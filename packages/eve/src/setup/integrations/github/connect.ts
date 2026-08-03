@@ -36,6 +36,7 @@ export function parseCreatedGitHubConnector(stdout: string): GitHubConnectorRef 
 
 /** Creates a GitHub connector and routes its verified webhooks to eve. */
 export async function provisionGitHubConnector(input: {
+  events: readonly string[];
   log: ChannelSetupLog;
   project: VercelProjectReference;
   projectRoot: string;
@@ -54,6 +55,7 @@ export async function provisionGitHubConnector(input: {
         "--name",
         input.slug,
         "--triggers",
+        ...input.events.flatMap((event) => ["--trigger-event", event]),
         "-F",
         "json",
         "--scope",

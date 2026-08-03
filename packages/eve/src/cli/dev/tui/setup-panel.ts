@@ -151,7 +151,7 @@ export interface SetupAcknowledgePanelState {
 /** One progress line shown inside the flow panel while it runs. */
 export interface FlowPanelLine {
   text: string;
-  tone: "info" | "success" | "warning" | "error";
+  tone: "info" | "success" | "warning" | "error" | "neutral";
   /**
    * Subprocess output a warning/error settle pulled in as its evidence.
    * Renders like any info line in the panel, but survives the panel close
@@ -263,6 +263,8 @@ function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
       return c.yellow(theme.glyph.warning);
     case "error":
       return c.red(theme.glyph.error);
+    case "neutral":
+      return theme.glyph.dot;
     case "info":
       return c.dim(theme.glyph.dot);
   }
@@ -309,7 +311,7 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
   for (const line of recent) {
     const text = line.text.split("\n");
     for (const [index, part] of text.entries()) {
-      const body = line.tone === "info" ? c.dim(part) : part;
+      const body = line.tone === "info" ? c.dim(part) : line.tone === "neutral" ? c.bold(part) : part;
       const prefix = index === 0 ? `${toneGlyph(line.tone, theme)} ` : "  ";
       rows.push(`  ${prefix}${body}`);
     }

@@ -2558,7 +2558,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * Commits one persistent flow line to the transcript (progress the user
    * must keep, like the Slack Connect URL), toned info/success/warning/error.
    */
-  #renderFlowLine(text: string, tone: "info" | "success" | "warning" | "error"): void {
+  #renderFlowLine(text: string, tone: "info" | "success" | "warning" | "error" | "neutral"): void {
     const content = stripTerminalControls(text);
     if (content.trim().length === 0) return;
     const flow = this.#setupFlow;

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 
+import type { MultiSelectQuestion } from "#setup/ask.js";
 import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
 import { openUrl } from "#setup/primitives/open-url.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
@@ -29,12 +30,107 @@ const defaultDeps: GitHubSetupDeps = {
   writeTextFile,
 };
 
-function connectTemplate(uid: string): string {
+const GITHUB_EVENT_OPTIONS = [
+  {
+    id: "issue_comment",
+    label: "Issue and pull request comments",
+    value: "issue_comment",
+    hint: "Respond when someone mentions the app in an issue or pull request comment.",
+  },
+  {
+    id: "pull_request_review_comment",
+    label: "Pull request review comments",
+    value: "pull_request_review_comment",
+    hint: "Respond when someone mentions the app in an inline review comment.",
+  },
+  {
+    id: "issues",
+    label: "Issues",
+    value: "issues",
+    hint: "Start a turn when an issue changes.",
+  },
+  {
+    id: "pull_request",
+    label: "Pull requests",
+    value: "pull_request",
+    hint: "Start a turn when a pull request changes.",
+  },
+  {
+    id: "check_suite",
+    label: "Check suites",
+    value: "check_suite",
+    hint: "Start a turn when a check suite changes.",
+  },
+  {
+    id: "check_run",
+    label: "Check runs",
+    value: "check_run",
+    hint: "Start a turn when a check run changes.",
+  },
+  {
+    id: "workflow_run",
+    label: "Workflow runs",
+    value: "workflow_run",
+    hint: "Start a turn when a workflow run changes.",
+  },
+] as const;
+
+type GitHubWebhookEvent = (typeof GITHUB_EVENT_OPTIONS)[number]["value"];
+
+const DEFAULT_GITHUB_EVENTS: readonly GitHubWebhookEvent[] = [
+  "issue_comment",
+  "pull_request_review_comment",
+];
+
+const githubEventsQuestion: MultiSelectQuestion<GitHubWebhookEvent> = {
+  key: "github-events",
+  message: "Which GitHub events should this app receive?",
+  options: GITHUB_EVENT_OPTIONS,
+  recommended: DEFAULT_GITHUB_EVENTS,
+  requireSelection: true,
+};
+
+function connectTemplate(uid: string, events: readonly GitHubWebhookEvent[]): string {
+  const handlers = [
+    events.includes("issues")
+      ? `  onIssue(ctx, issue) {
+    if (issue.action !== "opened") return null;
+    return { auth: defaultGitHubAuth(ctx) };
+  },`
+      : undefined,
+    events.includes("pull_request")
+      ? `  onPullRequest(ctx, pullRequest) {
+    if (pullRequest.action !== "opened") return null;
+    return { auth: defaultGitHubAuth(ctx) };
+  },`
+      : undefined,
+    events.includes("check_suite")
+      ? `  onCheckSuite(ctx, checkSuite) {
+    if (checkSuite.action !== "completed") return null;
+    return { auth: defaultGitHubAuth(ctx) };
+  },`
+      : undefined,
+    events.includes("check_run")
+      ? `  onCheckRun(ctx, checkRun) {
+    if (checkRun.action !== "completed") return null;
+    return { auth: defaultGitHubAuth(ctx) };
+  },`
+      : undefined,
+    events.includes("workflow_run")
+      ? `  onWorkflowRun(ctx, workflowRun) {
+    if (workflowRun.action !== "completed") return null;
+    return { auth: defaultGitHubAuth(ctx) };
+  },`
+      : undefined,
+  ].filter((handler): handler is string => handler !== undefined);
+  const defaultAuthImport = handlers.length > 0 ? ", defaultGitHubAuth" : "";
+  const handlerBlock = handlers.length > 0 ? `\n${handlers.join("\n")}` : "";
+
   return `import { connectGitHubCredentials } from "@vercel/connect/eve";
-import { githubChannel } from "eve/channels/github";
+import { githubChannel${defaultAuthImport} } from "eve/channels/github";
 
 export default githubChannel({
-  credentials: connectGitHubCredentials(${JSON.stringify(uid)}),
+  credentials: connectGitHubCredentials(${JSON.stringify(uid)}),${handlerBlock}
 });
 `;
 }
@@ -53,7 +149,9 @@ export async function setupGitHub(
     context.ui.prompter.note(
       "Vercel Connect creates a GitHub App and routes verified webhooks to your deployed agent.",
       "GitHub App",
+      { tone: "neutral" },
     );
+    const events = await context.ui.asker.askMany(githubEventsQuestion);
     const project = await deps.ensureVercelProject({
       appRoot: context.appRoot,
       prompter: context.ui.prompter,
@@ -61,6 +159,7 @@ export async function setupGitHub(
     });
     const connector = await deps.provisionConnector({
       log: context.ui.prompter.log,
+      events,
       project,
       projectRoot: context.appRoot,
       slug: await deps.deriveConnectorSlug(context.appRoot),
@@ -68,7 +167,7 @@ export async function setupGitHub(
     });
     await deps.writeTextFile(
       join(context.appRoot, "agent/channels/github.ts"),
-      connectTemplate(connector.uid),
+      connectTemplate(connector.uid, events),
       { force: context.force },
     );
     const dashboardUrl = "https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Open+Vercel+Connect";

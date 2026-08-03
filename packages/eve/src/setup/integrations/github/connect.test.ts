@@ -41,6 +41,7 @@ describe("GitHub Connect provisioning", () => {
 
     await expect(
       provisionGitHubConnector({
+        events: ["issue_comment", "pull_request_review_comment"],
         log: log(),
         project: { orgId: "team_123", projectId: "prj_123" },
         projectRoot: "/project",
@@ -57,6 +58,10 @@ describe("GitHub Connect provisioning", () => {
         "--name",
         "agent",
         "--triggers",
+        "--trigger-event",
+        "issue_comment",
+        "--trigger-event",
+        "pull_request_review_comment",
         "-F",
         "json",
         "--scope",

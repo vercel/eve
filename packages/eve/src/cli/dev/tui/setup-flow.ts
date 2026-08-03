@@ -102,7 +102,7 @@ export interface SetupFlowRenderer {
    */
   readChoice(options: ChannelSetupChoiceOptions): ChannelSetupChoice;
   setStatus(status: SetupFlowStatus | undefined): void;
-  renderLine(text: string, tone: "info" | "success" | "warning" | "error"): void;
+  renderLine(text: string, tone: "info" | "success" | "warning" | "error" | "neutral"): void;
   renderOutput(text: string): void;
   /** Temporarily restores the terminal while a child process inherits stdio. */
   withInheritedStdio<T>(task: () => Promise<T>): Promise<T>;
