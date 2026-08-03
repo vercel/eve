@@ -1434,6 +1434,39 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("renders an idle wake turn without corrupting the active prompt draft", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.type("draft in progress");
+
+    await renderer.renderIdleStream(
+      streamOf([
+        {
+          type: "tool-call",
+          input: { taskIds: ["task_123"] },
+          toolCallId: "peek-1",
+          toolName: "task_peek",
+        },
+        {
+          type: "tool-result",
+          output: { tasks: [{ status: "completed", taskId: "task_123" }] },
+          toolCallId: "peek-1",
+        },
+        { type: "assistant-delta", id: "wake-1", delta: "Research finished." },
+        { type: "assistant-complete", id: "wake-1" },
+        { type: "finish" },
+      ]),
+      { continueSession: true },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Research finished.");
+    expect(snapshot).toContain("draft in progress");
+    input.enter();
+    expect(await prompt).toBe("draft in progress");
+    renderer.shutdown();
+  });
+
   it("never submits an empty or whitespace-only prompt", async () => {
     const { input, renderer } = makeRenderer();
 

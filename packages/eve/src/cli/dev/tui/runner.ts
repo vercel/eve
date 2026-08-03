@@ -22,6 +22,7 @@ import {
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
+import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import {
   createDevelopmentRuntimeArtifactRefresher,
   type DevelopmentRuntimeArtifactRefresher,
@@ -292,6 +293,12 @@ export type AgentTUIRenderer = {
     options?: AgentTUISessionOptions,
   ): Promise<AgentTUIInputQuestionResponse | undefined>;
   renderStream(result: AgentTUIStreamResult, options?: AgentTUISessionOptions): Promise<void>;
+  /**
+   * Renders a server-initiated turn while `readPrompt` still owns input.
+   * Unlike `renderStream`, this must not replace the active key consumer or
+   * clear the user's draft.
+   */
+  renderIdleStream?(result: AgentTUIStreamResult, options?: AgentTUISessionOptions): Promise<void>;
   /**
    * The renderer's whole subagent surface — sections, nested steps and
    * tools, ghost sweeps, completion. One optional capability with required
@@ -767,7 +774,7 @@ export class EveTUIRunner {
           }
 
           try {
-            prompt = await this.#readPromptWithIdleRefresh(promptOptions);
+            prompt = await this.#readPromptFollowingSession(promptOptions);
           } catch (error) {
             if (isInterruptedError(error)) {
               return;
@@ -1095,6 +1102,70 @@ export class EveTUIRunner {
       stopped = true;
       clearInterval(timer);
       await inFlightRefresh;
+    }
+  }
+
+  /**
+   * Gives the idle prompt exclusive ownership handoff with `send()`:
+   * follow while the prompt is open, then abort and await the follow before
+   * returning the submitted prompt. Both readers advance the same session
+   * cursor, so the next send starts after every wake event already rendered.
+   */
+  async #readPromptFollowingSession(options: AgentTUISessionOptions): Promise<string | undefined> {
+    const prompt = this.#readPromptWithIdleRefresh(options);
+    if (
+      this.#renderer.renderIdleStream === undefined ||
+      this.#session.state.sessionId === undefined
+    ) {
+      return await prompt;
+    }
+
+    const controller = new AbortController();
+    const follow = this.#followIdleSession(controller.signal, options).catch((error: unknown) => {
+      if (!controller.signal.aborted) {
+        this.#renderer.renderNotice?.(
+          `Stopped following session updates: ${toErrorMessage(error)}`,
+        );
+      }
+    });
+    try {
+      return await prompt;
+    } finally {
+      controller.abort();
+      await follow;
+    }
+  }
+
+  /**
+   * Holds one boundary-blind parent stream open, splitting it into complete
+   * turns for rendering. The underlying iterator stays shared across those
+   * turns and advances the ClientSession cursor once it is stopped.
+   */
+  async #followIdleSession(signal: AbortSignal, options: AgentTUISessionOptions): Promise<void> {
+    const source = this.#session.stream({ signal })[Symbol.asyncIterator]();
+    try {
+      while (!signal.aborted) {
+        let consumed = false;
+        const turn = {
+          async *[Symbol.asyncIterator]() {
+            while (!signal.aborted) {
+              const next = await source.next();
+              if (next.done === true) return;
+              consumed = true;
+              yield next.value;
+              if (isCurrentTurnBoundaryEvent(next.value)) return;
+            }
+          },
+        };
+        const result = this.#createTUIStreamResult(turn, () => {});
+        await this.#renderer.renderIdleStream!(result, {
+          ...options,
+          continueSession: true,
+        });
+        if (!consumed) return;
+      }
+    } finally {
+      await source.return?.();
     }
   }
 

@@ -534,6 +534,147 @@ function sessionYieldingTurns(turns: ReadonlyArray<readonly unknown[]>): ClientS
   return session;
 }
 
+describe("EveTUIRunner idle session follow", () => {
+  it("renders a wake turn while prompting, then stops before send without replay", async () => {
+    const client = stubClient();
+    const session = client.session({
+      continuationToken: "eve:test",
+      sessionId: "session_test",
+      streamIndex: 0,
+    });
+    const prompt = createDeferred<string | undefined>();
+    const wakeRendered = createDeferred<void>();
+    const idleEvents: AgentTUIStreamEvent[] = [];
+    const sendEvents: AgentTUIStreamEvent[] = [];
+    let idleStopped = false;
+    let streamCalls = 0;
+    const wakeEvents = [
+      {
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: "peek-1",
+              input: { taskIds: ["task_123"] },
+              kind: "tool-call",
+              toolName: "task_peek",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "wake-turn",
+        },
+      },
+      {
+        type: "action.result",
+        data: {
+          result: {
+            callId: "peek-1",
+            kind: "tool-result",
+            output: { tasks: [{ status: "completed", taskId: "task_123" }] },
+            toolName: "task_peek",
+          },
+          sequence: 1,
+          status: "completed",
+          stepIndex: 0,
+          turnId: "wake-turn",
+        },
+      },
+      {
+        type: "message.appended",
+        data: {
+          messageDelta: "Background research finished.",
+          messageSoFar: "Background research finished.",
+          sequence: 1,
+          stepIndex: 1,
+          turnId: "wake-turn",
+        },
+      },
+      {
+        type: "message.completed",
+        data: {
+          finishReason: "stop",
+          message: "Background research finished.",
+          sequence: 1,
+          stepIndex: 1,
+          turnId: "wake-turn",
+        },
+      },
+      { type: "turn.completed", data: { sequence: 1, turnId: "wake-turn" } },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ].map((event, index) => stampTestEvent(event as UnstampedMessageStreamEvent, index));
+    vi.spyOn(session, "stream").mockImplementation((options) => {
+      streamCalls += 1;
+      const signal = options?.signal;
+      const events = streamCalls === 1 ? wakeEvents : [];
+      return {
+        async *[Symbol.asyncIterator]() {
+          try {
+            for (const event of events) yield event;
+            await new Promise<void>((resolve) => {
+              if (signal?.aborted) resolve();
+              else signal?.addEventListener("abort", () => resolve(), { once: true });
+            });
+          } finally {
+            idleStopped = true;
+          }
+        },
+      };
+    });
+    const send = vi.spyOn(session, "send").mockImplementation(async () => {
+      expect(idleStopped).toBe(true);
+      return messageResponseOf([
+        {
+          type: "message.appended",
+          data: {
+            messageDelta: "Follow-up answer.",
+            messageSoFar: "Follow-up answer.",
+            sequence: 2,
+            stepIndex: 0,
+            turnId: "follow-up-turn",
+          },
+        },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
+      ]);
+    });
+    const renderer = fakeRenderer({
+      readPrompt: vi
+        .fn()
+        .mockImplementationOnce(() => prompt.promise)
+        .mockResolvedValueOnce(undefined),
+      renderIdleStream: vi.fn(async (result) => {
+        for await (const event of result.events) idleEvents.push(event);
+        if (idleEvents.some((event) => event.type === "assistant-delta")) wakeRendered.resolve();
+      }),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events) sendEvents.push(event);
+      }),
+    });
+    const runner = new EveTUIRunner({ client, session, renderer, name: "Research Agent" });
+
+    const running = runner.run();
+    await wakeRendered.promise;
+    prompt.resolve("What else?");
+    await running;
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(idleEvents.filter((event) => event.type === "assistant-delta")).toEqual([
+      {
+        delta: "Background research finished.",
+        id: "text:wake-turn:1",
+        type: "assistant-delta",
+      },
+    ]);
+    expect(sendEvents.filter((event) => event.type === "assistant-delta")).toEqual([
+      {
+        delta: "Follow-up answer.",
+        id: "text:follow-up-turn:0",
+        type: "assistant-delta",
+      },
+    ]);
+  });
+});
+
 describe("EveTUIRunner development session continuity", () => {
   it("keeps the REPL session when HMR publishes a new runtime revision", async () => {
     const requests: Array<{ readonly method: string; readonly url: URL }> = [];

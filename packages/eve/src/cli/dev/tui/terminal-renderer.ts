@@ -950,6 +950,48 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
+  /**
+   * Applies a wake-initiated turn without taking input ownership from the
+   * prompt. Paints use the same live region, so the editor redraws around
+   * incoming tool and assistant blocks exactly as it does for subagent pumps.
+   */
+  async renderIdleStream(
+    result: AgentTUIStreamResult,
+    options?: AgentTUISessionOptions,
+  ): Promise<void> {
+    const displayModes: DisplayModes = {
+      tools: options?.tools ?? this.#tools,
+      reasoning: options?.reasoning ?? this.#reasoning,
+      assistantResponseStats: options?.assistantResponseStats ?? this.#assistantResponseStats,
+    };
+    const turnState: RenderTurnState = {
+      text: new Map(),
+      reasoning: new Map(),
+      tools: new Map(),
+    };
+
+    try {
+      for await (const event of iterateTUIStream(result.events)) {
+        this.#applyStreamEvent(event, displayModes, turnState);
+      }
+    } catch (error) {
+      const summary = summarizeKnownError(error);
+      if (summary === null) {
+        this.#addErrorBlock("Error", toErrorMessage(error), { detail: inspectError(error) });
+      } else {
+        this.#addErrorBlock(summary.name, summary.message, {
+          detail: inspectError(error),
+          hint: summary.hint,
+        });
+      }
+    } finally {
+      this.#sweepPreparingToolBlocks(turnState);
+      this.#finalizeAllBlocks();
+      this.#diagnostics?.reportStats();
+      this.#paint();
+    }
+  }
+
   async readToolApproval(
     request: AgentTUIToolApprovalRequest,
     options?: AgentTUISessionOptions,
