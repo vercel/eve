@@ -149,7 +149,7 @@ export async function setupGitHub(
     context.ui.prompter.note(
       "Vercel Connect creates a GitHub App and routes verified webhooks to your deployed agent.",
       "GitHub App",
-      { tone: "neutral" },
+      { tone: "info" },
     );
     const events = await context.ui.asker.askMany(githubEventsQuestion);
     const project = await deps.ensureVercelProject({

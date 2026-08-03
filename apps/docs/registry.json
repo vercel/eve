@@ -1135,14 +1135,14 @@
           "requires": ">=0.27.8"
         }
       },
-      "dependencies": ["@vercel/connect@0.4.2"]
+      "dependencies": ["@vercel/connect@>=0.4.2"]
     },
     {
       "name": "channel/discord",
       "type": "registry:item",
       "title": "Discord",
       "description": "Connect an eve agent to Discord with guided connector and slash-command setup.",
-      "dependencies": ["@vercel/connect@0.6.0"],
+      "dependencies": ["@vercel/connect@>=0.6.0"],
       "meta": {
         "eve": {
           "setup": {
@@ -1221,7 +1221,7 @@
           "requires": ">=0.30.7"
         }
       },
-      "dependencies": ["@vercel/connect"]
+      "dependencies": ["@vercel/connect@>=0.6.0"]
     },
     {
       "name": "channel/linear-agent",
@@ -1681,7 +1681,7 @@
       "type": "registry:item",
       "title": "Photon iMessage",
       "description": "Connect an eve agent to iMessage through Photon with guided project and phone setup.",
-      "dependencies": ["@vercel/connect@0.5.0"],
+      "dependencies": ["@vercel/connect@>=0.5.0"],
       "meta": {
         "eve": {
           "setup": {

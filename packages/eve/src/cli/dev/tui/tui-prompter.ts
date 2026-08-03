@@ -193,11 +193,7 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
 
     note(message, title, options) {
       const tone =
-        options?.tone === "success"
-          ? "success"
-          : options?.tone === "neutral"
-            ? "neutral"
-            : "warning";
+        options?.tone === "success" ? "success" : options?.tone === "info" ? "info" : "warning";
       if (title) renderer.renderLine(title, tone);
       renderer.renderLine(message, tone);
     },
