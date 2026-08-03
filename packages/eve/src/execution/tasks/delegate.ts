@@ -70,9 +70,10 @@ export async function settleDelegatedDispatch(input: {
     commandToken: input.task.commandToken,
     retryUnreachable: { attempts: 20, delayMs: 250 },
   });
-  const receiptOutput = { status: "working", taskId: input.task.taskId };
+  const receiptOutput = { status: "working" as const, taskId: input.task.taskId };
   return {
     receipt: {
+      backgroundTask: receiptOutput,
       callId: input.callId,
       kind: "subagent-result",
       outcome: {

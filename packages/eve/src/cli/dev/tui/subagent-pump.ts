@@ -29,6 +29,8 @@ import { isAbortLikeError } from "./errors.js";
 export interface SubagentView {
   /** Opens a call's section the moment its dispatch is announced. */
   begin(update: { callId: string; name: string }): void;
+  /** Keeps a receipt-returned background call mutable across parent turns. */
+  background(update: { callId: string }): void;
   upsertStep(update: SubagentStepUpdate): void;
   upsertTool(update: SubagentToolUpdate): void;
   /** Drops a child tool row whose call never materialized. */
@@ -175,6 +177,17 @@ export class SubagentPump {
    */
   settle(callId: string): void {
     this.#finalizeRun(callId);
+  }
+
+  /**
+   * The originating call returned a task receipt, not the child's result.
+   * Keep the section open until the child stream reaches its own boundary.
+   * A child that already settled before the receipt raced in stays settled.
+   */
+  background(callId: string): void {
+    const run = this.#runs.get(callId);
+    if (run === undefined || run.status === "settled") return;
+    this.#view?.background({ callId });
   }
 
   abortAll(): void {

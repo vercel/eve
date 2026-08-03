@@ -20,6 +20,7 @@ import {
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 const CHILD_SESSION_ID = "local-child-123456789012";
 const CHILD_CONTINUATION_TOKEN = "subagent:private-token";
@@ -103,6 +104,39 @@ function createSessionWithRunningChild(): HarnessSession {
 }
 
 describe("resolvePendingRuntimeActions", () => {
+  it("marks a working task receipt as backgrounded on subagent.completed", async () => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    const taskId = "task_0123456789abcdef";
+
+    await resolvePendingRuntimeActions({
+      emit: async (event) => {
+        events.push(event);
+      },
+      session: createSessionWithRunningChild(),
+      stepInput: {
+        runtimeActionResults: [
+          {
+            backgroundTask: { status: "working", taskId },
+            callId: "call-1",
+            kind: "subagent-result",
+            outcome: {
+              kind: "parked",
+              result: { kind: "succeeded", output: "delegated" },
+              usageDelta: ZERO_USAGE,
+            },
+            output: { status: "working", taskId },
+            sessionId: CHILD_SESSION_ID,
+            subagentName: "researcher",
+          },
+        ],
+      },
+    });
+
+    expect(events.find((event) => event.type === "subagent.completed")).toMatchObject({
+      data: { backgroundTask: { status: "working", taskId } },
+    });
+  });
+
   it("settles the running handle terminally and deletes it with the batch", async () => {
     const session = createSessionWithRunningChild();
 

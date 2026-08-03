@@ -387,6 +387,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #updateSequence = 0;
   /** Call ids per subagent name, for the sections' ordinal subtitles. */
   readonly #subagentCallsByName = new Map<string, string[]>();
+  /** Background sections kept at the live edge until their child boundary. */
+  readonly #backgroundSubagentCallIds = new Set<string>();
   /** Session-local file contents, so write blocks can render real diffs. */
   readonly #fileContents = new FileContentCache();
   readonly #subagentHeaders = new Set<string>();
@@ -1295,7 +1297,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
 
-    this.#upsertBlock({
+    this.#upsertSubagentBlock({
       id: subagentStepSectionId(update.callId, update.sectionKey),
       kind: "subagent-step",
       subagentCallId: update.callId,
@@ -1371,7 +1373,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     } else if (update.errorText !== undefined) {
       block.result = stripTerminalControls(update.errorText);
     }
-    this.#upsertBlock(block);
+    this.#upsertSubagentBlock(block);
     this.#syncSubagentChildLiveness(update.callId);
     this.#paint();
   }
@@ -1401,6 +1403,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   readonly subagents: SubagentView = {
     begin: (update) => this.beginSubagent(update),
+    background: (update) => this.backgroundSubagent(update),
     upsertStep: (update) => this.upsertSubagentStep(update),
     upsertTool: (update) => this.upsertSubagentTool(update),
     removeTool: (update) => this.removeSubagentTool(update),
@@ -1424,6 +1427,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
+   * A background receipt closes the model tool call, not the child. Mark the
+   * header running so turn finalization cannot commit immutable scrollback
+   * before the child pump has folded in its later events.
+   */
+  backgroundSubagent(update: { callId: string }): void {
+    const header = this.#blockById.get(subagentHeaderId(update.callId));
+    if (header === undefined || this.#committedIds.has(subagentHeaderId(update.callId))) return;
+    header.status = "running";
+    header.live = true;
+    header.updateSeq = ++this.#updateSequence;
+    this.#backgroundSubagentCallIds.add(update.callId);
+    this.#paint();
+  }
+
+  /**
    * Marks a subagent call complete — its final message has arrived — so the
    * section's closing corner reports `Done`. The header stays live until the
    * turn finalizes (committing mid-turn would freeze its child window).
@@ -1432,6 +1450,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const header = this.#blockById.get(subagentHeaderId(update.callId));
     if (header === undefined) return;
     header.status = "done";
+    this.#backgroundSubagentCallIds.delete(update.callId);
     this.#paint();
   }
 
@@ -1558,6 +1577,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#childToolCallIds.clear();
     this.#parentToolBlockIds.clear();
     this.#subagentHeaders.clear();
+    this.#backgroundSubagentCallIds.clear();
     this.#subagentCallsByName.clear();
     this.#todoItems = undefined;
     this.#todoCommittedSignature = undefined;
@@ -3057,7 +3077,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pushBlock(block: Block) {
     if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
     block.updateSeq = ++this.#updateSequence;
-    this.#blocks.push(block);
+    const isBackgroundChild =
+      block.subagentCallId !== undefined &&
+      this.#backgroundSubagentCallIds.has(block.subagentCallId);
+    const backgroundIndex = isBackgroundChild
+      ? -1
+      : this.#blocks.findIndex(
+          (candidate) =>
+            candidate.subagentCallId !== undefined &&
+            this.#backgroundSubagentCallIds.has(candidate.subagentCallId),
+        );
+    if (backgroundIndex < 0) this.#blocks.push(block);
+    else this.#blocks.splice(backgroundIndex, 0, block);
     if (block.id) this.#blockById.set(block.id, block);
   }
 
@@ -3187,6 +3218,36 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
     this.#pushBlock(block);
+  }
+
+  /**
+   * Inserts a new child beside the rest of its call's cohort instead of at
+   * the transcript's live edge. Background children can emit after parent
+   * and user blocks from later turns; arrival order must not split their
+   * section.
+   */
+  #upsertSubagentBlock(block: Block) {
+    if (block.id && this.#committedIds.has(block.id)) return;
+    const existing = block.id ? this.#blockById.get(block.id) : undefined;
+    if (existing !== undefined) {
+      Object.assign(existing, block);
+      existing.updateSeq = ++this.#updateSequence;
+      return;
+    }
+
+    const callId = block.subagentCallId;
+    if (callId === undefined) {
+      this.#pushBlock(block);
+      return;
+    }
+    if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
+    block.updateSeq = ++this.#updateSequence;
+    let anchor = -1;
+    for (let index = 0; index < this.#blocks.length; index += 1) {
+      if (this.#blocks[index]?.subagentCallId === callId) anchor = index;
+    }
+    this.#blocks.splice(anchor < 0 ? this.#blocks.length : anchor + 1, 0, block);
+    if (block.id !== undefined) this.#blockById.set(block.id, block);
   }
 
   #removeBlock(id: string) {

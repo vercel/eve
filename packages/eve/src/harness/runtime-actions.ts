@@ -202,13 +202,14 @@ export async function resolvePendingRuntimeActions(input: {
   if (input.emit !== undefined) {
     for (const result of readyResults) {
       if (result.kind === "subagent-result" && result.isError !== true) {
+        const backgroundTask = readBackgroundTaskReceipt(result);
+        const data = {
+          callId: result.callId,
+          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+          subagentName: result.subagentName,
+        };
         await input.emit({
-          data: {
-            callId: result.callId,
-            output:
-              typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-            subagentName: result.subagentName,
-          },
+          data: backgroundTask === undefined ? data : { ...data, backgroundTask },
           type: "subagent.completed",
         } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
       }
@@ -331,6 +332,12 @@ export async function resolvePendingRuntimeActions(input: {
     outcome: "resolved",
     session: nextSession,
   };
+}
+
+function readBackgroundTaskReceipt(
+  result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
+): { readonly status: "working"; readonly taskId: string } | undefined {
+  return "backgroundTask" in result ? result.backgroundTask : undefined;
 }
 
 /**

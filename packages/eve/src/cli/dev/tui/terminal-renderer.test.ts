@@ -1131,6 +1131,54 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("keeps late background child output inside its section across parent turns", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.backgroundSubagent({ callId: "s1" });
+
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "parent-1", delta: "Research task started." },
+        { type: "assistant-complete", id: "parent-1" },
+        { type: "finish" },
+      ]),
+      { continueSession: true },
+    );
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "parent-2", delta: "It is still running." },
+        { type: "assistant-complete", id: "parent-2" },
+        { type: "finish" },
+      ]),
+      { continueSession: true, submittedPrompt: "cool" },
+    );
+
+    // The child emits after both parent turns. It still inserts beside its
+    // call's header, not at the current transcript edge beneath parent-2.
+    renderer.upsertSubagentTool({
+      callId: "s1",
+      subagentName: "researcher",
+      childCallId: "dig-1",
+      toolName: "dig",
+      input: { phase: "sources" },
+      status: "executing",
+    });
+
+    const snapshot = screen.snapshot();
+    const header = snapshot.indexOf("※ subagent(researcher)");
+    const child = snapshot.indexOf("dig");
+    const firstParent = snapshot.indexOf("Research task started.");
+    const user = snapshot.indexOf("cool");
+    const secondParent = snapshot.indexOf("It is still running.");
+    expect(firstParent).toBeGreaterThan(-1);
+    expect(user).toBeGreaterThan(firstParent);
+    expect(secondParent).toBeGreaterThan(user);
+    expect(header).toBeGreaterThan(secondParent);
+    expect(child).toBeGreaterThan(header);
+    renderer.shutdown();
+  });
+
   it("swaps a dispatch's preparing placeholder for the section header", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });

@@ -2139,6 +2139,7 @@ describe("EveTUIRunner renderer teardown", () => {
         }),
         subagents: {
           begin: vi.fn(),
+          background: vi.fn(),
           upsertStep: vi.fn(),
           upsertTool: vi.fn(),
           removeTool: vi.fn(),
@@ -2174,6 +2175,60 @@ describe("EveTUIRunner renderer teardown", () => {
     await completed.promise;
 
     expect(completeSubagent).toHaveBeenCalledWith({ callId: "call-child" });
+  });
+
+  it("does not settle a subagent section when completed carries a background receipt", async () => {
+    const backgroundSubagent = vi.fn();
+    const completeSubagent = vi.fn();
+    const runner = new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn().mockResolvedValueOnce("delegate").mockResolvedValueOnce(undefined),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) void event;
+        }),
+        subagents: {
+          begin: vi.fn(),
+          background: backgroundSubagent,
+          upsertStep: vi.fn(),
+          upsertTool: vi.fn(),
+          removeTool: vi.fn(),
+          markChildToolCallId: vi.fn(),
+          complete: completeSubagent,
+        },
+      }),
+      session: sessionYielding([
+        {
+          type: "subagent.called",
+          data: {
+            callId: "call-child",
+            childSessionId: "child-session",
+            name: "researcher",
+            sequence: 0,
+            sessionId: "parent-session",
+            toolName: "researcher",
+            turnId: "turn-parent",
+            workflowId: "workflow-parent",
+          },
+        },
+        {
+          type: "subagent.completed",
+          data: {
+            backgroundTask: { status: "working", taskId: "task_123" },
+            callId: "call-child",
+            output: '{"status":"working","taskId":"task_123"}',
+            subagentName: "researcher",
+          },
+        },
+        { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
+      ]),
+    });
+
+    await runner.run();
+
+    expect(backgroundSubagent).toHaveBeenCalledWith({ callId: "call-child" });
+    expect(completeSubagent).not.toHaveBeenCalled();
   });
 
   it("aborts child-session streams when Ctrl-C exits the runner", async () => {
@@ -3131,6 +3186,7 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
     ]);
     const view = {
       begin: vi.fn(),
+      background: vi.fn(),
       upsertStep: vi.fn(),
       upsertTool: vi.fn(),
       removeTool: vi.fn(),

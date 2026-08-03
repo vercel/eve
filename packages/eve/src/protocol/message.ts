@@ -304,6 +304,15 @@ export interface SubagentChildEventStreamEvent {
  */
 export interface SubagentCompletedStreamEvent {
   data: {
+    /**
+     * Present when the originating call completed with a background-task
+     * receipt while the child itself kept running. Consumers must not treat
+     * this as the child's terminal boundary; the child stream owns that.
+     */
+    backgroundTask?: {
+      taskId: string;
+      status: "working";
+    };
     callId: string;
     output: string;
     subagentName: string;

@@ -142,6 +142,11 @@ const runtimeToolResultActionResultSchema = z
  * the tool-result projection shown to the model. Every producer states the
  * envelope explicitly — task-mode boundaries synthesize a terminal one —
  * so the parent never infers lifecycle from an absent field.
+ *
+ * `backgroundTask` marks the one parent-produced exception: delegated
+ * dispatch resolves the model's tool call with a parked task receipt before
+ * the child settles. Stream consumers use the marker to keep child lifecycle
+ * open while still recording the receipt as the tool result.
  */
 export type RuntimeSubagentChildResult = z.infer<typeof runtimeSubagentChildResultSchema>;
 
@@ -150,6 +155,12 @@ export type RuntimeSubagentChildResult = z.infer<typeof runtimeSubagentChildResu
  */
 const runtimeSubagentChildResultSchema = z
   .object({
+    backgroundTask: z
+      .strictObject({
+        status: z.literal("working"),
+        taskId: z.string(),
+      })
+      .optional(),
     callId: z.string(),
     isError: z.boolean().optional(),
     kind: z.literal("subagent-result"),

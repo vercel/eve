@@ -9,6 +9,7 @@ import { SubagentPump, type SubagentView } from "./subagent-pump.js";
 function fakeView(): SubagentView {
   return {
     begin: vi.fn(),
+    background: vi.fn(),
     upsertStep: vi.fn(),
     upsertTool: vi.fn(),
     removeTool: vi.fn(),
@@ -134,6 +135,33 @@ describe("SubagentPump.settleAll", () => {
     const completions = vi.mocked(view.complete).mock.calls.length;
     pump.settle("call-1");
     expect(vi.mocked(view.complete).mock.calls.length).toBe(completions);
+  });
+});
+
+describe("SubagentPump background receipts", () => {
+  it("keeps the section open until the child stream reaches its own boundary", async () => {
+    const child = pushableChildStream();
+    const client = new Client({ host: "http://localhost:3000" });
+    vi.spyOn(client, "session").mockReturnValue({
+      stream: (options?: { signal?: AbortSignal }) => child.stream(options),
+    } as never);
+    const view = fakeView();
+    const pump = new SubagentPump({ client, view, formatActionResultError: () => "failed" });
+
+    pump.begin(subagentCalled("call-1"));
+    pump.background("call-1");
+
+    expect(view.background).toHaveBeenCalledWith({ callId: "call-1" });
+    expect(view.complete).not.toHaveBeenCalled();
+
+    child.push(reasoningEvent("still working", 0));
+    child.push(boundaryEvent(1));
+    await settleAsyncWork();
+
+    expect(view.upsertStep).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: "call-1", reasoning: "still working" }),
+    );
+    expect(view.complete).toHaveBeenCalledWith({ callId: "call-1" });
   });
 });
 
