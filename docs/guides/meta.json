@@ -12,6 +12,7 @@
     "remote-agents",
     "dev-tui",
     "frontend",
-    "client"
+    "client",
+    "ucp"
   ]
 }

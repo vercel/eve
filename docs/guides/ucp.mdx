@@ -1,0 +1,175 @@
+---
+title: "Universal Commerce Protocol (UCP)"
+description: "Serve a UCP profile at /.well-known/ucp from a custom eve channel."
+---
+
+The [Universal Commerce Protocol](https://ucp.dev/) (UCP) is an open standard for agentic commerce. A business declares its UCP support by serving a JSON **profile** from the `/.well-known/ucp` path. This is a document listing the spec versions it supports, its services and capabilities, its payment handlers, and the public keys agents use to verify signed responses.
+
+With eve, you can support UCP in three steps:
+
+1. [Author the profile](#author-the-profile)
+2. [Serve it from a channel](#serve-it-from-a-channel)
+3. [Add your commerce endpoints](#add-your-commerce-endpoints)
+
+## Author the profile
+
+Your profile is a plain JSON object that follows the [UCP spec](https://ucp.dev/). This spec outlines the `version`, `services`, `payment_handlers` and `capabilities` of your business. It also includes `signing_keys` that allow agents and businesses to verify requests between them.
+
+```ts
+// agent/ucp-profile.ts
+export const profile = {
+  ucp: {
+    version: "2026-04-08",
+    services: {
+      "dev.ucp.shopping": [
+        {
+          version: "2026-04-08",
+          spec: "https://ucp.dev/2026-04-08/specification/overview",
+          transport: "rest",
+          schema: "https://ucp.dev/2026-04-08/services/shopping/rest.openapi.json",
+          endpoint: "https://your-domain.com/ucp/shopping",
+        },
+      ],
+    },
+    capabilities: {
+      "dev.ucp.shopping.checkout": [
+        {
+          version: "2026-04-08",
+          spec: "https://ucp.dev/2026-04-08/specification/checkout",
+          schema: "https://ucp.dev/2026-04-08/schemas/shopping/checkout.json",
+        },
+      ],
+    },
+    payment_handlers: {
+      "dev.shopify.shop_pay": [
+        {
+          id: "shop_pay_1234",
+          version: "2026-04-08",
+          spec: "https://shopify.dev/ucp/shop-pay-handler",
+          schema: "https://shopify.dev/ucp/schemas/shop-pay-config.json",
+          available_instruments: [
+            {
+              type: "shop_pay",
+            },
+          ],
+        },
+      ],
+      "com.example.processor_tokenizer": [
+        {
+          id: "processor_tokenizer",
+          version: "2026-04-08",
+          spec: "https://example.com/specs/payments/processor_tokenizer-payment",
+          schema: "https://example.com/schemas/payments/delegate-payment.json",
+          available_instruments: [
+            {
+              type: "card",
+              constraints: {
+                brands: ["visa", "mastercard"],
+              },
+            },
+          ],
+        },
+      ],
+    },
+  },
+  signing_keys: [
+    {
+      kid: "business_2025",
+      kty: "EC",
+      crv: "P-256",
+      x: "...",
+      y: "...",
+      use: "sig",
+      alg: "ES256",
+    },
+  ],
+};
+```
+
+## Serve it from a channel
+
+Use a custom channel to serve the profile from the `/.well-known/ucp` endpoint.
+
+```ts
+// agent/channels/ucp.ts
+import { defineChannel, GET } from "eve/channels";
+import { profile } from "../ucp-profile";
+
+const body = JSON.stringify(profile);
+
+export default defineChannel({
+  cors: true,
+  routes: [
+    GET("/.well-known/ucp", async () => {
+      return new Response(body, {
+        headers: {
+          "content-type": "application/json",
+          "cache-control": "public, max-age=300",
+        },
+      });
+    }),
+  ],
+});
+```
+
+- **Caching**: The spec requires `public` and a `max-age` of at least 60 seconds, and forbids `private`, `no-store`, and `no-cache`. See [Profile Requirements](https://ucp.dev/2026-04-08/specification/overview#hosting).
+- **CORS**: `cors: true` suits public discovery metadata. Pass a `cors` options object to narrow origins. See [CORS](../channels/custom#cors).
+- **HTTPS, no redirects**: The spec requires HTTPS and forbids 3xx responses on the profile endpoint.
+
+## Add your commerce endpoints
+
+The URLs in `services[].endpoint` must point at endpoints you serve. You can use a custom channel for these endpoints:
+
+```ts
+// agent/channels/ucp-shopping.ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    POST("/ucp/shopping/checkout-sessions", async (req) => {
+      const request = await req.json();
+      // Create a checkout session per your published schema. Every UCP
+      // response must carry the `ucp` envelope with the negotiated
+      // version and the capabilities active for this response.
+      return Response.json({
+        ucp: {
+          version: "2026-04-08",
+          capabilities: {
+            "dev.ucp.shopping.checkout": [{ version: "2026-04-08" }],
+          },
+        },
+        id: "checkout_123",
+        status: "incomplete",
+        // ...other checkout fields per the checkout schema
+      });
+    }),
+  ],
+});
+```
+
+Keep the `endpoint` in your profile in sync with the route path you mount here.
+
+## Verify
+
+Fetch the well-known document from your deployment:
+
+```sh
+curl -i https://your_deployment_url_here/.well-known/ucp
+```
+
+Expect a `200` with the profile JSON:
+
+```http
+HTTP/2 200
+content-type: application/json
+cache-control: public, max-age=300
+```
+
+## What's not covered
+
+Commerce operation semantics are author-owned: the checkout, cart, and order state machines; payment-handler execution; and request signing and verification.
+
+## Read next
+
+- [Channels overview](../channels/overview): The channel contract this builds on.
+- [Custom channels](../channels/custom): The route helpers, CORS, and metadata this page uses.
