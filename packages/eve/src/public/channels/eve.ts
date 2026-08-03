@@ -425,6 +425,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             message: body.message,
             context,
             outputSchema: body.outputSchema,
+            outputSchemaRequired: body.outputSchemaRequired,
           },
           {
             auth: dispatchAuth,
@@ -654,6 +655,7 @@ interface ParsedCreateBody {
   mode?: RunMode;
   context?: readonly string[];
   outputSchema?: JsonObject;
+  outputSchemaRequired?: boolean;
 }
 
 function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | Response {
@@ -671,6 +673,14 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
 
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
+  const outputSchemaRequired = parseOutputSchemaRequiredField(payload.outputSchemaRequired);
+  if (outputSchemaRequired instanceof Response) return outputSchemaRequired;
+  if (outputSchemaRequired === true && outputSchema === undefined) {
+    return Response.json(
+      { error: "'outputSchemaRequired' requires 'outputSchema'.", ok: false },
+      { status: 400 },
+    );
+  }
 
   if (message === undefined) {
     return Response.json(
@@ -679,7 +689,7 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
     );
   }
 
-  return { callback, message, mode, context, outputSchema };
+  return { callback, message, mode, context, outputSchema, outputSchemaRequired };
 }
 
 interface ParsedContinueBody {
@@ -688,6 +698,7 @@ interface ParsedContinueBody {
   inputResponses?: readonly InputResponse[];
   context?: readonly string[];
   outputSchema?: JsonObject;
+  outputSchemaRequired?: boolean;
 }
 
 function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody | Response {
@@ -723,6 +734,8 @@ function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody
 
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
+  const outputSchemaRequired = parseOutputSchemaRequiredField(payload.outputSchemaRequired);
+  if (outputSchemaRequired instanceof Response) return outputSchemaRequired;
 
   if (message === undefined && inputResponses === undefined) {
     return Response.json(
@@ -734,7 +747,14 @@ function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody
     );
   }
 
-  return { message, continuationToken, inputResponses, context, outputSchema };
+  return {
+    message,
+    continuationToken,
+    inputResponses,
+    context,
+    outputSchema,
+    outputSchemaRequired,
+  };
 }
 
 interface ParsedCancelTurnBody {
@@ -814,14 +834,20 @@ function createSendPayload(
       readonly message: string | UserContent;
       readonly context?: readonly string[];
       readonly outputSchema?: JsonObject;
+      readonly outputSchemaRequired?: boolean;
     } {
-  if (context === undefined && body.outputSchema === undefined) {
+  if (
+    context === undefined &&
+    body.outputSchema === undefined &&
+    body.outputSchemaRequired === undefined
+  ) {
     return body.message;
   }
   const payload: {
     message: string | UserContent;
     context?: readonly string[];
     outputSchema?: JsonObject;
+    outputSchemaRequired?: boolean;
   } = { message: body.message };
   if (context !== undefined) {
     payload.context = context;
@@ -829,7 +855,19 @@ function createSendPayload(
   if (body.outputSchema !== undefined) {
     payload.outputSchema = body.outputSchema;
   }
+  if (body.outputSchemaRequired !== undefined) {
+    payload.outputSchemaRequired = body.outputSchemaRequired;
+  }
   return payload;
+}
+
+function parseOutputSchemaRequiredField(value: unknown): boolean | Response | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "boolean") return value;
+  return Response.json(
+    { error: "Expected 'outputSchemaRequired' to be a boolean.", ok: false },
+    { status: 400 },
+  );
 }
 
 function parseOutputSchemaField(value: unknown): JsonObject | Response | undefined {

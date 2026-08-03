@@ -66,6 +66,7 @@ export interface CreateSessionInput {
   readonly turnAgent: RuntimeTurnAgent;
   readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
+  readonly outputSchemaRequired?: HarnessSession["outputSchemaRequired"];
   readonly subagentDepth?: number;
   readonly workflowMaxSubagents?: number;
 }
@@ -102,6 +103,9 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   session.limits = resolveSessionLimits(input);
   if (input.outputSchema !== undefined) {
     session.outputSchema = input.outputSchema;
+  }
+  if (input.outputSchemaRequired !== undefined) {
+    session.outputSchemaRequired = input.outputSchemaRequired;
   }
   if (input.subagentDepth !== undefined) {
     session.subagentDepth = input.subagentDepth;
@@ -181,6 +185,7 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     history: HarnessSession["history"];
     limits?: HarnessSession["limits"];
     outputSchema?: HarnessSession["outputSchema"];
+    outputSchemaRequired?: HarnessSession["outputSchemaRequired"];
     rootSessionId?: string;
     sandboxState?: HarnessSession["sandboxState"];
     sessionId: string;
@@ -211,6 +216,9 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   }
   if (session.outputSchema !== undefined) {
     durable.outputSchema = session.outputSchema;
+  }
+  if (session.outputSchemaRequired !== undefined) {
+    durable.outputSchemaRequired = session.outputSchemaRequired;
   }
   if (session.sandboxState !== undefined) {
     durable.sandboxState = session.sandboxState;
@@ -276,6 +284,9 @@ export function hydrateDurableSession(input: {
   }
   if (durable.outputSchema !== undefined) {
     session.outputSchema = durable.outputSchema;
+  }
+  if (durable.outputSchemaRequired !== undefined) {
+    session.outputSchemaRequired = durable.outputSchemaRequired;
   }
   if (durable.sandboxState !== undefined) {
     session.sandboxState = durable.sandboxState;

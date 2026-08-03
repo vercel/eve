@@ -290,6 +290,7 @@ describe("createSession", () => {
     const session = createSession({
       continuationToken: "root-token",
       outputSchema: runOutputSchema,
+      outputSchemaRequired: true,
       sessionId: "sess-root",
       turnAgent: createTestTurnAgent({ outputSchema: agentOutputSchema }),
     });
@@ -301,7 +302,9 @@ describe("createSession", () => {
     });
 
     expect(durable.outputSchema).toEqual(runOutputSchema);
+    expect(durable.outputSchemaRequired).toBe(true);
     expect(hydrated.outputSchema).toEqual(runOutputSchema);
+    expect(hydrated.outputSchemaRequired).toBe(true);
   });
 
   it("persists subagent depth through durable session projection and hydration", () => {

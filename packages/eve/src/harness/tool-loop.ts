@@ -907,6 +907,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     type ModelCallOptions = {
       disabledProviderTools?: ReadonlySet<string>;
       extraSystemNote?: string;
+      forceFinalOutput?: boolean;
       preparedInput?: ReturnType<typeof prepareModelCallInput>;
       retryReason?: "empty-response";
       suppressStepStartedEmission?: boolean;
@@ -1054,6 +1055,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           telemetryRuntimeContext,
           bridgeIntegration,
         ),
+        toolChoice: opts.forceFinalOutput
+          ? ({ type: "tool", toolName: FINAL_OUTPUT_TOOL_NAME } as const)
+          : undefined,
         toolApproval: buildToolApproval(modelTools),
         tools: effectiveTools,
       };
@@ -1212,14 +1216,64 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return limitResult;
     }
 
+    const requiredFinalOutputNote =
+      "Return the final result now by calling final_output exactly once. Do not call any other tool or answer in prose.";
     let result: HarnessStepResult;
+    let requiredFinalOutputCall = false;
     try {
       result = await runOneModelCall({
         preparedInput: initialModelCallInput,
         suppressStepStartedEmission: true,
       });
+      if (
+        session.outputSchemaRequired === true &&
+        session.outputSchema !== undefined &&
+        extractFinalOutput(result) === undefined &&
+        result.finishReason !== "tool-calls" &&
+        result.toolCalls.length === 0
+      ) {
+        session = setTurnUsageState(
+          session,
+          accumulateTurnUsage({
+            previous: getTurnUsageState(session.state),
+            turnId: emissionState.turnId,
+            usage: extractTokenUsageDelta({
+              costUsd: extractGatewayCostUsd(result.providerMetadata),
+              usage: result.usage,
+            }),
+          }),
+        );
+        const requiredOutputLimitResult = await enforceSessionTokenLimit({
+          config,
+          emit,
+          emissionState,
+          messages,
+          session,
+        });
+        if (requiredOutputLimitResult !== null) {
+          return requiredOutputLimitResult;
+        }
+        if (emit) {
+          emissionState = advanceStep(emissionState);
+          session = setHarnessEmissionState(session, emissionState);
+        }
+        requiredFinalOutputCall = true;
+        result = await runOneModelCall({
+          forceFinalOutput: true,
+          trailingUserNote: requiredFinalOutputNote,
+        });
+      }
     } catch (error) {
       throwIfTurnAborted(config.abortSignal);
+
+      const recoveryModelCall: RecoveryModelCallFn = requiredFinalOutputCall
+        ? (opts) =>
+            runOneModelCall({
+              ...opts,
+              forceFinalOutput: true,
+              trailingUserNote: requiredFinalOutputNote,
+            })
+        : runOneModelCall;
 
       // Stage order: drop a gateway-rejected provider tool first, then
       // reissue an empty response; see runModelCallRecoveryPipeline for
@@ -1230,7 +1284,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           (current) =>
             attemptUnsupportedProviderToolRecovery({
               error: current.error,
-              runOneModelCall,
+              runOneModelCall: recoveryModelCall,
               sessionId: session.sessionId,
               turnId: emissionState.turnId,
             }),
@@ -1239,7 +1293,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               emptyDeliveryEnabled,
               error: current.error,
               retryCallOptions: current.retryCallOptions,
-              runOneModelCall,
+              runOneModelCall: recoveryModelCall,
               sessionId: session.sessionId,
               turnId: emissionState.turnId,
             }),
@@ -2227,6 +2281,11 @@ const OUTPUT_SCHEMA_NOT_FULFILLED = {
   message: "The agent could not produce a result matching the requested schema.",
 } as const;
 
+export const REQUIRED_OUTPUT_SCHEMA_NOT_FULFILLED = {
+  code: "REQUIRED_OUTPUT_SCHEMA_NOT_FULFILLED",
+  message: "The agent could not produce the required structured result.",
+} as const;
+
 /**
  * The structured value the model delivered by calling the framework
  * `final_output` tool, or `undefined` when the terminal turn ended in prose.
@@ -2251,6 +2310,7 @@ function persistStructuredAssistantTurn(
     ...session,
     history: [...history, { content: JSON.stringify(structured), role: "assistant" }],
     outputSchema: undefined,
+    outputSchemaRequired: undefined,
   };
 }
 
@@ -2362,12 +2422,19 @@ async function finishConversationTurn(input: {
 
   const structured = extractFinalOutput(result);
   if (structured === undefined) {
+    const failure =
+      session.outputSchemaRequired === true
+        ? REQUIRED_OUTPUT_SCHEMA_NOT_FULFILLED
+        : OUTPUT_SCHEMA_NOT_FULFILLED;
     if (emit) {
       emissionState = await emitRecoverableFailedTurn(emit, emissionState, {
-        ...OUTPUT_SCHEMA_NOT_FULFILLED,
+        ...failure,
         continuationToken: session.continuationToken,
       });
-      session = setHarnessEmissionState(session, emissionState);
+      session = setHarnessEmissionState(
+        { ...session, outputSchema: undefined, outputSchemaRequired: undefined },
+        emissionState,
+      );
     }
     return { next: null, session };
   }

@@ -173,6 +173,7 @@ export interface DeliverPayload {
   readonly message?: string | UserContent;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
+  readonly outputSchemaRequired?: boolean;
   readonly [key: string]: unknown;
 }
 
@@ -389,6 +390,7 @@ export interface RunInput {
     readonly message: string | UserContent;
     readonly context?: readonly string[];
     readonly outputSchema?: JsonObject;
+    readonly outputSchemaRequired?: boolean;
   };
   readonly mode: RunMode;
   readonly parent?: SessionParent;

@@ -376,12 +376,16 @@ describe("defineChannel", () => {
   it("passes SessionContext as third arg to event handlers inside the ALS scope", async () => {
     let capturedChannel: any;
     let capturedCtx: any;
+    let capturedFailure: unknown;
     const channel = defineChannel({
       routes: [POST("/x", async () => new Response("ok"))],
       events: {
         "turn.started": (_data, ch, ctx) => {
           capturedChannel = ch;
           capturedCtx = ctx;
+        },
+        "step.failed": (data) => {
+          capturedFailure = data;
         },
       },
     });
@@ -408,6 +412,11 @@ describe("defineChannel", () => {
 
     await contextStorage.run(ctx, async () => {
       await callAdapterEventHandler(adapter, { type: "turn.started" } as any, adapterCtx);
+      await callAdapterEventHandler(
+        adapter,
+        { data: { code: "REQUIRED_OUTPUT_SCHEMA_NOT_FULFILLED" }, type: "step.failed" } as any,
+        adapterCtx,
+      );
     });
 
     expect(capturedCtx).toBeDefined();
@@ -417,6 +426,9 @@ describe("defineChannel", () => {
     expect(capturedCtx.session.turn).toEqual({ id: "turn-1", sequence: 0 });
     expect(typeof capturedChannel.continuationToken).toBe("string");
     expect(typeof capturedChannel.setContinuationToken).toBe("function");
+    expect(capturedFailure).toEqual({
+      code: "REQUIRED_OUTPUT_SCHEMA_NOT_FULFILLED",
+    });
   });
 
   it("registers reasoning event handlers with channel and session context", async () => {

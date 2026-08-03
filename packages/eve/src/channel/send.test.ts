@@ -164,7 +164,7 @@ describe("createSendFn", () => {
 
     const deliverSend = createSendFn(deliverRuntime, ADAPTER, "test");
     await deliverSend(
-      { message: "hello", outputSchema },
+      { message: "hello", outputSchema, outputSchemaRequired: true },
       { auth: null, continuationToken: "token" },
     );
 
@@ -176,16 +176,21 @@ describe("createSendFn", () => {
         message: "hello",
         modelContext: undefined,
         outputSchema,
+        outputSchemaRequired: true,
       },
     });
 
     const runRuntime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
     const runSend = createSendFn(runRuntime, ADAPTER, "test");
-    await runSend({ message: "hello", outputSchema }, { auth: null, continuationToken: "token" });
+    await runSend(
+      { message: "hello", outputSchema, outputSchemaRequired: true },
+      { auth: null, continuationToken: "token" },
+    );
 
     expect(vi.mocked(runRuntime.run).mock.calls[0]![0].input).toEqual({
       message: "hello",
       outputSchema,
+      outputSchemaRequired: true,
     });
   });
 

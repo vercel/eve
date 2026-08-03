@@ -36,6 +36,7 @@ export async function createSessionStep(input: {
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly inheritedLimits?: RunSessionLimits;
   readonly outputSchema?: JsonObject;
+  readonly outputSchemaRequired?: boolean;
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
@@ -74,6 +75,7 @@ export async function createSessionStep(input: {
       }),
     },
     outputSchema: input.outputSchema,
+    outputSchemaRequired: input.outputSchemaRequired,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
     subagentDepth: input.subagentDepth,

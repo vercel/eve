@@ -131,18 +131,21 @@ export type HandleMessageRequestBody =
       readonly message: string | UserContent;
       readonly clientContext?: string | readonly string[] | JsonObject;
       readonly outputSchema?: JsonObject;
+      readonly outputSchemaRequired?: boolean;
     }
   | {
       readonly continuationToken: string;
       readonly message: string | UserContent;
       readonly clientContext?: string | readonly string[] | JsonObject;
       readonly outputSchema?: JsonObject;
+      readonly outputSchemaRequired?: boolean;
     }
   | {
       readonly continuationToken: string;
       readonly inputResponses: readonly InputResponse[];
       readonly clientContext?: string | readonly string[] | JsonObject;
       readonly outputSchema?: JsonObject;
+      readonly outputSchemaRequired?: boolean;
     }
   | {
       readonly continuationToken: string;
@@ -150,6 +153,7 @@ export type HandleMessageRequestBody =
       readonly message: string | UserContent;
       readonly clientContext?: string | readonly string[] | JsonObject;
       readonly outputSchema?: JsonObject;
+      readonly outputSchemaRequired?: boolean;
     };
 
 /**
