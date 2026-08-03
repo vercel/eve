@@ -1676,6 +1676,34 @@ describe("createToolLoopHarness", () => {
     expect(result.next).toEqual({ done: true, output: { summary: "Done" } });
   });
 
+  it("parses a double-encoded final_output payload into the structured object", async () => {
+    const schema = {
+      properties: { summary: { type: "string" } },
+      required: ["summary"],
+      type: "object",
+    } as const;
+    // The model double-encodes the payload as a JSON string.
+    setupMockAgent(finalOutputResult("Done.", JSON.stringify({ summary: "Done" })));
+
+    const runStep = createToolLoopHarness(createTestConfig("task"));
+    const session = createTestSession({ outputSchema: schema });
+
+    const result = await runStep(session, { message: "Hi" });
+
+    expect(result.next).toEqual({ done: true, output: { summary: "Done" } });
+  });
+
+  it("fails the turn when the final_output payload is an unparseable string", async () => {
+    setupMockAgent(finalOutputResult("Done.", "not json at all"));
+
+    const runStep = createToolLoopHarness(createTestConfig("task"));
+    const session = createTestSession({ outputSchema: { type: "object" } });
+
+    const result = await runStep(session, { message: "Hi" });
+
+    expect(result.next).toMatchObject({ done: true, isError: true });
+  });
+
   it("fails a task turn as an error when structured output is not produced", async () => {
     setupMockAgent({
       finishReason: "stop",

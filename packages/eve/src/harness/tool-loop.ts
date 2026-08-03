@@ -165,6 +165,7 @@ import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js
 import {
   createRuntimeActionRequestFromToolCall,
   resolvePendingRuntimeActions,
+  resolveToolCallInputObject,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
 import {
@@ -2179,8 +2180,11 @@ async function handleStepResult(input: {
   // A `final_output` call is terminal even when the model emits it alongside
   // executing tools: continuing the loop would leave the no-execute call as a
   // dangling tool_use the next provider call rejects, and drop the result.
+  // Presence of the call — not whether its payload parses — decides that the
+  // turn is terminal, so an unparseable payload still ends the turn (as
+  // OUTPUT_SCHEMA_NOT_FULFILLED) instead of looping with a dangling tool_use.
   const calledFinalOutput =
-    nextSession.outputSchema !== undefined && extractFinalOutput(result) !== undefined;
+    nextSession.outputSchema !== undefined && findFinalOutputCall(result) !== undefined;
 
   const continueLoop =
     !calledFinalOutput &&
@@ -2231,10 +2235,32 @@ const OUTPUT_SCHEMA_NOT_FULFILLED = {
  * The structured value the model delivered by calling the framework
  * `final_output` tool, or `undefined` when the terminal turn ended in prose.
  */
-function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
+function findFinalOutputCall(result: HarnessStepResult) {
   return (result.toolCalls ?? []).find(
     (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME && !isInvalidToolCall(call),
-  )?.input as JsonValue | undefined;
+  );
+}
+
+/**
+ * Parses the `final_output` call's input into the structured object clients
+ * receive. The model sometimes double-encodes the payload as a JSON string, so
+ * the raw input is parsed rather than emitted verbatim. Returns `undefined`
+ * when there is no `final_output` call or its input is not a JSON object, which
+ * the terminal-turn handlers surface as `OUTPUT_SCHEMA_NOT_FULFILLED`.
+ */
+function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
+  const call = findFinalOutputCall(result);
+  if (call === undefined) {
+    return undefined;
+  }
+  try {
+    return resolveToolCallInputObject(call.input, {
+      callId: call.toolCallId,
+      toolName: call.toolName,
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 /**
