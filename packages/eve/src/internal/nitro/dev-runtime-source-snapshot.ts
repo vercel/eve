@@ -1,12 +1,20 @@
 import { existsSync, readFileSync } from "node:fs";
 import { lstat, readlink, realpath } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 import {
-  parseTsConfigObject,
   readTextFileIfExists,
   resolveTsConfigDependencyPaths,
 } from "#internal/application/tsconfig-dependencies.js";
+import {
+  isAuthoredSourcePath,
+  isPathInsideOrEqual,
+  resolveLocalTsConfigPathTargetRoots,
+  resolveNearestPackageRoot,
+  tsConfigDefinesPathAliases,
+} from "#internal/nitro/dev-runtime-source-snapshot-tsconfig-paths.js";
+
+export { isAuthoredSourcePath } from "#internal/nitro/dev-runtime-source-snapshot-tsconfig-paths.js";
 
 export const DEV_RUNTIME_SOURCE_DIRECTORY = "source";
 
@@ -204,7 +212,36 @@ async function addTsConfigDependenciesForRoot(
   state: SnapshotPlanState,
   packageRoot: string,
 ): Promise<void> {
-  const tsconfigPaths = await resolveTsConfigDependencyPaths(packageRoot);
+  await addTsConfigDependenciesForConfigRoot(state, packageRoot);
+
+  // An app root without its own `package.json` (a bare `withEve` agent
+  // directory) is bundled with the nearest owning package's tsconfig in
+  // production, so its path aliases must resolve inside the snapshot too
+  // (vercel/eve#1242).
+  const declarationRoot = resolveDependencyDeclarationRoot(packageRoot, state.sourceRoot);
+
+  if (declarationRoot === packageRoot) {
+    return;
+  }
+
+  const declaresPathAliases = await addTsConfigDependenciesForConfigRoot(state, declarationRoot);
+
+  // Alias targets such as `"@/*": ["./*"]` resolve against the owning
+  // package root, so that whole package must be part of the snapshot for
+  // dev bundling to match production resolution (vercel/eve#1242). The
+  // source root itself is never copied wholesale, matching
+  // `resolveLocalTsConfigPathTargetRoot`.
+  if (declaresPathAliases && declarationRoot !== state.sourceRoot) {
+    enqueueLocalRoot(state, declarationRoot);
+  }
+}
+
+async function addTsConfigDependenciesForConfigRoot(
+  state: SnapshotPlanState,
+  configRoot: string,
+): Promise<boolean> {
+  const tsconfigPaths = await resolveTsConfigDependencyPaths(configRoot);
+  let declaresPathAliases = false;
 
   for (const tsconfigPath of tsconfigPaths) {
     if (!isPathInsideOrEqual(tsconfigPath, state.sourceRoot)) {
@@ -214,6 +251,10 @@ async function addTsConfigDependenciesForRoot(
     state.tsconfigPaths.add(tsconfigPath);
     state.copyFiles.add(tsconfigPath);
 
+    if (await tsConfigDefinesPathAliases(tsconfigPath)) {
+      declaresPathAliases = true;
+    }
+
     for (const localRoot of await resolveLocalTsConfigPathTargetRoots({
       configPath: tsconfigPath,
       sourceRoot: state.sourceRoot,
@@ -221,6 +262,8 @@ async function addTsConfigDependenciesForRoot(
       enqueueLocalRoot(state, localRoot);
     }
   }
+
+  return declaresPathAliases;
 }
 
 async function addDependencyMountsForRoot(
@@ -450,155 +493,6 @@ async function readPackageDependencyNames(packageRoot: string): Promise<string[]
   return [...dependencyNames].sort((left, right) => left.localeCompare(right));
 }
 
-async function resolveLocalTsConfigPathTargetRoots(input: {
-  readonly configPath: string;
-  readonly sourceRoot: string;
-}): Promise<string[]> {
-  const source = await readTextFileIfExists(input.configPath);
-
-  if (source === undefined) {
-    return [];
-  }
-
-  const parsedConfig = parseTsConfigObject(source);
-  const compilerOptions = isObjectRecord(parsedConfig?.compilerOptions)
-    ? parsedConfig.compilerOptions
-    : undefined;
-  const paths = isObjectRecord(compilerOptions?.paths) ? compilerOptions.paths : undefined;
-
-  if (compilerOptions === undefined || paths === undefined) {
-    return [];
-  }
-
-  const baseDirectory =
-    typeof compilerOptions.baseUrl === "string"
-      ? resolve(dirname(input.configPath), compilerOptions.baseUrl)
-      : dirname(input.configPath);
-  const localRoots = new Set<string>();
-
-  for (const targets of Object.values(paths)) {
-    if (!Array.isArray(targets)) {
-      continue;
-    }
-
-    for (const target of targets) {
-      if (typeof target !== "string" || target.length === 0) {
-        continue;
-      }
-
-      const localRoot = await resolveLocalTsConfigPathTargetRoot({
-        baseDirectory,
-        sourceRoot: input.sourceRoot,
-        target,
-      });
-
-      if (localRoot !== undefined) {
-        localRoots.add(localRoot);
-      }
-    }
-  }
-
-  return [...localRoots].sort((left, right) => left.localeCompare(right));
-}
-
-async function resolveLocalTsConfigPathTargetRoot(input: {
-  readonly baseDirectory: string;
-  readonly sourceRoot: string;
-  readonly target: string;
-}): Promise<string | undefined> {
-  const hasWildcard = input.target.includes("*");
-  const targetPrefix = hasWildcard
-    ? input.target.slice(0, input.target.indexOf("*"))
-    : input.target;
-
-  if (targetPrefix.length === 0 || targetPrefix === "." || targetPrefix === "./") {
-    return undefined;
-  }
-
-  const resolvedTarget = resolve(input.baseDirectory, targetPrefix);
-
-  if (!isAuthoredSourcePath(resolvedTarget, input.sourceRoot)) {
-    return undefined;
-  }
-
-  const existingTarget = await resolveExistingPathOrAncestor({
-    path: resolvedTarget,
-    stopDirectory: input.sourceRoot,
-  });
-
-  if (existingTarget === undefined) {
-    return undefined;
-  }
-
-  const packageRoot = await resolveNearestPackageRoot(existingTarget, input.sourceRoot);
-
-  if (packageRoot !== undefined && packageRoot !== input.sourceRoot) {
-    return packageRoot;
-  }
-
-  if (hasWildcard) {
-    return undefined;
-  }
-
-  return existingTarget === input.sourceRoot ? undefined : existingTarget;
-}
-
-async function resolveExistingPathOrAncestor(input: {
-  readonly path: string;
-  readonly stopDirectory: string;
-}): Promise<string | undefined> {
-  let currentPath = resolve(input.path);
-
-  while (isAuthoredSourcePath(currentPath, input.stopDirectory)) {
-    if (existsSync(currentPath)) {
-      return currentPath;
-    }
-
-    const parentPath = dirname(currentPath);
-
-    if (parentPath === currentPath) {
-      return undefined;
-    }
-
-    currentPath = parentPath;
-  }
-
-  return undefined;
-}
-
-async function resolveNearestPackageRoot(
-  path: string,
-  sourceRoot: string,
-): Promise<string | undefined> {
-  let currentDirectory = resolve(path);
-
-  try {
-    const stats = await lstat(currentDirectory);
-
-    if (!stats.isDirectory()) {
-      currentDirectory = dirname(currentDirectory);
-    }
-  } catch {
-    currentDirectory = dirname(currentDirectory);
-  }
-
-  while (isAuthoredSourcePath(currentDirectory, sourceRoot)) {
-    if (existsSync(join(currentDirectory, "package.json"))) {
-      return currentDirectory;
-    }
-
-    const parentDirectory = dirname(currentDirectory);
-
-    if (parentDirectory === currentDirectory) {
-      return undefined;
-    }
-
-    currentDirectory = parentDirectory;
-  }
-
-  return undefined;
-}
-
 function normalizeCopyRoots(copyRoots: readonly string[]): string[] {
   const sortedRoots = [...new Set(copyRoots.map((path) => resolve(path)))].sort((left, right) => {
     const lengthDifference = left.length - right.length;
@@ -672,26 +566,6 @@ function toSnapshotPath(input: {
   }
 
   return join(input.snapshotSourceRoot, relative(input.sourceRoot, input.sourcePath));
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
-  );
-}
-
-/** Returns whether a path is authored workspace source rather than installed dependency data. */
-export function isAuthoredSourcePath(path: string, sourceRoot: string): boolean {
-  if (!isPathInsideOrEqual(path, sourceRoot)) {
-    return false;
-  }
-
-  const relativePath = relative(sourceRoot, path);
-
-  return !relativePath.split(/[\\/]/).includes("node_modules");
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
