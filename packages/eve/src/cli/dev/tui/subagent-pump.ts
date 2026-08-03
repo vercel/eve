@@ -36,7 +36,7 @@ export interface SubagentView {
   /** Drops a child tool row whose call never materialized. */
   removeTool(update: { callId: string; childCallId: string }): void;
   /** Marks a call complete so its section collapses on `└ Done…`. */
-  complete(update: { callId: string }): void;
+  complete(update: { authoritative: boolean; callId: string }): void;
   /** Suppresses the parent-level tool row for a child-owned call id. */
   markChildToolCallId(callId: string): void;
 }
@@ -176,7 +176,7 @@ export class SubagentPump {
    * (the parent and child streams are independent HTTP connections).
    */
   settle(callId: string): void {
-    this.#finalizeRun(callId);
+    this.#finalizeRun(callId, false);
   }
 
   /**
@@ -208,7 +208,7 @@ export class SubagentPump {
    */
   settleAll(): void {
     for (const callId of this.#runs.keys()) {
-      this.#finalizeRun(callId);
+      this.#finalizeRun(callId, true);
     }
     for (const controller of this.#pumps.values()) {
       controller.abort();
@@ -281,7 +281,7 @@ export class SubagentPump {
       } finally {
         this.#pumps.delete(callId);
       }
-      if (boundaryReached) this.#finalizeRun(callId);
+      if (boundaryReached) this.#finalizeRun(callId, true);
     })();
   }
 
@@ -342,7 +342,7 @@ export class SubagentPump {
    * the idempotency authority — the child's turn boundary and the parent's
    * `subagent.completed` can both land here.
    */
-  #finalizeRun(callId: string): void {
+  #finalizeRun(callId: string, authoritative: boolean): void {
     const run = this.#runs.get(callId);
     if (!run || run.status === "settled") return;
     run.status = "settled";
@@ -361,7 +361,7 @@ export class SubagentPump {
     }
     run.currentSectionKey = null;
     this.#sweepPreparingTools(callId, run);
-    this.#view?.complete({ callId });
+    this.#view?.complete({ authoritative, callId });
   }
 
   /**

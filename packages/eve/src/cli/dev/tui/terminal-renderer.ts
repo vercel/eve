@@ -1488,11 +1488,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * section's closing corner reports `Done`. The header stays live until the
    * turn finalizes (committing mid-turn would freeze its child window).
    */
-  completeSubagent(update: { callId: string }): void {
+  completeSubagent(update: { authoritative: boolean; callId: string }): void {
     const header = this.#blockById.get(subagentHeaderId(update.callId));
     if (header === undefined) return;
     header.status = "done";
     this.#backgroundSubagentCallIds.delete(update.callId);
+    if (update.authoritative) {
+      for (const block of this.#blocks) {
+        if (block.subagentCallId === update.callId) block.live = false;
+      }
+    }
     this.#paint();
   }
 

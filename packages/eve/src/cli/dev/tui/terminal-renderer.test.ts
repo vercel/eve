@@ -1279,13 +1279,41 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Fetched https://one.example");
     expect(screen.snapshot()).not.toContain("Done");
 
-    renderer.completeSubagent({ callId: "s1" });
+    renderer.completeSubagent({ authoritative: true, callId: "s1" });
     const snapshot = screen.snapshot();
     // Completed: the corner reports Done with the counted footnote and the
     // children fold away — the parent's reply carries the conclusion.
     expect(snapshot).toContain("※ subagent(echo-marker)");
     expect(snapshot).toContain("  └ Done. Fetched 1 URL");
     expect(snapshot).not.toContain("SUBAGENT_TOKEN=echo-marker-9F2X");
+    renderer.shutdown();
+  });
+
+  it("commits an authoritative background completion out of the live prompt region", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.backgroundSubagent({ callId: "s1" });
+    renderer.upsertSubagentTool({
+      callId: "s1",
+      subagentName: "researcher",
+      childCallId: "dig-1",
+      toolName: "dig",
+      input: { phase: "sources" },
+      status: "done",
+      output: { ok: true },
+    });
+
+    renderer.completeSubagent({ authoritative: true, callId: "s1" });
+    const outputAfterCommit = screen.rawOutput().length;
+    const prompt = renderer.readPrompt();
+    input.type("next message");
+
+    // Prompt repaint must not redraw the completed subagent cohort: it has
+    // moved to immutable scrollback and no longer occupies the live region.
+    expect(screen.rawOutput().slice(outputAfterCommit)).not.toContain("subagent(researcher)");
+    input.enter();
+    expect(await prompt).toBe("next message");
     renderer.shutdown();
   });
 

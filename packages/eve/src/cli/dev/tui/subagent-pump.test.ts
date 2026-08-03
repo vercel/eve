@@ -97,6 +97,16 @@ function boundaryEvent(index: number): MessageStreamEvent {
   );
 }
 
+function failedBoundaryEvent(index: number): MessageStreamEvent {
+  return stampTestEvent(
+    {
+      type: "session.failed",
+      data: { code: "SESSION_FAILED", message: "child failed", sessionId: "child_call-1" },
+    } as UnstampedMessageStreamEvent,
+    index,
+  );
+}
+
 async function settleAsyncWork(): Promise<void> {
   for (let i = 0; i < 8; i += 1) await Promise.resolve();
 }
@@ -120,7 +130,7 @@ describe("SubagentPump.settleAll", () => {
 
     // The parent turn is cancelled: sections settle and the stream stops.
     pump.settleAll();
-    expect(view.complete).toHaveBeenCalledWith({ callId: "call-1" });
+    expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" });
     expect(view.upsertStep).toHaveBeenCalledWith(
       expect.objectContaining({ callId: "call-1", finalized: true }),
     );
@@ -161,7 +171,34 @@ describe("SubagentPump background receipts", () => {
     expect(view.upsertStep).toHaveBeenCalledWith(
       expect.objectContaining({ callId: "call-1", reasoning: "still working" }),
     );
-    expect(view.complete).toHaveBeenCalledWith({ callId: "call-1" });
+    expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" });
+  });
+
+  it("treats a child failure boundary as authoritative completion", async () => {
+    const child = pushableChildStream();
+    const client = new Client({ host: "http://localhost:3000" });
+    vi.spyOn(client, "session").mockReturnValue({
+      stream: (options?: { signal?: AbortSignal }) => child.stream(options),
+    } as never);
+    const view = fakeView();
+    const pump = new SubagentPump({ client, view, formatActionResultError: () => "failed" });
+
+    pump.begin(subagentCalled("call-1"));
+    pump.background("call-1");
+    child.push(failedBoundaryEvent(0));
+    await settleAsyncWork();
+
+    expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" });
+  });
+
+  it("keeps parent completion fallback non-authoritative for late child events", () => {
+    const view = fakeView();
+    const pump = new SubagentPump({ view, formatActionResultError: () => "failed" });
+
+    pump.begin(subagentCalled("call-1"));
+    pump.settle("call-1");
+
+    expect(view.complete).toHaveBeenCalledWith({ authoritative: false, callId: "call-1" });
   });
 });
 

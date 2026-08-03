@@ -2285,7 +2285,7 @@ describe("EveTUIRunner renderer teardown", () => {
           upsertTool: vi.fn(),
           removeTool: vi.fn(),
           markChildToolCallId: vi.fn(),
-          complete: (update: { callId: string }) => {
+          complete: (update: { authoritative: boolean; callId: string }) => {
             completeSubagent(update);
             completed.resolve();
           },
@@ -2315,7 +2315,7 @@ describe("EveTUIRunner renderer teardown", () => {
     await runner.run();
     await completed.promise;
 
-    expect(completeSubagent).toHaveBeenCalledWith({ callId: "call-child" });
+    expect(completeSubagent).toHaveBeenCalledWith({ authoritative: true, callId: "call-child" });
   });
 
   it("does not settle a subagent section when completed carries a background receipt", async () => {
@@ -3351,7 +3351,7 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
     expect(view.begin).toHaveBeenCalledWith({ callId: "call-1", name: "researcher" });
     // `subagent.completed` never arrives for a cancelled delegation — the
     // cancellation itself must close the section.
-    expect(view.complete).toHaveBeenCalledWith({ callId: "call-1" });
+    expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" });
   });
 });
 
