@@ -67,7 +67,10 @@ export async function executeGlobOnSandbox(
   // missing) indicates a real failure. Surface these as structured
   // errors rather than silently pretending the search returned zero
   // files.
-  if (result.exitCode !== 0 && result.exitCode !== 1) {
+  if (
+    (result.exitCode !== 0 && result.exitCode !== 1) ||
+    (result.exitCode === 1 && result.stderr.trim().length > 0)
+  ) {
     throw buildGlobExecutionError(command, result.exitCode, result.stderr);
   }
 
@@ -148,7 +151,7 @@ function buildRipgrepCommand(input: BuildCommandInput): string {
     "rg --files --hidden",
     "--glob '!.git/*'",
     `--glob ${shellQuote(input.pattern)}`,
-    `-- ${shellQuote(input.normalizedPath)}`,
+    shellQuote(input.normalizedPath),
   ].join(" ");
 }
 

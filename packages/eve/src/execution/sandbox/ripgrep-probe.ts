@@ -1,14 +1,18 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 
 /**
- * Memoizes the result of probing for `rg` (ripgrep) once per sandbox
- * session. The probe runs exactly one `command -v rg` per distinct
- * session object, regardless of how many grep/glob tool calls happen.
+ * Memoizes the result of probing for a compatible `rg` (ripgrep) once per
+ * sandbox session, regardless of how many grep/glob tool calls happen.
  */
 const probes = new Map<string, Promise<boolean>>();
 
+const RIPGREP_PROBE_COMMAND =
+  "command -v rg >/dev/null 2>&1 || exit 127; " +
+  "rg --line-number --color=never --hidden --glob '!.git/*' --max-count 1 -- " +
+  "'__eve_ripgrep_probe_never_matches__' /workspace";
+
 /**
- * Returns `true` when `rg` is on PATH in the given sandbox session,
+ * Returns `true` when `rg` is on PATH and supports the options used by eve,
  * `false` otherwise. Result is cached per session.
  *
  * Framework `grep` and `glob` tools call this to decide whether to use
@@ -36,6 +40,6 @@ export async function ripgrepIsAvailable(session: SandboxSession): Promise<boole
 }
 
 async function runProbe(session: SandboxSession): Promise<boolean> {
-  const result = await session.run({ command: "command -v rg >/dev/null 2>&1" });
-  return result.exitCode === 0;
+  const result = await session.run({ command: RIPGREP_PROBE_COMMAND });
+  return (result.exitCode === 0 || result.exitCode === 1) && result.stderr.trim().length === 0;
 }
