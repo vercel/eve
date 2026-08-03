@@ -112,7 +112,27 @@ Per-request headers override client-level values with the same name. For example
 
 ## Sessions
 
-Create a `ClientSession` for each conversation:
+For an ID-addressed session, create it explicitly with the first message:
+
+```ts
+const { session, response } = await client.sessions.create("Summarize account A.");
+await response.result();
+
+await (await session.send("Now list the risks.")).result();
+await session.compact();
+await session.clear();
+```
+
+If you already know the durable ID, attach a fixed handle without performing I/O:
+
+```ts
+const session = client.sessions.attach("wrun_A");
+await session.cancel();
+```
+
+`client.sessions` stores only the session ID and stream cursor. Every method calls an ID-addressed `/eve/v1/sessions/:sessionId/...` route; reset leaves the handle pinned to the retired ID rather than silently creating or following a replacement.
+
+The continuation-addressed client surface remains available for callers that persist continuation tokens. Create a `ClientSession` for each conversation:
 
 ```ts
 const session = client.session();

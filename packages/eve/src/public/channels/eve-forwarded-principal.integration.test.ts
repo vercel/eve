@@ -72,6 +72,7 @@ function createEveCreateHandler(input: EveChannelInput) {
     send: mockSend,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
+        attachSession: vi.fn() as any,
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),

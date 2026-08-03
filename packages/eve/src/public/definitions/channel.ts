@@ -29,10 +29,12 @@ export type {
   CompactSessionResult,
   GetEventStreamOptions,
 } from "#channel/types.js";
-export type { Session, SessionHandle } from "#channel/session.js";
+export type { FixedSession, Session, SessionHandle } from "#channel/session.js";
+export type { SessionSendOptions } from "#channel/session.js";
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
 export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
 export type {
+  AttachSessionFn,
   CancelFn,
   CancelOptions,
   ClearFn,

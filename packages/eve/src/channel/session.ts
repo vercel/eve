@@ -1,6 +1,18 @@
+import type { UserContent } from "ai";
+
 import type { ContextAccessor } from "#context/key.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import type { CancelTurnResult, Runtime } from "#channel/types.js";
+import type {
+  CancelTurnResult,
+  ClearSessionResult,
+  CompactSessionResult,
+  ResetSessionCommandResult,
+  Runtime,
+  SessionAuthContext,
+  SessionSendCommandResult,
+} from "#channel/types.js";
+import type { SendPayload } from "#channel/routes.js";
+import { normalizeSendInput, serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
 
@@ -35,6 +47,31 @@ export interface Session {
   getStreamTailIndex(): Promise<number>;
 }
 
+/** Immutable-ID session handle for aligned send, control, and stream operations. */
+export interface FixedSession {
+  readonly id: string;
+  /** Sends input to this exact session ID without creating or following a replacement. */
+  send(
+    input: string | UserContent | SendPayload,
+    options: SessionSendOptions,
+  ): Promise<SessionSendCommandResult>;
+  /** Requests cancellation of this exact session's active turn. */
+  cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
+  /** Queues compaction on this exact session ID. */
+  compact(): Promise<CompactSessionResult>;
+  /** Queues a context clear on this exact session ID. */
+  clear(): Promise<ClearSessionResult>;
+  /** Terminally retires this exact session ID. */
+  reset(options?: { reason?: string }): Promise<ResetSessionCommandResult>;
+  getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
+  getStreamTailIndex(): Promise<number>;
+}
+
+/** Per-delivery metadata required when sending through a fixed session handle. */
+export interface SessionSendOptions {
+  readonly auth: SessionAuthContext | null;
+}
+
 /**
  * Live handle to the current session, exposed on `ctx.session` to
  * `deliver` and event handlers. The framework hydrates the read-only
@@ -49,13 +86,45 @@ export interface SessionHandle {
   setContinuationToken(rawToken: string): void;
 }
 
-export function createSession(id: string, continuationToken: string, runtime: Runtime): Session {
+export function createSession(
+  id: string,
+  continuationToken: string,
+  runtime: Runtime,
+  metadata: { readonly requestId?: string } = {},
+): Session & FixedSession {
   return {
     id,
     continuationToken,
+    async send(input, options) {
+      const payload = normalizeSendInput(input);
+      return await runtime.dispatchSession({
+        command: {
+          auth: options.auth,
+          kind: "send",
+          payload: {
+            ...payload,
+            message: serializeUrlFilePartsInMessage(payload.message),
+          },
+          requestId: metadata.requestId,
+        },
+        sessionId: id,
+      });
+    },
     async cancel(options?: { turnId?: string }) {
-      return runtime.dispatchSession({
+      return await runtime.dispatchSession({
         command: { kind: "cancel", turnId: options?.turnId },
+        sessionId: id,
+      });
+    },
+    async compact() {
+      return await runtime.dispatchSession({ command: { kind: "compact" }, sessionId: id });
+    },
+    async clear() {
+      return await runtime.dispatchSession({ command: { kind: "clear" }, sessionId: id });
+    },
+    async reset(options) {
+      return await runtime.dispatchSession({
+        command: { kind: "reset", reason: options?.reason },
         sessionId: id,
       });
     },
@@ -68,8 +137,19 @@ export function createSession(id: string, continuationToken: string, runtime: Ru
   };
 }
 
-export function createGetSessionFn(runtime: Runtime): (sessionId: string) => Session {
-  return (sessionId: string) => createSession(sessionId, "", runtime);
+export function createGetSessionFn(
+  runtime: Runtime,
+  metadata: { readonly requestId?: string } = {},
+): (sessionId: string) => Session {
+  return (sessionId: string) => createSession(sessionId, "", runtime, metadata);
+}
+
+/** Builds an I/O-free factory for fixed session-ID handles. */
+export function createAttachSessionFn(
+  runtime: Runtime,
+  metadata: { readonly requestId?: string } = {},
+): (sessionId: string) => FixedSession {
+  return (sessionId) => createSession(sessionId, "", runtime, metadata);
 }
 
 /**

@@ -11,6 +11,7 @@ import type { ClearResponse } from "#protocol/clear-session.js";
 import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import type { SendOptions } from "#channel/routes.js";
+import type { FixedSession } from "#channel/session.js";
 import { resolveForwardedPrincipal, type TrustedForwarders } from "#channel/forwarded-principal.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
@@ -19,6 +20,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import {
   readAgentInfoRouteResponse,
   readRouteAgent,
+  readRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 import { AgentHandleError } from "#protocol/agent-handle-error.js";
 import {
@@ -36,6 +38,13 @@ import {
   EVE_COMPACT_SESSION_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
   EVE_RESET_SESSION_ROUTE_PATH,
+  EVE_SESSIONS_ROUTE_PATH,
+  EVE_SESSION_CANCEL_ROUTE_PATTERN,
+  EVE_SESSION_CLEAR_ROUTE_PATTERN,
+  EVE_SESSION_COMPACT_ROUTE_PATTERN,
+  EVE_SESSION_MESSAGES_ROUTE_PATTERN,
+  EVE_SESSION_RESET_ROUTE_PATTERN,
+  EVE_SESSION_STREAM_ROUTE_PATTERN,
 } from "#protocol/routes.js";
 import { type InputResponse, isInputResponse } from "#runtime/input/types.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
@@ -221,6 +230,216 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
 
         return await respond();
+      }),
+
+      POST(EVE_SESSIONS_ROUTE_PATH, async (req, args) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const payload = await parseJsonRequest(req);
+        if (payload instanceof Response) return payload;
+        const tokenRejection = rejectSessionContinuationToken(payload);
+        if (tokenRejection !== null) return tokenRejection;
+
+        const forwarded = await resolveForwardedPrincipal({
+          trustedForwarders: input.trustedForwarders,
+          forwarder: authResult,
+          payload,
+        });
+        if (forwarded instanceof Response) return forwarded;
+
+        const body = parseCreateBody(payload);
+        if (body instanceof Response) return body;
+
+        const policyRejection = checkUploadPolicy(body, uploadPolicy);
+        if (policyRejection !== null) return policyRejection;
+
+        const messageResult = await resolveOnMessage({
+          auth: forwarded.auth,
+          config: input,
+          message: body.message,
+          request: req,
+        });
+        if (messageResult instanceof Response) return messageResult;
+        if (!messageResult.dispatch) return droppedMessageResponse();
+
+        const createSession = readRouteSessionCreator(args);
+        if (createSession === undefined) {
+          return Response.json(
+            { error: "Session creation requires internal channel dispatch context.", ok: false },
+            { status: 500 },
+          );
+        }
+
+        const handle = await createSession({
+          auth: messageResult.auth,
+          capabilities: body.mode === "task" ? undefined : { requestInput: true },
+          callback: body.callback,
+          initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
+          input: {
+            message: body.message,
+            context: mergeContext(body.context, messageResult.context),
+            outputSchema: body.outputSchema,
+          },
+          mode: body.mode ?? "conversation",
+        });
+
+        return Response.json(
+          { ok: true, sessionId: handle.sessionId, status: "accepted" },
+          {
+            headers: {
+              "cache-control": "no-store",
+              [EVE_SESSION_ID_HEADER]: handle.sessionId,
+            },
+            status: 202,
+          },
+        );
+      }),
+
+      POST(EVE_SESSION_MESSAGES_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const sessionId = requireSessionId(params);
+        if (sessionId instanceof Response) return sessionId;
+        const payload = await parseJsonRequest(req);
+        if (payload instanceof Response) return payload;
+        const body = parseSessionMessageBody(payload);
+        if (body instanceof Response) return body;
+
+        const policyRejection = checkUploadPolicy(body, uploadPolicy);
+        if (policyRejection !== null) return policyRejection;
+
+        let context = body.context;
+        let dispatchAuth: SessionAuthContext | null = authResult;
+        if (body.message !== undefined) {
+          const messageResult = await resolveOnMessage({
+            auth: authResult,
+            config: input,
+            message: body.message,
+            request: req,
+            sessionId,
+          });
+          if (messageResult instanceof Response) return messageResult;
+          if (!messageResult.dispatch) return droppedMessageResponse();
+          context = mergeContext(body.context, messageResult.context);
+          dispatchAuth = messageResult.auth;
+        }
+
+        const result = await attachSession(sessionId).send(
+          {
+            context,
+            inputResponses: body.inputResponses,
+            message: body.message,
+            outputSchema: body.outputSchema,
+          },
+          { auth: dispatchAuth },
+        );
+        if (result.status === "session_not_active") {
+          return Response.json(
+            { code: "session_not_active", ok: false },
+            { headers: { "cache-control": "no-store" }, status: 409 },
+          );
+        }
+
+        return Response.json(
+          { ok: true, sessionId: result.sessionId, status: "accepted" },
+          {
+            headers: {
+              "cache-control": "no-store",
+              [EVE_SESSION_ID_HEADER]: result.sessionId,
+            },
+            status: 202,
+          },
+        );
+      }),
+
+      POST(EVE_SESSION_CANCEL_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(params);
+        if (sessionId instanceof Response) return sessionId;
+        const body = await parseCancelTurnBody(req, { rejectContinuationToken: true });
+        if (body instanceof Response) return body;
+        const result = await attachSession(sessionId).cancel({ turnId: body.turnId });
+        return Response.json(
+          { ok: true, sessionId, status: result.status } satisfies CancelTurnResponse,
+          { headers: { "cache-control": "no-store" } },
+        );
+      }),
+
+      POST(EVE_SESSION_COMPACT_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(params);
+        if (sessionId instanceof Response) return sessionId;
+        const body = await parseSessionControlBody(req);
+        if (body instanceof Response) return body;
+        const result = await attachSession(sessionId).compact();
+        return Response.json(
+          result.status === "accepted"
+            ? ({
+                ok: true,
+                sessionId: result.sessionId,
+                status: "accepted",
+              } satisfies CompactResponse)
+            : ({ ok: true, status: "no_active_session" } satisfies CompactResponse),
+          {
+            headers: { "cache-control": "no-store" },
+            status: result.status === "accepted" ? 202 : 200,
+          },
+        );
+      }),
+
+      POST(EVE_SESSION_CLEAR_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(params);
+        if (sessionId instanceof Response) return sessionId;
+        const body = await parseSessionControlBody(req);
+        if (body instanceof Response) return body;
+        const result = await attachSession(sessionId).clear();
+        return Response.json(
+          result.status === "accepted"
+            ? ({
+                ok: true,
+                sessionId: result.sessionId,
+                status: "accepted",
+              } satisfies ClearResponse)
+            : ({ ok: true, status: "no_active_session" } satisfies ClearResponse),
+          {
+            headers: { "cache-control": "no-store" },
+            status: result.status === "accepted" ? 202 : 200,
+          },
+        );
+      }),
+
+      POST(EVE_SESSION_RESET_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(params);
+        if (sessionId instanceof Response) return sessionId;
+        const body = await parseResetBody(req);
+        if (body instanceof Response) return body;
+        const result = await attachSession(sessionId).reset({ reason: body.reason });
+        return Response.json(
+          result.status === "reset"
+            ? ({
+                ok: true,
+                previousSessionId: result.previousSessionId,
+                status: "reset",
+              } satisfies ResetResponse)
+            : ({ ok: true, status: "no_active_session" } satisfies ResetResponse),
+          { headers: { "cache-control": "no-store" } },
+        );
+      }),
+
+      GET(EVE_SESSION_STREAM_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(params);
+        if (sessionId instanceof Response) return sessionId;
+        return await createSessionStreamResponse(req, attachSession(sessionId));
       }),
 
       POST("/eve/v1/session", async (req, { send }) => {
@@ -724,6 +943,47 @@ interface ParsedContinueBody {
   outputSchema?: JsonObject;
 }
 
+interface ParsedSessionMessageBody {
+  message?: string | UserContent;
+  inputResponses?: readonly InputResponse[];
+  context?: readonly string[];
+  outputSchema?: JsonObject;
+}
+
+function parseSessionMessageBody(
+  payload: Record<string, unknown>,
+): ParsedSessionMessageBody | Response {
+  const tokenRejection = rejectSessionContinuationToken(payload);
+  if (tokenRejection !== null) return tokenRejection;
+  if (payload.forwardedPrincipal !== undefined) {
+    return Response.json(
+      { error: "A forwarded principal is only accepted on session creation.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  const message = parseMessageField(payload.message);
+  if (message instanceof Response) return message;
+  const inputResponses = parseInputResponses(payload.inputResponses);
+  if (inputResponses instanceof Response) return inputResponses;
+  const context = parseClientContextField(payload.clientContext);
+  if (context instanceof Response) return context;
+  const outputSchema = parseOutputSchemaField(payload.outputSchema);
+  if (outputSchema instanceof Response) return outputSchema;
+
+  if (message === undefined && inputResponses === undefined) {
+    return Response.json(
+      {
+        error: "Expected a non-empty 'message', a non-empty 'inputResponses' array, or both.",
+        ok: false,
+      },
+      { status: 400 },
+    );
+  }
+
+  return { message, inputResponses, context, outputSchema };
+}
+
 function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody | Response {
   // Fail loud instead of silently running the delivery as the transport
   // principal: principal forwarding is create-only today.
@@ -807,28 +1067,18 @@ async function parseContinuationTokenBody(
   return { continuationToken };
 }
 
-async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody | Response> {
-  let text: string;
-  try {
-    text = await req.text();
-  } catch {
-    return Response.json({ error: "Unreadable request body.", ok: false }, { status: 400 });
-  }
-  if (text.trim().length === 0) {
-    return {};
-  }
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
-  }
-  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
-    return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
+async function parseCancelTurnBody(
+  req: Request,
+  options: { readonly rejectContinuationToken?: boolean } = {},
+): Promise<ParsedCancelTurnBody | Response> {
+  const payload = await parseOptionalJsonRequest(req);
+  if (payload instanceof Response) return payload;
+  if (options.rejectContinuationToken) {
+    const tokenRejection = rejectSessionContinuationToken(payload);
+    if (tokenRejection !== null) return tokenRejection;
   }
 
-  const turnId = (payload as { turnId?: unknown }).turnId;
+  const turnId = payload.turnId;
   if (turnId === undefined) {
     return {};
   }
@@ -839,6 +1089,105 @@ async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody |
     );
   }
   return { turnId };
+}
+
+async function parseJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {
+  let payload: unknown;
+  try {
+    payload = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
+  }
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
+  }
+  return payload as Record<string, unknown>;
+}
+
+async function parseResetBody(req: Request): Promise<{ readonly reason?: string } | Response> {
+  const payload = await parseOptionalJsonRequest(req);
+  if (payload instanceof Response) return payload;
+  const tokenRejection = rejectSessionContinuationToken(payload);
+  if (tokenRejection !== null) return tokenRejection;
+  const reason = payload.reason;
+  if (reason !== undefined && (typeof reason !== "string" || reason.length === 0)) {
+    return Response.json(
+      { error: "Expected 'reason' to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
+  return reason === undefined ? {} : { reason };
+}
+
+async function parseSessionControlBody(req: Request): Promise<Record<string, unknown> | Response> {
+  const payload = await parseOptionalJsonRequest(req);
+  if (payload instanceof Response) return payload;
+  return rejectSessionContinuationToken(payload) ?? payload;
+}
+
+async function parseOptionalJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {
+  let text: string;
+  try {
+    text = await req.text();
+  } catch {
+    return Response.json({ error: "Unreadable request body.", ok: false }, { status: 400 });
+  }
+  if (text.trim().length === 0) return {};
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
+  }
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
+  }
+  return payload as Record<string, unknown>;
+}
+
+function rejectSessionContinuationToken(payload: Record<string, unknown>): Response | null {
+  return "continuationToken" in payload
+    ? Response.json(
+        { error: "Session-ID routes do not accept 'continuationToken'.", ok: false },
+        { status: 400 },
+      )
+    : null;
+}
+
+function requireSessionId(params: Readonly<Record<string, string>>): string | Response {
+  const sessionId = params.sessionId;
+  return sessionId || Response.json({ error: "Missing session id.", ok: false }, { status: 400 });
+}
+
+async function createSessionStreamResponse(
+  request: Request,
+  session: FixedSession,
+): Promise<Response> {
+  const startIndex = parseStartIndex(request);
+  if (startIndex instanceof Response) return startIndex;
+  const includeTailIndex = parseIncludeTailIndex(request);
+
+  try {
+    const tailIndex = includeTailIndex ? await session.getStreamTailIndex() : undefined;
+    const events = await session.getEventStream({ startIndex });
+    const headers = new Headers({
+      "cache-control": "no-store, no-transform",
+      "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
+      "x-accel-buffering": "no",
+      [EVE_SESSION_ID_HEADER]: session.id,
+      [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
+      [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
+    });
+    if (tailIndex !== undefined) {
+      headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
+    }
+    return new Response(serializeAsNdjson(events), {
+      headers,
+    });
+  } catch {
+    return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+  }
 }
 
 function createSendPayload(
@@ -1003,7 +1352,7 @@ function parseMessagePart(raw: unknown): TextPart | FilePart | Response {
 }
 
 function checkUploadPolicy(
-  body: ParsedCreateBody | ParsedContinueBody,
+  body: ParsedCreateBody | ParsedContinueBody | ParsedSessionMessageBody,
   policy: UploadPolicy,
 ): Response | null {
   if (!body.message) return null;

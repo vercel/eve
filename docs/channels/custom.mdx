@@ -46,6 +46,7 @@ export default defineChannel({
 
 Declare routes with the `POST()` and `GET()` helpers. Each route handler receives the raw `Request` and a helpers object:
 
+- `attachSession(sessionId)` creates an I/O-free handle pinned to one durable session ID. Its `send()`, control, and stream methods never follow a replacement session.
 - `send(message, { auth, continuationToken, state?, title? })` starts or resumes a session. `title` overrides the new workflow session's display title without changing the model message. Returns a `Session`.
 - `cancel({ continuationToken, turnId? })` requests cancellation of the active turn on the session that owns the token. See [Cancel a turn](#cancel-a-turn).
 - `clear({ continuationToken })` removes the model-message history while preserving the session and its durable resources. See [Clear session context](#clear-session-context).
@@ -58,6 +59,18 @@ Declare routes with the `POST()` and `GET()` helpers. Each route handler receive
 - `requestIp` is the client IP, or `null` when the host cannot provide it.
 
 Event handlers like `"message.completed"` are declared under the `events` key. They receive `(eventData, channel, ctx)`, where `eventData` is the event payload, `channel` carries platform handles and session continuation operations, and `ctx` is the eve `SessionContext`. Every channel kind shares this signature. The one exception is `session.failed`, which receives only `(eventData, channel)` with no `ctx`.
+
+## Session handles
+
+Use `attachSession()` when you already have a durable session ID and must target that exact session. Attaching performs no network or runtime lookup; the first operation reports whether the session is still active:
+
+```ts
+POST("/sessions/:sessionId/clear", async (_request, { attachSession, params }) => {
+  return Response.json(await attachSession(params.sessionId).clear());
+});
+```
+
+The fixed session handle exposes `send`, `cancel`, `compact`, `clear`, `reset`, and `stream`. It never creates or follows another session.
 
 ## Cancel a turn
 

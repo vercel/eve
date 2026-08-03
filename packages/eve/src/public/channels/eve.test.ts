@@ -77,6 +77,7 @@ function createEveCreateHandler(input: EveChannelInput) {
     send: mockSend,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
+        attachSession: vi.fn() as any,
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
@@ -126,6 +127,7 @@ function createEveContinueHandler(input: EveChannelInput) {
     send: mockSend,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
+        attachSession: vi.fn() as any,
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
@@ -162,6 +164,7 @@ function createEveCancelHandler(input: EveChannelInput) {
     async fetch(req: Request) {
       const args = attachRouteAgent(
         {
+          attachSession: vi.fn() as any,
           send: vi.fn(),
           resolveActiveSession: async () => undefined,
           cancel: vi.fn(),
@@ -210,6 +213,7 @@ function createEveResetHandler(input: EveChannelInput) {
     reset,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
+        attachSession: vi.fn() as any,
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
@@ -260,6 +264,7 @@ function createEveClearHandler(input: EveChannelInput) {
     clear,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
+        attachSession: vi.fn() as any,
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
@@ -294,6 +299,7 @@ function createEveCompactHandler(input: EveChannelInput) {
     compact,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
+        attachSession: vi.fn() as any,
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
@@ -334,6 +340,7 @@ function createEveStreamHandler(input: EveChannelInput) {
     getStreamTailIndex,
     async fetch(url: string) {
       const args: RouteHandlerArgs = {
+        attachSession: vi.fn() as any,
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),

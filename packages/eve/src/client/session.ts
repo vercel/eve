@@ -1,20 +1,22 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
-import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
-import { ClearResponseSchema } from "#protocol/clear-session.js";
-import { CompactResponseSchema } from "#protocol/compact-session.js";
-import { ResetResponseSchema } from "#protocol/reset-session.js";
 import {
   EVE_CREATE_SESSION_ROUTE_PATH,
-  EVE_CLEAR_SESSION_ROUTE_PATH,
-  EVE_COMPACT_SESSION_ROUTE_PATH,
-  EVE_RESET_SESSION_ROUTE_PATH,
-  createEveCancelTurnRoutePath,
+  EVE_SESSIONS_ROUTE_PATH,
+  createEveSessionMessagesRoutePath,
+  createEveSessionStreamRoutePath,
   createEveContinueSessionRoutePath,
 } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
 import { followStreamIterable } from "#client/open-stream.js";
+import {
+  cancelClientSession,
+  clearClientSession,
+  compactClientSession,
+  resetClientSession,
+  type ClientSessionTransport,
+} from "#client/session-controls.js";
 import { advanceSession, createInitialSessionState } from "#client/session-utils.js";
 import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { createClientUrl } from "#client/url.js";
@@ -38,7 +40,7 @@ const DELIVER_RETRY_DELAY_MS = 200;
  * Internal interface that a {@link ClientSession} uses to access client-level
  * configuration without depending on the full {@link Client} class.
  */
-interface SessionContext {
+export interface ClientSessionContext {
   readonly host: string;
   readonly preserveCompletedSessions: boolean;
   readonly redirect?: ClientRedirectPolicy;
@@ -53,13 +55,19 @@ interface SessionContext {
  * the {@link state} getter and serialize it to persist a session.
  */
 export class ClientSession {
-  readonly #context: SessionContext;
+  readonly #context: ClientSessionContext;
+  readonly #transport: ClientSessionTransport;
   #state: SessionState;
 
   /** @internal */
-  constructor(context: SessionContext, state: SessionState) {
+  constructor(
+    context: ClientSessionContext,
+    state: SessionState,
+    transport: ClientSessionTransport = "legacy",
+  ) {
     this.#context = context;
     this.#state = state;
+    this.#transport = transport;
   }
 
   /**
@@ -104,17 +112,22 @@ export class ClientSession {
 
     options?.signal?.throwIfAborted();
 
-    const lastEvent = events.at(-1);
-    const continuationToken =
-      lastEvent?.type === "session.waiting"
-        ? lastEvent.data.continuationToken
-        : lastEvent?.type === "session.completed" && this.#context.preserveCompletedSessions
-          ? initialState.continuationToken
-          : undefined;
-    const session: SessionState =
-      continuationToken === undefined
-        ? { sessionId, streamIndex: events.length }
-        : { continuationToken, sessionId, streamIndex: events.length };
+    let session: SessionState;
+    if (this.#transport === "sessions") {
+      session = { sessionId, streamIndex: events.length };
+    } else {
+      const lastEvent = events.at(-1);
+      const continuationToken =
+        lastEvent?.type === "session.waiting"
+          ? lastEvent.data.continuationToken
+          : lastEvent?.type === "session.completed" && this.#context.preserveCompletedSessions
+            ? initialState.continuationToken
+            : undefined;
+      session =
+        continuationToken === undefined
+          ? { sessionId, streamIndex: events.length }
+          : { continuationToken, sessionId, streamIndex: events.length };
+    }
 
     return { events, session };
   }
@@ -135,9 +148,12 @@ export class ClientSession {
     // Cancellation and observation can begin as soon as the POST is accepted,
     // before the response stream reaches a turn boundary.
     if (this.#state === state) {
-      const nextState = { ...state, sessionId };
-      if (continuationToken !== undefined) nextState.continuationToken = continuationToken;
-      this.#state = nextState;
+      this.#state =
+        this.#transport === "sessions"
+          ? { sessionId, streamIndex: state.streamIndex }
+          : continuationToken === undefined
+            ? { ...state, sessionId }
+            : { ...state, continuationToken, sessionId };
     }
 
     return new MessageResponse<TOutput>({
@@ -164,41 +180,12 @@ export class ClientSession {
     if (!sessionId) {
       throw new Error("Session has no session ID. Send a message first.");
     }
-
-    const url = createClientUrl(this.#context.host, createEveCancelTurnRoutePath(sessionId));
-    const headers = await this.#context.resolveHeaders();
-    headers.set("content-type", "application/json");
-
-    const response = await fetch(
-      url,
-      withRedirectPolicy(
-        {
-          headers,
-          method: "POST",
-          body: options ? JSON.stringify(options) : undefined,
-        },
-        this.#context.redirect,
-      ),
-    );
-    const body = await response.text();
-
-    if (!response.ok) {
-      throw new ClientError(response.status, body, response.headers);
-    }
-
-    let payload: unknown;
-    try {
-      payload = JSON.parse(body);
-    } catch {
-      throw new Error(`Cancel route returned invalid JSON (${response.status}).`);
-    }
-
-    const result = CancelTurnResponseSchema.safeParse(payload);
-    if (!result.success || result.data.sessionId !== sessionId) {
-      throw new Error(`Cancel route returned an invalid response (${response.status}).`);
-    }
-
-    return { sessionId: result.data.sessionId, status: result.data.status };
+    return await cancelClientSession({
+      context: this.#context,
+      options,
+      sessionId,
+      transport: this.#transport,
+    });
   }
 
   /**
@@ -208,59 +195,11 @@ export class ClientSession {
    * `session.waiting` boundary before sending another turn.
    */
   async clear(): Promise<ClearResult> {
-    const state = this.#state;
-    const continuationToken = state.continuationToken;
-
-    if (continuationToken === undefined) {
-      if (state.sessionId !== undefined) {
-        throw new Error(
-          "Session has no continuation token. Consume its event stream before clearing.",
-        );
-      }
-      return { status: "no_active_session" };
-    }
-
-    const url = createClientUrl(this.#context.host, EVE_CLEAR_SESSION_ROUTE_PATH);
-    const headers = await this.#context.resolveHeaders();
-    headers.set("content-type", "application/json");
-
-    const response = await fetch(
-      url,
-      withRedirectPolicy(
-        {
-          body: JSON.stringify({ continuationToken }),
-          headers,
-          method: "POST",
-        },
-        this.#context.redirect,
-      ),
-    );
-    const body = await response.text();
-
-    if (!response.ok) {
-      throw new ClientError(response.status, body, response.headers);
-    }
-
-    let payload: unknown;
-    try {
-      payload = JSON.parse(body);
-    } catch {
-      throw new Error(`Clear route returned invalid JSON (${response.status}).`);
-    }
-
-    const result = ClearResponseSchema.safeParse(payload);
-    if (
-      !result.success ||
-      (result.data.status === "accepted" &&
-        state.sessionId !== undefined &&
-        result.data.sessionId !== state.sessionId)
-    ) {
-      throw new Error(`Clear route returned an invalid response (${response.status}).`);
-    }
-
-    return result.data.status === "accepted"
-      ? { sessionId: result.data.sessionId, status: "accepted" }
-      : { status: "no_active_session" };
+    return await clearClientSession({
+      context: this.#context,
+      state: this.#state,
+      transport: this.#transport,
+    });
   }
 
   /**
@@ -270,59 +209,11 @@ export class ClientSession {
    * summarization succeeded. A never-started handle is a successful no-op.
    */
   async compact(): Promise<CompactResult> {
-    const state = this.#state;
-    const continuationToken = state.continuationToken;
-
-    if (continuationToken === undefined) {
-      if (state.sessionId !== undefined) {
-        throw new Error(
-          "Session has no continuation token. Consume its event stream before compacting.",
-        );
-      }
-      return { status: "no_active_session" };
-    }
-
-    const url = createClientUrl(this.#context.host, EVE_COMPACT_SESSION_ROUTE_PATH);
-    const headers = await this.#context.resolveHeaders();
-    headers.set("content-type", "application/json");
-
-    const response = await fetch(
-      url,
-      withRedirectPolicy(
-        {
-          body: JSON.stringify({ continuationToken }),
-          headers,
-          method: "POST",
-        },
-        this.#context.redirect,
-      ),
-    );
-    const body = await response.text();
-
-    if (!response.ok) {
-      throw new ClientError(response.status, body, response.headers);
-    }
-
-    let payload: unknown;
-    try {
-      payload = JSON.parse(body);
-    } catch {
-      throw new Error(`Compact route returned invalid JSON (${response.status}).`);
-    }
-
-    const result = CompactResponseSchema.safeParse(payload);
-    if (
-      !result.success ||
-      (result.data.status === "accepted" &&
-        state.sessionId !== undefined &&
-        result.data.sessionId !== state.sessionId)
-    ) {
-      throw new Error(`Compact route returned an invalid response (${response.status}).`);
-    }
-
-    return result.data.status === "accepted"
-      ? { sessionId: result.data.sessionId, status: "accepted" }
-      : { status: "no_active_session" };
+    return await compactClientSession({
+      context: this.#context,
+      state: this.#state,
+      transport: this.#transport,
+    });
   }
 
   /**
@@ -336,67 +227,18 @@ export class ClientSession {
    *
    * @throws {ClientError} If the reset route returns a non-successful status.
    */
-  async reset(): Promise<ResetResult> {
+  async reset(options?: { readonly reason?: string }): Promise<ResetResult> {
     const state = this.#state;
-    const continuationToken = state.continuationToken;
-
-    if (continuationToken === undefined) {
-      if (state.sessionId !== undefined) {
-        throw new Error(
-          "Session has no continuation token. Consume its event stream before resetting.",
-        );
-      }
-      this.#state = createInitialSessionState();
-      return { status: "no_active_session" };
-    }
-
-    const url = createClientUrl(this.#context.host, EVE_RESET_SESSION_ROUTE_PATH);
-    const headers = await this.#context.resolveHeaders();
-    headers.set("content-type", "application/json");
-
-    const response = await fetch(
-      url,
-      withRedirectPolicy(
-        {
-          body: JSON.stringify({ continuationToken }),
-          headers,
-          method: "POST",
-        },
-        this.#context.redirect,
-      ),
-    );
-    const body = await response.text();
-
-    if (!response.ok) {
-      throw new ClientError(response.status, body, response.headers);
-    }
-
-    let payload: unknown;
-    try {
-      payload = JSON.parse(body);
-    } catch {
-      throw new Error(`Reset route returned invalid JSON (${response.status}).`);
-    }
-
-    const result = ResetResponseSchema.safeParse(payload);
-    if (!result.success) {
-      throw new Error(`Reset route returned an invalid response (${response.status}).`);
-    }
-    if (
-      result.data.status === "reset" &&
-      state.sessionId !== undefined &&
-      result.data.previousSessionId !== state.sessionId
-    ) {
-      throw new Error(`Reset route returned an invalid response (${response.status}).`);
-    }
-
-    if (this.#state === state) {
+    const result = await resetClientSession({
+      context: this.#context,
+      options,
+      state,
+      transport: this.#transport,
+    });
+    if (this.#transport === "legacy" && this.#state === state) {
       this.#state = createInitialSessionState();
     }
-
-    return result.data.status === "reset"
-      ? { previousSessionId: result.data.previousSessionId, status: "reset" }
-      : { status: "no_active_session" };
+    return result;
   }
 
   /**
@@ -439,14 +281,20 @@ export class ClientSession {
     input: SendTurnPayload,
     session: SessionState,
   ): Promise<{ continuationToken?: string; sessionId: string }> {
-    const routePath = session.sessionId
-      ? createEveContinueSessionRoutePath(session.sessionId)
-      : EVE_CREATE_SESSION_ROUTE_PATH;
+    const routePath =
+      this.#transport === "sessions"
+        ? session.sessionId
+          ? createEveSessionMessagesRoutePath(session.sessionId)
+          : EVE_SESSIONS_ROUTE_PATH
+        : session.sessionId
+          ? createEveContinueSessionRoutePath(session.sessionId)
+          : EVE_CREATE_SESSION_ROUTE_PATH;
     const url = createClientUrl(this.#context.host, routePath);
     const headers = await this.#context.resolveHeaders(input.headers);
     headers.set("content-type", "application/json");
 
     const body = createHandleMessageBody({
+      includeContinuationToken: this.#transport === "legacy",
       input,
       outputSchema: serializeOutputSchema(input.outputSchema),
       session,
@@ -510,13 +358,21 @@ export class ClientSession {
         }
       }
     } finally {
-      this.#state = advanceSession({
-        continuationToken,
-        events,
-        preserveCompletedSessions: this.#context.preserveCompletedSessions,
-        sessionId,
-        session: initialState,
-      });
+      this.#state =
+        this.#transport === "sessions"
+          ? {
+              sessionId,
+              streamIndex:
+                (initialState.sessionId === sessionId ? initialState.streamIndex : 0) +
+                events.length,
+            }
+          : advanceSession({
+              continuationToken,
+              events,
+              preserveCompletedSessions: this.#context.preserveCompletedSessions,
+              sessionId,
+              session: initialState,
+            });
     }
   }
 
@@ -541,13 +397,16 @@ export class ClientSession {
       }
     } finally {
       if (streamIndex >= 0) {
-        this.#state = advanceSession({
-          continuationToken: initialState.continuationToken,
-          events,
-          preserveCompletedSessions: this.#context.preserveCompletedSessions,
-          session: { ...initialState, sessionId, streamIndex },
-          sessionId,
-        });
+        this.#state =
+          this.#transport === "sessions"
+            ? { sessionId, streamIndex: streamIndex + events.length }
+            : advanceSession({
+                continuationToken: initialState.continuationToken,
+                events,
+                preserveCompletedSessions: this.#context.preserveCompletedSessions,
+                session: { ...initialState, sessionId, streamIndex },
+                sessionId,
+              });
       }
     }
   }
@@ -569,6 +428,10 @@ export class ClientSession {
       sessionId: input.sessionId,
       signal: input.signal,
       startIndex: input.startIndex,
+      streamPath:
+        this.#transport === "sessions"
+          ? createEveSessionStreamRoutePath(input.sessionId)
+          : undefined,
     });
   }
 }
@@ -630,6 +493,7 @@ function normalizeSendTurnInput<TOutput>(input: SendTurnInput<TOutput>): SendTur
 }
 
 function createHandleMessageBody(input: {
+  readonly includeContinuationToken: boolean;
   readonly input: SendTurnPayload;
   readonly outputSchema?: Record<string, unknown>;
   readonly session: SessionState;
@@ -652,7 +516,7 @@ function createHandleMessageBody(input: {
     body.outputSchema = input.outputSchema;
   }
 
-  if (input.session.continuationToken !== undefined) {
+  if (input.includeContinuationToken && input.session.continuationToken !== undefined) {
     body.continuationToken = input.session.continuationToken;
   }
 
@@ -660,12 +524,24 @@ function createHandleMessageBody(input: {
     return null;
   }
 
-  if (input.session.continuationToken === undefined && body.message === undefined) {
+  if (
+    input.includeContinuationToken &&
+    input.session.continuationToken === undefined &&
+    body.message === undefined
+  ) {
     return null;
   }
 
   if (
-    input.session.continuationToken !== undefined &&
+    !input.includeContinuationToken &&
+    input.session.sessionId === undefined &&
+    body.message === undefined
+  ) {
+    return null;
+  }
+
+  if (
+    (!input.includeContinuationToken || input.session.continuationToken !== undefined) &&
     body.message === undefined &&
     body.inputResponses === undefined
   ) {
@@ -673,8 +549,4 @@ function createHandleMessageBody(input: {
   }
 
   return body;
-}
-
-function withRedirectPolicy(init: RequestInit, redirect?: ClientRedirectPolicy): RequestInit {
-  return redirect === undefined ? init : { ...init, redirect };
 }

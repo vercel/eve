@@ -13,7 +13,7 @@ import { createCompactFn } from "#channel/compact-session.js";
 import { createResetFn } from "#channel/reset-session.js";
 import { createSendFn } from "#channel/send.js";
 import { createResolveActiveSessionFn } from "#channel/resolve-active-session.js";
-import { createGetSessionFn } from "#channel/session.js";
+import { createAttachSessionFn, createGetSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
@@ -21,6 +21,7 @@ import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-
 import {
   attachAgentInfoRouteResponse,
   attachRouteAgent,
+  attachRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
@@ -220,31 +221,42 @@ function buildRouteArgs(
   const clear = createClearFn(bundle.runtime, channelName);
   const compact = createCompactFn(bundle.runtime, channelName);
   const reset = createResetFn(bundle.runtime, channelName);
-  const getSession = createGetSessionFn(bundle.runtime);
+  const attachSession = createAttachSessionFn(bundle.runtime, { requestId });
+  const getSession = createGetSessionFn(bundle.runtime, { requestId });
   const receive = createCrossChannelReceiveFn(
     bundle.runtime,
     toCrossChannelTargets(bundle.channels),
   );
 
   const args = attachRouteAgent(
-    attachAgentInfoRouteResponse(
-      {
-        send,
-        resolveActiveSession,
-        cancel,
-        clear,
-        compact,
-        reset,
-        getSession,
-        receive,
-        params,
-        waitUntil,
-        requestIp,
-      },
-      async () => {
-        const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-        return await handleAgentInfoRequest(config);
-      },
+    attachRouteSessionCreator(
+      attachAgentInfoRouteResponse(
+        {
+          attachSession,
+          send,
+          resolveActiveSession,
+          cancel,
+          clear,
+          compact,
+          reset,
+          getSession,
+          receive,
+          params,
+          waitUntil,
+          requestIp,
+        },
+        async () => {
+          const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+          return await handleAgentInfoRequest(config);
+        },
+      ),
+      async (input) =>
+        await bundle.runtime.createSession({
+          ...input,
+          adapter,
+          channelName,
+          requestId,
+        }),
     ),
     agent,
   );

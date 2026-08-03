@@ -11,7 +11,7 @@ import type {
   TurnCaller,
 } from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
-import type { Session } from "#channel/session.js";
+import type { FixedSession, Session } from "#channel/session.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
@@ -30,6 +30,8 @@ type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Recor
  * provide it.
  */
 export interface RouteHandlerArgs<TState = undefined> {
+  /** Attaches a fixed operation handle to one exact durable session ID without performing I/O. */
+  attachSession: AttachSessionFn;
   send: SendFn<TState>;
   /**
    * Resolves the session currently owning a channel-local continuation token.
@@ -124,10 +126,10 @@ export type SendOptions<TState = undefined> = [TState] extends [undefined]
   ? BaseSendOptions
   : BaseSendOptions & { state: TState };
 
-/**
- * Resolves an existing {@link Session} by id, for example to read its event
- * stream from within a route handler.
- */
+/** Attaches an I/O-free fixed handle to one exact durable session ID. */
+export type AttachSessionFn = (sessionId: string) => FixedSession;
+
+/** Resolves the legacy token-bearing session facade by ID. */
 export type GetSessionFn = (sessionId: string) => Session;
 
 /**

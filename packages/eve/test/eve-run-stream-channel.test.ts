@@ -188,6 +188,7 @@ function createArgs(input: {
   readonly params: Readonly<Record<string, string>>;
 }): RouteHandlerArgs {
   return {
+    attachSession: vi.fn() as any,
     send: vi.fn(),
     resolveActiveSession: async () => undefined,
     cancel: vi.fn(),

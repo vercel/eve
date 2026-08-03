@@ -4,6 +4,7 @@ import { encodeBasicCredentials } from "#internal/http/basic-auth.js";
 import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
 import { ClientError } from "#client/client-error.js";
 import { ClientSession } from "#client/session.js";
+import { ClientSessions } from "#client/sessions.js";
 import { createInitialSessionState } from "#client/session-utils.js";
 import { createClientUrl } from "#client/url.js";
 import type {
@@ -31,6 +32,8 @@ export class Client {
   readonly #host: string;
   readonly #preserveCompletedSessions: boolean;
   readonly #redirect: ClientRedirectPolicy | undefined;
+  /** Explicit create/attach surface for ID-addressed sessions. */
+  readonly sessions: ClientSessions;
 
   constructor(options: ClientOptions) {
     this.#host = options.host;
@@ -38,6 +41,12 @@ export class Client {
     this.#headers = options.headers;
     this.#preserveCompletedSessions = options.preserveCompletedSessions ?? false;
     this.#redirect = options.redirect;
+    this.sessions = new ClientSessions({
+      host: this.#host,
+      preserveCompletedSessions: this.#preserveCompletedSessions,
+      redirect: this.#redirect,
+      resolveHeaders: (perRequest) => this.#resolveHeaders(perRequest),
+    });
   }
 
   /**

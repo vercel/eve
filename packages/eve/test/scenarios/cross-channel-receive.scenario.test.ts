@@ -175,6 +175,9 @@ describe("cross-channel receive end-to-end", () => {
           }),
         }),
         {
+          attachSession: () => {
+            throw new Error("webhook should not attach sessions directly");
+          },
           receive,
           resolveActiveSession: async () => undefined,
           send: async () => {

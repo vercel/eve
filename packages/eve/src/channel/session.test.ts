@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildSessionHandle, createGetSessionFn, createSession } from "#channel/session.js";
+import {
+  buildSessionHandle,
+  createAttachSessionFn,
+  createGetSessionFn,
+  createSession,
+} from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
@@ -48,6 +53,40 @@ describe("createSession#cancel", () => {
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: { kind: "cancel", turnId: undefined },
       sessionId: "sess_2",
+    });
+  });
+});
+
+describe("fixed session operations", () => {
+  it("dispatches every operation through the stable session id", async () => {
+    const runtime = createRuntime();
+    const session = createAttachSessionFn(runtime, { requestId: "req_1" })("sess_1");
+
+    await session.send("hello", { auth: null });
+    await session.compact();
+    await session.clear();
+    await session.reset({ reason: "fresh start" });
+
+    expect(runtime.dispatchSession).toHaveBeenNthCalledWith(1, {
+      command: {
+        auth: null,
+        kind: "send",
+        payload: { message: "hello" },
+        requestId: "req_1",
+      },
+      sessionId: "sess_1",
+    });
+    expect(runtime.dispatchSession).toHaveBeenNthCalledWith(2, {
+      command: { kind: "compact" },
+      sessionId: "sess_1",
+    });
+    expect(runtime.dispatchSession).toHaveBeenNthCalledWith(3, {
+      command: { kind: "clear" },
+      sessionId: "sess_1",
+    });
+    expect(runtime.dispatchSession).toHaveBeenNthCalledWith(4, {
+      command: { kind: "reset", reason: "fresh start" },
+      sessionId: "sess_1",
     });
   });
 });

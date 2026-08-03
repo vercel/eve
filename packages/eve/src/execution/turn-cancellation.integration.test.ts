@@ -250,6 +250,9 @@ function createCancelRouteCaller(): (
     });
     const args = attachRouteAgent(
       {
+        attachSession: () => {
+          throw new Error("cancel route must not attach a session");
+        },
         send: () => {
           throw new Error("cancel route must not send");
         },
