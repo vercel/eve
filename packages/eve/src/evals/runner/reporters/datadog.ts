@@ -38,7 +38,7 @@ export interface DatadogReporterConfig {
   readonly log?: (line: string) => void;
   /** eve-owned client seam for tests and custom Datadog SDK wiring. */
   readonly client?: {
-    startExperiment(options: DatadogStartExperimentOptions): Promise<DatadogExperimentRecorder>;
+    startExperiment(options: DatadogStartExperimentOptions): Promise<DatadogExternalExperiment>;
   };
 }
 
@@ -54,18 +54,18 @@ interface DatadogStartExperimentOptions {
   };
 }
 
-interface DatadogExperimentRecorder {
-  readonly experimentId?: string | null;
+interface DatadogExternalExperiment {
+  experimentId(): string | null;
   url(): string | null;
-  submitSpan(row: DatadogExperimentSpanInput): Promise<DatadogExperimentSpan>;
+  submitSpan(row: DatadogExternalExperimentSpanInput): Promise<DatadogExternalExperimentSpan>;
   submitEvaluationMetrics(
-    span: Pick<DatadogExperimentSpan, "experimentId" | "spanId">,
+    span: Pick<DatadogExternalExperimentSpan, "experimentId" | "spanId" | "traceId">,
     metrics: readonly DatadogEvaluationMetricInput[],
   ): Promise<void>;
   close(options?: { status?: "completed" | "failed"; error?: string }): Promise<void>;
 }
 
-interface DatadogExperimentSpanInput {
+interface DatadogExternalExperimentSpanInput {
   id?: string;
   name?: string;
   input?: unknown;
@@ -79,7 +79,7 @@ interface DatadogExperimentSpanInput {
   error?: string;
 }
 
-interface DatadogExperimentSpan {
+interface DatadogExternalExperimentSpan {
   experimentId: string | null;
   spanId: string | null;
   traceId?: string | null;
@@ -108,7 +108,7 @@ interface DatadogTraceModule {
 interface DatadogTracer {
   readonly llmobs?: {
     readonly experiments?: {
-      startExperiment(options: DatadogStartExperimentOptions): Promise<DatadogExperimentRecorder>;
+      startExperiment(options: DatadogStartExperimentOptions): Promise<DatadogExternalExperiment>;
     };
   };
 }
@@ -126,7 +126,7 @@ export function Datadog(config: DatadogReporterConfig = {}): EvalReporter {
 class DatadogReporter implements EvalReporter {
   readonly #config: DatadogReporterConfig;
   readonly #evaluations = new Map<string, EveEval>();
-  #recorder: DatadogExperimentRecorder | undefined;
+  #experiment: DatadogExternalExperiment | undefined;
 
   constructor(config: DatadogReporterConfig) {
     this.#config = config;
@@ -142,7 +142,7 @@ class DatadogReporter implements EvalReporter {
     const git = resolveLocalGitMetadata(process.cwd());
 
     const experimentName = this.#config.experimentName ?? defaultExperimentName();
-    this.#recorder = await client.startExperiment({
+    this.#experiment = await client.startExperiment({
       name: experimentName,
       projectName: resolveProjectName(this.#config, evaluations),
       description: this.#config.description,
@@ -158,10 +158,10 @@ class DatadogReporter implements EvalReporter {
   }
 
   async onEvalComplete(result: EveEvalResult): Promise<void> {
-    if (!this.#recorder) return;
+    if (!this.#experiment) return;
 
     const evaluation = this.#evaluations.get(result.id);
-    const span = await this.#recorder.submitSpan({
+    const span = await this.#experiment.submitSpan({
       id: result.id,
       name: result.id,
       input: this.#config.recordInputs ? resolveInput(result, evaluation) : undefined,
@@ -177,25 +177,25 @@ class DatadogReporter implements EvalReporter {
       error: result.error,
     });
 
-    await this.#recorder.submitEvaluationMetrics(span, resolveEvaluationMetrics(result));
+    await this.#experiment.submitEvaluationMetrics(span, resolveEvaluationMetrics(result));
   }
 
   async onRunComplete(summary: EveEvalRunSummary): Promise<void> {
-    if (!this.#recorder) return;
+    if (!this.#experiment) return;
 
     try {
       const failed = summary.failed > 0 || summary.errored > 0;
-      await this.#recorder.close({
+      await this.#experiment.close({
         status: failed ? "failed" : "completed",
         error: failed ? `${summary.failed} failed, ${summary.errored} errored` : undefined,
       });
 
-      const url = this.#recorder.url();
+      const url = this.#experiment.url();
       if (url) {
         (this.#config.log ?? console.log)(`Datadog experiment URL: ${url}\n`);
       }
     } finally {
-      this.#recorder = undefined;
+      this.#experiment = undefined;
     }
   }
 }
@@ -206,7 +206,7 @@ async function resolveDatadogClient(
   config: DatadogReporterConfig,
   evaluations: readonly EveEval[],
 ): Promise<{
-  startExperiment(options: DatadogStartExperimentOptions): Promise<DatadogExperimentRecorder>;
+  startExperiment(options: DatadogStartExperimentOptions): Promise<DatadogExternalExperiment>;
 }> {
   if (config.client) return config.client;
 

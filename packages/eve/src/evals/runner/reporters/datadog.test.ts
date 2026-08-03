@@ -91,15 +91,15 @@ function makeConfig(overrides: Partial<DatadogReporterConfig> = {}) {
     traceId: "trace-1",
     url: "https://dd.test/span",
   };
-  const recorder = {
-    experimentId: "exp-1",
+  const experiment = {
+    experimentId: vi.fn(() => "exp-1"),
     url: vi.fn(() => "https://dd.test/experiment"),
     submitSpan: vi.fn(async () => span),
     submitEvaluationMetrics: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
   };
   const client = {
-    startExperiment: vi.fn(async () => recorder),
+    startExperiment: vi.fn(async () => experiment),
   };
   const lines: string[] = [];
   const config = {
@@ -109,12 +109,12 @@ function makeConfig(overrides: Partial<DatadogReporterConfig> = {}) {
     ...overrides,
   } satisfies DatadogReporterConfig;
 
-  return { client, config, lines, recorder, span };
+  return { client, config, lines, experiment, span };
 }
 
 describe("Datadog", () => {
   it("creates an experiment, submits one span, and attaches assertion metrics", async () => {
-    const { client, config, recorder, span } = makeConfig({ experimentName: "run-1" });
+    const { client, config, experiment, span } = makeConfig({ experimentName: "run-1" });
     const reporter = Datadog(config);
     const evaluation = makeEval();
     const result = makeEvalResult();
@@ -131,7 +131,7 @@ describe("Datadog", () => {
         metadata: expect.objectContaining({ eveEvalIds: ["eval-1"], eveTargetKind: "local" }),
       }),
     );
-    expect(recorder.submitSpan).toHaveBeenCalledWith(
+    expect(experiment.submitSpan).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "eval-1",
         name: "eval-1",
@@ -145,7 +145,7 @@ describe("Datadog", () => {
         tags: expect.objectContaining({ eval_id: "eval-1", eval_verdict: "passed" }),
       }),
     );
-    expect(recorder.submitEvaluationMetrics).toHaveBeenCalledWith(span, [
+    expect(experiment.submitEvaluationMetrics).toHaveBeenCalledWith(span, [
       expect.objectContaining({ label: "gate_succeeded", value: 1 }),
       expect.objectContaining({ label: "similarity", value: 0.9 }),
       expect.objectContaining({ label: "judge_autoevals_closedQA", value: 1 }),
@@ -157,7 +157,7 @@ describe("Datadog", () => {
   });
 
   it("records eval input and output only when enabled", async () => {
-    const { config, recorder } = makeConfig({
+    const { config, experiment } = makeConfig({
       recordInputs: true,
       recordOutputs: true,
       recordExpectedOutputs: true,
@@ -167,7 +167,7 @@ describe("Datadog", () => {
     await reporter.onRunStart([makeEval()], makeTarget());
     await reporter.onEvalComplete(makeEvalResult());
 
-    expect(recorder.submitSpan).toHaveBeenCalledWith(
+    expect(experiment.submitSpan).toHaveBeenCalledWith(
       expect.objectContaining({
         input: "What should I send you?",
         output: "actual output",
@@ -177,13 +177,13 @@ describe("Datadog", () => {
   });
 
   it("closes the experiment and logs its URL", async () => {
-    const { config, lines, recorder } = makeConfig();
+    const { config, lines, experiment } = makeConfig();
     const reporter = Datadog(config);
 
     await reporter.onRunStart([makeEval()], makeTarget());
     await reporter.onRunComplete(makeSummary());
 
-    expect(recorder.close).toHaveBeenCalledWith({ status: "completed", error: undefined });
+    expect(experiment.close).toHaveBeenCalledWith({ status: "completed", error: undefined });
     expect(lines.join("\n")).toContain("Datadog experiment URL: https://dd.test/experiment");
   });
 

@@ -86,8 +86,8 @@ interface EvaluationMetricInput {
   timestamp?: Date | string | number;
 }
 
-interface ExperimentRecorder {
-  readonly experimentId: string;
+interface ExternalExperiment {
+  experimentId(): string | null;
   url(): string | null;
 
   /**
@@ -103,7 +103,7 @@ interface ExperimentRecorder {
    * `span.experimentId`.
    */
   submitEvaluationMetrics(
-    span: Pick<ExperimentSpan, "experimentId" | "spanId">,
+    span: Pick<ExperimentSpan, "experimentId" | "spanId" | "traceId">,
     metrics: readonly EvaluationMetricInput[],
   ): Promise<void>;
 
@@ -112,7 +112,7 @@ interface ExperimentRecorder {
 }
 
 interface Experiments {
-  startExperiment(options: StartExperimentOptions): Promise<ExperimentRecorder>;
+  startExperiment(options: StartExperimentOptions): Promise<ExternalExperiment>;
 }
 ```
 
@@ -136,7 +136,7 @@ const span = await experiment.submitSpan({
 });
 
 await experiment.submitEvaluationMetrics(span, [
-  { label: "gate:succeeded", value: 1 },
+  { label: "gate_succeeded", value: 1 },
   { label: "similarity", value: 0.92 },
 ]);
 
@@ -234,7 +234,7 @@ manual dogfood app:
 ## Open questions
 
 - What exact public Node SDK API and package version should eve target for the
-  recorder-style Experiments surface?
+  externally-driven Experiments surface?
 - Does Datadog require a persisted dataset for every Experiment, or can external
   eval rows create an Experiment without dataset records?
 - What is the backend contract for post-hoc linking to an already-ingested span?
