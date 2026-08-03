@@ -6,13 +6,13 @@ import {
   connectionProtocols as protocolsForIdentity,
   extensionEntries,
   instrumentationEntries,
-} from "@vercel/eve-catalog";
+} from "@eve/catalog";
 import type { LogoKey } from "./logos";
 
 /**
  * The docs integration gallery layers presentation (logo, keywords, setup
  * markdown, auth modes) on top of the shared identity catalog
- * (`@vercel/eve-catalog`). Identity — slug, name, kind, tagline, and a
+ * (`@eve/catalog`). Identity — slug, name, kind, tagline, and a
  * connection's transport + model-facing description — comes from the catalog
  * and is never re-declared here; this module owns only the docs-facing overlay,
  * keyed by slug.
@@ -21,8 +21,8 @@ import type { LogoKey } from "./logos";
 export type IntegrationType = "channel" | "connection" | "extension" | "instrumentation";
 
 /** Wire protocol and transport identity types are owned by the shared catalog. */
-export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@vercel/eve-catalog";
-import type { ConnectionProtocol } from "@vercel/eve-catalog";
+export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@eve/catalog";
+import type { ConnectionProtocol } from "@eve/catalog";
 
 /**
  * How a connection authenticates. A mode uses either Vercel Connect (`user`,
@@ -1434,7 +1434,7 @@ The extension also supports inline screenshots, session naming, proxies, and pro
 
 /**
  * Connection presentation overlay, keyed by catalog slug. Transport (`mcp`,
- * `openapi`) and the model-facing description come from `@vercel/eve-catalog`;
+ * `openapi`) and the model-facing description come from `@eve/catalog`;
  * this carries the docs-only auth modes, optional connector UID, and configure
  * note.
  */

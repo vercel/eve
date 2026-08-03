@@ -19,10 +19,10 @@
     "registry:validate:instrumentation": "tsx scripts/validate-instrumentation-registry.ts"
   },
   "dependencies": {
+    "@eve/catalog": "workspace:*",
     "@icons-pack/react-simple-icons": "13.13.0",
     "@streamdown/code": "1.1.1",
     "@vercel/analytics": "2.0.1",
-    "@vercel/eve-catalog": "workspace:*",
     "@vercel/geistdocs": "1.19.2",
     "@vercel/speed-insights": "2.0.0",
     "@vgpu/core": "0.0.7",

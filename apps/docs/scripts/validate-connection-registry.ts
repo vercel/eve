@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { connectionEntries } from "@vercel/eve-catalog";
+import { connectionEntries } from "@eve/catalog";
 
 interface RegistryFile {
   path: string;
