@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -64,6 +65,32 @@ describe("compiled vendor assets", () => {
 
     expect(sourceMapFiles).toEqual([]);
     expect(javaScriptSources.some(containsSourceMapComment)).toBe(false);
+  });
+
+  it("ships every relative sibling declaration chunk its .d.ts files import", async () => {
+    const entries = await readdir(COMPILED_VENDOR_ROOT, { recursive: true });
+    const declarationFiles = entries.filter((entry) => entry.endsWith(".d.ts"));
+    // Anchored at line start so relative specifiers quoted inside JSDoc
+    // comments (which are prefixed with `*`) are not mistaken for imports.
+    const relativeSpecifierPattern = /^\s*(?:import|export)\b[^\n]*?['"](\.\.?\/[^'"]+)['"]/gm;
+
+    const missing: string[] = [];
+    await Promise.all(
+      declarationFiles.map(async (entry) => {
+        const source = await readFile(join(COMPILED_VENDOR_ROOT, entry), "utf8");
+        const fileDir = dirname(join(COMPILED_VENDOR_ROOT, entry));
+        for (const match of source.matchAll(relativeSpecifierPattern)) {
+          const specifier = match[1]!;
+          const base = specifier.replace(/\.d\.ts$/, "").replace(/\.js$/, "");
+          const declarationTarget = join(fileDir, `${base}.d.ts`);
+          if (!existsSync(declarationTarget) && !existsSync(join(fileDir, base))) {
+            missing.push(`${entry} -> ${specifier}`);
+          }
+        }
+      }),
+    );
+
+    expect(missing).toEqual([]);
   });
 
   it("suppresses dependency warnings without hiding actionable logs", async () => {

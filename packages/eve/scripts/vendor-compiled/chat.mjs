@@ -11,15 +11,16 @@ import {
  * etc., so the public type contract has to be the *actual* chat shape —
  * hand-written stubs would drift on every version bump.
  *
- * Three transforms apply during the copy:
+ * Two transforms apply during the copy:
  *
- * 1. The sibling `jsx-runtime-<hash>.d.ts` chunk is co-copied so chat's
- *    relative import resolves locally. The chunk's filename has a content
- *    hash, so we discover it dynamically.
- * 2. `from '@workflow/serde'` is rewritten to a local stub that declares
+ * 1. `from '@workflow/serde'` is rewritten to a local stub that declares
  *    just the unique symbols chat references.
- * 3. `from 'mdast'` is rewritten to a local stub that aliases the names
+ * 2. `from 'mdast'` is rewritten to a local stub that aliases the names
  *    chat references to `unknown` — consumers don't need @types/mdast.
+ *
+ * The sibling declaration chunks chat imports by relative path (its
+ * hash-named `jsx-runtime-<hash>` and `messages-<hash>` chunks) are
+ * co-copied transitively by `createDeclarationCopier`.
  */
 export default {
   packageName: "chat",
@@ -37,7 +38,5 @@ export default {
         build: buildOpaqueTypesStub,
       },
     },
-    discoverExtraFiles: (distEntries) =>
-      distEntries.filter((name) => /^jsx-runtime-[^./]+\.d\.ts$/.test(name)),
   }),
 };

@@ -121,10 +121,13 @@ export function createDeclarationCopier({
           : [{ source: "index.d.ts", output: "index.d.ts" }];
 
     const declarations = await Promise.all(
-      declarationFiles.map(async (file) => ({
-        ...file,
-        sourceText: await readFile(join(distDir, file.source), "utf8"),
-      })),
+      declarationFiles.map(async (file) => {
+        const sourceText = await readFile(join(distDir, file.source), "utf8");
+        // Keep the upstream text so relative sibling-chunk discovery scans the
+        // original specifiers, before the rewrite loop rewrites bare external
+        // imports (e.g. `mdast`) into local stub specifiers (`./_mdast.js`).
+        return { ...file, sourceText, originalSourceText: sourceText };
+      }),
     );
     const externals = mergeExternalDeclarationImports(
       declarations.map((declaration) => declaration.sourceText),
@@ -178,6 +181,27 @@ export function createDeclarationCopier({
       }),
     );
 
+    // Co-copy every sibling declaration chunk the entry declarations import by
+    // relative path, transitively. Upstream splits its `.d.ts` into hash-named
+    // chunks (e.g. `./messages-<hash>.js`); their names change on every bump,
+    // so discovering them from the imports keeps the vendored tree complete
+    // without a per-package allowlist. Declarations already written above are
+    // pre-visited, so their rewritten output is never overwritten by a verbatim
+    // upstream copy.
+    const relativeSeeds = [];
+    for (const declaration of declarations) {
+      const baseDir = toPosixDir(declaration.output);
+      for (const specifier of collectRelativeDeclarationImports(declaration.originalSourceText)) {
+        relativeSeeds.push({ baseDir, specifier });
+      }
+    }
+    await copyRelativeDeclarationChunks({
+      declarationOutputs: declarations.map((declaration) => declaration.output),
+      destinationRoot,
+      distDir,
+      seeds: relativeSeeds,
+    });
+
     if (typeof discoverExtraFiles === "function") {
       const extras = discoverExtraFiles(distEntries);
       await Promise.all(
@@ -189,6 +213,105 @@ export function createDeclarationCopier({
       );
     }
   };
+}
+
+/**
+ * Copies every sibling declaration chunk reachable from `seeds` by relative
+ * import, transitively, from `distDir` into `destinationRoot`, preserving the
+ * package-relative path. Chunks are copied verbatim (they carry no external
+ * imports needing a rewrite). Files already emitted as rewritten declarations
+ * are pre-visited and never overwritten, and a specifier that does not resolve
+ * to a `.d.ts` under `distDir` is skipped.
+ */
+async function copyRelativeDeclarationChunks({
+  declarationOutputs,
+  destinationRoot,
+  distDir,
+  seeds,
+}) {
+  const visited = new Set(declarationOutputs.map((output) => output.replaceAll("\\", "/")));
+  const queue = [...seeds];
+
+  while (queue.length > 0) {
+    const { baseDir, specifier } = queue.shift();
+    const target = resolveRelativeDeclarationPath(baseDir, specifier);
+    if (target === null || visited.has(target)) {
+      continue;
+    }
+    visited.add(target);
+
+    let chunkSource;
+    try {
+      chunkSource = await readFile(join(distDir, target), "utf8");
+    } catch {
+      continue;
+    }
+
+    const outputPath = join(destinationRoot, target);
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, chunkSource, "utf8");
+
+    const nextBaseDir = posix.dirname(target);
+    for (const next of collectRelativeDeclarationImports(chunkSource)) {
+      queue.push({ baseDir: nextBaseDir === "." ? "" : nextBaseDir, specifier: next });
+    }
+  }
+}
+
+/**
+ * Resolves a relative import specifier against the importing declaration's
+ * package-relative directory and returns the package-relative `.d.ts` path it
+ * targets, or `null` when the specifier is not relative or escapes the package.
+ */
+function resolveRelativeDeclarationPath(baseDir, specifier) {
+  if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
+    return null;
+  }
+  const base = specifier.endsWith(".d.ts")
+    ? specifier.slice(0, -".d.ts".length)
+    : specifier.endsWith(".js")
+      ? specifier.slice(0, -".js".length)
+      : specifier;
+  const joined = posix.normalize(posix.join(baseDir === "" ? "." : baseDir, base));
+  if (joined === "" || joined === "." || joined.startsWith("..")) {
+    return null;
+  }
+  return `${joined}.d.ts`;
+}
+
+/**
+ * Returns the package-relative posix directory of a declaration output path,
+ * or `""` for a top-level file.
+ */
+function toPosixDir(output) {
+  const dir = posix.dirname(output.replaceAll("\\", "/"));
+  return dir === "." ? "" : dir;
+}
+
+/**
+ * Collects the distinct relative import specifiers a declaration source
+ * references. Mirrors {@link collectExternalDeclarationImports} but keeps the
+ * `./`-prefixed specifiers it discards.
+ */
+function collectRelativeDeclarationImports(source) {
+  const patterns = [
+    /^(?:import|export)\s+(?:type\s+)?\{[^}]*\}\s+from\s+['"]([^'"]+)['"];/gm,
+    /^import\s+(?:type\s+)?\*\s+as\s+[A-Za-z_$][\w$]*\s+from\s+['"]([^'"]+)['"];/gm,
+    /^(?:import|export)\s+(?:type\s+)?['"]([^'"]+)['"];/gm,
+    /^export\s+(?:type\s+)?\*\s+from\s+['"]([^'"]+)['"];/gm,
+  ];
+  const specifiers = new Set();
+
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const specifier = match[1];
+      if (specifier !== undefined && specifier.startsWith("./")) {
+        specifiers.add(specifier);
+      }
+    }
+  }
+
+  return specifiers;
 }
 
 function mergeExternalDeclarationImports(sources) {
