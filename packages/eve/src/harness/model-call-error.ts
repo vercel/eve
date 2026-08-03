@@ -22,6 +22,15 @@ const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
 const UNSUPPORTED_TOOL_TYPE_REGEX = /tool type ['"]([\w.-]+)['"] is not supported/i;
 
 /**
+ * OpenAI-compatible endpoints without native web search (e.g. Bedrock Mantle)
+ * reject the injected OpenAI web-search tool by naming its Responses include
+ * value rather than a "tool type". The literal is unambiguously attributable
+ * to the injected tool, so surfacing it lets the recovery path drop
+ * `web_search` and retry.
+ */
+const OPENAI_WEB_SEARCH_INCLUDE_VALUE = "web_search_call.action.sources";
+
+/**
  * The most informative human-readable rejection a model-call error
  * carries, extracted from the upstream response. Not a semantic-error
  * classification: the message is arbitrary provider prose, so it carries
@@ -140,6 +149,9 @@ function collectUnsupportedToolTypesFromValue(value: unknown, out: Set<string>):
     const match = UNSUPPORTED_TOOL_TYPE_REGEX.exec(value);
     if (match?.[1] !== undefined) {
       out.add(match[1]);
+    }
+    if (value.includes(OPENAI_WEB_SEARCH_INCLUDE_VALUE)) {
+      out.add(OPENAI_WEB_SEARCH_INCLUDE_VALUE);
     }
     return;
   }
