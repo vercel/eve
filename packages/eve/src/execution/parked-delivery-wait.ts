@@ -2,6 +2,7 @@ import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
+import { filterAwaitedTaskWakePayloadsStep } from "#execution/tasks/wake-suppression-step.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 
 type NextSessionAction =
@@ -20,6 +21,7 @@ export type NextTurnInstruction =
       readonly kind: "turn";
       readonly deliver: DeliverHookPayload;
       readonly remainder: DeliverPayload;
+      readonly sessionState: DurableSessionState;
     };
 
 /**
@@ -33,8 +35,10 @@ export async function nextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly deliveryHook: SessionDeliveryHook;
   readonly driverWritable: WritableStream<Uint8Array>;
+  readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<NextTurnInstruction> {
+  let sessionState = input.sessionState;
   while (true) {
     const nextAction = await waitForNextSessionAction({
       bufferedDeliveries: input.bufferedDeliveries,
@@ -50,11 +54,22 @@ export async function nextTurnDelivery(input: {
       return { kind: "closed" };
     }
 
+    const filtered = await filterAwaitedTaskWakePayloadsStep({
+      payloads: deliver.payloads,
+      serializedContext: input.serializedContext,
+      sessionState,
+    });
+    sessionState = filtered.sessionState;
+    if (filtered.payloads.length === 0) {
+      // A completed task_await already reported every task in this delivery.
+      continue;
+    }
+
     const routed = await routeDeliverToChildren({
       auth: deliver.auth,
       parentWritable: input.driverWritable,
-      payloads: deliver.payloads,
-      sessionState: input.sessionState,
+      payloads: filtered.payloads,
+      sessionState,
     });
 
     if (routed.kind === "cancel-turn") {
@@ -66,7 +81,7 @@ export async function nextTurnDelivery(input: {
       continue;
     }
 
-    return { deliver, kind: "turn", remainder: routed.remainder };
+    return { deliver, kind: "turn", remainder: routed.remainder, sessionState };
   }
 }
 

@@ -33,6 +33,7 @@ import {
   type UnstampedMessageStreamEvent,
   stampMessageStreamEvent,
 } from "#protocol/message.js";
+import { clearAwaitedTaskWakeSuppressions } from "#tasks/wake-suppression.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 export interface CancelledTurnSettleResult {
@@ -124,15 +125,17 @@ export async function settleCancelledTurnStep(input: {
   // discarded turn state). The pre-model gate re-raises the prompt while the
   // violation holds, so the next delivery gets a fresh prompt instead of
   // queueing forever behind a stale one.
-  const cancelledSession = reconcileSessionContinuationToken(
-    ctx,
-    setHarnessEmissionState(
-      clearPendingSessionLimitPrompt(
-        clearAllProxyInputRequests(
-          clearPendingWorkflowInterrupt(clearPendingRuntimeActionBatch(session)),
+  const cancelledSession = clearAwaitedTaskWakeSuppressions(
+    reconcileSessionContinuationToken(
+      ctx,
+      setHarnessEmissionState(
+        clearPendingSessionLimitPrompt(
+          clearAllProxyInputRequests(
+            clearPendingWorkflowInterrupt(clearPendingRuntimeActionBatch(session)),
+          ),
         ),
+        emissionState,
       ),
-      emissionState,
     ),
   );
 

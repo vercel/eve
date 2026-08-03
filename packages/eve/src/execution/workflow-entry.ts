@@ -399,6 +399,7 @@ async function runDriverLoop(input: {
         bufferedDeliveries,
         deliveryHook,
         driverWritable: input.driverWritable,
+        serializedContext: action.serializedContext,
         sessionState: action.sessionState,
       });
 
@@ -449,7 +450,7 @@ async function runDriverLoop(input: {
           requestId: next.deliver.requestId,
         },
         serializedContext: action.serializedContext,
-        sessionState: action.sessionState,
+        sessionState: next.sessionState,
       });
       input.crashCleanupState.lastSessionState = action.sessionState;
     }

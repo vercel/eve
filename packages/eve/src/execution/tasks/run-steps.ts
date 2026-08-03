@@ -10,7 +10,7 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import { walkCauseChain } from "#shared/errors.js";
-import { TASK_SNAPSHOT_STREAM_NAMESPACE, type TaskView } from "#tasks/types.js";
+import { TASK_SNAPSHOT_STREAM_NAMESPACE, type TaskStatus, type TaskView } from "#tasks/types.js";
 
 const log = createLogger("execution.tasks.run");
 
@@ -50,6 +50,10 @@ export async function wakeTaskParentStep(input: {
     payloads: [
       {
         message: formatTaskNotification(input.view),
+        taskNotification: {
+          status: readyNotificationStatus(input.view.status),
+          taskId: input.view.taskId,
+        },
       },
     ],
   };
@@ -65,6 +69,13 @@ export async function wakeTaskParentStep(input: {
     }
     throw error;
   }
+}
+
+function readyNotificationStatus(status: TaskStatus): Exclude<TaskStatus, "working"> {
+  if (status === "working") {
+    throw new Error("Cannot wake a parent for a working task.");
+  }
+  return status;
 }
 
 function formatTaskNotification(view: TaskView): string {

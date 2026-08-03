@@ -36,6 +36,7 @@ import {
 } from "#runtime/framework-tools/tasks.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import { isReadyTaskStatus, type TaskView } from "#tasks/types.js";
+import { suppressAwaitedTaskWakes } from "#tasks/wake-suppression.js";
 
 export {
   beginDelegatedTask,
@@ -110,7 +111,10 @@ export async function executeTaskControlAction(input: {
     case TASK_AWAIT_TOOL_NAME: {
       const views = await readTaskViews(entries);
       if (views.every((view) => isReadyTaskStatus(view.status))) {
-        return { result: createTaskViewsResult(action, views), session };
+        return {
+          result: createTaskViewsResult(action, views),
+          session: suppressAwaitedTaskWakes(session, taskIds),
+        };
       }
       if (input.parentContinuationToken === undefined) {
         return {
@@ -133,7 +137,10 @@ export async function executeTaskControlAction(input: {
           toolName: action.toolName,
         },
       ]);
-      return { result: undefined, session };
+      return {
+        result: undefined,
+        session: suppressAwaitedTaskWakes(session, taskIds),
+      };
     }
     default:
       return {

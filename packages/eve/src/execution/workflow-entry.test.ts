@@ -62,6 +62,12 @@ vi.mock("./route-child-delivery.js", () => ({
   })),
 }));
 
+vi.mock("./tasks/wake-suppression-step.js", () => ({
+  filterAwaitedTaskWakePayloadsStep: vi
+    .fn()
+    .mockImplementation(async ({ payloads, sessionState }) => ({ payloads, sessionState })),
+}));
+
 vi.mock("./delegated-parent-notification.js", () => ({
   notifyDelegatedParentStep: vi.fn().mockResolvedValue(undefined),
   notifyTurnCallerStep: vi.fn().mockResolvedValue(undefined),
