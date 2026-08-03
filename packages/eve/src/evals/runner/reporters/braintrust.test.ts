@@ -177,6 +177,19 @@ describe("Braintrust", () => {
     );
   });
 
+  it("logs an empty output instead of null when the eval produced no agent turn", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    reporter.onEvalComplete(
+      makeEvalResult({
+        result: { ...makeEvalResult().result, output: null },
+      }),
+    );
+
+    expect(braintrustMocks.log).toHaveBeenCalledWith(expect.objectContaining({ output: "" }));
+  });
+
   it("keeps duplicate assertion scores under stable keys", async () => {
     const reporter = Braintrust(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());
