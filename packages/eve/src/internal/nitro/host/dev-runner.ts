@@ -117,6 +117,11 @@ class NodeDevelopmentRunner extends BaseEnvRunner implements DevelopmentRunner {
 
     const worker = new Worker(this._workerEntry, {
       env: process.env,
+      // The dev worker manages its own resources and is torn down wholesale via
+      // terminate(), so Node's unmanaged-fd tracking (default on) adds no safety
+      // here — it only emits spurious "File descriptor … unmanaged mode"
+      // warnings on Node 24 as the worker's embedded server opens and closes fds.
+      trackUnmanagedFds: false,
       workerData: {
         name: this._name,
         ...this._data,
