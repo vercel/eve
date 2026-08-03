@@ -1,6 +1,12 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
+import {
+  prependTurnDeliveries,
+  takeBufferedDelivery,
+  takePriorityDelivery,
+  type DeliveryBuffers,
+} from "#execution/delivery-buffers.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
@@ -12,18 +18,19 @@ type DeliveryRequest = Extract<TurnControlPayload, { readonly kind: "turn-delive
 
 /** Owns one turn's driver-side control hook and public-delivery relay state. */
 export class TurnControlReceiver {
-  private readonly bufferedDeliveries: DeliverHookPayload[];
+  private readonly deliveryBuffers: DeliveryBuffers;
   private readonly control: Hook<TurnControlPayload>;
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
   private readonly deliveryHook: SessionDeliveryHook;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
+  private pendingDelivery: ReturnType<SessionDeliveryHook["bufferNext"]> | null = null;
 
   constructor(input: {
-    readonly bufferedDeliveries: DeliverHookPayload[];
+    readonly deliveryBuffers: DeliveryBuffers;
     readonly deliveryHook: SessionDeliveryHook;
     readonly token: string;
   }) {
-    this.bufferedDeliveries = input.bufferedDeliveries;
+    this.deliveryBuffers = input.deliveryBuffers;
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
     this.deliveryHook = input.deliveryHook;
@@ -60,9 +67,7 @@ export class TurnControlReceiver {
   private bufferTurnDeliveries(
     payload: Extract<TurnControlPayload, { readonly kind: "turn-result" }>,
   ): void {
-    if (payload.bufferedDeliveries !== undefined) {
-      this.bufferedDeliveries.unshift(...payload.bufferedDeliveries);
-    }
+    prependTurnDeliveries(this.deliveryBuffers, payload.bufferedDeliveries);
   }
 
   private consumeControl(): void {
@@ -72,6 +77,15 @@ export class TurnControlReceiver {
   private getControlPromise(): Promise<IteratorResult<TurnControlPayload>> {
     this.pendingControl ??= this.controlIterator.next();
     return this.pendingControl;
+  }
+
+  private consumeDelivery(): void {
+    this.pendingDelivery = null;
+  }
+
+  private getDeliveryPromise(): ReturnType<SessionDeliveryHook["bufferNext"]> {
+    this.pendingDelivery ??= this.deliveryHook.bufferNext();
+    return this.pendingDelivery;
   }
 
   private async nextControl(
@@ -105,11 +119,16 @@ export class TurnControlReceiver {
   ): Promise<NextDriverAction | undefined> {
     await this.deliveryHook.rekey(request.continuationToken);
 
-    let delivery = this.bufferedDeliveries.shift();
+    let delivery = takePriorityDelivery(this.deliveryBuffers);
+    if (delivery === undefined && this.deliveryBuffers.replacedHookDeliveries.length > 0) {
+      await this.deliveryHook.drainReady();
+      delivery = takeBufferedDelivery(this.deliveryBuffers);
+    }
+
     while (delivery === undefined) {
       const winner = await Promise.race([
         this.getControlPromise().then((value) => ({ kind: "control" as const, value })),
-        this.deliveryHook.next().then((value) => ({ kind: "delivery" as const, value })),
+        this.getDeliveryPromise().then((value) => ({ kind: "delivery" as const, value })),
       ]);
 
       if (winner.kind === "control") {
@@ -132,13 +151,13 @@ export class TurnControlReceiver {
         continue;
       }
 
-      if (winner.value.done) {
+      this.consumeDelivery();
+      if (winner.value === "closed") {
         throw new Error("Session delivery hook closed during a turn delivery request.");
       }
 
-      this.deliveryHook.consumeNext();
-      if (winner.value.value.kind !== "deliver") continue;
-      delivery = winner.value.value;
+      await this.deliveryHook.drainReady();
+      delivery = takeBufferedDelivery(this.deliveryBuffers);
     }
 
     // Forwarding is provisional until the turn acknowledges it. If the inbox is
@@ -181,12 +200,12 @@ export class TurnControlReceiver {
       }
 
       if (payload.kind === "turn-delivery-cancelled" && payload.requestId === requestId) {
-        this.bufferedDeliveries.unshift(outstanding);
+        prependTurnDeliveries(this.deliveryBuffers, [outstanding]);
         return undefined;
       }
 
       if (payload.kind === "turn-result") {
-        this.bufferedDeliveries.unshift(outstanding);
+        prependTurnDeliveries(this.deliveryBuffers, [outstanding]);
       }
 
       const terminal = this.readTerminalControl(payload);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 
 import { sessionDeliveryHookWorkflow } from "#internal/testing/session-delivery-hook-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
@@ -9,7 +10,7 @@ describe("session delivery hook integration", () => {
     ["old then replacement", ["old", "replacement"] as const],
     ["replacement then old", ["replacement", "old"] as const],
   ])("preserves deliveries committed %s during rekey", async (_label, order) => {
-    const suffix = order.join("-");
+    const suffix = `${order.join("-")}-${randomUUID()}`;
     const oldToken = `http:session-delivery-hook:${suffix}:old`;
     const replacementToken = `http:session-delivery-hook:${suffix}:replacement`;
     const disposal = await pauseHookDisposal(oldToken);
