@@ -216,6 +216,40 @@ export function rejectAgentEffect(
   );
 }
 
+/**
+ * Parks every running child when the parent abandons a cancelled turn.
+ *
+ * Cancellation requests each running descendant's cancellation and then
+ * tears down the turn inbox — the only hook a child settlement can
+ * resume — so no later settlement can move these handles. Without this
+ * transition they would stay `running` forever: invisible to the model,
+ * unresumable, and retried by every future cancellation.
+ *
+ * A cancelled child settles its own turn as a park, so `parked` with
+ * `"(cancelled)"` mirrors {@link settleAgentTurn}'s cancelled outcome. If
+ * the child instead died, a later continuation attempt discovers the dead
+ * session and {@link rejectAgentEffect} deletes the handle.
+ */
+export function abandonRunningAgentTurns(session: HarnessSession): HarnessSession {
+  const handles = getAgentHandleStore(session.state)?.handles ?? [];
+  if (!handles.some((handle) => handle.phase === "running")) {
+    return session;
+  }
+  return writeHandles(
+    session,
+    handles.map((handle) =>
+      handle.phase === "running"
+        ? {
+            address: handle.address,
+            identity: handle.identity,
+            lastStatus: "(cancelled)",
+            phase: "parked",
+          }
+        : handle,
+    ),
+  );
+}
+
 /** Result of applying a settled child turn to the store. */
 export type SettleAgentTurnResult =
   | { readonly kind: "settled"; readonly session: HarnessSession }
