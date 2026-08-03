@@ -101,6 +101,14 @@ export async function discardDevelopmentGeneration(
   await rm(generation.snapshotRoot, { force: true, recursive: true });
 }
 
+/**
+ * Requests a serialized background prune of dev runtime snapshots,
+ * deduplicated with the passes triggered by activation commits.
+ */
+export function pruneDevelopmentGenerationsInBackground(appRoot: string): void {
+  requestDevelopmentGenerationPrune(appRoot);
+}
+
 function requestDevelopmentGenerationPrune(appRoot: string): void {
   const state = developmentGenerationPruneStates.get(appRoot) ?? {
     requested: false,

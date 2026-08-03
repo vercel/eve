@@ -13,8 +13,11 @@ vi.mock("#internal/nitro/dev-runtime-artifacts.js", () => ({
   stageDevelopmentRuntimeArtifactsSnapshot: vi.fn(),
 }));
 
-const { activateDevelopmentGeneration, activateDevelopmentGenerationTransaction } =
-  await import("#internal/nitro/development-generation.js");
+const {
+  activateDevelopmentGeneration,
+  activateDevelopmentGenerationTransaction,
+  pruneDevelopmentGenerationsInBackground,
+} = await import("#internal/nitro/development-generation.js");
 
 function createGeneration(id: string): DevelopmentGeneration {
   return {
@@ -62,5 +65,11 @@ describe("development generation activation", () => {
     expect(rollback).toHaveBeenCalledOnce();
     expect(commit).not.toHaveBeenCalled();
     expect(mocks.prune).not.toHaveBeenCalled();
+  });
+
+  it("requests a background prune outside of activation commits", () => {
+    pruneDevelopmentGenerationsInBackground("/tmp/app-boot-sweep");
+
+    expect(mocks.prune).toHaveBeenCalledWith({ appRoot: "/tmp/app-boot-sweep" });
   });
 });

@@ -455,7 +455,7 @@ describe("development runtime artifact snapshots", () => {
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
     const activeSnapshotRoot = join(snapshotsRoot, "active");
     const recentSnapshotRoot = join(snapshotsRoot, "recent");
-    const retainedSnapshotRoot = join(snapshotsRoot, "retained");
+    const expiredSnapshotRoot = join(snapshotsRoot, "expired");
     const staleSnapshotRoot = join(snapshotsRoot, "stale");
     const oldActiveTime = new Date(1_000);
     const now = 1_000_000;
@@ -463,7 +463,7 @@ describe("development runtime artifact snapshots", () => {
     for (const snapshotRoot of [
       activeSnapshotRoot,
       recentSnapshotRoot,
-      retainedSnapshotRoot,
+      expiredSnapshotRoot,
       staleSnapshotRoot,
     ]) {
       await mkdir(snapshotRoot, { recursive: true });
@@ -471,7 +471,7 @@ describe("development runtime artifact snapshots", () => {
     }
     await utimes(activeSnapshotRoot, oldActiveTime, oldActiveTime);
     await utimes(recentSnapshotRoot, new Date(now - 1_000), new Date(now - 1_000));
-    await utimes(retainedSnapshotRoot, new Date(now - 20_000), new Date(now - 20_000));
+    await utimes(expiredSnapshotRoot, new Date(now - 20_000), new Date(now - 20_000));
     await utimes(staleSnapshotRoot, new Date(now - 30_000), new Date(now - 30_000));
 
     await activateDevelopmentRuntimeArtifactsSnapshot({
@@ -493,8 +493,9 @@ describe("development runtime artifact snapshots", () => {
     });
 
     await expect(readdir(snapshotsRoot)).resolves.toEqual(
-      expect.arrayContaining(["active", "recent", "retained"]),
+      expect.arrayContaining(["active", "recent"]),
     );
+    expect(existsSync(expiredSnapshotRoot)).toBe(false);
     expect(existsSync(staleSnapshotRoot)).toBe(false);
   });
 
@@ -532,7 +533,7 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(join(nextSnapshotRoot, "retired.json"))).toBe(false);
   });
 
-  it("retains the active, five newest retired, and recently retired generations", async () => {
+  it("retains the active and the newest generations retired within the retain window", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-retired-pruning-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
     const activeSnapshotRoot = join(snapshotsRoot, "active");
@@ -584,6 +585,99 @@ describe("development runtime artifact snapshots", () => {
     for (const snapshotRoot of expiredSnapshotRoots.slice(4)) {
       expect(existsSync(snapshotRoot)).toBe(false);
     }
+  });
+
+  it("prunes generations retired beyond the retain window regardless of the retain count", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-retired-window-pruning-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const activeSnapshotRoot = join(snapshotsRoot, "active");
+    const withinWindowSnapshotRoot = join(snapshotsRoot, "within-window");
+    const beyondWindowSnapshotRoots = Array.from({ length: 3 }, (_, index) =>
+      join(snapshotsRoot, `beyond-window-${String(index)}`),
+    );
+    const now = 1_000_000_000_000;
+    const oneHourMs = 60 * 60 * 1_000;
+    const thirtyDaysMs = 30 * 24 * oneHourMs;
+
+    for (const snapshotRoot of [
+      activeSnapshotRoot,
+      withinWindowSnapshotRoot,
+      ...beyondWindowSnapshotRoots,
+    ]) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await writeFile(join(snapshotRoot, "activated"), "");
+    }
+    await writeFile(
+      join(withinWindowSnapshotRoot, "retired.json"),
+      `${JSON.stringify({ retiredAt: now - oneHourMs })}\n`,
+    );
+    for (const [index, snapshotRoot] of beyondWindowSnapshotRoots.entries()) {
+      await writeFile(
+        join(snapshotRoot, "retired.json"),
+        `${JSON.stringify({ retiredAt: now - thirtyDaysMs - index })}\n`,
+      );
+    }
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: {
+        runtimeAppRoot: join(activeSnapshotRoot, "source"),
+        snapshotRoot: activeSnapshotRoot,
+        snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
+      },
+    });
+
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      now,
+    });
+
+    expect(existsSync(activeSnapshotRoot)).toBe(true);
+    expect(existsSync(withinWindowSnapshotRoot)).toBe(true);
+    for (const snapshotRoot of beyondWindowSnapshotRoots) {
+      expect(existsSync(snapshotRoot)).toBe(false);
+    }
+  });
+
+  it("decays generations whose retirement metadata cannot be initialized on their staging time", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-retirement-fallback-pruning-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const activeSnapshotRoot = join(snapshotsRoot, "active");
+    const oldFallbackSnapshotRoot = join(snapshotsRoot, "fallback-old");
+    const recentFallbackSnapshotRoot = join(snapshotsRoot, "fallback-recent");
+    const now = 10_000_000;
+    const gracePeriodMs = 30 * 60 * 1_000;
+
+    await mkdir(activeSnapshotRoot, { recursive: true });
+    for (const [snapshotRoot, mtime] of [
+      [oldFallbackSnapshotRoot, now - 2 * gracePeriodMs],
+      [recentFallbackSnapshotRoot, now - 1_000],
+    ] as const) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await writeFile(join(snapshotRoot, "activated"), "");
+      // A directory at the retired.json path makes reads and initialization fail.
+      await mkdir(join(snapshotRoot, "retired.json"));
+      await utimes(snapshotRoot, new Date(mtime), new Date(mtime));
+    }
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: {
+        runtimeAppRoot: join(activeSnapshotRoot, "source"),
+        snapshotRoot: activeSnapshotRoot,
+        snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
+      },
+    });
+
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      now,
+      retainCount: 0,
+    });
+
+    expect(existsSync(activeSnapshotRoot)).toBe(true);
+    expect(existsSync(recentFallbackSnapshotRoot)).toBe(true);
+    expect(existsSync(oldFallbackSnapshotRoot)).toBe(false);
   });
 
   it("starts a full grace period for an activated generation from an older format", async () => {

@@ -127,6 +127,7 @@ const mocks = vi.hoisted(() => {
     }),
     startDevelopmentSandboxPrewarmInBackground: vi.fn(() => undefined),
     pruneLocalSandboxTemplatesInBackground: vi.fn(() => undefined),
+    pruneDevelopmentGenerationsInBackground: vi.fn(() => undefined),
     stopDevelopmentSandboxResources: vi.fn(async () => undefined),
     resolveDiscoveryProject: vi.fn(async () => ({
       agentRoot: "/tmp/eve-test/agent",
@@ -181,6 +182,7 @@ vi.mock("#internal/workflow/development-world-server.js", () => ({
 vi.mock("#internal/nitro/development-generation.js", () => ({
   activateDevelopmentGeneration: mocks.activateDevelopmentGeneration,
   discardDevelopmentGeneration: mocks.discardDevelopmentGeneration,
+  pruneDevelopmentGenerationsInBackground: mocks.pruneDevelopmentGenerationsInBackground,
 }));
 
 vi.mock("./create-application-nitro.js", () => ({
@@ -397,6 +399,7 @@ describe("createDevelopmentServer", () => {
       },
     });
     expect(mocks.pruneLocalSandboxTemplatesInBackground).toHaveBeenCalledWith("/tmp/eve-test");
+    expect(mocks.pruneDevelopmentGenerationsInBackground).toHaveBeenCalledWith("/tmp/eve-test");
     expect(mocks.createParentDevelopmentWorkflowWorld).toHaveBeenCalledWith(
       expect.objectContaining({ agentName: "test-agent", appRoot: "/tmp/eve-test" }),
     );

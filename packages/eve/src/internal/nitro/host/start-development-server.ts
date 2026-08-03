@@ -50,6 +50,7 @@ import { devBootPhase } from "#internal/dev-boot-progress.js";
 import {
   activateDevelopmentGeneration,
   discardDevelopmentGeneration,
+  pruneDevelopmentGenerationsInBackground,
 } from "#internal/nitro/development-generation.js";
 import { randomBytes } from "node:crypto";
 import {
@@ -420,6 +421,7 @@ async function startNitroDevelopmentServer(
       }),
     );
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
+    pruneDevelopmentGenerationsInBackground(preparedHost.appRoot);
     const activeNitro = await devBootPhase(
       "creating dev server",
       () => createDevelopmentApplicationNitro(preparedHost),
