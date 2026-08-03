@@ -6,6 +6,7 @@ import { readFile, writeFile } from "node:fs/promises";
  * argument in generated connection files, so a narrow anchored match is safe.
  */
 const CONNECT_CONNECTOR_REGEX = /(\bconnect\(\s*)(["'`])([^"'`]+)\2/;
+const CONNECT_OBJECT_CONNECTOR_REGEX = /(\bconnector\s*:\s*)(["'`])([^"'`]+)\2/;
 
 /**
  * Replaces the connector UID literal in a scaffolded Connect connection
@@ -23,12 +24,15 @@ export async function updateConnectionConnectorUid(
     return { patched: false };
   }
 
-  if (!CONNECT_CONNECTOR_REGEX.test(source)) {
-    return { patched: false };
-  }
+  const pattern = CONNECT_CONNECTOR_REGEX.test(source)
+    ? CONNECT_CONNECTOR_REGEX
+    : CONNECT_OBJECT_CONNECTOR_REGEX.test(source)
+      ? CONNECT_OBJECT_CONNECTOR_REGEX
+      : undefined;
+  if (pattern === undefined) return { patched: false };
 
   const next = source.replace(
-    CONNECT_CONNECTOR_REGEX,
+    pattern,
     (_match, prefix: string, quote: string) => `${prefix}${quote}${connectorUid}${quote}`,
   );
   await writeFile(connectionFilePath, next, "utf8");

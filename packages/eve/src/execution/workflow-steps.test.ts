@@ -7,6 +7,7 @@ import { ContextKey } from "#context/key.js";
 import {
   AuthKey,
   ContinuationTokenKey,
+  DynamicSubagentAgentConfigKey,
   ModeKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
@@ -18,6 +19,7 @@ import {
   getPendingRuntimeActionBatch,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
+import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -31,7 +33,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { createTurnWorkflowInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { projectToDurableSession } from "#execution/session.js";
-import { createExecutionNodeStep } from "#execution/node-step.js";
+import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { defineTool } from "#public/definitions/tool.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
@@ -742,9 +744,159 @@ describe("dispatchRuntimeActionsStep", () => {
     );
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
   });
+
+  it("blocks a dynamic subagent call when the current selection omits it", async () => {
+    const nodeId = "subagents/researcher";
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        dynamicNodeIds: new Set([nodeId]),
+        dynamicResolvers: [],
+        subagentsByNodeId: new Map([
+          [
+            nodeId,
+            {
+              definition: {
+                description: "Research the request.",
+                kind: "subagent",
+              },
+            },
+          ],
+        ]),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-dynamic",
+          description: "Research the request.",
+          input: { message: "investigate" },
+          kind: "subagent-call",
+          name: "researcher",
+          nodeId,
+          subagentName: "researcher",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+    const sessionState = createStubSessionState({
+      continuationToken: "http:parent",
+      sessionId: "parent-session",
+    });
+
+    await expect(
+      dispatchRuntimeActionsStep({
+        parentContinuationToken: "turn-inbox",
+        parentWritable: createTestWritable(),
+        serializedContext: createSerializedContext(),
+        sessionState,
+      }),
+    ).resolves.toEqual({
+      results: [
+        {
+          callId: "call-dynamic",
+          isError: true,
+          kind: "subagent-result",
+          output: {
+            code: "SUBAGENT_UNAVAILABLE",
+            message: 'Subagent "researcher" is not available in the current session context.',
+          },
+          subagentName: "researcher",
+        },
+      ],
+      sessionState,
+    });
+    expect(startMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("turnStep", () => {
+  it("uses the selected dynamic subagent model for execution identity", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: { done: true, output: "ok" },
+        session: stepSession,
+      });
+    });
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "dynamic-subagent");
+    ctx.set(DynamicSubagentAgentConfigKey, {
+      description: "Perform deep research.",
+      model: { id: "anthropic/claude-opus-4.6" },
+    });
+    ctx.set(ModeKey, "task");
+    ctx.set(SessionIdKey, "session-1");
+
+    await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "research this" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    const effectiveNode = expect.objectContaining({
+      turnAgent: expect.objectContaining({
+        model: { id: "anthropic/claude-opus-4.6" },
+      }),
+    });
+    expect(buildRuntimeIdentity).toHaveBeenCalledWith(effectiveNode);
+    expect(createExecutionNodeStep).toHaveBeenCalledWith(
+      expect.objectContaining({ node: effectiveNode }),
+    );
+  });
+
   it("reads the durable session from normalized turn-step input", async () => {
     const session = createStubSession({
       continuationToken: "http:turn-step",
@@ -776,6 +928,36 @@ describe("turnStep", () => {
     expect(createDurableSessionState).toHaveBeenLastCalledWith({
       session: expect.objectContaining({ sessionId: "turn-step-session" }),
     });
+  });
+
+  it("projects a requested sleep onto the durable step result", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => {
+        requestTurnSleep(2_500);
+        return {
+          next: async () => ({ next: null, session: stepSession }),
+          session: stepSession,
+        };
+      };
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "wait before checking" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "continue",
+      sleepDurationMs: 2_500,
+    });
+    expect(result.serializedContext).not.toHaveProperty("eve.pendingTurnSleepDuration");
   });
 
   it("persists onDeliver context into the next durable step", async () => {

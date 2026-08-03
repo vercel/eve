@@ -25,6 +25,8 @@ function createMockRunHandle(): RunHandle {
 function createMockRuntime(): Runtime {
   return {
     cancelTurn: vi.fn(),
+    clearSession: vi.fn(),
+    compactSession: vi.fn(),
     deliver: vi.fn().mockRejectedValue(new RuntimeNoActiveSessionError("schedule:token")),
     resolveSession: vi.fn(),
     run: vi.fn().mockResolvedValue(createMockRunHandle()),

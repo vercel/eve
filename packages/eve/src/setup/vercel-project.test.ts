@@ -9,6 +9,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { readProjectLink } from "./project-resolution.js";
 import {
   assertNewProjectNameAvailable,
+  ensureLinkedVercelProject,
   getVercelAuthStatus,
   linkProject,
   pickNewProjectName,
@@ -567,6 +568,47 @@ describe("resolveProjectByNameOrId", () => {
       ["api", "/v9/projects/my-agent", "--scope", "team-a", "--raw"],
       { cwd: "/tmp/eve-agent", signal: undefined, timeoutMs: 15_000 },
     );
+  });
+});
+
+describe("ensureLinkedVercelProject", () => {
+  it("returns the existing project link without invoking the CLI", async () => {
+    mockedReadProjectLink.mockResolvedValue({ orgId: "team_a", projectId: "prj_a" });
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
+    ).resolves.toEqual({ orgId: "team_a", projectId: "prj_a" });
+
+    expect(mockedRunVercel).not.toHaveBeenCalled();
+  });
+
+  it("links interactively and reads the resulting project link", async () => {
+    mockedReadProjectLink
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ orgId: "team_a", projectId: "prj_a" });
+    const { prompter } = createFakePrompter();
+    prompter.withInheritedStdio = vi.fn((task) => task());
+
+    await expect(
+      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
+    ).resolves.toEqual({ orgId: "team_a", projectId: "prj_a" });
+
+    expect(prompter.withInheritedStdio).toHaveBeenCalledOnce();
+    expect(mockedRunVercel).toHaveBeenCalledWith(["link"], {
+      cwd: "/tmp/eve-agent",
+      signal: undefined,
+    });
+  });
+
+  it("fails when the interactive link does not complete", async () => {
+    mockedReadProjectLink.mockResolvedValue(undefined);
+    mockedRunVercel.mockResolvedValue(false);
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
+    ).rejects.toThrow("Vercel project linking failed.");
   });
 });
 

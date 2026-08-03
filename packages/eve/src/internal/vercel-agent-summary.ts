@@ -182,7 +182,7 @@ export interface VercelEveSkillEntry {
 
 export interface VercelEveSubagentEntry {
   readonly name: string;
-  readonly description: string;
+  readonly description?: string;
   readonly logicalPath: string;
 }
 

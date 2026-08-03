@@ -25,6 +25,7 @@ function completedToolResultCount(events: readonly MessageStreamEvent[], toolNam
 }
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Provider tools smoke: eight parallel gateway web searches complete successfully.",
   async test(t) {
     const turn = await t.send(

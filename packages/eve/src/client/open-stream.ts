@@ -234,6 +234,7 @@ export async function openStreamBody(
     let response: Response;
     try {
       response = await fetch(url, {
+        cache: "no-store",
         headers,
         redirect: input.redirect,
         signal: input.signal ?? null,

@@ -8,6 +8,10 @@ import {
 import type {
   CancelTurnInput,
   CancelTurnResult,
+  ClearSessionInput,
+  ClearSessionResult,
+  CompactSessionInput,
+  CompactSessionResult,
   DeliverInput,
   GetEventStreamOptions,
   HookPayload,
@@ -44,6 +48,7 @@ import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { buildRunContext } from "#execution/runtime-context.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
@@ -52,6 +57,7 @@ import {
   sessionCancelHookToken,
   type TurnCancelPayload,
 } from "#execution/turn-cancellation-token.js";
+import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
@@ -117,6 +123,7 @@ export const sessionTimeoutWorkflowReference = {
  */
 export function createWorkflowRuntime(config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+  readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly nodeId?: string;
 }): Runtime {
   return {
@@ -125,10 +132,15 @@ export function createWorkflowRuntime(config: {
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
       });
-      const ctx = buildRunContext({ bundle, run: input });
+      const ctx = buildRunContext({
+        bundle,
+        dynamicSubagentAgentConfig: config.dynamicSubagentAgentConfig,
+        run: input,
+      });
+      const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
-      const sessionTimeoutMs = bundle.resolvedAgent.config.limits?.sessionTimeoutMs;
+      const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       const workflowInput: {
         -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
       } = {
@@ -184,6 +196,14 @@ export function createWorkflowRuntime(config: {
 
     async cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult> {
       return await requestWorkflowTurnCancellation(input);
+    },
+
+    async compactSession(input: CompactSessionInput): Promise<CompactSessionResult> {
+      return await requestWorkflowSessionControl(input.continuationToken, "compact");
+    },
+
+    async clearSession(input: ClearSessionInput): Promise<ClearSessionResult> {
+      return await requestWorkflowSessionControl(input.continuationToken, "clear");
     },
 
     async terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult> {
@@ -257,6 +277,22 @@ export function createWorkflowRuntime(config: {
       }
     },
   };
+}
+
+async function requestWorkflowSessionControl(
+  continuationToken: string,
+  kind: "clear" | "compact",
+): Promise<ClearSessionResult> {
+  try {
+    const hook = normalizeWorkflowHook(await resumeHook(continuationToken, { kind }));
+    return { sessionId: hook.runId, status: "accepted" };
+  } catch (error) {
+    if (HookNotFoundError.is(error) || isAlreadyTerminalSessionError(error)) {
+      return { status: "no_active_session" };
+    }
+    logError(log, `failed to request session ${kind}`, error, { continuationToken });
+    throw error;
+  }
 }
 
 /** Requests cancellation through a session's stable workflow hook. */

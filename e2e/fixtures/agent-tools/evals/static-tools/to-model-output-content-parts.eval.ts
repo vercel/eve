@@ -9,6 +9,7 @@ const TOOL_NAME = "render-stripes";
 // model exclusively through `toModelOutput` content parts. Color recognition
 // remains tracked rather than gated because live vision quality varies.
 export default defineEval({
+  tags: ["real-model"],
   description: "Static tools smoke: toModelOutput content parts deliver an image to the model.",
   async test(t) {
     await t.send(

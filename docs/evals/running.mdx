@@ -10,6 +10,7 @@ eve eval                       # run all discovered evals locally
 eve eval weather smoke         # run selected evals (an id, or a directory prefix)
 eve eval --url https://<app>   # target a remote app instead of a local host
 eve eval --tag fast            # only evals carrying a tag
+eve eval --exclude-tag slow    # skip evals carrying a tag
 eve eval --strict              # soft below-threshold assertions also fail the exit code
 eve eval --timeout 60000       # per-eval timeout in milliseconds
 eve eval --max-concurrency 4   # cap concurrent eval executions (default 8)
@@ -21,6 +22,8 @@ eve eval --skip-report         # skip config and eval-defined reporters (e.g. Br
 ```
 
 Positional ids match exactly or by directory prefix: `eve eval weather` runs `evals/weather.eval.ts`, every eval under `evals/weather/`, and every entry of an array-exported `weather.eval.ts`.
+
+Tag filters compose: `--tag` keeps evals carrying at least one listed tag, then `--exclude-tag` drops any eval carrying an excluded tag. A `--tag` filter that matches nothing is a configuration error (exit `2`), but a run where `--exclude-tag` removes every match succeeds with nothing executed — exclusion expresses "this suite does not apply here."
 
 ## Exit codes
 

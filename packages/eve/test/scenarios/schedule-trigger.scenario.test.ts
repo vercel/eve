@@ -60,6 +60,12 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     async cancelTurn() {
       throw new Error("cancelTurn should not be called in this scenario");
     },
+    async clearSession() {
+      throw new Error("clearSession should not be called in this scenario");
+    },
+    async compactSession() {
+      throw new Error("compactSession should not be called in this scenario");
+    },
     async resolveSession() {
       throw new Error("resolveSession should not be called in this scenario");
     },

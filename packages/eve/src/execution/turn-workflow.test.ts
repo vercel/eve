@@ -16,10 +16,12 @@ import { turnStep } from "#execution/workflow-steps.js";
 
 const resumeHookMock = vi.fn();
 const createHookMock = vi.fn();
+const sleepMock = vi.fn(async (_duration: unknown) => {});
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
   getWorkflowMetadata: vi.fn(() => ({ url: "https://eve.example.com" })),
+  sleep: (duration: unknown) => sleepMock(duration),
 }));
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
@@ -59,6 +61,7 @@ describe("turnWorkflow", () => {
     vi.clearAllMocks();
     resumeHookMock.mockReset();
     createHookMock.mockReset();
+    sleepMock.mockClear();
   });
 
   it("notifies the driver when a turn completes", async () => {
@@ -152,6 +155,60 @@ describe("turnWorkflow", () => {
         action: expect.objectContaining({ kind: "done", output: "after continue" }),
         kind: "turn-result",
       }),
+    );
+  });
+
+  it("durably sleeps the turn before continuing the tool loop", async () => {
+    const sessionState = createSessionState();
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "continue",
+        sleepDurationMs: 2_500,
+        serializedContext: { state: "sleeping" },
+        sessionState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "checked again",
+        serializedContext: { state: "done" },
+        sessionState,
+      });
+
+    const { input } = createInput({ sessionState });
+    await turnWorkflow(input);
+
+    expect(sleepMock).toHaveBeenCalledExactlyOnceWith(2_500);
+    expect(sleepMock.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(turnStep).mock.invocationCallOrder[1]!,
+    );
+  });
+
+  it("durably sleeps a turn-owned workflow before continuing the tool loop", async () => {
+    const sessionState = createSessionState();
+    installInbox([]);
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "continue",
+        sleepDurationMs: 1_250,
+        serializedContext: { state: "sleeping" },
+        sessionState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "checked again",
+        serializedContext: { state: "done" },
+        sessionState,
+      });
+
+    const { input } = createInput({
+      driverCapabilities: { turnInbox: true },
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    expect(sleepMock).toHaveBeenCalledExactlyOnceWith(1_250);
+    expect(sleepMock.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(turnStep).mock.invocationCallOrder[1]!,
     );
   });
 

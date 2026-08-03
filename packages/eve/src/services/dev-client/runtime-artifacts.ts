@@ -1,6 +1,8 @@
 import {
   EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
+  EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
+  EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH,
 } from "#protocol/routes.js";
 
 /**
@@ -22,6 +24,41 @@ export async function readDevelopmentRuntimeArtifactsRevision(input: {
     return await parseDevelopmentRuntimeArtifactsRevision(response);
   } catch {
     return undefined;
+  }
+}
+
+export async function suspendDevelopmentRuntimeArtifacts(input: {
+  readonly serverUrl: string;
+}): Promise<boolean> {
+  return await changeDevelopmentRuntimeArtifacts(
+    input.serverUrl,
+    EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH,
+  );
+}
+
+export async function resumeDevelopmentRuntimeArtifacts(input: {
+  readonly serverUrl: string;
+  readonly silent?: boolean;
+}): Promise<string | undefined> {
+  try {
+    const url = new URL(EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH, input.serverUrl);
+    if (input.silent === true) url.searchParams.set("silent", "1");
+    const response = await fetch(url, { method: "POST" });
+    return await parseDevelopmentRuntimeArtifactsRevision(response);
+  } catch {
+    return undefined;
+  }
+}
+
+async function changeDevelopmentRuntimeArtifacts(
+  serverUrl: string,
+  path: string,
+): Promise<boolean> {
+  try {
+    const response = await fetch(new URL(path, serverUrl), { method: "POST" });
+    return response.ok;
+  } catch {
+    return false;
   }
 }
 

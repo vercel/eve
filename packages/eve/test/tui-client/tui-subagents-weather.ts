@@ -179,9 +179,9 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   }
 
   // The turn is complete; wait until the runner is back at the prompt so
-  // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
-  // turn and returns to the prompt (Claude Code's two-step exit).
+  // Two idle Ctrl+C presses exit; mid-stream Ctrl+C cancels cooperatively.
   await screen.waitForIdlePrompt(30_000);
+  input.ctrlC();
   input.ctrlC();
   await runPromise;
 });

@@ -22,13 +22,23 @@ import type { GenericChannelDefinition, GenericReceiveInput } from "#shared/chan
 
 declare const CHANNEL_METADATA_TYPE: unique symbol;
 
-export type { CancelTurnInput, CancelTurnResult, GetEventStreamOptions } from "#channel/types.js";
+export type {
+  CancelTurnInput,
+  CancelTurnResult,
+  ClearSessionResult,
+  CompactSessionResult,
+  GetEventStreamOptions,
+} from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
 export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
 export type {
   CancelFn,
   CancelOptions,
+  ClearFn,
+  ClearOptions,
+  CompactFn,
+  CompactOptions,
   ResetFn,
   ResetOptions,
   ResetResult,
@@ -236,6 +246,9 @@ type ChannelSessionFailedHandler<TCtx> = (
  * and the channel context, with no `ctx`.
  */
 export interface ChannelEvents<TCtx = void> {
+  readonly "context.cleared"?: ChannelEventHandler<"context.cleared", TCtx>;
+  readonly "compaction.requested"?: ChannelEventHandler<"compaction.requested", TCtx>;
+  readonly "compaction.completed"?: ChannelEventHandler<"compaction.completed", TCtx>;
   readonly "turn.started"?: ChannelEventHandler<"turn.started", TCtx>;
   readonly "actions.requested"?: ChannelEventHandler<"actions.requested", TCtx>;
   readonly "action.result"?: ChannelEventHandler<"action.result", TCtx>;
@@ -339,6 +352,9 @@ export function defineChannel<
 // The Record type fails to compile if this map drifts from the ChannelEvents
 // keys in either direction.
 const channelEventTypes: Record<keyof ChannelEvents, null> = {
+  "context.cleared": null,
+  "compaction.requested": null,
+  "compaction.completed": null,
   "turn.started": null,
   "actions.requested": null,
   "action.result": null,

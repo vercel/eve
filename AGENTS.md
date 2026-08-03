@@ -121,8 +121,11 @@ assertion:
 - **Integration** (`src/**/*.integration.test.ts`): multiple modules in memory.
 - **Scenario** (`src/**/*.scenario.test.ts`, `test/scenarios/`): real
   subprocess, HTTP port, or bundler.
-- **E2E** (`e2e/fixtures/*/evals/`, plus `apps/fixtures/weather-fixture/evals/`):
-  fixture-owned `eve eval` suites that run only in CI.
+- **E2E** (`e2e/fixtures/*/evals/`): fixture-owned `eve eval` suites that run
+  only in CI. The model suite (`e2e-local`) runs real matrix models against
+  the local world; the world suites (`e2e-vercel`, …) run deterministic mock
+  models (`EVE_E2E_MODEL=mock`) and exclude `real-model`-tagged evals. See
+  [`e2e/README.md`](./e2e/README.md).
 
 **Running a single file or filtered test: always pass the tier config.** Only
 the `vitest.<tier>.config.ts` files alias `#*` imports to `./src`; a bare

@@ -13,12 +13,16 @@ import type {
   SessionCallback,
   SessionCapabilities,
   SessionParent,
+  SessionTraceContext,
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type { SessionAuthContext, SessionParent, SessionTurn } from "#channel/types.js";
@@ -67,6 +71,8 @@ export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationPr
 );
 export const ModeKey = new ContextKey<RunMode>("eve.mode");
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
+/** Separate from {@link ParentSessionKey} so it stays out of what extensions read. */
+export const ParentTraceContextKey = new ContextKey<SessionTraceContext>("eve.parentTraceContext");
 export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
 
 /**
@@ -77,7 +83,7 @@ export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
 
 /**
- * Optional framework-owned terminal callback metadata for this session.
+ * Optional framework-owned caller callback captured when the session is created.
  */
 export const SessionCallbackKey = new ContextKey<SessionCallback>("eve.sessionCallback");
 
@@ -159,9 +165,28 @@ export const TurnDynamicToolMetadataKey = new ContextKey<readonly DurableDynamic
  * framework tools (which lack bundler step-function metadata) work.
  * Re-resolved every step — no cross-step persistence needed.
  */
-export const LiveStepToolsKey = new ContextKey<
-  import("#harness/execute-tool.js").HarnessToolDefinition[]
->("eve.liveStepTools");
+export const LiveStepToolsKey = new ContextKey<HarnessToolDefinition[]>("eve.liveStepTools");
+
+export type DurableDynamicSubagentSelection = {
+  readonly agentConfig: DynamicSubagentAgentConfig;
+  readonly prepared: PreparedRuntimeDelegationTool;
+} | null;
+
+export const SessionDynamicSubagentSelectionsKey = new ContextKey<
+  Readonly<Record<string, DurableDynamicSubagentSelection>>
+>("eve.sessionDynamicSubagentSelections");
+
+export const TurnDynamicSubagentSelectionsKey = new ContextKey<
+  Readonly<Record<string, DurableDynamicSubagentSelection>>
+>("eve.turnDynamicSubagentSelections");
+
+export const SessionDynamicSubagentRuntimeRevisionKey = new ContextKey<string>(
+  "eve.sessionDynamicSubagentRuntimeRevision",
+);
+
+export const DynamicSubagentAgentConfigKey = new ContextKey<DynamicSubagentAgentConfig>(
+  "eve.dynamicSubagentAgentConfig",
+);
 
 // ---------------------------------------------------------------------------
 // Dynamic skill keys

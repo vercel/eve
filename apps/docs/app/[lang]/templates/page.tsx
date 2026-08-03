@@ -17,9 +17,7 @@ export const generateStaticParams = () => Object.keys(translations).map((lang) =
 const TemplatesPage = () => (
   <main className="mx-auto max-w-[1080px] px-4 pb-32 sm:px-6">
     <header className="pt-12 pb-8 sm:pt-16 sm:pb-10">
-      <h1 className="font-medium! text-heading-32 text-gray-1000 tracking-tighter sm:text-heading-40">
-        {title}
-      </h1>
+      <h1 className="text-heading-32 text-gray-1000 sm:text-heading-40">{title}</h1>
       <p className="mt-3 max-w-[460px] text-copy-16 text-gray-900">{description}</p>
     </header>
     <TemplateGallery entries={templateEntries} />
