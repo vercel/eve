@@ -305,7 +305,10 @@ function collectRelativeDeclarationImports(source) {
   for (const pattern of patterns) {
     for (const match of source.matchAll(pattern)) {
       const specifier = match[1];
-      if (specifier !== undefined && specifier.startsWith("./")) {
+      if (
+        specifier !== undefined &&
+        (specifier.startsWith("./") || specifier.startsWith("../"))
+      ) {
         specifiers.add(specifier);
       }
     }
