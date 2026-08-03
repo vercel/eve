@@ -337,9 +337,8 @@ describe("turnWorkflow", () => {
       serializedContext: { state: "start" },
       sessionState,
     });
-    // The cancel token is session-scoped so a trigger can derive it from
-    // the session id alone.
-    expect(cancelHookTokens()).toEqual(["wrun_test_123:cancel"]);
+    // The command inbox forwards cancellation to this turn-private hook.
+    expect(cancelHookTokens()).toEqual(["turn-token:cancel"]);
     // The cancelled result is a pure marker: the control payload carries
     // the cursor's last settled state, not the aborted step's echo.
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
@@ -435,10 +434,10 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
-    // The token is stable across turns: the next turn's claim must never
-    // race this run's teardown, so disposal precedes the terminal send.
+    // The next turn must never race this run's teardown, so disposal
+    // precedes the terminal send.
     const cancelHook = createHookMock.mock.results.find(
-      (result) => (result.value as { token?: string }).token === "wrun_test_123:cancel",
+      (result) => (result.value as { token?: string }).token === "turn-token:cancel",
     )?.value as { dispose: ReturnType<typeof vi.fn> };
     const resultCall = resumeHookMock.mock.calls.findIndex(
       (call) => call[1]?.kind === "turn-result",
