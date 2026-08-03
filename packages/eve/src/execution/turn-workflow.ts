@@ -49,7 +49,7 @@ export type { TurnWorkflowInput };
  * Runs one complete logical turn, including child-agent waits when supported.
  *
  * The turn-owned path also owns turn cancellation: resuming the
- * session-scoped cancel hook (`{sessionId}:cancel`) mid-turn aborts the
+ * turn-private cancel hook (`{completionToken}:cancel`) mid-turn aborts the
  * signal serialized into every `turnStep` and settles the turn as
  * `turn.cancelled` → `session.waiting` — never as a failure. A late or
  * guard-mismatched cancel is a benign no-op.
@@ -104,8 +104,8 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       canSettleCancelledTurnAsPark(input)
     ) {
       cancellation = await createTurnCancellationControl({
+        controlToken: input.completionToken,
         expectedTurnId: activeTurnId(input.stepInput.sessionState.emissionState),
-        sessionId: input.stepInput.sessionState.sessionId,
       });
     }
 

@@ -206,8 +206,8 @@ describe("workflowEntry integration", () => {
           },
         );
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up after auth" }],
+          kind: "send",
+          payload: { message: "follow up after auth" },
         });
 
         const followupTurn = await stream.nextUntil(
@@ -272,12 +272,11 @@ describe("workflowEntry integration", () => {
           compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         });
         await expect(
-          workflowRuntime.deliver({
-            auth: null,
+          workflowRuntime.dispatchContinuation({
+            command: { auth: null, kind: "send", payload: { message: "follow up" } },
             continuationToken,
-            payload: { message: "follow up" },
           }),
-        ).resolves.toEqual({ sessionId: run.runId });
+        ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
 
         const secondTurn = await stream.nextTurn();
 
@@ -409,7 +408,10 @@ describe("workflowEntry integration", () => {
       } finally {
         stream.dispose();
         if (replacementSessionId !== undefined) {
-          await workflowRuntime.terminateSession({ sessionId: replacementSessionId });
+          await workflowRuntime.dispatchSession({
+            command: { kind: "reset", reason: "Test cleanup" },
+            sessionId: replacementSessionId,
+          });
         }
       }
     });
@@ -462,8 +464,8 @@ describe("workflowEntry integration", () => {
         );
 
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "owner follow up" }],
+          kind: "send",
+          payload: { message: "owner follow up" },
         });
         const ownerFollowUp = await ownerStream.nextTurn();
 
@@ -527,8 +529,8 @@ describe("workflowEntry integration", () => {
         expect(firstTurn.at(-1)?.type).toBe("session.waiting");
 
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up without structured output" }],
+          kind: "send",
+          payload: { message: "follow up without structured output" },
         });
 
         const secondTurn = await stream.nextTurn();

@@ -7,15 +7,12 @@ import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#
 
 function createRuntime(): Runtime {
   return {
-    cancelTurn: vi.fn().mockResolvedValue({ status: "accepted" }),
-    clearSession: vi.fn(),
-    compactSession: vi.fn(),
-    deliver: vi.fn(),
+    createSession: vi.fn(),
+    dispatchContinuation: vi.fn(),
+    dispatchSession: vi.fn().mockResolvedValue({ status: "accepted" }),
     getEventStream: vi.fn(),
     getStreamTailIndex: vi.fn(),
-    resolveSession: vi.fn(),
-    run: vi.fn(),
-    terminateSession: vi.fn(),
+    resolveContinuation: vi.fn(),
   };
 }
 
@@ -25,7 +22,10 @@ describe("createSession#cancel", () => {
     const session = createSession("sess_1", "C1:T1", runtime);
 
     await expect(session.cancel()).resolves.toEqual({ status: "accepted" });
-    expect(runtime.cancelTurn).toHaveBeenCalledWith({ sessionId: "sess_1", turnId: undefined });
+    expect(runtime.dispatchSession).toHaveBeenCalledWith({
+      command: { kind: "cancel", turnId: undefined },
+      sessionId: "sess_1",
+    });
   });
 
   it("forwards the turn guard", async () => {
@@ -34,7 +34,10 @@ describe("createSession#cancel", () => {
 
     await session.cancel({ turnId: "turn_2" });
 
-    expect(runtime.cancelTurn).toHaveBeenCalledWith({ sessionId: "sess_1", turnId: "turn_2" });
+    expect(runtime.dispatchSession).toHaveBeenCalledWith({
+      command: { kind: "cancel", turnId: "turn_2" },
+      sessionId: "sess_1",
+    });
   });
 
   it("is available on sessions returned by getSession", async () => {
@@ -42,7 +45,10 @@ describe("createSession#cancel", () => {
     const session = createGetSessionFn(runtime)("sess_2");
 
     await expect(session.cancel()).resolves.toEqual({ status: "accepted" });
-    expect(runtime.cancelTurn).toHaveBeenCalledWith({ sessionId: "sess_2", turnId: undefined });
+    expect(runtime.dispatchSession).toHaveBeenCalledWith({
+      command: { kind: "cancel", turnId: undefined },
+      sessionId: "sess_2",
+    });
   });
 });
 

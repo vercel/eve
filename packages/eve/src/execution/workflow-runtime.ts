@@ -8,18 +8,14 @@ import {
 import type {
   CancelTurnInput,
   CancelTurnResult,
-  ClearSessionInput,
-  ClearSessionResult,
-  CompactSessionInput,
-  CompactSessionResult,
-  DeliverInput,
+  DispatchContinuationInput,
+  DispatchSessionInput,
   GetEventStreamOptions,
-  HookPayload,
   RunHandle,
   RunInput,
   Runtime,
-  TerminateSessionInput,
-  TerminateSessionResult,
+  SessionCommand,
+  SessionCommandResult,
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -31,10 +27,8 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
-  cancelRun,
   getHookByToken,
   getRun,
-  getWorld,
   resumeHook,
   start,
   type Run,
@@ -50,19 +44,17 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
-import {
-  sessionCancelHookToken,
-  type TurnCancelPayload,
-} from "#execution/turn-cancellation-token.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
 const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
+const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
@@ -127,7 +119,7 @@ export function createWorkflowRuntime(config: {
   readonly nodeId?: string;
 }): Runtime {
   return {
-    async run(input: RunInput): Promise<RunHandle> {
+    async createSession(input: RunInput): Promise<RunHandle> {
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
@@ -151,6 +143,7 @@ export function createWorkflowRuntime(config: {
       if (sessionTimeoutMs !== undefined) {
         workflowInput.sessionTimeoutMs = sessionTimeoutMs;
       }
+
       const attributes =
         parentLineage.sessionId === undefined
           ? buildSessionAttributes({
@@ -179,6 +172,18 @@ export function createWorkflowRuntime(config: {
         throw error;
       }
 
+      await waitForOwnedCommandHook(sessionCommandHookToken(run.runId), run.runId);
+      if (input.continuationToken) {
+        const owner = await waitForCommandHookOwner(input.continuationToken);
+        if (owner.runId !== run.runId) {
+          throw new RuntimeSessionOwnershipConflictError({
+            continuationToken: input.continuationToken,
+            ownerSessionId: owner.runId,
+            sessionId: run.runId,
+          });
+        }
+      }
+
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
         events ??= parseNdjsonStream<MessageStreamEvent>(() => getRun(run.runId).getReadable());
@@ -194,53 +199,16 @@ export function createWorkflowRuntime(config: {
       };
     },
 
-    async cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult> {
-      return await requestWorkflowTurnCancellation(input);
+    async dispatchContinuation<TCommand extends SessionCommand>(
+      input: DispatchContinuationInput<TCommand>,
+    ): Promise<SessionCommandResult<TCommand>> {
+      return await dispatchWorkflowCommand(input.continuationToken, input.command);
     },
 
-    async compactSession(input: CompactSessionInput): Promise<CompactSessionResult> {
-      return await requestWorkflowSessionControl(input.continuationToken, "compact");
-    },
-
-    async clearSession(input: ClearSessionInput): Promise<ClearSessionResult> {
-      return await requestWorkflowSessionControl(input.continuationToken, "clear");
-    },
-
-    async terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult> {
-      try {
-        await cancelRun(await getWorld(), input.sessionId, {
-          cancelReason: input.reason ?? "Session reset by channel",
-        });
-        return { status: "terminated" };
-      } catch (error) {
-        if (isAlreadyTerminalSessionError(error)) {
-          return { status: "already_terminal" };
-        }
-        throw error;
-      }
-    },
-
-    async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
-      const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
-        auth: input.auth,
-        kind: "deliver",
-        payloads: [input.payload],
-        requestId: input.requestId,
-      };
-      try {
-        const hook = normalizeWorkflowHook(await resumeHook(input.continuationToken, hookPayload));
-        return { sessionId: hook.runId };
-      } catch (error) {
-        // "No hook" is the expected resume-or-start signal: normalize it to
-        // the eve-owned class without logging. Anything else is a real failure.
-        if (HookNotFoundError.is(error)) {
-          throw new RuntimeNoActiveSessionError(input.continuationToken);
-        }
-        logError(log, "failed to deliver to active session", error, {
-          continuationToken: input.continuationToken,
-        });
-        throw error;
-      }
+    async dispatchSession<TCommand extends SessionCommand>(
+      input: DispatchSessionInput<TCommand>,
+    ): Promise<SessionCommandResult<TCommand>> {
+      return await dispatchWorkflowCommand(sessionCommandHookToken(input.sessionId), input.command);
     },
 
     async getEventStream(
@@ -262,7 +230,9 @@ export function createWorkflowRuntime(config: {
       }
     },
 
-    async resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined> {
+    async resolveContinuation(
+      continuationToken: string,
+    ): Promise<{ sessionId: string } | undefined> {
       try {
         const hook = await getHookByToken(continuationToken);
         return { sessionId: hook.runId };
@@ -279,38 +249,65 @@ export function createWorkflowRuntime(config: {
   };
 }
 
-async function requestWorkflowSessionControl(
-  continuationToken: string,
-  kind: "clear" | "compact",
-): Promise<ClearSessionResult> {
+async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
+  token: string,
+  command: TCommand,
+): Promise<SessionCommandResult<TCommand>> {
+  let hook: WorkflowHookRecord;
   try {
-    const hook = normalizeWorkflowHook(await resumeHook(continuationToken, { kind }));
-    return { sessionId: hook.runId, status: "accepted" };
+    hook = normalizeWorkflowHook(await resumeHook(token, command));
   } catch (error) {
-    if (HookNotFoundError.is(error) || isAlreadyTerminalSessionError(error)) {
-      return { status: "no_active_session" };
+    if (isInactiveCommandTarget(error)) {
+      return inactiveCommandResult(command, error);
     }
-    logError(log, `failed to request session ${kind}`, error, { continuationToken });
+    logError(log, "failed to dispatch session command", error, {
+      command: command.kind,
+      token,
+    });
     throw error;
   }
+
+  if (command.kind === "reset") {
+    await waitForCommandHookRelease(sessionCommandHookToken(hook.runId), hook.runId);
+  }
+
+  return activeCommandResult(command, hook.runId);
 }
 
-/** Requests cancellation through a session's stable workflow hook. */
+function activeCommandResult<TCommand extends SessionCommand>(
+  command: TCommand,
+  sessionId: string,
+): SessionCommandResult<TCommand> {
+  const result =
+    command.kind === "reset"
+      ? { previousSessionId: sessionId, status: "reset" as const }
+      : command.kind === "cancel"
+        ? { status: "accepted" as const }
+        : { sessionId, status: "accepted" as const };
+  return result as SessionCommandResult<TCommand>;
+}
+
+function inactiveCommandResult<TCommand extends SessionCommand>(
+  command: TCommand,
+  error: unknown,
+): SessionCommandResult<TCommand> {
+  const result =
+    command.kind === "send"
+      ? { status: "session_not_active" as const }
+      : command.kind === "cancel"
+        ? { reason: classifyInactiveCancelTarget(error), status: "no_active_turn" as const }
+        : { status: "no_active_session" as const };
+  return result as SessionCommandResult<TCommand>;
+}
+
+/** Requests cancellation through a session's stable command inbox. */
 export async function requestWorkflowTurnCancellation(
   input: CancelTurnInput,
 ): Promise<CancelTurnResult> {
-  const payload: TurnCancelPayload = input.turnId === undefined ? {} : { turnId: input.turnId };
-
-  try {
-    await resumeHook(sessionCancelHookToken(input.sessionId), payload);
-    return { status: "accepted" };
-  } catch (error) {
-    const reason = classifyInactiveCancelTarget(error);
-    if (reason !== undefined) {
-      return { reason, status: "no_active_turn" };
-    }
-    throw error;
-  }
+  return await dispatchWorkflowCommand(sessionCommandHookToken(input.sessionId), {
+    kind: "cancel",
+    turnId: input.turnId,
+  });
 }
 
 function classifyInactiveCancelTarget(error: unknown): string | undefined {
@@ -321,7 +318,8 @@ function classifyInactiveCancelTarget(error: unknown): string | undefined {
   return undefined;
 }
 
-function isAlreadyTerminalSessionError(error: unknown): boolean {
+function isInactiveCommandTarget(error: unknown): boolean {
+  if (HookNotFoundError.is(error)) return true;
   for (const candidate of walkCauseChain(error)) {
     if (
       WorkflowRunNotFoundError.is(candidate) ||
@@ -332,6 +330,47 @@ function isAlreadyTerminalSessionError(error: unknown): boolean {
     }
   }
   return false;
+}
+
+async function waitForOwnedCommandHook(token: string, sessionId: string): Promise<void> {
+  const owner = await waitForCommandHookOwner(token);
+  if (owner.runId !== sessionId) {
+    throw new RuntimeSessionOwnershipConflictError({
+      continuationToken: token,
+      ownerSessionId: owner.runId,
+      sessionId,
+    });
+  }
+}
+
+async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
+  const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
+  while (true) {
+    try {
+      return normalizeWorkflowHook(await getHookByToken(token));
+    } catch (error) {
+      if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+  }
+}
+
+async function waitForCommandHookRelease(token: string, sessionId: string): Promise<void> {
+  const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
+  while (true) {
+    try {
+      const owner = normalizeWorkflowHook(await getHookByToken(token));
+      if (owner.runId !== sessionId) return;
+    } catch (error) {
+      if (HookNotFoundError.is(error)) return;
+      throw error;
+    }
+
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out waiting for session "${sessionId}" to release its command inbox.`);
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 /**

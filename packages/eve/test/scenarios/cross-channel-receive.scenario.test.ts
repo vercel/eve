@@ -7,9 +7,8 @@ import {
   createCrossChannelReceiveFn,
   toCrossChannelTargets,
 } from "../../src/channel/cross-channel-receive.js";
-import type { Runtime } from "../../src/channel/types.js";
+import type { Runtime, SessionCommand, SessionCommandResult } from "../../src/channel/types.js";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
-import { RuntimeNoActiveSessionError } from "../../src/execution/runtime-errors.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "../../src/runtime/sessions/compiled-agent-cache.js";
 import {
@@ -80,19 +79,7 @@ interface CapturedRun {
 
 function createCapturingRuntime(captured: CapturedRun[]): Runtime {
   return {
-    async cancelTurn() {
-      throw new Error("cancelTurn should not be called in this scenario");
-    },
-    async clearSession() {
-      throw new Error("clearSession should not be called in this scenario");
-    },
-    async compactSession() {
-      throw new Error("compactSession should not be called in this scenario");
-    },
-    async resolveSession() {
-      throw new Error("resolveSession should not be called in this scenario");
-    },
-    async run(input) {
+    async createSession(input) {
       captured.push({
         adapter: input.adapter,
         continuationToken: input.continuationToken,
@@ -105,8 +92,13 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
         sessionId: "sess_scenario",
       };
     },
-    async deliver(input) {
-      throw new RuntimeNoActiveSessionError(input.continuationToken);
+    async dispatchContinuation<TCommand extends SessionCommand>(): Promise<
+      SessionCommandResult<TCommand>
+    > {
+      return { status: "session_not_active" } as SessionCommandResult<TCommand>;
+    },
+    async dispatchSession() {
+      throw new Error("dispatchSession should not be called in this scenario");
     },
     async getEventStream() {
       return new ReadableStream();
@@ -114,8 +106,8 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     async getStreamTailIndex() {
       return -1;
     },
-    async terminateSession() {
-      throw new Error("terminateSession should not be called in this scenario");
+    async resolveContinuation() {
+      throw new Error("resolveContinuation should not be called in this scenario");
     },
   };
 }

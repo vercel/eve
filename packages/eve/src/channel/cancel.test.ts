@@ -3,72 +3,48 @@ import { describe, expect, it, vi } from "vitest";
 import { createCancelFn } from "#channel/cancel.js";
 import type { Runtime } from "#channel/types.js";
 
-function createRuntime(overrides?: Partial<Runtime>): Runtime {
+function createRuntime(): Runtime {
   return {
-    cancelTurn: vi.fn().mockResolvedValue({ status: "accepted" }),
-    clearSession: vi.fn(),
-    compactSession: vi.fn(),
-    deliver: vi.fn(),
+    createSession: vi.fn(),
+    dispatchContinuation: vi.fn().mockResolvedValue({ status: "accepted" }),
+    dispatchSession: vi.fn(),
     getEventStream: vi.fn(),
     getStreamTailIndex: vi.fn(),
-    resolveSession: vi.fn().mockResolvedValue({ sessionId: "sess_1" }),
-    run: vi.fn(),
-    terminateSession: vi.fn(),
-    ...overrides,
+    resolveContinuation: vi.fn(),
   };
 }
 
 describe("createCancelFn", () => {
-  it("namespaces the channel-local token before resolving the session", async () => {
+  it("dispatches directly through the namespaced channel address", async () => {
     const runtime = createRuntime();
 
-    const cancel = createCancelFn(runtime, "slack");
-    await cancel({ continuationToken: "C1:T1" });
-
-    expect(runtime.resolveSession).toHaveBeenCalledWith("slack:C1:T1");
+    await expect(
+      createCancelFn(runtime, "slack")({ continuationToken: "C1:T1", turnId: "turn_3" }),
+    ).resolves.toEqual({ status: "accepted" });
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
+      command: { kind: "cancel", turnId: "turn_3" },
+      continuationToken: "slack:C1:T1",
+    });
+    expect(runtime.resolveContinuation).not.toHaveBeenCalled();
   });
 
-  it("cancels the resolved session and forwards the turn guard", async () => {
+  it("passes through no_active_turn", async () => {
     const runtime = createRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({ status: "no_active_turn" });
 
-    const cancel = createCancelFn(runtime, "slack");
-    const result = await cancel({ continuationToken: "C1:T1", turnId: "turn_3" });
-
-    expect(result).toEqual({ status: "accepted" });
-    expect(runtime.cancelTurn).toHaveBeenCalledWith({ sessionId: "sess_1", turnId: "turn_3" });
+    await expect(
+      createCancelFn(runtime, "slack")({ continuationToken: "unknown" }),
+    ).resolves.toEqual({ status: "no_active_turn" });
   });
 
-  it("returns 'no_active_turn' for a token no session owns", async () => {
-    const runtime = createRuntime({ resolveSession: vi.fn().mockResolvedValue(undefined) });
-
-    const cancel = createCancelFn(runtime, "slack");
-    const result = await cancel({ continuationToken: "unknown" });
-
-    expect(result).toEqual({ status: "no_active_turn" });
-    expect(runtime.cancelTurn).not.toHaveBeenCalled();
-  });
-
-  it("passes through the runtime's cancellation status", async () => {
-    const runtime = createRuntime({
-      cancelTurn: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
-    });
-
-    const cancel = createCancelFn(runtime, "slack");
-
-    await expect(cancel({ continuationToken: "C1:T1" })).resolves.toEqual({
-      status: "no_active_turn",
-    });
-  });
-
-  it("propagates unexpected resolution failures and never starts a session", async () => {
+  it("propagates dispatch failures without creating a session", async () => {
     const failure = new Error("transient backing-store outage");
-    const runtime = createRuntime({ resolveSession: vi.fn().mockRejectedValue(failure) });
+    const runtime = createRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockRejectedValue(failure);
 
-    const cancel = createCancelFn(runtime, "slack");
-
-    await expect(cancel({ continuationToken: "C1:T1" })).rejects.toBe(failure);
-    expect(runtime.cancelTurn).not.toHaveBeenCalled();
-    expect(runtime.run).not.toHaveBeenCalled();
-    expect(runtime.deliver).not.toHaveBeenCalled();
+    await expect(createCancelFn(runtime, "slack")({ continuationToken: "C1:T1" })).rejects.toBe(
+      failure,
+    );
+    expect(runtime.createSession).not.toHaveBeenCalled();
   });
 });

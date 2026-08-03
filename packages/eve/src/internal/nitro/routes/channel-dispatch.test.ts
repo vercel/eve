@@ -54,6 +54,18 @@ const DEVELOPMENT_ARTIFACTS_CONFIG = {
   moduleMapLoaderPath: "/eve/src/internal/authored-module-map-loader.ts",
 } as const;
 
+function createRuntime(overrides: Partial<Runtime> = {}): Runtime {
+  return {
+    createSession: vi.fn(),
+    dispatchContinuation: vi.fn(),
+    dispatchSession: vi.fn(),
+    getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+    getStreamTailIndex: vi.fn().mockResolvedValue(-1),
+    resolveContinuation: vi.fn(),
+    ...overrides,
+  };
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -263,17 +275,12 @@ describe("dispatchChannelRequest", () => {
   });
 
   it("tags route sends with Vercel's request id", async () => {
-    const runtimeForTest: Runtime = {
-      cancelTurn: vi.fn(),
-      clearSession: vi.fn(),
-      compactSession: vi.fn(),
-      deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
-      resolveSession: vi.fn(),
-      getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
-      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-      run: vi.fn(),
-      terminateSession: vi.fn(),
-    };
+    const runtimeForTest = createRuntime({
+      dispatchContinuation: vi.fn().mockResolvedValue({
+        sessionId: "sess_route",
+        status: "accepted",
+      }),
+    });
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [
@@ -308,23 +315,18 @@ describe("dispatchChannelRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(vi.mocked(runtimeForTest.deliver).mock.calls[0]?.[0].requestId).toBe(
-      "iad1::abc123-1710000000000-deadbeef",
+    expect(vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0].command).toMatchObject(
+      { requestId: "iad1::abc123-1710000000000-deadbeef" },
     );
   });
 
   it("supplies a channel-scoped reset helper", async () => {
-    const runtimeForTest: Runtime = {
-      cancelTurn: vi.fn(),
-      clearSession: vi.fn(),
-      compactSession: vi.fn(),
-      deliver: vi.fn(),
-      getEventStream: vi.fn(),
-      getStreamTailIndex: vi.fn(),
-      resolveSession: vi.fn().mockResolvedValue({ sessionId: "sess_previous" }),
-      run: vi.fn(),
-      terminateSession: vi.fn().mockResolvedValue({ status: "terminated" }),
-    };
+    const runtimeForTest = createRuntime({
+      dispatchContinuation: vi.fn().mockResolvedValue({
+        previousSessionId: "sess_previous",
+        status: "reset",
+      }),
+    });
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [
@@ -358,27 +360,18 @@ describe("dispatchChannelRequest", () => {
       previousSessionId: "sess_previous",
       status: "reset",
     });
-    expect(runtimeForTest.resolveSession).toHaveBeenCalledWith(
-      "imessage:direct:+15551234567:+15557654321",
-    );
-    expect(runtimeForTest.terminateSession).toHaveBeenCalledWith({
-      reason: "User requested /new",
-      sessionId: "sess_previous",
+    expect(runtimeForTest.dispatchContinuation).toHaveBeenCalledWith({
+      command: { kind: "reset", reason: "User requested /new" },
+      continuationToken: "imessage:direct:+15551234567:+15557654321",
     });
   });
 
   it("supplies a channel-scoped clear helper", async () => {
-    const runtimeForTest: Runtime = {
-      cancelTurn: vi.fn(),
-      clearSession: vi.fn().mockResolvedValue({ sessionId: "sess_active", status: "accepted" }),
-      compactSession: vi.fn(),
-      deliver: vi.fn(),
-      getEventStream: vi.fn(),
-      getStreamTailIndex: vi.fn(),
-      resolveSession: vi.fn(),
-      run: vi.fn(),
-      terminateSession: vi.fn(),
-    };
+    const runtimeForTest = createRuntime({
+      dispatchContinuation: vi
+        .fn()
+        .mockResolvedValue({ sessionId: "sess_active", status: "accepted" }),
+    });
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [
@@ -409,23 +402,19 @@ describe("dispatchChannelRequest", () => {
       sessionId: "sess_active",
       status: "accepted",
     });
-    expect(runtimeForTest.clearSession).toHaveBeenCalledWith({
+    expect(runtimeForTest.dispatchContinuation).toHaveBeenCalledWith({
+      command: { kind: "clear" },
       continuationToken: "imessage:direct:+15551234567:+15557654321",
     });
   });
 
   it("does not invent a channel request id when Vercel did not send one", async () => {
-    const runtimeForTest: Runtime = {
-      cancelTurn: vi.fn(),
-      clearSession: vi.fn(),
-      compactSession: vi.fn(),
-      deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
-      resolveSession: vi.fn(),
-      getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
-      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-      run: vi.fn(),
-      terminateSession: vi.fn(),
-    };
+    const runtimeForTest = createRuntime({
+      dispatchContinuation: vi.fn().mockResolvedValue({
+        sessionId: "sess_route",
+        status: "accepted",
+      }),
+    });
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       channels: [
@@ -457,25 +446,24 @@ describe("dispatchChannelRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(vi.mocked(runtimeForTest.deliver).mock.calls[0]?.[0].requestId).toBeUndefined();
+    expect(
+      vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0].command,
+    ).toHaveProperty("requestId", undefined);
   });
 
   it("does not mutate route-owned run and deliver inputs", async () => {
-    const runtimeForTest: Runtime = {
-      cancelTurn: vi.fn().mockResolvedValue({ status: "accepted" }),
-      clearSession: vi.fn(),
-      compactSession: vi.fn(),
-      deliver: vi.fn().mockResolvedValue({ sessionId: "sess_deliver" }),
-      resolveSession: vi.fn(),
-      getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
-      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-      run: vi.fn().mockResolvedValue({
+    const runtimeForTest = createRuntime({
+      createSession: vi.fn().mockResolvedValue({
         continuationToken: "route-token",
         events: new ReadableStream(),
         sessionId: "sess_run",
       }),
-      terminateSession: vi.fn(),
-    };
+      dispatchContinuation: vi.fn().mockResolvedValue({
+        sessionId: "sess_deliver",
+        status: "accepted",
+      }),
+      dispatchSession: vi.fn().mockResolvedValue({ status: "accepted" }),
+    });
     const deliverInput = Object.freeze({
       auth: null,
       continuationToken: "route-token",
@@ -522,12 +510,17 @@ describe("dispatchChannelRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    const deliveredInput = vi.mocked(runtimeForTest.deliver).mock.calls[0]?.[0];
-    const startedInput = vi.mocked(runtimeForTest.run).mock.calls[0]?.[0];
-    expect(runtimeForTest.cancelTurn).toHaveBeenCalledWith(cancelInput);
+    const deliveredInput = vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0];
+    const startedInput = vi.mocked(runtimeForTest.createSession).mock.calls[0]?.[0];
+    expect(runtimeForTest.dispatchSession).toHaveBeenCalledWith({
+      command: { kind: "cancel", turnId: "turn_1" },
+      sessionId: "sess_run",
+    });
     expect(deliveredInput).not.toBe(deliverInput);
     expect(startedInput).not.toBe(runInput);
-    expect(deliveredInput?.requestId).toBe("iad1::abc123-1710000000000-deadbeef");
+    expect(deliveredInput?.command).toMatchObject({
+      requestId: "iad1::abc123-1710000000000-deadbeef",
+    });
     expect(startedInput?.requestId).toBe("iad1::abc123-1710000000000-deadbeef");
     expect(deliverInput).not.toHaveProperty("requestId");
     expect(runInput).not.toHaveProperty("requestId");

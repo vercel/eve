@@ -10,15 +10,12 @@ import type { Runtime } from "#channel/types.js";
 
 function makeRuntime(): Runtime {
   return {
-    cancelTurn: vi.fn(),
-    clearSession: vi.fn(),
-    compactSession: vi.fn(),
-    deliver: vi.fn(),
+    createSession: vi.fn(),
+    dispatchContinuation: vi.fn(),
+    dispatchSession: vi.fn(),
     getEventStream: vi.fn(),
     getStreamTailIndex: vi.fn(),
-    resolveSession: vi.fn(),
-    run: vi.fn(),
-    terminateSession: vi.fn(),
+    resolveContinuation: vi.fn(),
   };
 }
 

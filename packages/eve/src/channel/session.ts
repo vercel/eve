@@ -54,7 +54,10 @@ export function createSession(id: string, continuationToken: string, runtime: Ru
     id,
     continuationToken,
     async cancel(options?: { turnId?: string }) {
-      return runtime.cancelTurn({ sessionId: id, turnId: options?.turnId });
+      return runtime.dispatchSession({
+        command: { kind: "cancel", turnId: options?.turnId },
+        sessionId: id,
+      });
     },
     async getEventStream(options?: { startIndex?: number }) {
       return runtime.getEventStream(id, options);

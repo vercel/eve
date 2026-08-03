@@ -5,32 +5,29 @@ import type { Runtime } from "#channel/types.js";
 
 function runtime(): Runtime {
   return {
-    cancelTurn: vi.fn(),
-    clearSession: vi.fn(),
-    compactSession: vi.fn(),
-    deliver: vi.fn(),
+    createSession: vi.fn(),
+    dispatchContinuation: vi.fn(),
+    dispatchSession: vi.fn(),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-    resolveSession: vi.fn(),
-    run: vi.fn(),
-    terminateSession: vi.fn(),
+    resolveContinuation: vi.fn(),
   };
 }
 
 describe("createResolveActiveSessionFn", () => {
   it("resolves a channel-local continuation using the authored channel name", async () => {
     const mockRuntime = runtime();
-    vi.mocked(mockRuntime.resolveSession).mockResolvedValue({ sessionId: "session-1" });
+    vi.mocked(mockRuntime.resolveContinuation).mockResolvedValue({ sessionId: "session-1" });
 
     await expect(
       createResolveActiveSessionFn(mockRuntime, "support")({ continuationToken: "C1:T1" }),
     ).resolves.toEqual({ sessionId: "session-1" });
-    expect(mockRuntime.resolveSession).toHaveBeenCalledWith("support:C1:T1");
+    expect(mockRuntime.resolveContinuation).toHaveBeenCalledWith("support:C1:T1");
   });
 
   it("returns undefined for an inactive continuation", async () => {
     const mockRuntime = runtime();
-    vi.mocked(mockRuntime.resolveSession).mockResolvedValue(undefined);
+    vi.mocked(mockRuntime.resolveContinuation).mockResolvedValue(undefined);
 
     await expect(
       createResolveActiveSessionFn(mockRuntime, "support")({ continuationToken: "C1:T1" }),

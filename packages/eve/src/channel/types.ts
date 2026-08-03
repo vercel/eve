@@ -176,6 +176,49 @@ export interface DeliverPayload {
   readonly [key: string]: unknown;
 }
 
+/** One command accepted by a durable session inbox. */
+export type SessionCommand =
+  | {
+      readonly auth?: SessionAuthContext | null;
+      readonly caller?: TurnCaller;
+      readonly kind: "send";
+      readonly payload: DeliverPayload;
+      readonly requestId?: string;
+    }
+  | { readonly kind: "cancel"; readonly turnId?: string }
+  | { readonly kind: "compact" }
+  | { readonly kind: "clear" }
+  | { readonly kind: "reset"; readonly reason?: string };
+
+export type SessionSendCommandResult =
+  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "session_not_active" };
+
+export type ResetSessionCommandResult =
+  | { readonly status: "reset"; readonly previousSessionId: string }
+  | { readonly status: "no_active_session" };
+
+export type SessionCommandResult<TCommand extends SessionCommand = SessionCommand> =
+  TCommand extends { readonly kind: "send" }
+    ? SessionSendCommandResult
+    : TCommand extends { readonly kind: "cancel" }
+      ? CancelTurnResult
+      : TCommand extends { readonly kind: "compact" }
+        ? CompactSessionResult
+        : TCommand extends { readonly kind: "clear" }
+          ? ClearSessionResult
+          : ResetSessionCommandResult;
+
+export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
+  readonly command: TCommand;
+  readonly continuationToken: string;
+}
+
+export interface DispatchSessionInput<TCommand extends SessionCommand = SessionCommand> {
+  readonly command: TCommand;
+  readonly sessionId: string;
+}
+
 // ---------------------------------------------------------------------------
 // Hook payload
 // ---------------------------------------------------------------------------
@@ -196,7 +239,7 @@ export interface DeliverHookPayload {
   readonly payloads: readonly DeliverPayload[];
 }
 
-/** Internal deadline signal sent through the session's delivery hook. */
+/** Internal deadline signal sent through the stable session command inbox. */
 export interface SessionTimeoutHookPayload {
   readonly kind: "session-timeout";
 }
@@ -335,7 +378,7 @@ export interface SessionCapabilities {
 // ---------------------------------------------------------------------------
 
 /**
- * Single input shape consumed by {@link Runtime.run} for both root runs
+ * Single input shape consumed by {@link Runtime.createSession} for both root runs
  * (started by routes) and delegated child runs (started by the
  * subagent tool wrapper).
  */
@@ -442,8 +485,8 @@ export type RunResult =
   | { readonly status: "waiting" };
 
 /**
- * Handle returned immediately by `runtime.run()` before the step loop
- * completes.
+ * Handle returned by `runtime.createSession()` once the command inbox is ready,
+ * before the step loop completes.
  *
  * Carries the identifiers needed for stream endpoints.
  */
@@ -468,31 +511,22 @@ export interface Runtime {
    * time), builds the seeded {@link AlsContext}, and drives the step loop to
    * completion.
    */
-  run(input: RunInput): Promise<RunHandle>;
+  createSession(input: RunInput): Promise<RunHandle>;
 
-  /** Requests cancellation of a session's in-flight turn. */
-  cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
+  dispatchContinuation<TCommand extends SessionCommand>(
+    input: DispatchContinuationInput<TCommand>,
+  ): Promise<SessionCommandResult<TCommand>>;
 
-  /** Queues context compaction on the session owning a continuation token. */
-  compactSession(input: CompactSessionInput): Promise<CompactSessionResult>;
-
-  /** Queues a context clear on the session owning a continuation token. */
-  clearSession(input: ClearSessionInput): Promise<ClearSessionResult>;
-
-  /** Terminally retires a session and releases its non-retained continuation hooks. */
-  terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult>;
-
-  /**
-   * Delivers a follow-up message to a parked session.
-   */
-  deliver(input: DeliverInput): Promise<{ sessionId: string }>;
+  dispatchSession<TCommand extends SessionCommand>(
+    input: DispatchSessionInput<TCommand>,
+  ): Promise<SessionCommandResult<TCommand>>;
 
   /**
    * Resolves the session that currently owns a continuation token without
    * delivering input or starting a run. Returns `undefined` when no session
    * owns the token.
    */
-  resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined>;
+  resolveContinuation(continuationToken: string): Promise<{ sessionId: string } | undefined>;
 
   /**
    * Returns a readable stream of lifecycle events for an existing session.

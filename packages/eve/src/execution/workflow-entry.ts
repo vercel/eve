@@ -21,6 +21,7 @@ import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
+import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
@@ -28,9 +29,10 @@ import { emitTerminalSessionFailureStep } from "#execution/terminal-session-fail
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { disposeHook } from "#execution/hook-ownership.js";
 import {
-  createSessionDeliveryHook,
-  type SessionDeliveryHook,
-} from "#execution/session-delivery-hook.js";
+  createSessionCommandInbox,
+  type SessionCommandInbox,
+} from "#execution/session-command-inbox.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
@@ -77,7 +79,8 @@ type NextSessionAction =
       readonly delivery: DeliverHookPayload | null;
       readonly kind: "delivery";
     }
-  | { readonly kind: "expired" };
+  | { readonly kind: "expired" }
+  | { readonly kind: "reset" };
 
 /**
  * Long-lived workflow entrypoint. Handles both root sessions and
@@ -86,7 +89,7 @@ type NextSessionAction =
  * on a child stream and resume the parked parent with a
  * `subagent-result` on completion.
  *
- * Owns the public delivery hook and the session lifecycle; each turn-owned
+ * Owns the stable command inbox, its channel alias, and the session lifecycle; each turn-owned
  * turn resolves its own runtime actions in-line and reports back only
  * `done`/`park` via the closed-contract {@link NextDriverAction}. The
  * only session-shape flag the driver reads (besides identity) is
@@ -218,11 +221,17 @@ async function runDriverLoop(input: {
     `${input.sessionState.sessionId}:turn-control:${String(turnDispatchIndex++)}`;
 
   const bufferedDeliveries: DeliverHookPayload[] = [];
-  const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+  const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
+  const commandInbox = createSessionCommandInbox();
+  const stableCommandToken = sessionCommandHookToken(input.sessionState.sessionId);
+  await commandInbox.claimStable(stableCommandToken);
   const sessionTimeout =
     input.sessionTimeoutDeadline === undefined
       ? undefined
-      : createSessionTimeoutControl({ deadline: input.sessionTimeoutDeadline });
+      : createSessionTimeoutControl({
+          deadline: input.sessionTimeoutDeadline,
+          token: stableCommandToken,
+        });
 
   // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
@@ -230,13 +239,14 @@ async function runDriverLoop(input: {
     readonly delivery: HookPayload;
     readonly serializedContext: Record<string, unknown>;
     readonly sessionState: DurableSessionState;
-  }): Promise<NextDriverAction> => {
+  }): Promise<TurnDriverAction> => {
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
+      bufferedSessionControls,
       capabilities: input.capabilities,
+      commandInbox,
       controlToken: nextTurnControlToken(),
       delivery: args.delivery,
-      deliveryHook,
       mode: input.mode,
       parentWritable: input.driverWritable,
       serializedContext: args.serializedContext,
@@ -249,11 +259,11 @@ async function runDriverLoop(input: {
 
   try {
     if (input.sessionState.continuationToken) {
-      await deliveryHook.rekey(input.sessionState.continuationToken);
-      await sessionTimeout?.rekey(input.sessionState.continuationToken);
+      await commandInbox.rekeyContinuation(input.sessionState.continuationToken);
     }
+    await sessionTimeout?.start();
 
-    let action: NextDriverAction = await runTurn({
+    let action: TurnDriverAction = await runTurn({
       delivery: input.initialInput,
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
@@ -290,19 +300,11 @@ async function runDriverLoop(input: {
         };
       }
 
-      if (!action.sessionState.continuationToken) {
-        throw new Error(
-          "Cannot park: no continuation token available. The channel must " +
-            "post the first message during the initial turn (anchoring the " +
-            "session) or `send()` must be called with an explicit " +
-            "continuationToken.",
-        );
+      // Channel-created sessions may rekey their dynamic alias. Sessions
+      // without one remain reachable through the stable command inbox only.
+      if (action.sessionState.continuationToken) {
+        await commandInbox.rekeyContinuation(action.sessionState.continuationToken);
       }
-
-      // Rekey to the parked turn's continuation token before awaiting the next
-      // delivery — covers both the first turn's anchor and any later rekey.
-      await deliveryHook.rekey(action.sessionState.continuationToken);
-      await sessionTimeout?.rekey(action.sessionState.continuationToken);
 
       if (action.authorizationNames && action.authorizationNames.length > 0) {
         const expected = action.authorizationNames.length;
@@ -329,7 +331,8 @@ async function runDriverLoop(input: {
 
       const nextAction = await waitForNextSessionAction({
         bufferedDeliveries,
-        deliveryHook,
+        bufferedSessionControls,
+        commandInbox,
       });
 
       if (nextAction.kind === "expired") {
@@ -337,6 +340,10 @@ async function runDriverLoop(input: {
           kind: "expired",
           serializedContext: action.serializedContext,
         };
+      }
+
+      if (nextAction.kind === "reset") {
+        return { kind: "result", result: { output: "" } };
       }
 
       if (nextAction.kind === "clear" || nextAction.kind === "compact") {
@@ -397,7 +404,7 @@ async function runDriverLoop(input: {
   } finally {
     await disposeSettledTurnControl?.();
     await sessionTimeout?.dispose();
-    await deliveryHook.dispose();
+    await commandInbox.dispose();
     // Dispose without closing the iterator: a session cancelled while
     // awaiting authorization can leave a durable read in flight, and an
     // async iterator only honors `return()` after that read settles.
@@ -407,13 +414,10 @@ async function runDriverLoop(input: {
 
 async function waitForNextSessionAction(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly deliveryHook: SessionDeliveryHook;
+  readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly commandInbox: SessionCommandInbox;
 }): Promise<NextSessionAction> {
-  if (input.deliveryHook.consumeSessionTimeout()) {
-    return { kind: "expired" };
-  }
-
-  const pendingSessionControl = input.deliveryHook.consumeSessionControl();
+  const pendingSessionControl = input.bufferedSessionControls.shift();
   if (pendingSessionControl !== undefined) {
     return { kind: pendingSessionControl };
   }
@@ -426,8 +430,8 @@ async function waitForNextSessionAction(input: {
   }
 
   while (true) {
-    const first = await input.deliveryHook.next();
-    input.deliveryHook.consumeNext();
+    const first = await input.commandInbox.next();
+    input.commandInbox.consumeNext();
 
     if (first.done) {
       return { delivery: null, kind: "delivery" };
@@ -437,53 +441,32 @@ async function waitForNextSessionAction(input: {
       return { kind: "expired" };
     }
 
-    if (first.value.kind === "clear" || first.value.kind === "compact") {
-      const sessionControl = input.deliveryHook.consumeSessionControl();
-      if (sessionControl === undefined) {
-        throw new Error("Session control was consumed without being latched.");
-      }
-      return { kind: sessionControl };
+    if (
+      first.value.kind === "clear" ||
+      first.value.kind === "compact" ||
+      first.value.kind === "reset"
+    ) {
+      return { kind: first.value.kind };
     }
 
-    if (first.value.kind !== "deliver") {
+    if (first.value.kind === "cancel") {
       continue;
     }
 
-    let coalesced = first.value;
-
-    while (true) {
-      const ready = await takeReadyPayload(input.deliveryHook.next());
-
-      if (ready === NO_READY_MESSAGE) {
-        break;
-      }
-
-      if (ready.done) {
-        input.deliveryHook.consumeNext();
-        break;
-      }
-
-      // Preserve a timeout queued after a delivery. The delivery committed
-      // first, so its active turn settles before the offered timeout is read.
-      if (ready.value.kind === "session-timeout") {
-        break;
-      }
-
-      input.deliveryHook.consumeNext();
-
-      if (ready.value.kind === "clear" || ready.value.kind === "compact") {
-        continue;
-      }
-
-      if (ready.value.kind !== "deliver") {
-        continue;
-      }
-
-      coalesced = coalesceDeliveries([coalesced, ready.value]);
-    }
-
-    return { delivery: coalesced, kind: "delivery" };
+    return { delivery: commandToDelivery(first.value), kind: "delivery" };
   }
+}
+
+function commandToDelivery(
+  command: Extract<import("#channel/types.js").SessionCommand, { readonly kind: "send" }>,
+): DeliverHookPayload {
+  return {
+    auth: command.auth,
+    caller: command.caller,
+    kind: "deliver",
+    payloads: [command.payload],
+    requestId: command.requestId,
+  };
 }
 
 async function finalizeExpiredSession(input: {
@@ -528,11 +511,4 @@ async function finalizeDone(input: {
     usage: failed ? undefined : input.action.usage,
   });
   return { output };
-}
-
-const NO_READY_MESSAGE = Symbol("no-ready-message");
-
-async function takeReadyPayload<T>(promise: Promise<T>): Promise<T | typeof NO_READY_MESSAGE> {
-  await Promise.resolve();
-  return await Promise.race([promise, Promise.resolve(NO_READY_MESSAGE)]);
 }

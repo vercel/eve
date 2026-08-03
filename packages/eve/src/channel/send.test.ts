@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { createSendFn } from "#channel/send.js";
-import type { RunHandle, Runtime } from "#channel/types.js";
-import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import type { RunHandle, Runtime, SessionSendCommandResult } from "#channel/types.js";
+import {
+  RuntimeNoActiveSessionError,
+  RuntimeSessionOwnershipConflictError,
+} from "#execution/runtime-errors.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 
 function createMockRunHandle(): RunHandle {
@@ -14,49 +17,49 @@ function createMockRunHandle(): RunHandle {
   };
 }
 
-function createRuntime(deliverError: unknown): Runtime {
+function createRuntime(
+  dispatchResult: SessionSendCommandResult = { status: "session_not_active" },
+): Runtime {
   return {
-    cancelTurn: vi.fn(),
-    clearSession: vi.fn(),
-    compactSession: vi.fn(),
-    deliver: vi.fn().mockRejectedValue(deliverError),
-    resolveSession: vi.fn(),
-    run: vi.fn().mockResolvedValue(createMockRunHandle()),
+    createSession: vi.fn().mockResolvedValue(createMockRunHandle()),
+    dispatchContinuation: vi.fn().mockResolvedValue(dispatchResult),
+    dispatchSession: vi.fn(),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-    terminateSession: vi.fn(),
+    resolveContinuation: vi.fn(),
   };
 }
 
 const ADAPTER: ChannelAdapter = { kind: "channel:test" };
 
 describe("createSendFn", () => {
-  it("starts a new session silently when the runtime reports no active session", async () => {
-    const noSession = new RuntimeNoActiveSessionError("test:token");
-    const runtime = createRuntime(noSession);
-    // info/debug → console.log; warn → console.warn. Spy on both.
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
+  it("creates a session when the channel address is unowned", async () => {
+    const runtime = createRuntime();
     const send = createSendFn(runtime, ADAPTER, "test");
-    const session = await send("hello", {
-      auth: null,
-      continuationToken: "token",
-    });
+
+    const session = await send("hello", { auth: null, continuationToken: "token" });
 
     expect(session.id).toBe("mock-session-id");
-    expect(runtime.deliver).toHaveBeenCalledTimes(1);
-    expect(runtime.run).toHaveBeenCalledTimes(1);
-    expect(log).not.toHaveBeenCalled();
-    expect(warn).not.toHaveBeenCalled();
-
-    log.mockRestore();
-    warn.mockRestore();
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
+      command: {
+        auth: null,
+        caller: undefined,
+        kind: "send",
+        payload: {
+          context: undefined,
+          inputResponses: undefined,
+          message: "hello",
+          outputSchema: undefined,
+        },
+        requestId: undefined,
+      },
+      continuationToken: "test:token",
+    });
+    expect(runtime.createSession).toHaveBeenCalledOnce();
   });
 
   it("rethrows a typed no-active-session error when resume intent forbids fallback", async () => {
-    const noSession = new RuntimeNoActiveSessionError("test:token");
-    const runtime = createRuntime(noSession);
+    const runtime = createRuntime();
 
     const send = createSendFn(runtime, ADAPTER, "test");
     await expect(
@@ -65,86 +68,84 @@ describe("createSendFn", () => {
         continuationToken: "token",
         intent: "resume",
       }),
-    ).rejects.toBe(noSession);
+    ).rejects.toEqual(new RuntimeNoActiveSessionError("test:token"));
 
-    expect(runtime.run).not.toHaveBeenCalled();
+    expect(runtime.createSession).not.toHaveBeenCalled();
   });
 
-  it("propagates unexpected delivery failures without starting a new session", async () => {
+  it("returns the existing session without creating", async () => {
+    const runtime = createRuntime({ sessionId: "existing-session-id", status: "accepted" });
+    const send = createSendFn(runtime, ADAPTER, "test");
+
+    await expect(send("hello", { auth: null, continuationToken: "token" })).resolves.toMatchObject({
+      id: "existing-session-id",
+      continuationToken: "token",
+    });
+    expect(runtime.createSession).not.toHaveBeenCalled();
+  });
+
+  it("propagates unexpected dispatch failures without creating", async () => {
     const failure = new Error("boom");
-    const runtime = createRuntime(failure);
-
-    const send = createSendFn(runtime, ADAPTER, "test");
-    await expect(send("hello", { auth: null, continuationToken: "token" })).rejects.toBe(failure);
-
-    expect(runtime.run).not.toHaveBeenCalled();
-  });
-
-  it("rejects inputResponses when no active session exists", async () => {
-    const runtime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
-    const send = createSendFn(runtime, ADAPTER, "test");
+    const runtime = createRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockRejectedValue(failure);
 
     await expect(
-      send(
-        {
-          inputResponses: [{ requestId: "req-1", text: "yes" }],
-        },
+      createSendFn(
+        runtime,
+        ADAPTER,
+        "test",
+      )("hello", {
+        auth: null,
+        continuationToken: "token",
+      }),
+    ).rejects.toBe(failure);
+    expect(runtime.createSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects inputResponses when the channel address is unowned", async () => {
+    const runtime = createRuntime();
+
+    await expect(
+      createSendFn(
+        runtime,
+        ADAPTER,
+        "test",
+      )(
+        { inputResponses: [{ requestId: "req-1", text: "yes" }] },
         { auth: null, continuationToken: "token" },
       ),
     ).rejects.toThrow(/Cannot deliver inputResponses/);
-    expect(runtime.run).not.toHaveBeenCalled();
+    expect(runtime.createSession).not.toHaveBeenCalled();
   });
 
-  it("forwards context through deliver and run payloads", async () => {
-    const context = ["thread background"];
-    const deliverRuntime: Runtime = {
-      cancelTurn: vi.fn(),
-      clearSession: vi.fn(),
-      compactSession: vi.fn(),
-      deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
-      resolveSession: vi.fn(),
-      run: vi.fn().mockResolvedValue(createMockRunHandle()),
-      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
-      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-      terminateSession: vi.fn(),
-    };
+  it("re-dispatches to the winner of a concurrent first-send claim", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.createSession).mockRejectedValue(
+      new RuntimeSessionOwnershipConflictError({
+        continuationToken: "test:token",
+        ownerSessionId: "winner",
+        sessionId: "loser",
+      }),
+    );
+    vi.mocked(runtime.dispatchContinuation)
+      .mockResolvedValueOnce({ status: "session_not_active" })
+      .mockResolvedValueOnce({ sessionId: "winner", status: "accepted" });
 
-    const deliverSend = createSendFn(deliverRuntime, ADAPTER, "test");
-    await deliverSend({ message: "hello", context }, { auth: null, continuationToken: "token" });
-
-    expect(deliverRuntime.deliver).toHaveBeenCalledWith({
-      auth: null,
-      continuationToken: "test:token",
-      payload: {
-        inputResponses: undefined,
-        message: "hello",
-        context,
-      },
-    });
-    expect(deliverRuntime.run).not.toHaveBeenCalled();
-
-    const runRuntime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
-    const runSend = createSendFn(runRuntime, ADAPTER, "test");
-    await runSend({ message: "hello", context }, { auth: null, continuationToken: "token" });
-
-    expect(vi.mocked(runRuntime.run).mock.calls[0]![0].input).toEqual({
-      message: "hello",
-      context,
-    });
+    await expect(
+      createSendFn(
+        runtime,
+        ADAPTER,
+        "test",
+      )("hello", {
+        auth: null,
+        continuationToken: "token",
+      }),
+    ).resolves.toMatchObject({ id: "winner" });
+    expect(runtime.dispatchContinuation).toHaveBeenCalledTimes(2);
   });
 
-  it("forwards the turn caller from options onto the deliver input", async () => {
-    const runtime: Runtime = {
-      cancelTurn: vi.fn(),
-      clearSession: vi.fn(),
-      compactSession: vi.fn(),
-      deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
-      resolveSession: vi.fn(),
-      run: vi.fn().mockResolvedValue(createMockRunHandle()),
-      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
-      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-      terminateSession: vi.fn(),
-    };
+  it("forwards the turn caller on the session command", async () => {
+    const runtime = createRuntime({ sessionId: "existing-session-id", status: "accepted" });
     const caller = {
       callId: "call-1",
       replyTo: { kind: "hook" as const, token: "parent-turn" },
@@ -157,142 +158,93 @@ describe("createSendFn", () => {
       "test",
     )({ message: "follow up" }, { auth: null, caller, continuationToken: "token" });
 
-    expect(runtime.deliver).toHaveBeenCalledWith({
-      auth: null,
-      caller,
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
+      command: expect.objectContaining({
+        caller,
+        payload: expect.not.objectContaining({ caller: expect.anything() }),
+      }),
       continuationToken: "test:token",
-      payload: expect.not.objectContaining({ caller: expect.anything() }),
     });
   });
 
-  it("adds channel request ids to deliver and run inputs when provided", async () => {
-    const deliverRuntime: Runtime = {
-      cancelTurn: vi.fn(),
-      clearSession: vi.fn(),
-      compactSession: vi.fn(),
-      deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
-      resolveSession: vi.fn(),
-      run: vi.fn().mockResolvedValue(createMockRunHandle()),
-      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
-      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-      terminateSession: vi.fn(),
-    };
-
-    const deliverSend = createSendFn(deliverRuntime, ADAPTER, "test", {
-      requestId: "req_send",
-    });
-    await deliverSend("hello", { auth: null, continuationToken: "token" });
-
-    expect(vi.mocked(deliverRuntime.deliver).mock.calls[0]?.[0].requestId).toBe("req_send");
-
-    const runRuntime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
-    const runSend = createSendFn(runRuntime, ADAPTER, "test", { requestId: "req_send" });
-    await runSend("hello", { auth: null, continuationToken: "token" });
-
-    expect(vi.mocked(runRuntime.run).mock.calls[0]?.[0].requestId).toBe("req_send");
-  });
-
-  it("forwards outputSchema through deliver and run payloads", async () => {
+  it("forwards context, output schema, and request id through dispatch and creation", async () => {
+    const runtime = createRuntime();
     const outputSchema = {
       properties: { title: { type: "string" } },
       required: ["title"],
       type: "object",
     } as const;
-    const deliverRuntime: Runtime = {
-      cancelTurn: vi.fn(),
-      clearSession: vi.fn(),
-      compactSession: vi.fn(),
-      deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
-      resolveSession: vi.fn(),
-      run: vi.fn().mockResolvedValue(createMockRunHandle()),
-      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
-      getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-      terminateSession: vi.fn(),
-    };
+    const send = createSendFn(runtime, ADAPTER, "test", { requestId: "req_send" });
 
-    const deliverSend = createSendFn(deliverRuntime, ADAPTER, "test");
-    await deliverSend(
-      { message: "hello", outputSchema },
+    await send(
+      { context: ["thread background"], message: "hello", outputSchema },
       { auth: null, continuationToken: "token" },
     );
 
-    expect(deliverRuntime.deliver).toHaveBeenCalledWith({
-      auth: null,
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
+      command: expect.objectContaining({
+        payload: expect.objectContaining({
+          context: ["thread background"],
+          message: "hello",
+          outputSchema,
+        }),
+        requestId: "req_send",
+      }),
       continuationToken: "test:token",
-      payload: {
-        inputResponses: undefined,
-        message: "hello",
-        modelContext: undefined,
-        outputSchema,
-      },
     });
-
-    const runRuntime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
-    const runSend = createSendFn(runRuntime, ADAPTER, "test");
-    await runSend({ message: "hello", outputSchema }, { auth: null, continuationToken: "token" });
-
-    expect(vi.mocked(runRuntime.run).mock.calls[0]![0].input).toEqual({
-      message: "hello",
-      outputSchema,
-    });
+    expect(vi.mocked(runtime.createSession).mock.calls[0]![0]).toEqual(
+      expect.objectContaining({
+        input: {
+          context: ["thread background"],
+          message: "hello",
+          outputSchema,
+        },
+        requestId: "req_send",
+      }),
+    );
   });
 
-  it("namespaces the channel-local raw token with the channel name", async () => {
+  it("namespaces the raw token and seeds state for a new session", async () => {
     interface State {
       channelId: string;
       threadTs: string;
     }
-    const runtime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
-    const stateful: ChannelAdapter = {
-      kind: "channel:stateful",
-      state: { channelId: "C1", threadTs: "T1" },
-    };
-
-    const send = createSendFn<State>(runtime, stateful, "stateful");
-    await send("hello", {
-      auth: null,
-      continuationToken: "C1:T1",
-      state: { channelId: "C1", threadTs: "T1" },
-    });
-
-    expect(runtime.run).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(runtime.run).mock.calls[0]![0].continuationToken).toBe("stateful:C1:T1");
-  });
-
-  it("seeds adapter state from the send() call so the new session resumes with it", async () => {
-    interface State {
-      channelId: string;
-      threadTs: string;
-    }
-    const runtime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
-    const stateful: ChannelAdapter = {
+    const runtime = createRuntime();
+    const adapter: ChannelAdapter = {
       kind: "channel:stateful",
       state: { channelId: null, threadTs: null },
     };
 
-    const send = createSendFn<State>(runtime, stateful, "stateful");
-    await send("hello", {
+    await createSendFn<State>(
+      runtime,
+      adapter,
+      "stateful",
+    )("hello", {
       auth: null,
       continuationToken: "C1:T1",
       state: { channelId: "C1", threadTs: "T1" },
     });
 
-    const runInput = vi.mocked(runtime.run).mock.calls[0]![0];
+    const runInput = vi.mocked(runtime.createSession).mock.calls[0]![0];
+    expect(runInput.continuationToken).toBe("stateful:C1:T1");
     expect(runInput.adapter.state).toEqual({ channelId: "C1", threadTs: "T1" });
   });
 
   it("keeps an explicit workflow title separate from the model message", async () => {
-    const runtime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
-    const send = createSendFn(runtime, ADAPTER, "test");
-    const message = "<slack_message>\n<content>ship it</content>\n</slack_message>";
+    const runtime = createRuntime();
+    const message = "<slack_message>ship it</slack_message>";
 
-    await send(message, {
+    await createSendFn(
+      runtime,
+      ADAPTER,
+      "test",
+    )(message, {
       auth: null,
       continuationToken: "token",
       title: "ship it",
     });
 
-    const runInput = vi.mocked(runtime.run).mock.calls[0]![0];
+    const runInput = vi.mocked(runtime.createSession).mock.calls[0]![0];
     expect(runInput.input.message).toBe(message);
     expect(runInput.title).toBe("ship it");
   });

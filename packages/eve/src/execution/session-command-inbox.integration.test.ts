@@ -1,24 +1,46 @@
 import { describe, expect, it } from "vitest";
 
-import { sessionDeliveryHookWorkflow } from "#internal/testing/session-delivery-hook-workflow.js";
+import { sessionCommandInboxWorkflow } from "#internal/testing/session-command-inbox-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 
-describe("session delivery hook integration", () => {
+describe("session command inbox integration", () => {
+  it("accepts commands alternately through the stable ID and channel aliases", async () => {
+    const channelToken = "http:session-command-inbox:both-aliases";
+    const run = await start(sessionCommandInboxWorkflow, [{ token: channelToken }]);
+    const stableToken = sessionCommandHookToken(run.runId);
+
+    try {
+      await Promise.all([
+        waitForHook({ runId: run.runId }, { token: stableToken }),
+        waitForHook({ runId: run.runId }, { token: channelToken }),
+      ]);
+
+      await resumeHook(stableToken, { kind: "send", payload: { message: "by id" } });
+      await resumeHook(channelToken, { kind: "send", payload: { message: "by channel" } });
+
+      await expect(run.returnValue).resolves.toEqual(["by id", "by channel"]);
+    } finally {
+      const status = await run.status;
+      if (status === "pending" || status === "running") await run.cancel();
+    }
+  });
+
   it.each([
     ["old then replacement", ["old", "replacement"] as const],
     ["replacement then old", ["replacement", "old"] as const],
-  ])("preserves deliveries committed %s during rekey", async (_label, order) => {
+  ])("preserves sends committed %s during rekey", async (_label, order) => {
     const suffix = order.join("-");
-    const oldToken = `http:session-delivery-hook:${suffix}:old`;
-    const replacementToken = `http:session-delivery-hook:${suffix}:replacement`;
+    const oldToken = `http:session-command-inbox:${suffix}:old`;
+    const replacementToken = `http:session-command-inbox:${suffix}:replacement`;
     const disposal = await pauseHookDisposal(oldToken);
-    const run = await start(sessionDeliveryHookWorkflow, [
+    const run = await start(sessionCommandInboxWorkflow, [
       { nextToken: replacementToken, token: oldToken },
     ]);
 
     try {
-      await withTimeout(disposal.started, "old-hook disposal");
+      await withTimeout(disposal.started, "old-alias disposal");
       await Promise.all([
         waitForHook({ runId: run.runId }, { token: oldToken }),
         waitForHook({ runId: run.runId }, { token: replacementToken }),
@@ -26,20 +48,14 @@ describe("session delivery hook integration", () => {
 
       const tokens = { old: oldToken, replacement: replacementToken };
       for (const owner of order) {
-        await resumeHook(tokens[owner], {
-          kind: "deliver",
-          payloads: [{ message: owner }],
-        });
+        await resumeHook(tokens[owner], { kind: "send", payload: { message: owner } });
       }
 
       disposal.release();
-      await withTimeout(disposal.finished, "old-hook disposal completion");
+      await withTimeout(disposal.finished, "old-alias disposal completion");
 
       await expect(
-        resumeHook(oldToken, {
-          kind: "deliver",
-          payloads: [{ message: "too late" }],
-        }),
+        resumeHook(oldToken, { kind: "send", payload: { message: "too late" } }),
       ).rejects.toMatchObject({ name: "HookNotFoundError" });
       await expect(run.returnValue).resolves.toEqual(order);
     } finally {

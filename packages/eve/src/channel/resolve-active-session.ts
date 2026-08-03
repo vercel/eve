@@ -6,5 +6,6 @@ export function createResolveActiveSessionFn(
   runtime: Runtime,
   channelName: string,
 ): ResolveActiveSessionFn {
-  return ({ continuationToken }) => runtime.resolveSession(`${channelName}:${continuationToken}`);
+  return ({ continuationToken }) =>
+    runtime.resolveContinuation(`${channelName}:${continuationToken}`);
 }

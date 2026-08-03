@@ -15,6 +15,7 @@ import { createSendFn } from "#channel/send.js";
 import { createResolveActiveSessionFn } from "#channel/resolve-active-session.js";
 import { createGetSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import {
@@ -258,18 +259,33 @@ function buildRouteArgs(
 function createRouteAgent(runtime: Runtime, requestId: string | undefined): Agent {
   return {
     async cancelTurn(input) {
-      return await runtime.cancelTurn(input);
+      return await runtime.dispatchSession({
+        command: { kind: "cancel", turnId: input.turnId },
+        sessionId: input.sessionId,
+      });
     },
     async deliver(input) {
       const deliverInput: DeliverInput = { ...input, requestId }; // Avoid mutating a frozen caller input.
-      return await runtime.deliver(deliverInput);
+      const result = await runtime.dispatchContinuation({
+        command: {
+          auth: deliverInput.auth,
+          kind: "send",
+          payload: deliverInput.payload,
+          requestId: deliverInput.requestId,
+        },
+        continuationToken: deliverInput.continuationToken,
+      });
+      if (result.status === "session_not_active") {
+        throw new RuntimeNoActiveSessionError(deliverInput.continuationToken);
+      }
+      return { sessionId: result.sessionId };
     },
     async getEventStream(sessionId, options) {
       return await runtime.getEventStream(sessionId, options);
     },
     async run(input) {
       const runInput: RunInput = { ...input, requestId }; // Avoid mutating a frozen caller input.
-      return await runtime.run(runInput);
+      return await runtime.createSession(runInput);
     },
   };
 }

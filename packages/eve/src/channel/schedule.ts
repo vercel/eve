@@ -106,7 +106,7 @@ export class ScheduleDispatcher {
   }
 
   private async runMarkdown(markdown: string): Promise<Session> {
-    const handle = await this.runtime.run({
+    const handle = await this.runtime.createSession({
       adapter: SCHEDULE_ADAPTER,
       auth: SCHEDULE_APP_AUTH,
       input: { message: markdown },
