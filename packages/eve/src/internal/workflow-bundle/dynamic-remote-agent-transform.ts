@@ -1,5 +1,9 @@
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
-import type { DynamicToolAstNode as AstNode } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
+import {
+  findProperty,
+  type DynamicToolAstNode as AstNode,
+  walkNode,
+} from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
 interface CredentialsFactoryInfo {
   readonly authPropertySource?: string;
@@ -120,33 +124,4 @@ function sliceNode(source: string, node: AstNode | undefined): string | undefine
   return node?.start === undefined || node.end === undefined
     ? undefined
     : source.slice(node.start, node.end);
-}
-
-function findProperty(object: AstNode, name: string): AstNode | undefined {
-  return object.properties?.find(
-    (property) =>
-      property.type === "Property" &&
-      !property.computed &&
-      (property.key?.type === "Identifier"
-        ? property.key.name === name
-        : property.key?.value === name),
-  );
-}
-
-function walkNode(node: AstNode, visitor: (node: AstNode) => boolean): void {
-  if (!visitor(node)) return;
-
-  for (const value of Object.values(node)) {
-    if (Array.isArray(value)) {
-      for (const child of value) {
-        if (isAstNode(child)) walkNode(child, visitor);
-      }
-    } else if (isAstNode(value)) {
-      walkNode(value, visitor);
-    }
-  }
-}
-
-function isAstNode(value: unknown): value is AstNode {
-  return value !== null && typeof value === "object" && typeof (value as AstNode).type === "string";
 }

@@ -30,6 +30,37 @@ export type DynamicToolAstNode = {
 
 type IdentifierContext = "binding" | "reference";
 
+export function findProperty(
+  object: DynamicToolAstNode,
+  name: string,
+): DynamicToolAstNode | undefined {
+  return object.properties?.find(
+    (property) =>
+      property.type === "Property" &&
+      !property.computed &&
+      (property.key?.type === "Identifier"
+        ? property.key.name === name
+        : property.key?.value === name),
+  );
+}
+
+export function walkNode(
+  node: DynamicToolAstNode,
+  visitor: (node: DynamicToolAstNode) => boolean,
+): void {
+  if (!visitor(node)) return;
+
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        if (isAstNode(child)) walkNode(child, visitor);
+      }
+    } else if (isAstNode(value)) {
+      walkNode(value, visitor);
+    }
+  }
+}
+
 /**
  * Collects identifiers used as runtime references in a function body AST.
  */
