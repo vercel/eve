@@ -5,7 +5,7 @@ A development-only source editing subagent for [eve](https://eve.dev).
 Install the package and scaffold a declared subagent from the eve registry:
 
 ```sh
-eve add eve-selfmod
+eve add experimental/selfmod
 ```
 
 The command creates:
