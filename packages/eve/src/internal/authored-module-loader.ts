@@ -302,6 +302,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       platform: "node",
       plugins,
       resolve: {
+        conditionNames: ["eve-source", "node", "import", "default"],
         extensions: [...RESOLVE_EXTENSIONS],
       },
       tsconfig: resolveAuthoredTsConfigPath(packageRoot),
@@ -415,6 +416,7 @@ async function buildAuthoredModuleBundle(
       platform: "node",
       plugins,
       resolve: {
+        conditionNames: ["eve-source", "node", "import", "default"],
         extensions: [...RESOLVE_EXTENSIONS],
       },
       tsconfig: tsconfigPath,
