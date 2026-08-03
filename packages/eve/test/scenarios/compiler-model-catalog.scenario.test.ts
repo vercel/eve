@@ -319,7 +319,7 @@ describe("compiler model catalog", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("fails clearly when compaction requires unresolved model limits", async () => {
+  it("fails clearly when a gateway-routed model has no resolvable context window", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-model-catalog-missing-",
       APP_ROOT_OPTIONS,
@@ -337,7 +337,7 @@ describe("compiler model catalog", () => {
         startPath: appRoot,
       }),
     ).rejects.toThrow(
-      'Cannot compile agent compaction because the primary compaction trigger model "example/missing-model" does not have known AI Gateway context window metadata.',
+      'Cannot resolve a context window for the agent model "example/missing-model": it is not listed in the AI Gateway model catalog. Set modelContextWindowTokens to provide one explicitly.',
     );
   });
 
