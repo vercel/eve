@@ -208,7 +208,7 @@ Start with the [TypeScript SDK](../guides/client/overview) guide. It covers basi
 curl http://127.0.0.1:2000/eve/v1/info
 ```
 
-With the default auth chain (`[vercelOidc(), localDev()]`), a local Vercel OIDC bearer takes precedence and other local requests fall back to development access. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
+With the default auth chain (`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes precedence, an `eve dev` or `vercel dev` server authenticates local requests, and everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
 
 ## Dispatch order
 
