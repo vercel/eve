@@ -1,5 +1,6 @@
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest } from "#runtime/input/types.js";
+import { getToolApprovalContent } from "#runtime/input/tool-approval-content.js";
 import type {
   EveDynamicToolPart,
   EveMessageInputRequest,
@@ -26,6 +27,7 @@ export function toMessageInputRequest(request: InputRequest): EveMessageInputReq
     display: request.display,
     kind: request.kind,
     options: request.options,
+    content: getToolApprovalContent(request),
     prompt: request.prompt,
     requestId: request.requestId,
   };

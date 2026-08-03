@@ -3311,6 +3311,91 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("shows tool-provided content without changing decision keys", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const approval = renderer.readToolApproval({
+      approvalId: "a-review",
+      toolCallId: "c-review",
+      toolName: "extension__finalize",
+      input: {},
+      content: {
+        type: "text",
+        text: "--- agent.ts\n- old\n+ new",
+      },
+    });
+
+    expect(screen.snapshot()).toContain("Approve extension__finalize?");
+    expect(screen.snapshot()).toContain("(y/n)");
+    expect(screen.snapshot()).toContain("--- agent.ts");
+    expect(screen.snapshot()).toContain("- old");
+    expect(screen.snapshot()).toContain("+ new");
+    input.type("y");
+
+    await expect(approval).resolves.toEqual({ approved: true });
+    renderer.shutdown();
+  });
+
+  it("scrolls up immediately after paging and pages up with b", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const approval = renderer.readToolApproval({
+      approvalId: "a-scroll",
+      toolCallId: "c-scroll",
+      toolName: "review",
+      input: {},
+      content: {
+        type: "text",
+        text: Array.from(
+          { length: 30 },
+          (_, index) => `line-${String(index).padStart(2, "0")}`,
+        ).join("\n"),
+      },
+    });
+
+    input.type(" ");
+    expect(screen.snapshot()).toContain("line-07");
+    expect(screen.snapshot()).not.toContain("line-06");
+    input.up();
+    expect(screen.snapshot()).toContain("line-06");
+    input.type("b");
+    expect(screen.snapshot()).toContain("line-00");
+
+    input.type("n");
+    await expect(approval).resolves.toEqual({ approved: false, reason: "Denied by user." });
+    renderer.shutdown();
+  });
+
+  it("supports pager bindings and closes review content without deciding", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const approval = renderer.readToolApproval({
+      approvalId: "a-pager",
+      toolCallId: "c-pager",
+      toolName: "review",
+      input: {},
+      content: {
+        type: "text",
+        text: Array.from({ length: 40 }, (_, index) => `pager-line-${index}`).join("\n"),
+      },
+    });
+
+    input.type("G");
+    expect(screen.snapshot()).toContain("pager-line-39");
+    input.type("g");
+    expect(screen.snapshot()).toContain("pager-line-0");
+    input.send("\x1b[6~");
+    expect(screen.snapshot()).not.toContain("pager-line-0");
+    input.type("b");
+    expect(screen.snapshot()).toContain("pager-line-0");
+    input.type("q");
+    expect(screen.snapshot()).not.toContain("pager-line-0");
+    expect(screen.snapshot()).toContain("Review content available");
+    input.type("v");
+    expect(screen.snapshot()).toContain("pager-line-0");
+
+    input.type("n");
+    await expect(approval).resolves.toEqual({ approved: false, reason: "Denied by user." });
+    renderer.shutdown();
+  });
+
   it("marks a tool block denied when the user rejects the approval", async () => {
     const { screen, input, renderer } = makeRenderer();
     await renderer.renderStream(

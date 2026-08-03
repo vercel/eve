@@ -21,6 +21,7 @@ import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import { ToolApprovalContentCollector } from "#harness/tool-approval-content.js";
 
 function getJsonSchema(tool: unknown): unknown {
   return (tool as { inputSchema: { jsonSchema: unknown } }).inputSchema.jsonSchema;
@@ -779,6 +780,64 @@ describe("buildToolSet", () => {
         type: "denied",
         reason: "Account is protected.",
       });
+    });
+
+    it("collects review content while returning a plain SDK status", async () => {
+      const approvalContents = new ToolApprovalContentCollector();
+      const tools: HarnessToolMap = new Map([
+        [
+          "change_files",
+          {
+            approval: () => ({
+              type: "user-approval" as const,
+              content: {
+                type: "text" as const,
+                text: "--- agent.ts\n- old\n+ new",
+              },
+            }),
+            description: "Change files.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "change_files",
+          },
+        ],
+      ]);
+      const result = buildToolSet({ approvalContents, tools });
+
+      await expect(resolveApproval(result, "change_files", {})).resolves.toEqual({
+        type: "user-approval",
+      });
+      expect(approvalContents.get("call_1")).toEqual({
+        type: "text",
+        text: "--- agent.ts\n- old\n+ new",
+      });
+    });
+
+    it("rejects unsafe review content", async () => {
+      const approvalContents = new ToolApprovalContentCollector();
+      const tools: HarnessToolMap = new Map([
+        [
+          "unsafe",
+          {
+            approval: () => ({
+              type: "user-approval" as const,
+              content: {
+                type: "text" as const,
+                text: "agent.ts\u001b[2J",
+              },
+            }),
+            description: "Unsafe content.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "unsafe",
+          },
+        ],
+      ]);
+      const result = buildToolSet({ approvalContents, tools });
+
+      await expect(resolveApproval(result, "unsafe", {})).rejects.toThrow(
+        "terminal control characters",
+      );
     });
 
     it("always() requires approval", async () => {

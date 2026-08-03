@@ -22,11 +22,13 @@ import {
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
+import type { ToolApprovalContent } from "#public/tools/approval/content.js";
 import {
   createDevelopmentRuntimeArtifactRefresher,
   type DevelopmentRuntimeArtifactRefresher,
 } from "#services/dev-client.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { getToolApprovalContent } from "#runtime/input/tool-approval-content.js";
 import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
 export type {
   SubagentRun,
@@ -192,6 +194,7 @@ export type AgentTUIToolApprovalRequest = {
   toolCallId: string;
   toolName: string;
   title?: string;
+  content?: ToolApprovalContent;
   input: unknown;
 };
 
@@ -2211,6 +2214,7 @@ function toAgentTUIToolApprovalRequest(request: InputRequest): AgentTUIToolAppro
     approvalId: request.requestId,
     toolCallId: request.action.callId,
     toolName: request.action.toolName,
+    content: getToolApprovalContent(request),
     input: request.action.input,
   };
 }

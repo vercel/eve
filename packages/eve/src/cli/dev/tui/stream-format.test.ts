@@ -157,6 +157,11 @@ describe("nextKey", () => {
     expect(nextKey("\r")).toEqual({ key: { type: "enter" }, consumed: 1 });
   });
 
+  it("decodes Page Up and Page Down", () => {
+    expect(nextKey("\x1b[5~")).toEqual({ key: { type: "page-up" }, consumed: 4 });
+    expect(nextKey("\x1b[6~")).toEqual({ key: { type: "page-down" }, consumed: 4 });
+  });
+
   it("stops a printable run at a control byte", () => {
     expect(nextKey("ab\rcd")).toEqual({
       key: { type: "text", value: "ab", framing: "unframed" },

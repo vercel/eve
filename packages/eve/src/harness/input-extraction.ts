@@ -4,6 +4,8 @@ import { z } from "zod";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/input-requests.js";
+import type { ToolApprovalContentCollector } from "#harness/tool-approval-content.js";
+import type { InputRequestWithToolApprovalContent } from "#runtime/input/tool-approval-content.js";
 
 // Persisted history parts lose AI SDK typing on the storage round trip. The
 // schemas are the single source for the runtime narrowing and the static
@@ -99,6 +101,7 @@ function extractQuestionRequests(input: {
  * contain `tool-approval-request` entries.
  */
 export function extractToolApprovalInputRequests(input: {
+  readonly approvalContents?: ToolApprovalContentCollector;
   readonly content: readonly ContentPart<ToolSet>[];
   readonly excludedCallIds?: ReadonlySet<string>;
 }): InputRequest[] {
@@ -109,6 +112,7 @@ export function extractToolApprovalInputRequests(input: {
 // at runtime. The exported wrapper above keeps live call sites compile-checked
 // against the AI SDK shapes.
 function extractApprovalRequests(input: {
+  readonly approvalContents?: ToolApprovalContentCollector;
   readonly content: readonly unknown[];
   readonly excludedCallIds?: ReadonlySet<string>;
   readonly includedRequestIds?: ReadonlySet<string>;
@@ -154,7 +158,8 @@ function extractApprovalRequests(input: {
       continue;
     }
 
-    requests.push({
+    const content = input.approvalContents?.get(toolCall.toolCallId);
+    const request: InputRequest = {
       action: createRuntimeToolCallActionFromToolCall({ toolCall }),
       allowFreeform: false,
       display: "confirmation",
@@ -165,7 +170,13 @@ function extractApprovalRequests(input: {
       ],
       prompt: `Approve tool call: ${toolCall.toolName}`,
       requestId: approval.approvalId,
-    });
+    };
+    if (content === undefined) {
+      requests.push(request);
+    } else {
+      const requestWithContent: InputRequestWithToolApprovalContent = { ...request, content };
+      requests.push(requestWithContent);
+    }
   }
 
   return requests;

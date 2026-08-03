@@ -1,5 +1,6 @@
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { AuthorizationOutcome } from "#protocol/message.js";
+import type { ToolApprovalContent } from "#public/tools/approval/content.js";
 
 /**
  * UIMessage-compatible eve message projection for chat and agent UIs.
@@ -245,6 +246,7 @@ export interface EveMessageInputRequest {
     readonly label: string;
     readonly style?: "danger" | "default" | "primary";
   }[];
+  readonly content?: ToolApprovalContent;
   readonly prompt: string;
   readonly requestId: string;
 }

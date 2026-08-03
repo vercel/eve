@@ -21,6 +21,7 @@ import {
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import type { ToolApprovalContentCollector } from "#harness/tool-approval-content.js";
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
@@ -46,6 +47,7 @@ const toolApprovals = new WeakMap<
  * retry call so the request can proceed without it.
  */
 export function buildToolSet(input: {
+  readonly approvalContents?: ToolApprovalContentCollector;
   readonly approvedTools?: ReadonlySet<string>;
   readonly capabilities?: SessionCapabilities;
   readonly disabledProviderTools?: ReadonlySet<string>;
@@ -136,6 +138,7 @@ export function buildToolSet(input: {
  * ordering where step tools override turn/session tools.
  */
 export function buildToolSetFromDefinitions(input: {
+  readonly approvalContents?: ToolApprovalContentCollector;
   readonly approvedTools?: ReadonlySet<string>;
   readonly capabilities?: SessionCapabilities;
   readonly disabledProviderTools?: ReadonlySet<string>;
@@ -148,6 +151,7 @@ export function buildToolSetFromDefinitions(input: {
     }
   }
   return buildToolSet({
+    approvalContents: input.approvalContents,
     approvedTools: input.approvedTools,
     capabilities: input.capabilities,
     disabledProviderTools: input.disabledProviderTools,
@@ -202,6 +206,7 @@ export function wrapToolExecute(
  * a gateway fallback provider has rejected a provider-specific tool.
  */
 export async function buildToolSetWithProviderTools(input: {
+  readonly approvalContents?: ToolApprovalContentCollector;
   readonly approvedTools?: ReadonlySet<string>;
   readonly capabilities?: SessionCapabilities;
   readonly disabledProviderTools?: ReadonlySet<string>;
@@ -212,6 +217,7 @@ export async function buildToolSetWithProviderTools(input: {
   const disabled = input.disabledProviderTools;
   const tools: ToolSet = {
     ...buildToolSet({
+      approvalContents: input.approvalContents,
       approvedTools: input.approvedTools,
       capabilities: input.capabilities,
       disabledProviderTools: disabled,
@@ -238,7 +244,10 @@ export async function buildToolSetWithProviderTools(input: {
 
 function buildApprovalFn(
   definition: HarnessToolDefinition,
-  input: { readonly approvedTools?: ReadonlySet<string> },
+  input: {
+    readonly approvalContents?: ToolApprovalContentCollector;
+    readonly approvedTools?: ReadonlySet<string>;
+  },
 ): (toolInput: unknown, callId: string) => Promise<NativeApprovalStatus> {
   return async (toolInput: unknown, callId: string) => {
     if (definition.approval === undefined) return undefined;
@@ -252,6 +261,15 @@ function buildApprovalFn(
       toolInput: toolInputRecord,
       toolName: definition.name,
     });
+    if (
+      typeof status === "object" &&
+      status !== null &&
+      status.type === "user-approval" &&
+      "content" in status
+    ) {
+      input.approvalContents?.set(callId, status.content);
+      return { type: "user-approval" };
+    }
     return typeof status === "boolean" ? (status ? "user-approval" : "not-applicable") : status;
   };
 }

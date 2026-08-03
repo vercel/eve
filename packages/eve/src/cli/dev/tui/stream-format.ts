@@ -23,6 +23,8 @@ export type TerminalKey =
   | { type: "right" }
   | { type: "home" }
   | { type: "end" }
+  | { type: "page-up" }
+  | { type: "page-down" }
   | { type: "tab" }
   | { type: "escape" }
   | {
@@ -35,8 +37,10 @@ export type TerminalKey =
       y: number;
     }
   | { type: "ctrl-a" }
+  | { type: "ctrl-b" }
   | { type: "ctrl-e" }
   | { type: "ctrl-d" }
+  | { type: "ctrl-f" }
   | { type: "ctrl-k" }
   | { type: "ctrl-n" }
   | { type: "ctrl-p" }
@@ -224,10 +228,14 @@ export function parseKey(chunk: Buffer): TerminalKey {
   switch (value) {
     case "\u0001":
       return { type: "ctrl-a" };
+    case "\u0002":
+      return { type: "ctrl-b" };
     case "\u0005":
       return { type: "ctrl-e" };
     case "\u0004":
       return { type: "ctrl-d" };
+    case "\u0006":
+      return { type: "ctrl-f" };
     case "\u000b":
       return { type: "ctrl-k" };
     case "\u000e":
@@ -277,6 +285,10 @@ export function parseKey(chunk: Buffer): TerminalKey {
       return { type: "end" };
     case "\x1B[3~":
       return { type: "delete" };
+    case "\x1B[5~":
+      return { type: "page-up" };
+    case "\x1B[6~":
+      return { type: "page-down" };
     case "\t":
       return { type: "tab" };
     case "\x1B":

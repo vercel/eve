@@ -139,6 +139,7 @@ import {
 import { FileContentCache } from "./file-content-cache.js";
 import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
 import { renderQuestionPanel } from "./question-panel.js";
+import { ApprovalContentPanel } from "./approval-content-panel.js";
 import { promptPlaceholder } from "./prompt-placeholder.js";
 import { TurnClock } from "./turn-clock.js";
 import {
@@ -517,6 +518,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pendingEchoedPrompt?: string;
   /** The open HITL question overlay, painted above the input area. */
   #questionPanel?: (width: number) => string[];
+  /** Tool-provided content shown above the open approval prompt. */
+  #approvalContentPanel?: ApprovalContentPanel;
   /** The active setup flow's bordered panel: progress, question, status. */
   #setupFlow?: SetupFlowState;
   /** The clearable setup attention line (`⚠ … · /vc:login`), rendered in the live footer. */
@@ -965,7 +968,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#stopTicker();
     this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
-    this.#status = `Approve ${formatToolApprovalTitle(request)}?  (y/n)`;
+    this.#approvalContentPanel =
+      request.content === undefined ? undefined : new ApprovalContentPanel(request.content);
+    const approvalTitle = formatToolApprovalTitle(request);
+    const openStatus = `Approve ${approvalTitle}?  (y/n)`;
+    const closedStatus = `Review content available · Approve ${approvalTitle}?  (y/n)`;
+    this.#status = openStatus;
     this.#interrupted = false;
     this.#paint();
 
@@ -975,16 +983,45 @@ export class TerminalRenderer implements AgentTUIRenderer {
         switch (key.type) {
           case "text": {
             // This prevents ordinary bracketed paste from confirming by
-            // accident; terminal framing is not an authentication signal.
+            // accident; terminal framing is not proof of a physical keypress.
             if (key.framing !== "unframed") break;
-            const value = key.value.toLowerCase();
-            if (value === "y") {
+            const value = key.value;
+            if (value === " " && this.#approvalContentPanel?.visible === true) {
+              this.#moveApprovalContent("page-down", Math.max(1, this.#height() - 10));
+            } else if (value === "b" && this.#approvalContentPanel?.visible === true) {
+              this.#moveApprovalContent("page-up", Math.max(1, this.#height() - 10));
+            } else if (value === "j" && this.#approvalContentPanel?.visible === true) {
+              this.#moveApprovalContent("down");
+            } else if (value === "k" && this.#approvalContentPanel?.visible === true) {
+              this.#moveApprovalContent("up");
+            } else if (value === "g" && this.#approvalContentPanel?.visible === true) {
+              this.#moveApprovalContent("home");
+            } else if (value === "G" && this.#approvalContentPanel?.visible === true) {
+              this.#moveApprovalContent("end");
+            } else if (
+              value.toLowerCase() === "q" &&
+              this.#approvalContentPanel?.visible === true
+            ) {
+              this.#approvalContentPanel.close();
+              this.#status = closedStatus;
+              this.#paint();
+            } else if (
+              value.toLowerCase() === "v" &&
+              this.#approvalContentPanel !== undefined &&
+              !this.#approvalContentPanel.visible
+            ) {
+              this.#approvalContentPanel.open();
+              this.#status = openStatus;
+              this.#paint();
+            } else if (value.toLowerCase() === "y") {
+              this.#approvalContentPanel = undefined;
               this.#startWorking();
               this.#status = STATUS.processing;
               this.#detachInput();
               this.#paint();
               resolve({ approved: true });
-            } else if (value === "n") {
+            } else if (value.toLowerCase() === "n") {
+              this.#approvalContentPanel = undefined;
               this.#startWorking();
               this.#status = STATUS.processing;
               this.#markToolDenied(request.toolCallId);
@@ -994,10 +1031,46 @@ export class TerminalRenderer implements AgentTUIRenderer {
             }
             break;
           }
+          case "page-up":
+          case "ctrl-b":
+          case "ctrl-f": {
+            const action = key.type === "ctrl-f" ? "page-down" : "page-up";
+            this.#moveApprovalContent(action, Math.max(1, this.#height() - 10));
+            break;
+          }
+          case "page-down":
+            this.#moveApprovalContent("page-down", Math.max(1, this.#height() - 10));
+            break;
+          case "ctrl-d":
+            this.#moveApprovalContent(
+              "page-down",
+              Math.max(1, Math.floor((this.#height() - 10) / 2)),
+            );
+            break;
+          case "ctrl-u":
+            this.#moveApprovalContent(
+              "page-up",
+              Math.max(1, Math.floor((this.#height() - 10) / 2)),
+            );
+            break;
+          case "up":
+          case "down":
+          case "home":
+          case "end":
+            this.#moveApprovalContent(key.type);
+            break;
+          case "escape":
+            if (this.#approvalContentPanel?.visible === true) {
+              this.#approvalContentPanel.close();
+              this.#status = closedStatus;
+              this.#paint();
+            }
+            break;
           case "ctrl-r":
             this.#paint();
             break;
           case "ctrl-c":
+            this.#approvalContentPanel = undefined;
             this.#interrupted = true;
             this.#stop();
             reject(interruptedError());
@@ -2736,6 +2809,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
   // Lifecycle
   // ---------------------------------------------------------------------------
 
+  #moveApprovalContent(
+    action: "down" | "end" | "home" | "page-down" | "page-up" | "up",
+    pageSize = 1,
+  ): void {
+    if (this.#approvalContentPanel?.visible !== true) return;
+    this.#approvalContentPanel.move(
+      action,
+      pageSize,
+      this.#width(),
+      Math.max(8, this.#height() - 4),
+    );
+    this.#paint();
+  }
+
   #start(options?: AgentTUISessionOptions) {
     this.#title = options?.title ?? this.#title;
     if (options?.contextSize !== undefined) this.#contextSize = options.contextSize;
@@ -3847,6 +3934,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #footerRows(width: number): string[] {
     const c = this.#theme.colors;
     const rows: string[] = [""];
+
+    if (this.#approvalContentPanel?.visible === true) {
+      rows.push(
+        ...this.#approvalContentPanel.render(this.#theme, width, Math.max(8, this.#height() - 4)),
+        "",
+      );
+      rows.push(clip(`${c.dim(this.#theme.glyph.dot)} ${this.#status}`, width));
+      this.#pushStatusLine(rows, width);
+      return rows;
+    }
 
     // The HITL question overlay owns the footer down to the status bar —
     // no indicator or hint row beneath it (the panel carries its own).

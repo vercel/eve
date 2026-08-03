@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { getToolApprovalContent } from "#runtime/input/tool-approval-content.js";
+
+import { ToolApprovalContentCollector } from "#harness/tool-approval-content.js";
 import {
   extractQuestionInputRequests,
   extractToolApprovalInputRequests,
@@ -127,6 +130,35 @@ describe("extractToolApprovalInputRequests", () => {
         requestId: "approval-1",
       },
     ]);
+  });
+
+  it("attaches collected review content by tool call id", () => {
+    const approvalContents = new ToolApprovalContentCollector();
+    approvalContents.set("call-1", {
+      type: "text",
+      text: "--- agent.ts\n- old\n+ new",
+    });
+
+    const [request] = extractToolApprovalInputRequests({
+      approvalContents,
+      content: [
+        {
+          approvalId: "approval-1",
+          toolCall: {
+            input: {},
+            toolCallId: "call-1",
+            toolName: "change_files",
+            type: "tool-call",
+          },
+          type: "tool-approval-request",
+        },
+      ],
+    });
+
+    expect(request === undefined ? undefined : getToolApprovalContent(request)).toEqual({
+      type: "text",
+      text: "--- agent.ts\n- old\n+ new",
+    });
   });
 
   it("extracts an approval request from a sibling tool call", () => {
