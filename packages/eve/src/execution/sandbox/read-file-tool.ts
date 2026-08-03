@@ -5,7 +5,7 @@ import {
   normalizeModelPath,
   setReadFileStamp,
 } from "#runtime/framework-tools/file-state.js";
-import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
+import { resolveSkillFilePathCandidates } from "#shared/skill-paths.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
@@ -58,8 +58,20 @@ export async function executeReadFileOnSandbox(
 ): Promise<ReadFileResult> {
   const { filePath, offset, limit } = args;
 
-  const resolvedPath = await resolveAbsoluteFilePath(sandbox, filePath);
-  const normalizedPath = normalizeModelPath(resolvedPath);
+  // Skill files live under `$HOME/.agents/skills/<skill>/` with
+  // `/workspace/skills/<skill>/` as the documented fallback, so a skill path
+  // resolves to an ordered list of candidates and the first that exists wins.
+  // Every other path resolves to a single absolute candidate.
+  const candidatePaths = await resolveSkillFilePathCandidates({ path: filePath, sandbox });
+
+  for (const candidate of candidatePaths) {
+    if (!candidate.startsWith("/")) {
+      throw new Error(
+        `filePath must be an absolute path. Received: "${filePath}". ` +
+          "Use an absolute path such as /workspace/foo.ts or a path beginning with $HOME/.",
+      );
+    }
+  }
 
   // ── Validate offset / limit ─────────────────────────────────────────
   const effectiveOffset = offset ?? DEFAULT_OFFSET;
@@ -70,13 +82,24 @@ export async function executeReadFileOnSandbox(
   }
 
   // ── Read full file for fingerprinting ───────────────────────────────
-  const rawContent = await sandbox.readTextFile({ path: resolvedPath });
+  let resolvedPath: string | undefined;
+  let rawContent: string | null = null;
+  for (const candidate of candidatePaths) {
+    const content = await sandbox.readTextFile({ path: candidate });
+    if (content !== null) {
+      resolvedPath = candidate;
+      rawContent = content;
+      break;
+    }
+  }
 
-  if (rawContent === null) {
+  if (rawContent === null || resolvedPath === undefined) {
     throw new Error(
       `File not found: ${filePath}. Verify the path exists and is accessible in the sandbox.`,
     );
   }
+
+  const normalizedPath = normalizeModelPath(resolvedPath);
 
   // ── Reject non-text (NUL bytes) ─────────────────────────────────────
   if (rawContent.includes("\0")) {

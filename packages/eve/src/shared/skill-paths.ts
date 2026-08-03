@@ -72,13 +72,57 @@ export async function resolveSandboxSkillReadPaths(input: {
   readonly relativePath: string;
   readonly sandbox: SandboxSession;
 }): Promise<readonly string[]> {
-  return [
-    formatSkillPath({
-      name: input.name,
-      relativePath: input.relativePath,
-      root: await resolveSandboxSkillRoot({ sandbox: input.sandbox }),
-    }),
-  ];
+  return await resolveSkillRootCandidates({
+    suffix: `/${input.name}/${input.relativePath}`,
+    sandbox: input.sandbox,
+  });
+}
+
+/**
+ * Ordered sandbox paths to try when reading a model-supplied file. A path that
+ * targets the skill root — either the symbolic `$HOME/.agents/skills/…` form or
+ * the literal `/workspace/skills/…` fallback — resolves to the probed home root
+ * first and the `/workspace/skills` fallback second, matching the documented
+ * resolution order. Any other path resolves to a single entry via
+ * {@link resolveSandboxModelPath}.
+ */
+export async function resolveSkillFilePathCandidates(input: {
+  readonly path: string;
+  readonly sandbox: SandboxSession;
+}): Promise<readonly string[]> {
+  const suffix = skillRootSuffix(input.path);
+  if (suffix === null) {
+    return [await resolveSandboxModelPath({ path: input.path, sandbox: input.sandbox })];
+  }
+  return await resolveSkillRootCandidates({ suffix, sandbox: input.sandbox });
+}
+
+/**
+ * Extracts the `/<skill>/<relativePath>` remainder shared by both skill roots,
+ * or `null` when the path targets neither root.
+ */
+function skillRootSuffix(path: string): string | null {
+  if (path === MODEL_SKILL_ROOT || path.startsWith(`${MODEL_SKILL_ROOT}/`)) {
+    return path.slice(MODEL_SKILL_ROOT.length);
+  }
+  if (path === FALLBACK_SKILL_ROOT || path.startsWith(`${FALLBACK_SKILL_ROOT}/`)) {
+    return path.slice(FALLBACK_SKILL_ROOT.length);
+  }
+  return null;
+}
+
+async function resolveSkillRootCandidates(input: {
+  readonly suffix: string;
+  readonly sandbox: SandboxSession;
+}): Promise<readonly string[]> {
+  const candidates: string[] = [];
+  const home = await resolveSandboxHome(input.sandbox);
+  if (home !== null) {
+    const base = home === "/" ? "" : home;
+    candidates.push(`${base}${MODEL_SKILL_ROOT.slice(MODEL_HOME_ROOT.length)}${input.suffix}`);
+  }
+  candidates.push(`${FALLBACK_SKILL_ROOT}${input.suffix}`);
+  return candidates;
 }
 
 export async function resolveSandboxSkillWritePath(input: {

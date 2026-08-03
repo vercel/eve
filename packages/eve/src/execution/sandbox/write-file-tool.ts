@@ -7,7 +7,7 @@ import {
   ReadFileStateKey,
   setReadFileStamp,
 } from "#runtime/framework-tools/file-state.js";
-import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
+import { resolveSkillFilePathCandidates } from "#shared/skill-paths.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 // ---------------------------------------------------------------------------
@@ -47,10 +47,21 @@ export async function executeWriteFileOnSandbox(
 ): Promise<WriteFileResult> {
   const { filePath, content } = args;
 
-  const resolvedPath = await resolveAbsoluteFilePath(sandbox, filePath);
   const ctx = loadContext();
-  const normalizedPath = normalizeModelPath(resolvedPath);
-  const targetKey = buildReadFileTargetKey(normalizedPath);
+
+  // Resolve the skill-aware candidate list exactly as read_file does, so an
+  // edit lands on the same file read_file served rather than a divergent shadow
+  // copy under the other skill root. An existing file is written where it lives;
+  // a new file is created at the first (home-first) candidate.
+  const candidatePaths = await resolveSkillFilePathCandidates({ path: filePath, sandbox });
+  for (const candidate of candidatePaths) {
+    if (!candidate.startsWith("/")) {
+      throw new Error(
+        `filePath must be an absolute path. Received: "${filePath}". ` +
+          "Use an absolute path such as /workspace/foo.ts or a path beginning with $HOME/.",
+      );
+    }
+  }
 
   // ── Read current file ───────────────────────────────────────────────
   // The full read is required even for new-file detection because
@@ -58,7 +69,19 @@ export async function executeWriteFileOnSandbox(
   // cost: the entire file is read and hashed before every write. A
   // separate `exists()` primitive would avoid this for new files but
   // would require a sandbox session API change.
-  const currentContent = await sandbox.readTextFile({ path: resolvedPath });
+  let resolvedPath = candidatePaths[0]!;
+  let currentContent: string | null = null;
+  for (const candidate of candidatePaths) {
+    const existing = await sandbox.readTextFile({ path: candidate });
+    if (existing !== null) {
+      resolvedPath = candidate;
+      currentContent = existing;
+      break;
+    }
+  }
+
+  const normalizedPath = normalizeModelPath(resolvedPath);
+  const targetKey = buildReadFileTargetKey(normalizedPath);
 
   if (currentContent === null) {
     // ── File does not exist — write immediately, no prior read needed ──

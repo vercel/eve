@@ -9,6 +9,7 @@ import {
   resolveSandboxModelPath,
   resolveSandboxSkillReadPaths,
   resolveSandboxSkillRoot,
+  resolveSkillFilePathCandidates,
 } from "#shared/skill-paths.js";
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
@@ -85,7 +86,7 @@ describe("skill path helpers", () => {
     ).resolves.toBe("/workspace/skills/research/references/catalog.md");
   });
 
-  it("reads only from the resolved HOME skill root when HOME is usable", async () => {
+  it("reads the resolved HOME skill root first, then the /workspace fallback", async () => {
     const sandbox = mockSandbox({
       commands: {
         [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
@@ -98,10 +99,13 @@ describe("skill path helpers", () => {
         relativePath: "SKILL.md",
         sandbox: sandbox.session,
       }),
-    ).resolves.toEqual(["/home/agent/.agents/skills/research/SKILL.md"]);
+    ).resolves.toEqual([
+      "/home/agent/.agents/skills/research/SKILL.md",
+      "/workspace/skills/research/SKILL.md",
+    ]);
   });
 
-  it("reads from /workspace/skills only when that root is selected", async () => {
+  it("reads from /workspace/skills only when HOME is unusable", async () => {
     const sandbox = mockSandbox({
       commands: {
         [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "\n" },
@@ -115,6 +119,57 @@ describe("skill path helpers", () => {
         sandbox: sandbox.session,
       }),
     ).resolves.toEqual(["/workspace/skills/research/SKILL.md"]);
+  });
+
+  it("resolves skill file candidates HOME-first from a literal /workspace/skills path", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+    });
+
+    await expect(
+      resolveSkillFilePathCandidates({
+        path: "/workspace/skills/research/references/catalog.md",
+        sandbox: sandbox.session,
+      }),
+    ).resolves.toEqual([
+      "/home/agent/.agents/skills/research/references/catalog.md",
+      "/workspace/skills/research/references/catalog.md",
+    ]);
+  });
+
+  it("resolves skill file candidates HOME-first from a symbolic $HOME path", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+    });
+
+    await expect(
+      resolveSkillFilePathCandidates({
+        path: `${MODEL_SKILL_ROOT}/research/references/catalog.md`,
+        sandbox: sandbox.session,
+      }),
+    ).resolves.toEqual([
+      "/home/agent/.agents/skills/research/references/catalog.md",
+      "/workspace/skills/research/references/catalog.md",
+    ]);
+  });
+
+  it("passes a non-skill path through as a single resolved candidate", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+    });
+
+    await expect(
+      resolveSkillFilePathCandidates({
+        path: "/workspace/src/index.ts",
+        sandbox: sandbox.session,
+      }),
+    ).resolves.toEqual(["/workspace/src/index.ts"]);
   });
 
   it("resolves model-facing seed paths before writing to the sandbox", async () => {
