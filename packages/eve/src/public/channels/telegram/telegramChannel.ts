@@ -129,6 +129,8 @@ export interface TelegramChannelEvents {
   readonly "turn.started"?: TelegramEventHandler<"turn.started">;
   readonly "actions.requested"?: TelegramEventHandler<"actions.requested">;
   readonly "action.result"?: TelegramEventHandler<"action.result">;
+  readonly "subagent.called"?: TelegramEventHandler<"subagent.called">;
+  readonly "subagent.completed"?: TelegramEventHandler<"subagent.completed">;
   readonly "message.completed"?: TelegramEventHandler<"message.completed">;
   readonly "message.appended"?: TelegramEventHandler<"message.appended">;
   readonly "input.requested"?: TelegramEventHandler<"input.requested">;

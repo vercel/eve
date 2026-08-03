@@ -9,14 +9,16 @@
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
+import { withContextScope } from "#context/run-step.js";
 import {
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
+  ContinuationTokenKey,
   InitiatorAuthKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { deserializeContext } from "#context/serialize.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   getPendingRuntimeActionBatch,
   recordPendingSubagentChild,
@@ -25,6 +27,7 @@ import {
   createSubagentCalledEvent,
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import type {
   RuntimeActionRequest,
@@ -37,6 +40,8 @@ import {
   type DurableSessionState,
   readDurableSession,
 } from "#execution/durable-session-store.js";
+import { setChannelContext } from "#execution/channel-context.js";
+import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import {
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
@@ -62,6 +67,7 @@ export async function dispatchRuntimeActionsStep(input: {
   readonly sessionState: DurableSessionState;
 }): Promise<{
   readonly results: readonly RuntimeSubagentResultActionResult[];
+  readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }> {
   "use step";
@@ -75,6 +81,10 @@ export async function dispatchRuntimeActionsStep(input: {
 
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
+  // Validate this required dependency before any externally visible child
+  // start. A missing channel after the first start would otherwise retry the
+  // whole durable step and duplicate that child.
+  ctx.require(ChannelKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const session = hydrateDurableSession({
     compactionOverrides: {
@@ -83,14 +93,12 @@ export async function dispatchRuntimeActionsStep(input: {
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });
-  const adapter = ctx.require(ChannelKey);
   const auth = ctx.get(AuthKey) ?? null;
   const capabilities = ctx.get(CapabilitiesKey);
   const channelMetadata = ctx.get(ChannelInstrumentationKey);
   const initiatorAuth = ctx.get(InitiatorAuthKey) ?? null;
   const writer = input.parentWritable.getWriter();
 
-  const adapterCtx = buildAdapterContext(adapter, ctx);
   const subagentDepth = resolveSubagentDepth(session);
   // Read here, not in the child: trace state is scoped to one session's
   // context, so this is the last place the parent's window is visible.
@@ -102,6 +110,7 @@ export async function dispatchRuntimeActionsStep(input: {
   const fanoutSize = batch.actions.filter((action) => action.kind === "subagent-call").length;
 
   let nextSession = session;
+  let updatedContext = false;
   const results: RuntimeSubagentResultActionResult[] = [];
 
   try {
@@ -179,16 +188,7 @@ export async function dispatchRuntimeActionsStep(input: {
               nodeId: action.nodeId,
               subagentName: action.subagentName,
             });
-            results.push({
-              callId: action.callId,
-              isError: true,
-              kind: "subagent-result",
-              output: {
-                code: "SUBAGENT_START_FAILED",
-                message: toErrorMessage(error),
-              },
-              subagentName: action.subagentName,
-            });
+            results.push(createSubagentStartFailureResult({ action, error }));
             continue;
           }
 
@@ -245,22 +245,57 @@ export async function dispatchRuntimeActionsStep(input: {
           throw new Error(`Unsupported runtime action kind "${action.kind}" in workflow runtime.`);
       }
 
-      const parentEvent = await callAdapterEventHandler(
-        adapter,
-        createSubagentCalledEvent({
+      const parentEvent = createSubagentCalledEvent({
+        callId: action.callId,
+        childSessionId,
+        name,
+        remote,
+        sequence: batch.event.sequence,
+        sessionId: session.sessionId,
+        toolName,
+        turnId: batch.event.turnId,
+        workflowId: workflowEntryReference.workflowId,
+      });
+      try {
+        const scopedAdapter = ctx.require(ChannelKey);
+        if (scopedAdapter[parentEvent.type] === undefined) {
+          await writeParentEventBestEffort({ event: parentEvent, writer });
+          continue;
+        }
+
+        const continuationTokenBeforeHandler = ctx.get(ContinuationTokenKey);
+        const scopeResult = await withContextScope(ctx, nextSession, async (scopedSession) => {
+          const eventAdapter = ctx.require(ChannelKey);
+          const adapterCtx = buildAdapterContext(eventAdapter, ctx);
+          const transformedEvent = await callAdapterEventHandler(
+            eventAdapter,
+            parentEvent,
+            adapterCtx,
+          );
+          setChannelContext(ctx, { ...eventAdapter, state: { ...adapterCtx.state } });
+          await writeParentEventBestEffort({ event: transformedEvent, writer });
+
+          const continuationTokenChanged =
+            ctx.get(ContinuationTokenKey) !== continuationTokenBeforeHandler;
+          return {
+            result: undefined,
+            session: continuationTokenChanged
+              ? reconcileSessionContinuationToken(ctx, scopedSession)
+              : scopedSession,
+          };
+        });
+        nextSession = scopeResult.session;
+        updatedContext = true;
+      } catch (error) {
+        // Child creation is externally visible and cannot be rolled back. Never
+        // let best-effort notification/context work retry this whole dispatch
+        // step and launch the same child again.
+        logError(log, "subagent.called notification failed after child start", error, {
           callId: action.callId,
           childSessionId,
-          name,
-          remote,
-          sequence: batch.event.sequence,
-          sessionId: session.sessionId,
-          toolName,
-          turnId: batch.event.turnId,
-          workflowId: workflowEntryReference.workflowId,
-        }),
-        adapterCtx,
-      );
-      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(parentEvent)));
+          subagentName: toolName,
+        });
+      }
     }
   } finally {
     writer.releaseLock();
@@ -271,7 +306,56 @@ export async function dispatchRuntimeActionsStep(input: {
       ? input.sessionState
       : createDurableSessionState({ session: nextSession });
 
-  return { results, sessionState: nextState };
+  let serializedContext: Record<string, unknown> | undefined;
+  if (updatedContext) {
+    try {
+      serializedContext = serializeContext(ctx);
+    } catch (error) {
+      // An authored handler can leave non-serializable adapter state behind.
+      // Losing that best-effort mutation is safer than retrying child creation.
+      logError(log, "subagent.called context serialization failed after child start", error);
+    }
+  }
+
+  const output: {
+    results: readonly RuntimeSubagentResultActionResult[];
+    serializedContext?: Record<string, unknown>;
+    sessionState: DurableSessionState;
+  } = {
+    results,
+    sessionState: nextState,
+  };
+  if (serializedContext !== undefined) output.serializedContext = serializedContext;
+  return output;
+}
+
+async function writeParentEventBestEffort(input: {
+  readonly event: UnstampedMessageStreamEvent;
+  readonly writer: WritableStreamDefaultWriter<Uint8Array>;
+}): Promise<void> {
+  try {
+    await input.writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(input.event)));
+  } catch (error) {
+    logError(log, "subagent.called stream write failed after child start", error, {
+      eventType: input.event.type,
+    });
+  }
+}
+
+function createSubagentStartFailureResult(input: {
+  readonly action: RuntimeSubagentCallActionRequest;
+  readonly error: unknown;
+}): RuntimeSubagentResultActionResult {
+  return {
+    callId: input.action.callId,
+    isError: true,
+    kind: "subagent-result",
+    output: {
+      code: "SUBAGENT_START_FAILED",
+      message: toErrorMessage(input.error),
+    },
+    subagentName: input.action.subagentName,
+  };
 }
 
 function createUnavailableDynamicSubagentResult(

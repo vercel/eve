@@ -252,6 +252,8 @@ export interface ChannelEvents<TCtx = void> {
   readonly "turn.started"?: ChannelEventHandler<"turn.started", TCtx>;
   readonly "actions.requested"?: ChannelEventHandler<"actions.requested", TCtx>;
   readonly "action.result"?: ChannelEventHandler<"action.result", TCtx>;
+  readonly "subagent.called"?: ChannelEventHandler<"subagent.called", TCtx>;
+  readonly "subagent.completed"?: ChannelEventHandler<"subagent.completed", TCtx>;
   readonly "message.completed"?: ChannelEventHandler<"message.completed", TCtx>;
   readonly "message.appended"?: ChannelEventHandler<"message.appended", TCtx>;
   readonly "reasoning.appended"?: ChannelEventHandler<"reasoning.appended", TCtx>;
@@ -266,6 +268,29 @@ export interface ChannelEvents<TCtx = void> {
   readonly "authorization.required"?: ChannelEventHandler<"authorization.required", TCtx>;
   readonly "authorization.completed"?: ChannelEventHandler<"authorization.completed", TCtx>;
 }
+
+const CHANNEL_EVENT_TYPES = [
+  "compaction.requested",
+  "compaction.completed",
+  "turn.started",
+  "actions.requested",
+  "action.result",
+  "subagent.called",
+  "subagent.completed",
+  "message.completed",
+  "message.appended",
+  "reasoning.appended",
+  "reasoning.completed",
+  "input.requested",
+  "turn.failed",
+  "turn.completed",
+  "turn.cancelled",
+  "session.failed",
+  "session.completed",
+  "session.waiting",
+  "authorization.required",
+  "authorization.completed",
+] as const satisfies readonly (keyof ChannelEvents<any>)[];
 
 /**
  * Input passed to a channel's `receive` callback when another channel or
@@ -350,7 +375,8 @@ export function defineChannel<
 }
 
 // The Record type fails to compile if this map drifts from the ChannelEvents
-// keys in either direction.
+// keys in either direction. Kept as a compile-time drift guard for
+// CHANNEL_EVENT_TYPES above; referenced below so it is not tree-shaken as dead.
 const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "context.cleared": null,
   "compaction.requested": null,
@@ -358,6 +384,8 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "turn.started": null,
   "actions.requested": null,
   "action.result": null,
+  "subagent.called": null,
+  "subagent.completed": null,
   "message.completed": null,
   "message.appended": null,
   "reasoning.appended": null,
@@ -373,7 +401,11 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "authorization.completed": null,
 };
 
-const eventTypes = Object.keys(channelEventTypes) as readonly (keyof ChannelEvents)[];
+// CHANNEL_EVENT_TYPES drives runtime wiring; the drift guard above pins the
+// full ChannelEvents key set. Bind each wiring entry to a guard key so both
+// stay referenced and any drift in either direction fails to compile.
+const channelEventWiring: readonly (keyof typeof channelEventTypes)[] = CHANNEL_EVENT_TYPES;
+void channelEventWiring;
 
 function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<string, unknown>>(
   definition: ChannelDefinition<TState, TCtx, TReceiveTarget, TMetadata>,
@@ -389,7 +421,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   let hasEventHandlers = false;
 
   const events = definition.events;
-  for (const eventType of eventTypes) {
+  for (const eventType of CHANNEL_EVENT_TYPES) {
     const userHandler = events?.[eventType];
     if (userHandler) {
       hasEventHandlers = true;

@@ -166,6 +166,8 @@ export interface TeamsChannelEvents {
   readonly "turn.started"?: TeamsEventHandler<"turn.started">;
   readonly "actions.requested"?: TeamsEventHandler<"actions.requested">;
   readonly "action.result"?: TeamsEventHandler<"action.result">;
+  readonly "subagent.called"?: TeamsEventHandler<"subagent.called">;
+  readonly "subagent.completed"?: TeamsEventHandler<"subagent.completed">;
   readonly "message.completed"?: TeamsEventHandler<"message.completed">;
   readonly "message.appended"?: TeamsEventHandler<"message.appended">;
   readonly "input.requested"?: TeamsEventHandler<"input.requested">;

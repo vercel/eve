@@ -137,6 +137,8 @@ export interface GitHubChannelEvents {
   readonly "authorization.completed"?: GitHubEventHandler<"authorization.completed">;
   readonly "authorization.required"?: GitHubEventHandler<"authorization.required">;
   readonly "input.requested"?: GitHubEventHandler<"input.requested">;
+  readonly "subagent.called"?: GitHubEventHandler<"subagent.called">;
+  readonly "subagent.completed"?: GitHubEventHandler<"subagent.completed">;
   readonly "message.appended"?: GitHubEventHandler<"message.appended">;
   readonly "message.completed"?: GitHubEventHandler<"message.completed">;
   readonly "session.completed"?: GitHubEventHandler<"session.completed">;

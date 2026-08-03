@@ -161,6 +161,8 @@ export interface TwilioChannelEvents {
   readonly "turn.started"?: TwilioEventHandler<"turn.started">;
   readonly "actions.requested"?: TwilioEventHandler<"actions.requested">;
   readonly "action.result"?: TwilioEventHandler<"action.result">;
+  readonly "subagent.called"?: TwilioEventHandler<"subagent.called">;
+  readonly "subagent.completed"?: TwilioEventHandler<"subagent.completed">;
   readonly "message.completed"?: TwilioEventHandler<"message.completed">;
   readonly "message.appended"?: TwilioEventHandler<"message.appended">;
   readonly "input.requested"?: TwilioEventHandler<"input.requested">;

@@ -159,6 +159,7 @@ export default defineChannel({
 `reset` returns `{ status: "reset", previousSessionId }` when it observed an owner, or `{ status: "no_active_session" }` when the token was already free. Both outcomes are successful. It terminally cancels the observed workflow run and waits until its non-retained continuation hook no longer blocks reuse, so the next `send()` using the same token creates a new session with fresh history and state.
 
 The replacement session owns a new session-scoped sandbox. eve initializes it lazily on that session's first sandbox use, so it never reuses the prior session's workspace or sandbox state. Resetting does not clear history in place, roll back tool calls, or delete the previous run or its sandbox; normal retention and backend cleanup policies still apply. Side effects or partial output that were already committed remain committed. Authenticate and deduplicate inbound command webhooks before calling this helper: a delayed duplicate `/new` can otherwise reset a newer session that has already reclaimed the same token.
+Use a channel event handler, rather than an agent hook, when the reaction needs native platform context. For example, a GitHub or Slack channel can handle `"subagent.called"` and `"subagent.completed"` to correlate child work by `callId` and update the same issue, pull request, or thread when a reviewer subagent finishes.
 
 ## CORS
 
