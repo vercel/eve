@@ -11,10 +11,15 @@ Once `send()` is accepted, the session exposes its assigned `sessionId` and can 
 const { session, response } = await client.sessions.create({ message: "Run the long operation." });
 
 const cancellation = await session.cancel();
-console.log(cancellation.status);
+if (cancellation.status === "accepted") {
+  console.log(cancellation.sessionId);
+}
 
 const result = await response.result();
 ```
+
+The cancellation result is discriminated by `status`: only `accepted` includes
+`sessionId`; `no_active_turn` has no session identity field.
 
 Cancellation does not replace stream consumption. Continue reading the response to observe its terminal `turn.cancelled` and `session.waiting` boundary and to advance the client session cursor normally.
 

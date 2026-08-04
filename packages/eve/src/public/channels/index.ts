@@ -25,6 +25,7 @@ export {
   type ChannelEvents,
   type InferChannelMetadata,
   type Session,
+  type SessionCallback,
   type SessionHandle,
   type SessionRespondOptions,
   type SessionSendOptions,

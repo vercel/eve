@@ -1,9 +1,12 @@
 import type { ChannelAdapter, ChannelInstrumentationMetadata } from "#channel/adapter.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
-import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
+import {
+  CHANNEL_SENTINEL,
+  type ChannelReference,
+  type CompiledChannel,
+} from "#channel/compiled-channel.js";
 import { normalizeChannelCors, type ChannelCorsOptions } from "#channel/cors.js";
 import { HTTP_ADAPTER_KIND } from "#channel/http.js";
-import type { TypedReceiveTarget } from "#channel/receive-target.js";
 import type {
   ChannelFrom,
   ChannelReceiveContext,
@@ -28,6 +31,7 @@ export type {
   CompactSessionResult,
   GetEventStreamOptions,
   ResetSessionResult,
+  SessionCallback,
 } from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { SessionRespondOptions, SessionSendOptions } from "#channel/session.js";
@@ -235,8 +239,7 @@ export interface Channel<
   TState = undefined,
   TReceiveTarget = Record<string, unknown>,
   TMetadata extends Record<string, unknown> = Record<string, unknown>,
-> extends TypedReceiveTarget<TReceiveTarget> {
-  readonly __kind: typeof CHANNEL_SENTINEL;
+> extends ChannelReference<TReceiveTarget> {
   readonly [CHANNEL_METADATA_TYPE]?: TMetadata;
   readonly routes: readonly RouteDefinition<TState>[];
   readonly cors?: ChannelCorsOptions;

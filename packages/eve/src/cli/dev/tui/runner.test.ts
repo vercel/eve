@@ -3109,7 +3109,7 @@ describe("EveTUIRunner mid-turn message queue", () => {
       }
       // The first request raced the dispatch window: the turn workflow has
       // not claimed its cancel hook yet, so the server reports no turn.
-      return { sessionId: "session_test", status: "no_active_turn" as const };
+      return { status: "no_active_turn" as const };
     });
     const prompts: Array<string | undefined> = ["hello", undefined];
     const seen: string[] = [];

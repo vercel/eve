@@ -2,7 +2,7 @@ import type { UserContent } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { MessageStreamEvent } from "#protocol/message.js";
-import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
+import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
@@ -150,10 +150,15 @@ export interface SendTurnOptions<TOutput = unknown> {
 export type RespondTurnOptions<TOutput = unknown> = SendTurnOptions<TOutput>;
 
 /** @internal Transport envelope used by stores and command adapters. */
-export interface SendTurnPayload<TOutput = unknown> extends SendTurnOptions<TOutput> {
-  readonly inputResponses?: readonly InputResponse[];
-  readonly message?: string | UserContent;
-}
+export type SendTurnPayload<TOutput = unknown> =
+  | (SendTurnOptions<TOutput> & {
+      readonly inputResponses?: never;
+      readonly message: string | UserContent;
+    })
+  | (RespondTurnOptions<TOutput> & {
+      readonly inputResponses: readonly InputResponse[];
+      readonly message?: never;
+    });
 
 /** Retry and backoff settings for one kind of stream reconnection. */
 export interface StreamReconnectRetryPolicy {
@@ -214,12 +219,7 @@ export interface StreamOptions {
 }
 
 /** Result of requesting cancellation for a client session's active turn. */
-export interface CancelSessionResult {
-  /** Session whose command inbox accepted the request. */
-  readonly sessionId: string;
-  /** Both outcomes are successful; `no_active_turn` means the session is inactive. */
-  readonly status: CancelTurnStatus;
-}
+export type CancelSessionResult = CancelTurnResult;
 
 /** Result of requesting a context clear for a client session. */
 export type ClearResult =

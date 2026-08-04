@@ -643,9 +643,12 @@ function createScriptedServer(
       if (method === "POST" && pathname.endsWith("/cancel")) {
         const sessionId = decodeURIComponent(pathname.split("/").at(-2) ?? "");
         cancels.push(sessionId);
+        const status = options.cancelStatus ?? "no_active_turn";
         return Response.json(
-          { ok: true, sessionId, status: options.cancelStatus ?? "no_active_turn" },
-          { status: 202 },
+          status === "accepted"
+            ? { ok: true, sessionId, status: "accepted" }
+            : { ok: true, status: "no_active_turn" },
+          { status: status === "accepted" ? 202 : 200 },
         );
       }
 

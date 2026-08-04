@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ClientError } from "#client/client-error.js";
 import { ClientSession } from "#client/session.js";
 import type { ClientSessionState } from "#client/types.js";
 
@@ -254,6 +255,29 @@ describe("ClientSession", () => {
     const session = createSession({ sessionId: "session_1", streamIndex: 0 });
 
     await expect(session.cancel()).rejects.toThrow("Cancel route returned an invalid response");
+  });
+
+  it("exposes a typed session_not_active conflict", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        {
+          code: "session_not_active",
+          error: "The session is no longer active.",
+          ok: false,
+        },
+        { status: 409 },
+      ),
+    );
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    const error = await session.send("too late").catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ClientError);
+    expect(error).toMatchObject({
+      code: "session_not_active",
+      message: "The session is no longer active.",
+      status: 409,
+    });
   });
 
   it("queues a context clear without clearing the local session cursor", async () => {

@@ -36,10 +36,15 @@ export async function cancelClientSession(input: {
     path: createEveSessionCancelRoutePath(input.sessionId),
   });
   const result = CancelTurnResponseSchema.safeParse(payload);
-  if (!result.success || result.data.sessionId !== input.sessionId) {
+  if (
+    !result.success ||
+    (result.data.status === "accepted" && result.data.sessionId !== input.sessionId)
+  ) {
     throw new Error(`Cancel route returned an invalid response (${response.status}).`);
   }
-  return { sessionId: result.data.sessionId, status: result.data.status };
+  return result.data.status === "accepted"
+    ? { sessionId: result.data.sessionId, status: "accepted" }
+    : { status: "no_active_turn" };
 }
 
 export async function clearClientSession(input: {

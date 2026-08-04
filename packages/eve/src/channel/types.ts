@@ -1,7 +1,7 @@
 import type { UserContent } from "ai";
 
 import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
-import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
+import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
@@ -27,15 +27,7 @@ export interface CancelTurnInput {
 }
 
 /** Result of requesting turn cancellation. Both statuses are successful. */
-export interface CancelTurnResult {
-  readonly status: CancelTurnStatus;
-  /**
-   * For `no_active_turn`: the error class that classified the target as
-   * inactive, distinguishing "already finished" (`HookNotFoundError`) from a
-   * transiently unreachable cancel hook (`EntityConflictError`).
-   */
-  readonly reason?: string;
-}
+export type CancelTurnResult = ProtocolCancelTurnResult;
 
 /** Result of queueing manual context compaction for a session. */
 export type CompactSessionResult =

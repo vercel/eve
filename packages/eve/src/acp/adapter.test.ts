@@ -9,7 +9,7 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 type TestStreamEvent<T = HandleMessageStreamEvent> = T extends unknown ? Omit<T, "meta"> : never;
 
 class FakeClientSession {
-  readonly cancel = vi.fn(async () => ({ status: "accepted" }));
+  readonly cancel = vi.fn(async () => ({ sessionId: "session_test", status: "accepted" }));
   readonly reset = vi.fn(async () => ({ status: "reset" }));
   readonly sends: SendTurnPayload[] = [];
   readonly #turns: Array<readonly TestStreamEvent[]>;

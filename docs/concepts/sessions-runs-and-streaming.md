@@ -171,8 +171,11 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 
 `"accepted"` means the live session durably queued the request. Confirm an actual cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. If the turn is waiting on active local or remote subagents, eve also requests cancellation of every adopted child, recursively, before settling the parent. Each child reports its own cancellation boundary on its child-session stream; the parent does not emit `subagent.completed` for cancelled work. A live but already-parked session also returns `"accepted"` and consumes the command as a no-op. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
 
+The HTTP route returns `202` for `"accepted"` and `200` for
+`"no_active_turn"`. Only the accepted result includes `sessionId`.
+
 Custom channel routes request the same cancellation through
-a channel route's `cancel(address)` or `attachSession(sessionId).cancel()`. See
+`from(address).cancel()` or `attachSession(sessionId).cancel()`. See
 [custom channels](../channels/custom#channel-operations-and-session-handles).
 
 ## Compact, clear, and reset

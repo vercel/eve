@@ -245,7 +245,7 @@ export async function resolvePendingRuntimeActions(input: {
     if (outcome === undefined) {
       continue;
     }
-    if (outcome.kind === "terminal" && handle.address.continuationToken !== undefined) {
+    if (outcome.kind === "terminal" && "continuationToken" in handle.address) {
       nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
     }
     const settled = settleAgentTurn(nextSession, {

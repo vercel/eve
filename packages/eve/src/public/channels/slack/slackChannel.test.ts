@@ -276,7 +276,7 @@ async function firePost(
   }
   const cancel = vi
     .fn<(options?: Record<string, unknown>) => Promise<unknown>>()
-    .mockResolvedValue({ status: "accepted" });
+    .mockResolvedValue({ sessionId: "session_current", status: "accepted" });
   const reset = vi
     .fn<(options?: Record<string, unknown>) => Promise<unknown>>()
     .mockResolvedValue({ status: "reset", previousSessionId: "session_previous" });

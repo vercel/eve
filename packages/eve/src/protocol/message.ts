@@ -131,18 +131,14 @@ export interface RuntimeIdentity {
  */
 export type HandleMessageRequestBody =
   | {
+      readonly inputResponses?: never;
       readonly message: string | UserContent;
       readonly clientContext?: string | readonly string[] | JsonObject;
       readonly outputSchema?: JsonObject;
     }
   | {
       readonly inputResponses: readonly InputResponse[];
-      readonly clientContext?: string | readonly string[] | JsonObject;
-      readonly outputSchema?: JsonObject;
-    }
-  | {
-      readonly inputResponses: readonly InputResponse[];
-      readonly message: string | UserContent;
+      readonly message?: never;
       readonly clientContext?: string | readonly string[] | JsonObject;
       readonly outputSchema?: JsonObject;
     };

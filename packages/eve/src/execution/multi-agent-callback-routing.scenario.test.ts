@@ -17,7 +17,6 @@ import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { startRemoteAgentSession } from "#execution/remote-agent-dispatch.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { authHookToken, CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
   createEveCallbackRoutePath,
   createEveConnectionCallbackRoutePath,
@@ -223,21 +222,19 @@ describe("multi-agent callback routing", () => {
     });
     deploymentOrigin = await listen(deploymentServer);
 
-    // Remote subagent: records the create-session body and returns a session
-    // id and continuation token, like the eve channel's create-session route.
+    // Remote subagent: records the create-session body and returns the eve
+    // channel's canonical accepted response.
     remoteAgentServer = createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", () => {
         createSessionBodies.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        response.writeHead(200, {
-          "content-type": "application/json",
-          [EVE_SESSION_ID_HEADER]: "remote-session-1",
-        });
+        response.writeHead(202, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
-            continuationToken: "remote-session-1:continuation",
             ok: true,
+            sessionId: "remote-session-1",
+            status: "accepted",
           }),
         );
       });

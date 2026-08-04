@@ -2,7 +2,11 @@ import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
-import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
+import {
+  isCompiledChannel,
+  type ChannelReference,
+  type CompiledChannel,
+} from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
 import type { Session } from "#channel/session.js";
 import type { Runtime, SessionAuthContext } from "#channel/types.js";
@@ -21,7 +25,7 @@ export interface CrossChannelTargetHandle {
 }
 
 /** Selects another authored channel and one of its proactive targets. */
-export type CrossChannelToFn = <TChannel>(
+export type CrossChannelToFn = <TChannel extends ChannelReference>(
   channel: TChannel,
   target: InferReceiveTarget<TChannel>,
 ) => CrossChannelTargetHandle;

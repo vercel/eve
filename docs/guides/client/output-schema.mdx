@@ -54,8 +54,7 @@ const summarySchema = z.object({
 
 type Summary = z.infer<typeof summarySchema>;
 
-const response = await session.send<Summary>({
-  message: "Summarize this turn.",
+const response = await session.send<Summary>("Summarize this turn.", {
   outputSchema: summarySchema,
 });
 
@@ -69,8 +68,7 @@ The server is authoritative for validation. The client types `MessageResult.data
 If you consume events manually, read `result.completed`:
 
 ```ts
-const response = await session.send<Summary>({
-  message: "Summarize this turn.",
+const response = await session.send<Summary>("Summarize this turn.", {
   outputSchema,
 });
 

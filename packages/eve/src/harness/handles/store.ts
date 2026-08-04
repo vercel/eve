@@ -85,11 +85,6 @@ export type AgentAddress =
   | {
       readonly kind: "agent/remote";
       readonly sessionId: string;
-      /**
-       * Absent when the remote deployment predates continuation tokens; the
-       * child completes as a task-mode one-shot and can never be continued.
-       */
-      readonly continuationToken?: string;
       readonly url: string;
       readonly callbackBaseUrl: string;
     };
@@ -181,7 +176,6 @@ const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     callbackBaseUrl: z.url(),
-    continuationToken: nonEmptyString.optional(),
     kind: z.literal("agent/remote"),
     sessionId: nonEmptyString,
     url: z.url(),

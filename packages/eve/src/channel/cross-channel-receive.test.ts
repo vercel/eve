@@ -71,6 +71,17 @@ function makeChannel(name: string): {
 }
 
 describe("createCrossChannelToFn", () => {
+  it("requires an eve channel reference at compile time", () => {
+    const fn = createCrossChannelToFn(makeRuntime(), []);
+    const invalidCalls = () => {
+      // @ts-expect-error arbitrary strings are not authored channel references.
+      fn("slack", {});
+      // @ts-expect-error arbitrary objects are not authored channel references.
+      fn({}, {});
+    };
+    expect(invalidCalls).toBeTypeOf("function");
+  });
+
   it("delegates to the target channel's receive with a per-target send", async () => {
     const slack = makeChannel("slack");
     const fn = createCrossChannelToFn(makeRuntime(), [slack.target]);

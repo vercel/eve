@@ -131,7 +131,6 @@ beforeEach(() => {
   mocks.dispatchSession.mockResolvedValue({ sessionId: CHILD_SESSION_ID, status: "accepted" });
   mocks.continueRemoteAgentSession.mockResolvedValue(undefined);
   mocks.startRemoteAgentSession.mockResolvedValue({
-    continuationToken: "remote-child-token",
     sessionId: "remote-session-123456789012",
   });
   mocks.hydrateDurableSession.mockImplementation(({ durable }) => durable);
@@ -238,7 +237,6 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         expect.objectContaining({
           address: {
             callbackBaseUrl: "https://caller.example.com",
-            continuationToken: "remote-child-token",
             kind: "agent/remote",
             sessionId: "remote-session-123456789012",
             url: "https://registry.example.com",

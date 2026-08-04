@@ -2,6 +2,7 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import type { UserContent } from "ai";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
+import type { TypedReceiveTarget } from "#channel/receive-target.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -20,12 +21,18 @@ const channelInstrumentationKindGlobal = globalThis as ChannelInstrumentationKin
 channelInstrumentationKindGlobal[CHANNEL_INSTRUMENTATION_KINDS] ??= new Map();
 const channelInstrumentationKinds = channelInstrumentationKindGlobal[CHANNEL_INSTRUMENTATION_KINDS];
 
+/** Structural identity shared by public authored channels and compiled channels. */
+export interface ChannelReference<
+  TReceiveTarget = Record<string, unknown>,
+> extends TypedReceiveTarget<TReceiveTarget> {
+  readonly __kind: typeof CHANNEL_SENTINEL;
+}
+
 export interface CompiledChannel<
   TState = undefined,
   TReceiveTarget = Record<string, unknown>,
   TMetadata extends Record<string, unknown> = Record<string, unknown>,
-> {
-  readonly __kind: typeof CHANNEL_SENTINEL;
+> extends ChannelReference<TReceiveTarget> {
   readonly routes: readonly RouteDefinition<TState>[];
   readonly adapter: ChannelAdapter<any>;
   readonly cors?: NormalizedChannelCorsOptions;

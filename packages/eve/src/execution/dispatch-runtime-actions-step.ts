@@ -654,9 +654,6 @@ async function startRemoteSubagent(input: {
       kind: "agent/remote",
       sessionId: child.sessionId,
       url: resolvedRemote.url,
-      ...(child.continuationToken === undefined
-        ? {}
-        : { continuationToken: child.continuationToken }),
     } as const;
     return {
       address,

@@ -1,5 +1,4 @@
 import { z } from "#compiled/zod/index.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { AgentHandleError } from "#protocol/agent-handle-error.js";
 import { createEveCallbackRoutePath, createEveSessionCancelRoutePath } from "#protocol/routes.js";
@@ -20,15 +19,12 @@ import { expectFunction, expectObjectRecord } from "#internal/authored-module.js
 import type { JsonObject } from "#shared/json.js";
 
 const CreateSessionResponseSchema = z.object({
-  // Older eve deployments do not return a continuationToken. Their children
-  // still run to completion as task-mode one-shots; they just can never be
-  // continued, so the handle records no token.
-  continuationToken: z.string().min(1).optional(),
-  sessionId: z.string().min(1).optional(),
+  ok: z.literal(true),
+  sessionId: z.string().min(1),
+  status: z.literal("accepted"),
 });
 
 type RemoteAgentSessionCoordinates = {
-  readonly continuationToken?: string;
   readonly sessionId: string;
 };
 
@@ -130,23 +126,13 @@ export async function startRemoteAgentSession(input: {
   }
 
   const parsed = CreateSessionResponseSchema.safeParse(body);
-  const sessionIdFromHeader = response.headers.get(EVE_SESSION_ID_HEADER);
-  const sessionId =
-    sessionIdFromHeader !== null && sessionIdFromHeader.length > 0
-      ? sessionIdFromHeader
-      : parsed.success
-        ? parsed.data.sessionId
-        : undefined;
-
-  if (!parsed.success || sessionId === undefined) {
+  if (!parsed.success) {
     throw new Error(
-      `Remote agent "${input.action.remoteAgentName}" create-session response did not include a sessionId.`,
+      `Remote agent "${input.action.remoteAgentName}" create-session response was invalid.`,
     );
   }
 
-  return parsed.data.continuationToken === undefined
-    ? { sessionId }
-    : { continuationToken: parsed.data.continuationToken, sessionId };
+  return { sessionId: parsed.data.sessionId };
 }
 
 /** Continues one remote-agent session via agentId. */
@@ -282,14 +268,19 @@ export async function cancelRemoteAgentTurn(input: {
   }
 
   const result = CancelTurnResponseSchema.safeParse(body);
-  if (!result.success || result.data.sessionId !== input.sessionId) {
+  if (
+    !result.success ||
+    (result.data.status === "accepted" && result.data.sessionId !== input.sessionId)
+  ) {
     throw new RemoteAgentCancelRequestError(
       `Remote agent "${input.remote.name}" cancel-turn response was invalid.`,
       { retryable: false },
     );
   }
 
-  return { status: result.data.status };
+  return result.data.status === "accepted"
+    ? { sessionId: result.data.sessionId, status: "accepted" }
+    : { status: "no_active_turn" };
 }
 
 export function isRetryableRemoteAgentCancelError(error: unknown): boolean {

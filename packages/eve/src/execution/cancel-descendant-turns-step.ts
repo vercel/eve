@@ -86,7 +86,6 @@ async function cancelLocalDescendant(input: {
         callId: handle.operation.callId,
         childSessionId: handle.address.sessionId,
         finalStatus: final.status,
-        reason: final.reason,
         subagentName: handle.identity.name,
       });
     }
@@ -134,7 +133,6 @@ async function cancelRemoteDescendant(input: {
         callId: handle.operation.callId,
         childSessionId: handle.address.sessionId,
         finalStatus: final.status,
-        reason: final.reason,
         remoteAgentName: handle.identity.name,
       });
     }

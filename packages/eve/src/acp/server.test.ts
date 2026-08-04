@@ -29,7 +29,7 @@ describe("runAcpServerOnStreams", () => {
   it("closes the transport without creating an eve session before the first prompt", async () => {
     const reset = vi.fn(async () => ({ status: "reset" }));
     const session = {
-      cancel: vi.fn(async () => ({ status: "accepted" })),
+      cancel: vi.fn(async () => ({ sessionId: "session_test", status: "accepted" })),
       reset,
       respond: vi.fn(async () => emptyEvents()),
       send: vi.fn(async (_message: SendTurnInput["message"]) => emptyEvents()),

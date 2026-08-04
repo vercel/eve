@@ -3,7 +3,7 @@ import type { UserContent } from "ai";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { SendPayload } from "#channel/routes.js";
 import { normalizeSendInput, serializeUrlFilePartsInMessage } from "#channel/send-input.js";
-import { createSession, type Session } from "#channel/session.js";
+import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
 import type {
   CancelTurnResult,
   ClearSessionResult,
@@ -77,15 +77,18 @@ export function createChannelAddress<TState = undefined>(input: {
     continuationToken: input.continuationToken,
     async deliver(sendInput, options) {
       const payload = normalizeSendInput(sendInput);
-      const command: Extract<SessionCommand, { readonly kind: "send" }> = {
+      const caller = sessionCallbackToTurnCaller(options.callback);
+      const commandWithoutCaller = {
         auth: options.auth,
-        kind: "send",
+        kind: "send" as const,
         payload: {
           ...payload,
           message: serializeUrlFilePartsInMessage(payload.message),
         },
         requestId: metadata.requestId,
       };
+      const command: Extract<SessionCommand, { readonly kind: "send" }> =
+        caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };
       const dispatch = async (): Promise<Session | undefined> => {
         const result = await input.runtime.dispatchContinuation({
           command,

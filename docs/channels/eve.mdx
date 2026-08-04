@@ -56,7 +56,10 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
 ```
 
-Sending a message to an unknown or terminal session ID returns `409` with `{"code":"session_not_active"}`. It never creates or follows a replacement session.
+Sending a message to an unknown or terminal session ID returns `409` with
+`{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
+TypeScript clients expose the stable code as `ClientError.code`. The route never
+creates or follows a replacement session.
 
 ### Stream events
 
@@ -79,6 +82,9 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A/cancel
 ```
 
 Cancellation is asynchronous: `"accepted"` means the live session durably queued the request. Confirm an actual cancellation on the stream as `turn.cancelled` followed by `session.waiting`—never as a failure. Active local and remote subagents are cancelled recursively before the parent settles. Content emitted before cancellation stays on the event stream, while durable model history keeps only content that had already settled. The session accepts the next message normally.
+
+An accepted cancellation returns HTTP `202` with `sessionId`. An inactive target
+returns HTTP `200` with `{"ok":true,"status":"no_active_turn"}`.
 
 A live session also returns `"accepted"` when it is already parked; the driver consumes that late or duplicate cancel as a no-op. An unknown or terminal session returns `"no_active_turn"`. A `turnId` naming any other turn is likewise accepted and consumed as a no-op, so a guarded cancel racing a turn boundary cannot stop a turn the caller never saw.
 
@@ -183,6 +189,9 @@ export default eveChannel({
   },
 });
 ```
+
+`onMessage` must return an auth result. A successful canonical eve HTTP message
+always dispatches and therefore always produces or continues a session.
 
 ## Clients
 

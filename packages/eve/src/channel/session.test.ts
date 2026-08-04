@@ -9,7 +9,12 @@ function createRuntime(): Runtime {
   return {
     createSession: vi.fn(),
     dispatchContinuation: vi.fn(),
-    dispatchSession: vi.fn().mockResolvedValue({ status: "accepted" }),
+    dispatchSession: vi
+      .fn()
+      .mockImplementation(async ({ sessionId }: { readonly sessionId: string }) => ({
+        sessionId,
+        status: "accepted",
+      })),
     getEventStream: vi.fn(),
     getStreamTailIndex: vi.fn(),
     resolveContinuation: vi.fn(),
@@ -21,7 +26,7 @@ describe("createSession#cancel", () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime);
 
-    await expect(session.cancel()).resolves.toEqual({ status: "accepted" });
+    await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_1", status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: { kind: "cancel", turnId: undefined },
       sessionId: "sess_1",
@@ -44,7 +49,7 @@ describe("createSession#cancel", () => {
     const runtime = createRuntime();
     const session = createAttachSessionFn(runtime)("sess_2");
 
-    await expect(session.cancel()).resolves.toEqual({ status: "accepted" });
+    await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_2", status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: { kind: "cancel", turnId: undefined },
       sessionId: "sess_2",
@@ -94,6 +99,39 @@ describe("fixed session operations", () => {
       sessionId: "sess_1",
     });
   });
+
+  it("maps the public callback abstraction onto internal turn routing", async () => {
+    const runtime = createRuntime();
+    const session = createSession("sess_1", runtime);
+    const callback = {
+      callId: "call_1",
+      subagentName: "research",
+      token: "callback-token",
+      url: "https://caller.example.com/eve/v1/callback/callback-token",
+    };
+
+    await session.send("continue", { auth: null, callback });
+    const invalidSend = async () => {
+      // @ts-expect-error runtime TurnCaller routing is not public session input.
+      await session.send("continue", { auth: null, caller: {} });
+    };
+    expect(invalidSend).toBeTypeOf("function");
+
+    expect(runtime.dispatchSession).toHaveBeenCalledWith({
+      command: {
+        auth: null,
+        caller: {
+          callId: "call_1",
+          replyTo: { kind: "callback", url: callback.url },
+          subagentName: "research",
+        },
+        kind: "send",
+        payload: { message: "continue" },
+        requestId: undefined,
+      },
+      sessionId: "sess_1",
+    });
+  });
 });
 
 describe("buildSessionHandle", () => {
@@ -117,7 +155,7 @@ describe("buildSessionHandle", () => {
     const session = buildSessionHandle(ctx);
 
     expect(session.id).toBe("sess-123");
-    expect(session.continuation?.token).toBe("slack:C1:T1");
+    expect(session.continuation?.token).toBe("C1:T1");
     expect(session.auth.current?.principalId).toBe("U1");
     expect(session.auth.initiator?.principalId).toBe("eve:app");
   });
@@ -128,7 +166,7 @@ describe("buildSessionHandle", () => {
 
     expect(session.continuation).toBeUndefined();
     ctx.set(ContinuationTokenKey, "slack:C1:T1");
-    expect(session.continuation?.token).toBe("slack:C1:T1");
+    expect(session.continuation?.token).toBe("C1:T1");
   });
 
   it("namespaces the channel-local token on continuation.rekey", () => {
@@ -137,6 +175,16 @@ describe("buildSessionHandle", () => {
     const session = buildSessionHandle(ctx);
 
     session.continuation?.rekey("C1:T1");
+
+    expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
+  });
+
+  it("round-trips the exposed channel-local token through continuation.rekey", () => {
+    const ctx = new ContextContainer();
+    ctx.set(ContinuationTokenKey, "slack:C1:T1");
+    const session = buildSessionHandle(ctx);
+
+    session.continuation?.rekey(session.continuation.token);
 
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
   });

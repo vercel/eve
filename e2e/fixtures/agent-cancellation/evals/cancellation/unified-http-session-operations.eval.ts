@@ -90,7 +90,7 @@ export default defineEval({
       t.target,
       `/eve/v1/session/${sessionId}/cancel`,
       {},
-      200,
+      202,
     );
     await t.require(
       cancelled,

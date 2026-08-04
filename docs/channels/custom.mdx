@@ -72,6 +72,10 @@ the exact session, while `channel.continuation` exposes the current address and
 `(eventData, channel)` because it runs outside session context; its event data
 contains `sessionId` directly.
 
+`channel.continuation.token` is always the channel-local address accepted by
+`from()`, `resolveSession()`, and `rekey()`. Framework namespace prefixes are not
+part of the authored channel API.
+
 ## Channel operations and session handles
 
 Channel operations are dynamic: every call targets whichever session currently

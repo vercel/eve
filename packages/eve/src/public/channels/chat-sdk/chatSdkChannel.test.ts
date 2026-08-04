@@ -100,7 +100,7 @@ async function firePost(
     throw new Error(`Expected POST ${path}.`);
   }
   const send = vi.fn().mockResolvedValue({ id: "session-1" });
-  const cancel = vi.fn().mockResolvedValue({ status: "accepted" });
+  const cancel = vi.fn().mockResolvedValue({ sessionId: "session-1", status: "accepted" });
   const waitUntil = vi.fn();
   const channelContext = mockChannelContext<ChatSdkChannelState>(send);
 

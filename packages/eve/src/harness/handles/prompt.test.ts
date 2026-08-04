@@ -32,7 +32,6 @@ const runningHandle: AgentHandle = {
 const parkedRemoteHandle: AgentHandle = {
   address: {
     callbackBaseUrl: "https://CALLBACK_SENTINEL.invalid",
-    continuationToken: "CONTINUATION_TOKEN_SENTINEL",
     kind: "agent/remote",
     sessionId: "SESSION_ID_SENTINEL_123456789",
     url: "https://URL_SENTINEL.invalid",
@@ -64,7 +63,6 @@ describe("projectParkedAgentHandles / renderAgentsSnippet", () => {
 
     expect(snippet).toContain("(no status)");
     expect(snippet).not.toContain(parkedRemoteHandle.address.sessionId);
-    expect(snippet).not.toContain(parkedRemoteHandle.address.continuationToken);
     expect(snippet).not.toContain("URL_SENTINEL");
     expect(snippet).not.toContain("CALLBACK_SENTINEL");
   });

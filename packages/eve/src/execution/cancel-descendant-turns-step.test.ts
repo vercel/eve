@@ -49,7 +49,6 @@ const LOCAL_RUNNING_HANDLE: AgentHandle = {
 const REMOTE_RUNNING_HANDLE: AgentHandle = {
   address: {
     callbackBaseUrl: "https://parent.example.com",
-    continuationToken: "remote-token",
     kind: "agent/remote",
     sessionId: "remote-child",
     url: "https://remote.example.com",
@@ -85,8 +84,14 @@ describe("cancelDescendantTurnsStep", () => {
   it("cancels every running local and remote child in parallel", async () => {
     installRemoteRegistry();
     vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote as never);
-    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({ status: "accepted" });
-    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({ status: "accepted" });
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
+      sessionId: "local-child",
+      status: "accepted",
+    });
+    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({
+      sessionId: "remote-child",
+      status: "accepted",
+    });
 
     await cancelDescendantTurnsStep({
       serializedContext: { context: "parent" },
@@ -110,7 +115,10 @@ describe("cancelDescendantTurnsStep", () => {
   });
 
   it("does not deserialize remote context for local-only descendants", async () => {
-    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({ status: "accepted" });
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
+      sessionId: "local-child",
+      status: "accepted",
+    });
 
     await cancelDescendantTurnsStep({
       serializedContext: {},
@@ -136,8 +144,14 @@ describe("cancelDescendantTurnsStep", () => {
       remoteAgent: dynamicRemoteAgent,
     });
     vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote as never);
-    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({ status: "accepted" });
-    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({ status: "accepted" });
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
+      sessionId: "local-child",
+      status: "accepted",
+    });
+    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({
+      sessionId: "remote-child",
+      status: "accepted",
+    });
 
     await cancelDescendantTurnsStep({
       serializedContext: {},
@@ -186,10 +200,10 @@ describe("cancelDescendantTurnsStep", () => {
     vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote as never);
     vi.mocked(requestWorkflowTurnCancellation)
       .mockResolvedValueOnce({ status: "no_active_turn" })
-      .mockResolvedValueOnce({ status: "accepted" });
+      .mockResolvedValueOnce({ sessionId: "local-child", status: "accepted" });
     vi.mocked(cancelRemoteAgentTurn)
       .mockResolvedValueOnce({ status: "no_active_turn" })
-      .mockResolvedValueOnce({ status: "accepted" });
+      .mockResolvedValueOnce({ sessionId: "remote-child", status: "accepted" });
 
     const cancellation = cancelDescendantTurnsStep({
       serializedContext: {},
@@ -235,7 +249,6 @@ describe("cancelDescendantTurnsStep", () => {
   it("warns loudly when a descendant cancel is never accepted", async () => {
     vi.useFakeTimers();
     vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
-      reason: "EntityConflictError",
       status: "no_active_turn",
     });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -253,7 +266,6 @@ describe("cancelDescendantTurnsStep", () => {
       expect.objectContaining({
         childSessionId: "local-child",
         finalStatus: "no_active_turn",
-        reason: "EntityConflictError",
       }),
     );
   });

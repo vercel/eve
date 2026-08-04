@@ -213,7 +213,7 @@ describe("cross-channel receive end-to-end", () => {
         createCapturingRuntime([]),
         toCrossChannelTargets(bundle.graph.root.channels),
       );
-      const stranger = { __kind: "eve:channel", routes: [], adapter: { kind: "x" } };
+      const stranger = { __kind: "eve:channel", routes: [], adapter: { kind: "x" } } as const;
 
       expect(() => to(stranger, {})).toThrow(/not registered in this agent/);
     });

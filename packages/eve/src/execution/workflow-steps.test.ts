@@ -664,14 +664,16 @@ describe("dispatchRuntimeActionsStep", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json(
-            { continuationToken: "remote-continuation", ok: true, sessionId: "remote-child" },
-            { headers: { "x-eve-session-id": "remote-child" }, status: 202 },
-          ),
+      vi.fn().mockResolvedValue(
+        Response.json(
+          {
+            ok: true,
+            sessionId: "remote-child",
+            status: "accepted",
+          },
+          { headers: { "x-eve-session-id": "remote-child" }, status: 202 },
         ),
+      ),
     );
 
     const session = setPendingRuntimeActionBatch({
@@ -771,7 +773,7 @@ describe("dispatchRuntimeActionsStep", () => {
       .fn()
       .mockResolvedValue(
         Response.json(
-          { sessionId: "dynamic-remote-child" },
+          { ok: true, sessionId: "dynamic-remote-child", status: "accepted" },
           { headers: { "x-eve-session-id": "dynamic-remote-child" }, status: 202 },
         ),
       );

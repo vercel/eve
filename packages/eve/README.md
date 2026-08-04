@@ -27,7 +27,7 @@ Unless you configure stricter controls, eve agents may operate with permissive s
 - Durable message runs and follow-up turns
 - Inspectable compiled artifacts under `.eve/`
 - Per-agent sandbox with optional authored overrides
-- A stable HTTP protocol with explicit `continuationToken` and `sessionId` contracts
+- A stable HTTP protocol built around immutable session IDs
 - A runtime model that keeps channels, harnesses, and workflow execution separate
 
 ## Authored Directory
@@ -163,14 +163,13 @@ You do not need this section to author an eve agent — it documents the public 
 
 eve's internal split is:
 
-- the **channel** normalizes inbound transport, applies auth and delivery policy, and owns `continuationToken`
+- the **channel** normalizes inbound transport, applies auth and delivery policy, and owns channel-local addresses
 - the **harness** does one unit of AI work and returns `{ session, next }`
 - the **runtime** persists state, follows `next`, streams events, and owns workflow primitives (`start()`, `resumeHook()`, `createHook()`, `getWritable()`)
 
-That split is why the public HTTP protocol separates two distinct identifiers:
-
-- `continuationToken` — channel-owned handle the caller uses to start the next user turn
-- `sessionId` — runtime-owned handle for streaming and inspection
+The public HTTP protocol exposes one immutable identifier: `sessionId`. Create a
+session explicitly, then use that ID for follow-up messages, controls, streaming,
+and inspection. Channel-local addresses remain behind authored channel APIs.
 
 ## Changelog
 

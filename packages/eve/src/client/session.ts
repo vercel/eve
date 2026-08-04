@@ -12,6 +12,7 @@ import {
 } from "#client/session-controls.js";
 import { serializeOutputSchema } from "#shared/tool-schema.js";
 import { createClientUrl } from "#client/url.js";
+import type { InputResponse } from "#runtime/input/types.js";
 import type {
   CancelSessionResult,
   ClearResult,
@@ -98,7 +99,7 @@ export class ClientSession {
 
   /** Answers pending input requests on this exact session ID. */
   async respond<TOutput = unknown>(
-    inputResponses: NonNullable<SendTurnPayload["inputResponses"]>,
+    inputResponses: readonly InputResponse[],
     options: RespondTurnOptions<TOutput> = {},
   ): Promise<MessageResponse<TOutput>> {
     if (inputResponses.length === 0) {

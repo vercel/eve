@@ -108,13 +108,13 @@ export interface EveMessageContext {
 }
 
 /**
- * Result of `eveChannel({ onMessage })`. An object dispatches the inbound message,
- * optionally prepending `context` strings as user messages; `null` accepts without dispatching.
+ * Result of `eveChannel({ onMessage })`. The object dispatches the inbound message,
+ * optionally prepending `context` strings as user messages.
  */
 export type EveMessageResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
-} | null;
+};
 
 /** Synchronous or asynchronous `onMessage` result. */
 export type EveMessageResultOrPromise = EveMessageResult | Promise<EveMessageResult>;
@@ -249,8 +249,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           request: req,
         });
         if (messageResult instanceof Response) return messageResult;
-        if (!messageResult.dispatch) return droppedMessageResponse();
-
         const createSession = readRouteSessionCreator(args);
         if (createSession === undefined) {
           return Response.json(
@@ -319,7 +317,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             sessionId,
           });
           if (messageResult instanceof Response) return messageResult;
-          if (!messageResult.dispatch) return droppedMessageResponse();
           context = mergeContext(body.context, messageResult.context);
           dispatchAuth = messageResult.auth;
         }
@@ -329,14 +326,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           const session = attachSession(sessionId);
           const options = {
             auth: dispatchAuth,
-            caller:
-              body.callback === undefined
-                ? undefined
-                : {
-                    callId: body.callback.callId,
-                    replyTo: { kind: "callback" as const, url: body.callback.url },
-                    subagentName: body.callback.subagentName,
-                  },
+            callback: body.callback,
             context,
             outputSchema: body.outputSchema,
           };
@@ -353,7 +343,11 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
         if (result.status === "session_not_active") {
           return Response.json(
-            { code: "session_not_active", ok: false },
+            {
+              code: "session_not_active",
+              error: "The session is no longer active.",
+              ok: false,
+            },
             { headers: { "cache-control": "no-store" }, status: 409 },
           );
         }
@@ -388,8 +382,17 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
         return Response.json(
-          { ok: true, sessionId, status: result.status } satisfies CancelTurnResponse,
-          { headers: { "cache-control": "no-store" } },
+          result.status === "accepted"
+            ? ({
+                ok: true,
+                sessionId: result.sessionId,
+                status: "accepted",
+              } satisfies CancelTurnResponse)
+            : ({ ok: true, status: "no_active_turn" } satisfies CancelTurnResponse),
+          {
+            headers: { "cache-control": "no-store" },
+            status: result.status === "accepted" ? 202 : 200,
+          },
         );
       }),
 
@@ -555,15 +558,10 @@ function normalizeEveCorsOrigin(
   return origin;
 }
 
-type OnMessageOutcome =
-  | {
-      readonly auth: SessionAuthContext | null;
-      readonly context?: readonly string[];
-      readonly dispatch: true;
-    }
-  | {
-      readonly dispatch: false;
-    };
+interface OnMessageOutcome {
+  readonly auth: SessionAuthContext | null;
+  readonly context?: readonly string[];
+}
 
 async function resolveOnMessage(input: {
   readonly auth: SessionAuthContext | null;
@@ -574,7 +572,7 @@ async function resolveOnMessage(input: {
 }): Promise<OnMessageOutcome | Response> {
   const handler = input.config.onMessage ?? defaultOnMessage;
 
-  let result: EveMessageResult | undefined;
+  let result: EveMessageResult;
   try {
     const eve: EveHandle =
       input.sessionId === undefined
@@ -582,6 +580,9 @@ async function resolveOnMessage(input: {
         : { caller: input.auth, request: input.request, sessionId: input.sessionId };
     const ctx: EveMessageContext = { eve };
     result = await handler(ctx, input.message);
+    if (result === null || result === undefined) {
+      throw new TypeError("eveChannel onMessage must return an auth result.");
+    }
   } catch (error) {
     const errorId = logError(log, "onMessage handler failed", error, {
       sessionId: input.sessionId,
@@ -592,24 +593,14 @@ async function resolveOnMessage(input: {
     );
   }
 
-  if (result === null || result === undefined) {
-    return { dispatch: false };
-  }
   if (result.context === undefined) {
-    return { auth: result.auth, dispatch: true };
+    return { auth: result.auth };
   }
-  return { auth: result.auth, context: result.context, dispatch: true };
+  return { auth: result.auth, context: result.context };
 }
 
-function defaultOnMessage(ctx: EveMessageContext): Exclude<EveMessageResult, null> {
+function defaultOnMessage(ctx: EveMessageContext): EveMessageResult {
   return { auth: defaultEveAuth(ctx) };
-}
-
-function droppedMessageResponse(): Response {
-  return new Response(null, {
-    headers: { "cache-control": "no-store" },
-    status: 204,
-  });
 }
 
 interface ParsedCreateBody {
@@ -622,6 +613,12 @@ interface ParsedCreateBody {
 }
 
 function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | Response {
+  if (payload.inputResponses !== undefined) {
+    return Response.json(
+      { error: "'inputResponses' is only accepted for an existing session.", ok: false },
+      { status: 400 },
+    );
+  }
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
 

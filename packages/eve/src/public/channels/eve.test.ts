@@ -175,7 +175,9 @@ function createEveCancelHandler(input: EveChannelInput) {
   );
   if (!cancelRoute) throw new Error("No cancel POST route found");
 
-  const cancelTurn = vi.fn().mockResolvedValue({ status: "accepted" });
+  const cancelTurn = vi
+    .fn()
+    .mockResolvedValue({ sessionId: "test-session-id", status: "accepted" });
   const session = createMockSession({
     cancel: (options) => cancelTurn({ sessionId: "test-session-id", turnId: options?.turnId }),
   });
@@ -493,7 +495,7 @@ describe("eveChannel — events", () => {
       );
     });
 
-    expect(observed).toEqual(["done", "eve:continuation", "sess-eve-event"]);
+    expect(observed).toEqual(["done", "continuation", "sess-eve-event"]);
   });
 });
 
@@ -625,16 +627,20 @@ describe("eveChannel — onMessage", () => {
     expect(handler.send).not.toHaveBeenCalled();
   });
 
-  it("accepts a create request without dispatching when onMessage returns null", async () => {
+  it("rejects an invalid null onMessage result instead of returning an empty success", async () => {
     const handler = createEveCreateHandler({
       auth: none(),
-      onMessage: () => null,
+      onMessage: (() => null) as never,
     });
 
     const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
 
-    expect(response.status).toBe(204);
+    expect(response.status).toBe(500);
     expect(handler.send).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: "onMessage handler failed.",
+      ok: false,
+    });
   });
 
   it("allows onMessage to dispatch with an empty context array", async () => {
@@ -719,7 +725,7 @@ describe("eveChannel — onMessage", () => {
     expect(handler.send).not.toHaveBeenCalled();
   });
 
-  it("maps validated continuation callback metadata onto the turn caller", async () => {
+  it("passes validated continuation callback metadata through the public session API", async () => {
     const handler = createEveContinueHandler({ auth: none() });
 
     const response = await handler.fetch(
@@ -738,13 +744,11 @@ describe("eveChannel — onMessage", () => {
     expect(handler.send).toHaveBeenCalledWith(
       "follow up",
       expect.objectContaining({
-        caller: {
+        callback: {
           callId: "call-2",
-          replyTo: {
-            kind: "callback",
-            url: "https://caller.example.com/eve/v1/callback/tok123",
-          },
           subagentName: "research",
+          token: "tok123",
+          url: "https://caller.example.com/eve/v1/callback/tok123",
         },
       }),
     );
@@ -782,6 +786,7 @@ describe("eveChannel — onMessage", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
       code: "session_not_active",
+      error: "The session is no longer active.",
       ok: false,
     });
   });
@@ -1535,7 +1540,7 @@ describe("eveChannel — cancel turn", () => {
 
     const response = await handler.fetch(cancelRequest());
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual({
       ok: true,
@@ -1554,7 +1559,7 @@ describe("eveChannel — cancel turn", () => {
 
     const response = await handler.fetch(cancelRequest({}));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(handler.cancelTurn).toHaveBeenCalledWith({
       sessionId: "test-session-id",
       turnId: undefined,
@@ -1566,7 +1571,7 @@ describe("eveChannel — cancel turn", () => {
 
     const response = await handler.fetch(cancelRequest({ turnId: "turn_2" }));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(handler.cancelTurn).toHaveBeenCalledWith({
       sessionId: "test-session-id",
       turnId: "turn_2",
@@ -1582,7 +1587,6 @@ describe("eveChannel — cancel turn", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      sessionId: "test-session-id",
       status: "no_active_turn",
     });
   });

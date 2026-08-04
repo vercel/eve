@@ -182,6 +182,7 @@ export class EveAgentStore<TData> {
 
     try {
       const preparedInput = (await this.#callbacks.prepareSend?.(input)) ?? input;
+      assertExclusiveTurnInput(preparedInput);
 
       if (!this.#isCurrentOperation(operationId)) {
         return;
@@ -195,12 +196,7 @@ export class EveAgentStore<TData> {
         ...preparedInput,
         signal: createAbortSignal(preparedInput.signal, abortController.signal),
       };
-      const response =
-        this.#session === undefined
-          ? await this.#createFirstTurn(turnInput)
-          : turnInput.inputResponses === undefined
-            ? await this.#session.send(turnInput.message!, turnInput)
-            : await this.#session.respond(turnInput.inputResponses, turnInput);
+      const response = await this.#dispatchTurn(turnInput);
 
       let sawEvent = false;
       for await (const event of response) {
@@ -287,6 +283,18 @@ export class EveAgentStore<TData> {
     this.#callbacks.onSessionChange?.(created.session.state);
     this.#publish();
     return created.response;
+  }
+
+  async #dispatchTurn<TOutput>(
+    input: SendTurnPayload<TOutput>,
+  ): Promise<Awaited<ReturnType<ClientSession["send"]>>> {
+    if (this.#session === undefined) return await this.#createFirstTurn(input);
+    if (input.inputResponses === undefined) {
+      const { message, ...options } = input;
+      return await this.#session.send(message, options);
+    }
+    const { inputResponses, ...options } = input;
+    return await this.#session.respond(inputResponses, options);
   }
 
   #startOperation(): number {
@@ -441,6 +449,14 @@ export class EveAgentStore<TData> {
     for (const subscriber of this.#subscribers) {
       subscriber();
     }
+  }
+}
+
+function assertExclusiveTurnInput(input: SendTurnPayload): void {
+  const hasMessage = input.message !== undefined;
+  const hasResponses = input.inputResponses !== undefined;
+  if (hasMessage === hasResponses) {
+    throw new Error("A turn requires exactly one of message or inputResponses.");
   }
 }
 

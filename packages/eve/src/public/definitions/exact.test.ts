@@ -299,6 +299,14 @@ function typeOnlyFixtures(): void {
     },
   });
 
+  eveChannel({
+    auth: none(),
+    // @ts-expect-error canonical eve HTTP messages must dispatch or fail.
+    onMessage() {
+      return null;
+    },
+  });
+
   defineSandbox({
     async onSession({ ctx, use }) {
       const sessionId: string = ctx.session.id;

@@ -161,37 +161,31 @@ describe("createWorkflowRuntime command dispatch", () => {
         command: { kind: "cancel", turnId: "turn-2" },
         sessionId: "session-1",
       }),
-    ).resolves.toEqual({ status: "accepted" });
+    ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
     expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
       kind: "cancel",
       turnId: "turn-2",
     });
   });
 
-  it("maps missing and terminal targets to 'no_active_turn' with a classified reason", async () => {
+  it("maps missing and terminal targets to 'no_active_turn'", async () => {
     const { EntityConflictError, HookNotFoundError, RunExpiredError, WorkflowRunNotFoundError } =
       await import("#compiled/@workflow/errors/index.js");
     const errors = [
-      {
-        error: new HookNotFoundError(sessionCommandHookToken("session-1")),
-        reason: "HookNotFoundError",
-      },
-      { error: new WorkflowRunNotFoundError("turn-run"), reason: "WorkflowRunNotFoundError" },
-      { error: new RunExpiredError("turn already completed"), reason: "RunExpiredError" },
-      {
-        error: new EntityConflictError("turn completed during cancellation"),
-        reason: "EntityConflictError",
-      },
+      new HookNotFoundError(sessionCommandHookToken("session-1")),
+      new WorkflowRunNotFoundError("turn-run"),
+      new RunExpiredError("turn already completed"),
+      new EntityConflictError("turn completed during cancellation"),
     ];
 
-    for (const { error, reason } of errors) {
+    for (const error of errors) {
       resumeHookMock.mockRejectedValueOnce(error);
       await expect(
         buildRuntime().dispatchSession({
           command: { kind: "cancel" },
           sessionId: "session-1",
         }),
-      ).resolves.toEqual({ reason, status: "no_active_turn" });
+      ).resolves.toEqual({ status: "no_active_turn" });
     }
   });
 

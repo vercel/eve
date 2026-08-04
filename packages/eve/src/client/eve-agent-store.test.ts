@@ -66,6 +66,33 @@ afterEach(() => {
 });
 
 describe("EveAgentStore stream overlap", () => {
+  it("rejects a prepared turn containing both a message and input responses", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    store.setCallbacks({
+      prepareSend: () =>
+        ({
+          inputResponses: [{ optionId: "approve", requestId: "request_1" }],
+          message: "also send this",
+        }) as never,
+    });
+    const invalidSend = () => {
+      // @ts-expect-error message and inputResponses are mutually exclusive.
+      void store.send({
+        inputResponses: [{ optionId: "approve", requestId: "request_1" }],
+        message: "also send this",
+      });
+    };
+    expect(invalidSend).toBeTypeOf("function");
+
+    await store.send({ message: "hello" });
+
+    expect(store.snapshot.error?.message).toBe(
+      "A turn requires exactly one of message or inputResponses.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("folds an initialEvents prefix that the live stream re-delivers in once", async () => {
     const events = turnEvents();
     vi.spyOn(globalThis, "fetch")

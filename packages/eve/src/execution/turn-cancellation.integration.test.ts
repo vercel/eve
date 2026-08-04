@@ -252,14 +252,16 @@ function createCancelRouteCaller(): (
 
 async function expectCancelResponse(
   response: Response,
-  expected: { readonly sessionId: string; readonly status: "accepted" | "no_active_turn" },
+  expected:
+    | { readonly sessionId: string; readonly status: "accepted" }
+    | { readonly status: "no_active_turn" },
 ): Promise<void> {
-  expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toEqual({
-    ok: true,
-    sessionId: expected.sessionId,
-    status: expected.status,
-  });
+  expect(response.status).toBe(expected.status === "accepted" ? 202 : 200);
+  await expect(response.json()).resolves.toEqual(
+    expected.status === "accepted"
+      ? { ok: true, sessionId: expected.sessionId, status: "accepted" }
+      : { ok: true, status: "no_active_turn" },
+  );
 }
 
 describe("turn cancellation integration", () => {
@@ -347,7 +349,6 @@ describe("turn cancellation integration", () => {
 
     await fixture.runtime.run(async () => {
       await expectCancelResponse(await cancelViaRoute("missing-session"), {
-        sessionId: "missing-session",
         status: "no_active_turn",
       });
 
@@ -433,7 +434,6 @@ describe("turn cancellation integration", () => {
       // A token no session owns is the benign "nothing to cancel" success
       // and must never start a session.
       await expect(address("no-such-thread").cancel()).resolves.toEqual({
-        reason: "HookNotFoundError",
         status: "no_active_turn",
       });
 
@@ -454,6 +454,7 @@ describe("turn cancellation integration", () => {
         await fixture.toolStarted;
 
         await expect(address(rawToken).cancel()).resolves.toEqual({
+          sessionId: run.runId,
           status: "accepted",
         });
 
@@ -474,6 +475,7 @@ describe("turn cancellation integration", () => {
         // Session.cancel() addresses the same parked session by its stable ID.
         const session = createSession(run.runId, workflowRuntime);
         await expect(session.cancel()).resolves.toEqual({
+          sessionId: run.runId,
           status: "accepted",
         });
 

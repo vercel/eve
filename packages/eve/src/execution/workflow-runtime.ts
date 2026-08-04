@@ -257,7 +257,7 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
     hook = normalizeWorkflowHook(await resumeHook(token, command));
   } catch (error) {
     if (isInactiveCommandTarget(error)) {
-      return inactiveCommandResult(command, error);
+      return inactiveCommandResult(command);
     }
     logError(log, "failed to dispatch session command", error, {
       command: command.kind,
@@ -281,20 +281,19 @@ function activeCommandResult<TCommand extends SessionCommand>(
     command.kind === "reset"
       ? { previousSessionId: sessionId, status: "reset" as const }
       : command.kind === "cancel"
-        ? { status: "accepted" as const }
+        ? { sessionId, status: "accepted" as const }
         : { sessionId, status: "accepted" as const };
   return result as SessionCommandResult<TCommand>;
 }
 
 function inactiveCommandResult<TCommand extends SessionCommand>(
   command: TCommand,
-  error: unknown,
 ): SessionCommandResult<TCommand> {
   const result =
     command.kind === "send"
       ? { status: "session_not_active" as const }
       : command.kind === "cancel"
-        ? { reason: classifyInactiveCancelTarget(error), status: "no_active_turn" as const }
+        ? { status: "no_active_turn" as const }
         : { status: "no_active_session" as const };
   return result as SessionCommandResult<TCommand>;
 }
@@ -307,14 +306,6 @@ export async function requestWorkflowTurnCancellation(
     kind: "cancel",
     turnId: input.turnId,
   });
-}
-
-function classifyInactiveCancelTarget(error: unknown): string | undefined {
-  if (HookNotFoundError.is(error)) return "HookNotFoundError";
-  if (WorkflowRunNotFoundError.is(error)) return "WorkflowRunNotFoundError";
-  if (RunExpiredError.is(error)) return "RunExpiredError";
-  if (EntityConflictError.is(error)) return "EntityConflictError";
-  return undefined;
 }
 
 function isInactiveCommandTarget(error: unknown): boolean {
