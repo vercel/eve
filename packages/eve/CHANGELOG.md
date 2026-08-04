@@ -1,5 +1,11 @@
 # eve
 
+## 0.30.1
+
+### Patch Changes
+
+- dae6f73: Upload Vercel sandbox workspace seed files in one compressed SDK request instead of one request per file, substantially reducing fresh template build times for large workspaces.
+
 ## 0.30.0
 
 ### Minor Changes
