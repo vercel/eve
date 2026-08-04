@@ -500,11 +500,15 @@ function slackSessionAuth(message: SlackMessage, onBehalfOfUserId?: string) {
       channel_id: message.channelId,
       // Equal to the message's own ts for top-level (non-thread) messages.
       thread_ts: message.threadTs || message.ts,
-      ...(userId ? { user_id: userId } : {}),
+      ...(userId
+        ? { user_id: userId }
+        : {}),
       ...(message.author?.userName
         ? { user_name: message.author.userName }
         : {}),
-      ...(message.teamId ? { team_id: message.teamId } : {}),
+      ...(message.teamId
+        ? { team_id: message.teamId }
+        : {}),
     },
     authenticator: "slack-webhook",
     issuer: message.teamId ? \`slack:\${message.teamId}\` : "slack",
@@ -666,7 +670,9 @@ async function setSuggestedPrompts(
         channel_id: target.channelId,
         prompts: SUGGESTED_PROMPTS,
         title: SUGGESTED_PROMPTS_TITLE,
-        ...(target.threadTs ? { thread_ts: target.threadTs } : {}),
+        ...(target.threadTs
+          ? { thread_ts: target.threadTs }
+          : {}),
       }
     );
     if (response.ok !== true) {
