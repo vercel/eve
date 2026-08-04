@@ -25,6 +25,7 @@ const SNAPSHOT_SKIP_NAMES = new Set([
   ".turbo",
   ".vercel",
   ".workflow-data",
+  ".workflow-vitest",
   "node_modules",
 ]);
 const SNAPSHOT_APP_ROOT_SKIP_NAMES = new Set(["build", "dist"]);
