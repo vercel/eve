@@ -68,7 +68,7 @@ export const TemplateActions = ({ setupPrompt, sourceHref, template }: TemplateA
       </Button>
       <Button
         asChild
-        className="w-full justify-center font-medium text-label-14 sm:w-auto sm:flex-1"
+        className="w-full justify-center font-medium text-label-14 sm:w-auto lg:flex-1"
         variant="outline"
       >
         <a
