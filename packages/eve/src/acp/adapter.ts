@@ -16,7 +16,7 @@ import {
   type ToolCall,
 } from "#compiled/@agentclientprotocol/sdk/index.js";
 import { Client, ClientError } from "#client/index.js";
-import type { ClientOptions, SendTurnInput } from "#client/types.js";
+import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
@@ -36,7 +36,10 @@ interface ActivePrompt {
 }
 
 interface AdapterClientSession {
-  send(input: SendTurnInput): Promise<AsyncIterable<HandleMessageStreamEvent>>;
+  send(message: SendTurnInput["message"]): Promise<AsyncIterable<HandleMessageStreamEvent>>;
+  respond(
+    inputResponses: readonly InputResponse[],
+  ): Promise<AsyncIterable<HandleMessageStreamEvent>>;
   cancel(options?: { turnId?: string }): Promise<unknown>;
   reset(): Promise<unknown>;
 }
@@ -180,15 +183,21 @@ export class EveAcpAdapter {
       if (active.protocolCancelled) {
         throw RequestError.requestCancelled({ sessionId: params.sessionId });
       }
-      let input: SendTurnInput = { message };
+      let input: SendTurnPayload = { message };
       for (;;) {
         let response: AsyncIterable<HandleMessageStreamEvent>;
         if (session.client === undefined) {
-          const created = await this.#client.sessions.create(input);
+          if (input.message === undefined) {
+            throw new Error("ACP session has not started.");
+          }
+          const created = await this.#client.sessions.create({ ...input, message: input.message });
           session.client = created.session;
           response = created.response;
         } else {
-          response = await session.client.send(input);
+          response =
+            input.inputResponses === undefined
+              ? await session.client.send(input.message!)
+              : await session.client.respond(input.inputResponses);
         }
         if (active.cancelRequested || active.protocolCancelled) {
           await this.#cancelActive(session);

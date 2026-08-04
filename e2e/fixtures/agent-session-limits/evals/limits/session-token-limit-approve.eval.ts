@@ -76,10 +76,12 @@ export default defineEval({
       equals(1),
     );
 
-    const resumed = await queuedBSession.session.respond({
-      optionId: "continue",
-      requestId: request.requestId,
-    });
+    const resumed = await queuedBSession.session.respond([
+      {
+        optionId: "continue",
+        requestId: request.requestId,
+      },
+    ]);
     resumed.expectOk();
     resumed.event("step.started");
     resumed.notEvent("input.requested");
@@ -87,9 +89,9 @@ export default defineEval({
     t.check(resumed.sessionId, equals(active.sessionId));
     t.check(queuedBSession.session.sessionId, equals(active.sessionId));
 
-    const nextPrompt = await queuedBSession.session.send({
-      message: 'Post-approval probe: reply with exactly "same session".',
-    });
+    const nextPrompt = await queuedBSession.session.send(
+      'Post-approval probe: reply with exactly "same session".',
+    );
     nextPrompt.event("input.requested", { count: 1 });
     nextPrompt.notEvent("message.completed");
     t.check(nextPrompt.sessionId, equals(active.sessionId));

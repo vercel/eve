@@ -57,7 +57,8 @@ describe("fixed session operations", () => {
     const runtime = createRuntime();
     const session = createAttachSessionFn(runtime, { requestId: "req_1" })("sess_1");
 
-    await session.send({ auth: null, message: "hello" });
+    await session.send("hello", { auth: null });
+    await session.respond([{ optionId: "approve", requestId: "request_1" }], { auth: null });
     await session.compact();
     await session.clear();
     await session.reset({ reason: "fresh start" });
@@ -72,14 +73,23 @@ describe("fixed session operations", () => {
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(2, {
-      command: { kind: "compact" },
+      command: {
+        auth: null,
+        kind: "send",
+        payload: { inputResponses: [{ optionId: "approve", requestId: "request_1" }] },
+        requestId: "req_1",
+      },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(3, {
-      command: { kind: "clear" },
+      command: { kind: "compact" },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(4, {
+      command: { kind: "clear" },
+      sessionId: "sess_1",
+    });
+    expect(runtime.dispatchSession).toHaveBeenNthCalledWith(5, {
       command: { kind: "reset", reason: "fresh start" },
       sessionId: "sess_1",
     });

@@ -6,7 +6,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
-import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
@@ -173,9 +173,9 @@ async function firePost(
 
   const response = await post.handler(request, {
     attachSession: vi.fn() as any,
-    ...mockChannelOperations(send),
+    ...mockChannelContext(send),
     params: {},
-    receive: vi.fn() as any,
+    to: vi.fn() as any,
     requestIp: null,
     waitUntil,
   });

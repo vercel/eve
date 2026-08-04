@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  createCrossChannelReceiveFn,
+  createCrossChannelToFn,
   toCrossChannelTargets,
 } from "../../src/channel/cross-channel-receive.js";
 import type { Runtime, SessionCommand, SessionCommandResult } from "../../src/channel/types.js";
@@ -16,10 +16,10 @@ import {
   withRuntimeSession,
 } from "../../src/runtime/sessions/runtime-session.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
-import { mockChannelOperations } from "../../src/internal/testing/mocks/mock-channel-operations.js";
+import { mockChannelContext } from "../../src/internal/testing/mocks/mock-channel-operations.js";
 
 /**
- * Locks the cross-channel `args.receive(channel, …)` path end-to-end:
+ * Locks the cross-channel `ctx.to(channel, target).send(...)` path end-to-end:
  * a two-channel agent is compiled from disk, its resolved bundle
  * preserves the per-channel `definition` reference, and dispatching by
  * that reference routes through to the target channel's `receive`
@@ -44,11 +44,9 @@ export default {
       path: "/webhook",
       handler: async (req, args) => {
         const body = await req.json();
-        const session = await args.receive(target, {
-          message: body.message,
-          target: { sessionId: body.sessionId },
-          auth: body.auth,
-        });
+        const session = await args
+          .to(target, { sessionId: body.sessionId })
+          .send(body.message, { auth: body.auth });
         return Response.json({ ok: true, sessionId: session.id });
       },
     },
@@ -62,11 +60,10 @@ const TARGET_CHANNEL = `export default {
   routes: [
     { method: "POST", path: "/target", handler: async () => new Response("ok") },
   ],
-  async receive(input, { send }) {
+  async receive(input, { from }) {
     const target = input.target;
-    return send(\`target:\${target.sessionId ?? "default"}\`, {
+    return from(\`target:\${target.sessionId ?? "default"}\`).send(input.message, {
       auth: input.auth,
-      message: input.message,
     });
   },
 };
@@ -140,7 +137,7 @@ describe("cross-channel receive end-to-end", () => {
       expect(target?.receive).toBeDefined();
 
       const captured: CapturedRun[] = [];
-      const receive = createCrossChannelReceiveFn(
+      const to = createCrossChannelToFn(
         createCapturingRuntime(captured),
         toCrossChannelTargets(bundle.graph.root.channels),
       );
@@ -152,11 +149,10 @@ describe("cross-channel receive end-to-end", () => {
         principalType: "service",
       } as const;
 
-      const session = await receive(target!.definition!, {
-        message: "incident triggered",
-        target: { sessionId: "scenario-123" },
-        auth,
-      });
+      const session = await to(target!.definition!, { sessionId: "scenario-123" }).send(
+        "incident triggered",
+        { auth },
+      );
 
       expect(session.id).toBe("sess_scenario");
       expect(captured).toHaveLength(1);
@@ -176,13 +172,13 @@ describe("cross-channel receive end-to-end", () => {
           }),
         }),
         {
-          ...mockChannelOperations(() => {
+          ...mockChannelContext(() => {
             throw new Error("webhook should not send directly");
           }),
           attachSession: () => {
             throw new Error("webhook should not attach sessions directly");
           },
-          receive,
+          to,
           params: {},
           requestIp: null,
           waitUntil: () => undefined,
@@ -213,15 +209,13 @@ describe("cross-channel receive end-to-end", () => {
       const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
       const bundle = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
 
-      const receive = createCrossChannelReceiveFn(
+      const to = createCrossChannelToFn(
         createCapturingRuntime([]),
         toCrossChannelTargets(bundle.graph.root.channels),
       );
       const stranger = { __kind: "eve:channel", routes: [], adapter: { kind: "x" } };
 
-      await expect(receive(stranger, { message: "x", target: {}, auth: null })).rejects.toThrow(
-        /not registered in this agent/,
-      );
+      expect(() => to(stranger, {})).toThrow(/not registered in this agent/);
     });
   });
 });

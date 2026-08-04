@@ -9,27 +9,22 @@ import type { Runtime, SessionAuthContext } from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 /**
- * Options accepted by {@link CrossChannelReceiveFn}. Mirrors the input
- * argument of a channel's authored `receive(input, operations)` hook. The
- * runtime supplies the target channel's operation functions, so route-handler
- * callers only provide the platform target, payload, and auth.
+ * Options for sending a message to a channel selected with `ctx.to(...)`.
  */
-export interface CrossChannelReceiveOptions<TTarget = Record<string, unknown>> {
-  readonly message: string | UserContent;
-  readonly target: TTarget;
+export interface CrossChannelSendOptions {
   readonly auth: SessionAuthContext | null;
 }
 
-/**
- * Starts a session on a different channel from inside a route handler.
- * The target channel's authored `receive` hook owns continuation-token
- * format and initial state; `auth` is forwarded verbatim and becomes
- * `session.initiatorAuth`.
- */
-export type CrossChannelReceiveFn = <TChannel>(
+/** Message delivery bound to one channel-specific proactive target. */
+export interface CrossChannelTargetHandle {
+  send(message: string | UserContent, options: CrossChannelSendOptions): Promise<Session>;
+}
+
+/** Selects another authored channel and one of its proactive targets. */
+export type CrossChannelToFn = <TChannel>(
   channel: TChannel,
-  options: CrossChannelReceiveOptions<InferReceiveTarget<TChannel>>,
-) => Promise<Session>;
+  target: InferReceiveTarget<TChannel>,
+) => CrossChannelTargetHandle;
 
 /**
  * Channel record consumed by the receiver — keeps the public-facing
@@ -68,31 +63,32 @@ export function toCrossChannelTargets(
 }
 
 /**
- * Builds the `args.receive` closure used by every route handler. The
- * closure resolves the target channel by reference identity against
- * the request-scoped channel bundle, then delegates to the target's
- * authored `receive` hook with per-target channel operations.
+ * Builds the `ctx.to(channel, target)` closure used by route and schedule handlers.
  */
-export function createCrossChannelReceiveFn(
+export function createCrossChannelToFn(
   runtime: Runtime,
   channels: readonly CrossChannelTarget[],
-): CrossChannelReceiveFn {
-  return async (channel, options) => {
+): CrossChannelToFn {
+  return (channel, target) => {
     const targetChannel = resolveTargetByReference(channel, channels);
-    return await invokeChannelReceive({
-      runtime,
-      target: targetChannel,
-      input: {
-        message: options.message as string,
-        target: options.target as Readonly<Record<string, unknown>>,
-        auth: options.auth,
+    return {
+      async send(message, options) {
+        return await invokeChannelReceive({
+          runtime,
+          target: targetChannel,
+          input: {
+            message,
+            target: target as Readonly<Record<string, unknown>>,
+            auth: options.auth,
+          },
+          describeMissingReceive: () =>
+            `ctx.to(): channel "${targetChannel.name}" does not implement receive(). ` +
+            `Declare a receive hook on the channel to accept cross-channel sessions.`,
+          describeMissingAdapter: () =>
+            `ctx.to(): channel "${targetChannel.name}" has no adapter — cannot build ctx.from().`,
+        });
       },
-      describeMissingReceive: () =>
-        `args.receive(): channel "${targetChannel.name}" does not implement receive(). ` +
-        `Declare a receive hook on the channel to accept cross-channel sessions.`,
-      describeMissingAdapter: () =>
-        `args.receive(): channel "${targetChannel.name}" has no adapter — cannot build send().`,
-    });
+    };
   };
 }
 
@@ -100,7 +96,7 @@ interface InvokeChannelReceiveInput {
   readonly runtime: Runtime;
   readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter">;
   readonly input: {
-    readonly message: string;
+    readonly message: string | UserContent;
     readonly target: Readonly<Record<string, unknown>>;
     readonly auth: SessionAuthContext | null;
   };
@@ -109,10 +105,7 @@ interface InvokeChannelReceiveInput {
 }
 
 /**
- * Shared `receive(input, operations)` invocation used by both the route-
- * handler cross-channel surface and the schedule dispatcher. Owns the
- * receive/adapter precondition checks and the per-target operation functions so
- * both call sites stay byte-identical.
+ * Shared authored `receive(input, ctx)` invocation used by route and schedule delivery.
  */
 export async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Session> {
   if (!args.target.receive) {
@@ -121,12 +114,12 @@ export async function invokeChannelReceive(args: InvokeChannelReceiveInput): Pro
   if (!args.target.adapter) {
     throw new Error(args.describeMissingAdapter());
   }
-  const operations = createChannelOperations({
+  const channelOperations = createChannelOperations({
     adapter: args.target.adapter,
     channelName: args.target.name,
     runtime: args.runtime,
   });
-  return await args.target.receive(args.input, operations);
+  return await args.target.receive(args.input, channelOperations);
 }
 
 function resolveTargetByReference(
@@ -143,7 +136,7 @@ function resolveTargetByReference(
     return structurallyMatchedTarget;
   }
   throw new Error(
-    "args.receive(): the channel passed as the first argument is not registered " +
+    "ctx.to(): the channel passed as the first argument is not registered " +
       "in this agent's channels/. Import the channel module's default export from " +
       "agent/channels/<name>.ts and pass that value.",
   );
@@ -176,9 +169,9 @@ function resolveTargetByRouteFingerprint(
   }
   if (matches.size > 1) {
     throw new Error(
-      "args.receive(): the channel passed as the first argument matches multiple " +
+      "ctx.to(): the channel passed as the first argument matches multiple " +
         "registered channels by route shape. Import a channel with a unique route set " +
-        "from agent/channels/<name>.ts before passing it to args.receive().",
+        "from agent/channels/<name>.ts before passing it to ctx.to().",
     );
   }
 

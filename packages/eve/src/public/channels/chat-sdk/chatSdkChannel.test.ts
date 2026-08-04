@@ -6,7 +6,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   chatSdkChannel,
@@ -102,6 +102,7 @@ async function firePost(
   const send = vi.fn().mockResolvedValue({ id: "session-1" });
   const cancel = vi.fn().mockResolvedValue({ status: "accepted" });
   const waitUntil = vi.fn();
+  const channelContext = mockChannelContext<ChatSdkChannelState>(send);
 
   const response = await post.handler(
     new Request(`https://example.com${path}`, {
@@ -110,11 +111,16 @@ async function firePost(
       method: "POST",
     }),
     {
-      ...mockChannelOperations(send),
+      from(continuationToken) {
+        return {
+          ...channelContext.from(continuationToken),
+          cancel: () => cancel({ continuationToken }) as never,
+        };
+      },
+      resolveSession: channelContext.resolveSession,
       attachSession: vi.fn() as any,
-      cancel: (continuationToken) => cancel({ continuationToken }),
       params: {},
-      receive: vi.fn() as any,
+      to: vi.fn() as any,
       requestIp: null,
       waitUntil,
     } satisfies RouteHandlerArgs<ChatSdkChannelState>,
@@ -165,10 +171,10 @@ describe("chatSdkChannel", () => {
     const response = await get.handler(
       new Request("https://example.com/eve/v1/test?crc_token=abc123", { method: "GET" }),
       {
-        ...mockChannelOperations(vi.fn()),
+        ...mockChannelContext(vi.fn()),
         attachSession: vi.fn() as any,
         params: {},
-        receive: vi.fn() as any,
+        to: vi.fn() as any,
         requestIp: null,
         waitUntil: vi.fn(),
       } satisfies RouteHandlerArgs<ChatSdkChannelState>,
@@ -308,7 +314,7 @@ describe("chatSdkChannel", () => {
         message: "proactive",
         target: { adapterName: "test", threadId: THREAD_ID },
       },
-      mockChannelOperations(send),
+      mockChannelContext(send),
     );
 
     expect(send).toHaveBeenCalledWith(THREAD_ID, {

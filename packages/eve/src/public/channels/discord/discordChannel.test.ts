@@ -8,7 +8,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   DISCORD_HITL_FREEFORM_TEXT_INPUT_ID,
@@ -128,8 +128,8 @@ async function firePost(
 
   const response = await post.handler(request, {
     attachSession: vi.fn() as any,
-    ...mockChannelOperations(send),
-    receive: vi.fn() as any,
+    ...mockChannelContext(send),
+    to: vi.fn() as any,
     params: {},
     requestIp: null,
     waitUntil,
@@ -528,7 +528,7 @@ describe("discordChannel() default event handlers", () => {
         message: "start",
       },
       {
-        ...mockChannelOperations(send),
+        ...mockChannelContext(send),
       },
     );
 

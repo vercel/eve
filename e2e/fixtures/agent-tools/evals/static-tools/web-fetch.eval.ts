@@ -8,13 +8,13 @@ export default defineEval({
   tags: ["real-model"],
   description: "Framework tools smoke: web_fetch retrieves an HTTPS page.",
   async test(t) {
-    const turn = await t.send({
-      message: [
+    const turn = await t.send(
+      [
         `Call \`${TOOL_NAME}\` exactly once with URL ${JSON.stringify(TARGET_URL)} and format "text".`,
         "Do not call any other tools.",
         `After the tool returns, reply with the page title: ${CONTENT_MARKER}.`,
       ].join("\n"),
-    });
+    );
 
     turn.expectOk();
     turn.calledTool(TOOL_NAME, {

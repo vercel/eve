@@ -32,7 +32,7 @@ import { includes } from "eve/evals/expect";
 export default defineEval({
   description: "Basic message and tool-usage coverage for the weather agent.",
   async test(t) {
-    await t.send({ message: "What is the weather in Brooklyn?" });
+    await t.send("What is the weather in Brooklyn?");
     t.succeeded();
     t.calledTool("get_weather");
     t.check(t.reply, includes("Sunny"));

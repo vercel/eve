@@ -10,7 +10,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "Dynamic model smoke: null selection serves the fallback model.",
   async test(t) {
-    await t.send({ message: 'Reply with exactly the text "fallback ping" and nothing else.' });
+    await t.send('Reply with exactly the text "fallback ping" and nothing else.');
 
     t.succeeded();
     t.messageIncludes("fallback ping");

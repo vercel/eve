@@ -18,8 +18,10 @@ import type {
   ClientSessionState,
   CompactResult,
   ClientRedirectPolicy,
+  RespondTurnOptions,
   ResetResult,
   SendTurnInput,
+  SendTurnOptions,
   SendTurnPayload,
   SessionSnapshot,
   StreamOptions,
@@ -86,8 +88,28 @@ export class ClientSession {
     };
   }
 
-  /** Sends a turn to this exact session ID. */
-  async send<TOutput = unknown>(input: SendTurnInput<TOutput>): Promise<MessageResponse<TOutput>> {
+  /** Sends a message to this exact session ID. */
+  async send<TOutput = unknown>(
+    message: SendTurnInput<TOutput>["message"],
+    options: SendTurnOptions<TOutput> = {},
+  ): Promise<MessageResponse<TOutput>> {
+    return await this.#send({ ...options, message });
+  }
+
+  /** Answers pending input requests on this exact session ID. */
+  async respond<TOutput = unknown>(
+    inputResponses: NonNullable<SendTurnPayload["inputResponses"]>,
+    options: RespondTurnOptions<TOutput> = {},
+  ): Promise<MessageResponse<TOutput>> {
+    if (inputResponses.length === 0) {
+      throw new Error("ClientSession.respond() requires at least one input response.");
+    }
+    return await this.#send({ ...options, inputResponses });
+  }
+
+  async #send<TOutput = unknown>(
+    input: SendTurnPayload<TOutput>,
+  ): Promise<MessageResponse<TOutput>> {
     const initialStreamIndex = this.#state.streamIndex;
     const response = await postTurn(
       this.#context,
@@ -230,7 +252,7 @@ async function postTurn(
     throw new Error(
       requireMessage
         ? "Creating a session requires a non-empty message."
-        : "Session.send requires a non-empty message, inputResponses, or both.",
+        : "A session turn requires a non-empty message or inputResponses.",
     );
   }
 

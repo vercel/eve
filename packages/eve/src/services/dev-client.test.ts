@@ -26,12 +26,12 @@ describe("runtime-artifact refresher session continuity", () => {
     await refresher.refresh({
       message: "first",
     });
-    await (await session.send({ message: "first" })).result();
+    await (await session.send("first")).result();
     const sessionId = session.state.sessionId;
     await refresher.refresh({
       message: "second",
     });
-    await (await session.send({ message: "second" })).result();
+    await (await session.send("second")).result();
 
     expect(session.state.sessionId).toBe(sessionId);
     const postUrls = requests
@@ -58,11 +58,11 @@ describe("runtime-artifact refresher session continuity", () => {
     const session = client.sessions.attach("session_test");
 
     await refresher.refresh({ message: "first" });
-    await (await session.send({ message: "first" })).result();
+    await (await session.send("first")).result();
     const sessionId = session.state.sessionId;
 
     await refresher.refresh({ message: "second" });
-    await (await session.send({ message: "second" })).result();
+    await (await session.send("second")).result();
 
     expect(session.state.sessionId).toBe(sessionId);
     const postUrls = requests
@@ -91,12 +91,12 @@ describe("runtime-artifact refresher session continuity", () => {
     await refresher.refresh({
       message: "approve a tool",
     });
-    await (await session.send({ message: "approve a tool" })).result();
+    await (await session.send("approve a tool")).result();
     const sessionId = session.state.sessionId;
     await refresher.refresh({
       inputResponses,
     });
-    await (await session.send({ inputResponses })).result();
+    await (await session.respond(inputResponses)).result();
 
     expect(session.state.sessionId).toBe(sessionId);
 
@@ -129,7 +129,7 @@ describe("createDevelopmentRuntimeArtifactRefresher", () => {
     const session = client.sessions.attach("session_test");
 
     await refresher.refreshIdle({});
-    await (await session.send({ message: "first" })).result();
+    await (await session.send("first")).result();
     const sessionId = session.state.sessionId;
 
     await refresher.refreshAfterSourceChange({});
@@ -159,7 +159,7 @@ describe("createDevelopmentRuntimeArtifactRefresher", () => {
     });
     const session = client.sessions.attach("session_test");
 
-    await (await session.send({ message: "first" })).result();
+    await (await session.send("first")).result();
     const sessionId = session.state.sessionId;
 
     await refresher.refreshAfterSourceChange({});

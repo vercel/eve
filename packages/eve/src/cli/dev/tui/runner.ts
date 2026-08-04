@@ -1251,11 +1251,20 @@ export class EveTUIRunner {
         if (this.#client === undefined) {
           throw new Error("Cannot create a session without an eve client.");
         }
-        const created = await this.#client.sessions.create(sendInput);
+        if (sendInput.message === undefined) {
+          throw new Error("Cannot answer an input request before the session starts.");
+        }
+        const created = await this.#client.sessions.create({
+          ...sendInput,
+          message: sendInput.message,
+        });
         this.#session = created.session;
         response = created.response;
       } else {
-        response = await this.#session.send(sendInput);
+        response =
+          sendInput.inputResponses === undefined
+            ? await this.#session.send(sendInput.message!, { signal: sendInput.signal })
+            : await this.#session.respond(sendInput.inputResponses, { signal: sendInput.signal });
       }
     } catch (error) {
       if (isInterruptedError(error)) throw error;

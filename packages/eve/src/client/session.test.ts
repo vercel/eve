@@ -106,7 +106,7 @@ describe("ClientSession", () => {
       },
     );
 
-    const turn = await session.send({ message: "wait" });
+    const turn = await session.send("wait");
     const cancelled = await session.cancel();
 
     expect(turn.sessionId).toBe("session_1");
@@ -375,10 +375,7 @@ describe("ClientSession", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession();
 
-    await session.send({
-      clientContext: { selectedWord: "jazz" },
-      message: "What word is selected?",
-    });
+    await session.send("What word is selected?", { clientContext: { selectedWord: "jazz" } });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
@@ -395,9 +392,8 @@ describe("ClientSession", () => {
       streamIndex: 0,
     });
 
-    await session.send({
+    await session.respond([{ requestId: "approval_1", optionId: "approve" }], {
       clientContext: "approve button visible",
-      inputResponses: [{ requestId: "approval_1", optionId: "approve" }],
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -408,18 +404,16 @@ describe("ClientSession", () => {
     });
   });
 
-  it("rejects clientContext-only sends", async () => {
+  it("rejects empty input responses", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession({
       sessionId: "session_1",
       streamIndex: 0,
     });
 
-    await expect(
-      session.send({
-        clientContext: { selectedWord: "jazz" },
-      }),
-    ).rejects.toThrow("Session.send requires a non-empty message, inputResponses, or both.");
+    await expect(session.respond([], { clientContext: { selectedWord: "jazz" } })).rejects.toThrow(
+      "ClientSession.respond() requires at least one input response.",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -448,11 +442,11 @@ describe("ClientSession", () => {
     });
     const session = createSession();
 
-    const first = await session.send({ message: "first" });
+    const first = await session.send("first");
     for await (const _event of first) {
       // Drain the stream so ClientSession can advance its cursor.
     }
-    await session.send({ message: "second" });
+    await session.send("second");
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const postRequests = requests.filter((request) => request.method === "POST");
@@ -489,7 +483,7 @@ describe("ClientSession", () => {
     });
     const session = createSession();
 
-    const result = await (await session.send({ message: "first" })).result();
+    const result = await (await session.send("first")).result();
 
     expect(result.status).toBe("waiting");
     expect(cancelled).toBe(true);
@@ -515,8 +509,8 @@ describe("ClientSession", () => {
     });
     const session = createSession();
 
-    await (await session.send({ message: "first" })).result();
-    await session.send({ message: "second" });
+    await (await session.send("first")).result();
+    await session.send("second");
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const postRequests = requests.filter((request) => request.method === "POST");
@@ -556,7 +550,7 @@ describe("ClientSession", () => {
     });
     const session = createSession();
 
-    const result = await (await session.send({ message: "first" })).result();
+    const result = await (await session.send("first")).result();
 
     expect(result.inputRequests.map((request) => request.requestId)).toEqual(["approval_1"]);
   });
@@ -656,8 +650,7 @@ describe("ClientSession", () => {
     const session = createSession();
 
     const eventTypes: string[] = [];
-    for await (const event of await session.send({
-      message: "first",
+    for await (const event of await session.send("first", {
       streamReconnectPolicy: { reconnect: false },
     })) {
       eventTypes.push(event.type);
@@ -756,7 +749,7 @@ describe("ClientSession", () => {
 
     vi.useFakeTimers();
     try {
-      const eventTypes = await collectEventTypes(await session.send({ message: "first" }));
+      const eventTypes = await collectEventTypes(await session.send("first"));
       expect(eventTypes).toEqual(["turn.started", "session.waiting"]);
     } finally {
       vi.useRealTimers();
@@ -795,10 +788,7 @@ describe("ClientSession", () => {
     const session = createSession();
 
     const eventTypes: string[] = [];
-    for await (const event of await session.send({
-      message: "first",
-      signal: abortController.signal,
-    })) {
+    for await (const event of await session.send("first", { signal: abortController.signal })) {
       eventTypes.push(event.type);
       abortController.abort();
     }

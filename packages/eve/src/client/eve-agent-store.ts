@@ -198,7 +198,9 @@ export class EveAgentStore<TData> {
       const response =
         this.#session === undefined
           ? await this.#createFirstTurn(turnInput)
-          : await this.#session.send(turnInput);
+          : turnInput.inputResponses === undefined
+            ? await this.#session.send(turnInput.message!, turnInput)
+            : await this.#session.respond(turnInput.inputResponses, turnInput);
 
       let sawEvent = false;
       for await (const event of response) {
@@ -277,7 +279,10 @@ export class EveAgentStore<TData> {
     if (this.#client === undefined) {
       throw new Error("An external eve session is required before sending.");
     }
-    const created = await this.#client.sessions.create(input);
+    if (input.message === undefined) {
+      throw new Error("Cannot answer an input request before the session starts.");
+    }
+    const created = await this.#client.sessions.create({ ...input, message: input.message });
     this.#session = created.session;
     this.#callbacks.onSessionChange?.(created.session.state);
     this.#publish();

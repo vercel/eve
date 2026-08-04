@@ -1,10 +1,7 @@
 import type { H3Event } from "nitro";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
-import {
-  createCrossChannelReceiveFn,
-  toCrossChannelTargets,
-} from "#channel/cross-channel-receive.js";
+import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { createAttachSessionFn } from "#channel/session.js";
@@ -201,27 +198,24 @@ function buildRouteArgs(
   };
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };
-  const operations = createChannelOperations({
+  const channelOperations = createChannelOperations({
     adapter,
     channelName,
     metadata: { requestId },
     runtime: bundle.runtime,
   });
   const attachSession = createAttachSessionFn(bundle.runtime, { requestId });
-  const receive = createCrossChannelReceiveFn(
-    bundle.runtime,
-    toCrossChannelTargets(bundle.channels),
-  );
+  const to = createCrossChannelToFn(bundle.runtime, toCrossChannelTargets(bundle.channels));
 
   const args = attachRouteSessionCreator(
     attachAgentInfoRouteResponse(
       {
-        ...operations,
         attachSession,
-        receive,
+        ...channelOperations,
         params,
-        waitUntil,
         requestIp,
+        to,
+        waitUntil,
       },
       async () => {
         const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");

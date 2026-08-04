@@ -30,7 +30,7 @@ Scoped assertions take no explicit value and gate by default. Assertions on `t` 
 `succeeded()` accepts both a closed session and a healthy session left open for the next user message; it rejects protocol failures and unanswered HITL. `parked()` requires a clean HITL park. Structured output assertions live on turns and independent sessions, where the output is unambiguous (see the [output schema guide](../guides/client/output-schema)).
 
 ```ts
-await t.send({ message: "What is the weather in Brooklyn?" });
+await t.send("What is the weather in Brooklyn?");
 t.succeeded();
 t.calledTool("get_weather");
 ```
@@ -38,7 +38,7 @@ t.calledTool("get_weather");
 The same vocabulary narrows naturally in multi-turn and externally-created session evals:
 
 ```ts
-const first = await t.send({ message: "Call get_weather for Brooklyn" });
+const first = await t.send("Call get_weather for Brooklyn");
 first.calledTool("get_weather", { count: 1 });
 
 const attached = await t.target.attachSession(sessionId);

@@ -4,7 +4,14 @@ import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channe
 import { normalizeChannelCors, type ChannelCorsOptions } from "#channel/cors.js";
 import { HTTP_ADAPTER_KIND } from "#channel/http.js";
 import type { TypedReceiveTarget } from "#channel/receive-target.js";
-import type { ChannelOperations, ChannelSendInput } from "#channel/channel-operations.js";
+import type {
+  ChannelFrom,
+  ChannelReceiveContext,
+  ChannelResolveSession,
+  ChannelRespondOptions,
+  ChannelSendOptions,
+  ChannelSource,
+} from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
@@ -23,8 +30,15 @@ export type {
   ResetSessionResult,
 } from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
-export type { SessionSendInput } from "#channel/session.js";
-export type { ChannelOperations, ChannelSendInput };
+export type { SessionRespondOptions, SessionSendOptions } from "#channel/session.js";
+export type {
+  ChannelFrom,
+  ChannelReceiveContext,
+  ChannelResolveSession,
+  ChannelRespondOptions,
+  ChannelSendOptions,
+  ChannelSource,
+};
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
 export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
 export type {
@@ -32,7 +46,6 @@ export type {
   HttpRouteDefinition,
   RouteDefinition,
   RouteHandlerArgs,
-  SendPayload,
   WebSocketMessage,
   WebSocketPeer,
   WebSocketRouteDefinition,
@@ -229,7 +242,7 @@ export interface Channel<
   readonly cors?: ChannelCorsOptions;
   readonly receive?: (
     input: ReceiveInput<TReceiveTarget>,
-    args: ChannelOperations<TState>,
+    ctx: ChannelReceiveContext<TState>,
   ) => Promise<Session>;
 }
 

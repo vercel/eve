@@ -6,14 +6,14 @@ export default defineEval({
   tags: ["real-model"],
   description: "The model does not redo completed work because a stale todo stayed pending.",
   async test(t) {
-    const turn = await t.send({
-      message: [
+    const turn = await t.send(
+      [
         "[case: stale-todo-work]",
         "Call perform-source-analysis exactly once with approach initial.",
         "The tool deliberately leaves its completed work in a pending todo.",
         "After it succeeds, report SOURCE_ANALYSIS_COMPLETE and call no more tools.",
       ].join("\n"),
-    });
+    );
 
     turn.expectOk();
     t.succeeded();

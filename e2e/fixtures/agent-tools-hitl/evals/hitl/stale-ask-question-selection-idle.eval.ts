@@ -11,8 +11,8 @@ export default defineEval({
   description:
     "HITL smoke: a stale ask-question selection becomes a new user turn when nothing is pending.",
   async test(t) {
-    await t.send({
-      message: [
+    await t.send(
+      [
         "Use the `ask_question` tool exactly once to ask me which context to use.",
         "Set prompt to: 'Which context should I use?'",
         "Set allowFreeform to true.",
@@ -21,24 +21,26 @@ export default defineEval({
         '- id "candidate", label "Use STALE-CANDIDATE-7Q4M"',
         "Do not answer the question yourself, wait for my response.",
       ].join("\n"),
-    });
+    );
 
     const request = t.requireInputRequest({
       optionIds: ["current", "candidate"],
       toolName: "ask_question",
     });
 
-    const intervening = await t.send({
-      message: "Use current context instead and reply with exactly INTERVENING-HITL-OK.",
-    });
+    const intervening = await t.send(
+      "Use current context instead and reply with exactly INTERVENING-HITL-OK.",
+    );
     intervening.expectOk();
     intervening.notEvent("input.requested");
     intervening.messageIncludes(/INTERVENING-HITL-OK/i);
 
-    const staleSelection = await t.respond({
-      requestId: request.requestId,
-      optionId: "candidate",
-    });
+    const staleSelection = await t.respond([
+      {
+        requestId: request.requestId,
+        optionId: "candidate",
+      },
+    ]);
     staleSelection.expectOk();
     staleSelection.notEvent("input.requested");
     staleSelection.event("message.received", {

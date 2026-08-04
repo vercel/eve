@@ -14,7 +14,7 @@ import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey } from "#context/keys.js";
 import { buildRunContext } from "#execution/runtime-context.js";
-import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { isConnectionAuthorizationFailedError } from "#public/connections/errors.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -65,9 +65,9 @@ function createEveCreateHandler(input: EveChannelInput) {
     async fetch(req: Request) {
       const args = attachRouteSessionCreator<RouteHandlerArgs>(
         {
-          ...mockChannelOperations(vi.fn()),
+          ...mockChannelContext(vi.fn()),
           attachSession: vi.fn() as any,
-          receive: vi.fn() as never,
+          to: vi.fn() as never,
           params: {},
           waitUntil: () => undefined,
           requestIp: "127.0.0.1",

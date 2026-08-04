@@ -1,4 +1,3 @@
-import type { SendTurnInput } from "#client/types.js";
 import { EvalSessionManager } from "#evals/session.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createScopedAssertions } from "#evals/assertions/scoped.js";
@@ -56,15 +55,15 @@ export function createEvalContext(deps: {
     },
     cancel: () => primary().cancel(),
     requireInputRequest: (filter) => primary().requireInputRequest(filter),
-    respond: (...responses) => primary().respond(...responses),
+    respond: (responses, options) => primary().respond(responses, options),
     respondAll: (optionId) => primary().respondAll(optionId),
-    send: (input) => {
-      lastPrompt = promptText(input);
-      return primary().send(input);
+    send: (message, options) => {
+      lastPrompt = typeof message === "string" ? message : "";
+      return primary().send(message, options);
     },
-    start: (message) => {
+    start: (message, options) => {
       lastPrompt = message;
-      return primary().start(message);
+      return primary().start(message, options);
     },
     sendFile: (text, filePath, mediaType) => {
       lastPrompt = text;
@@ -135,11 +134,6 @@ async function evaluateAssertion(
     return await assertion.evaluate(value);
   }
   return { score: await assertion.score(value) };
-}
-
-function promptText(input: SendTurnInput): string {
-  const message = input.message;
-  return typeof message === "string" ? message : "";
 }
 
 function sleep(ms = 1_000, signal?: AbortSignal): Promise<void> {

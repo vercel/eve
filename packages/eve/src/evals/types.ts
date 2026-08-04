@@ -2,7 +2,12 @@ import type { LanguageModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { RuntimeIdentity, MessageStreamEvent } from "#protocol/message.js";
-import type { CancelSessionResult, SendTurnInput, ClientSessionState } from "#client/types.js";
+import type {
+  CancelSessionResult,
+  ClientSessionState,
+  SendTurnInput,
+  SendTurnOptions,
+} from "#client/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
@@ -283,13 +288,13 @@ export interface EveEvalSessionDriver {
   /** Require exactly one pending input request matching `filter`, or abort dependent control flow. */
   requireInputRequest(filter?: EveEvalInputRequestMatchOptions): InputRequest;
   /** Resolve specific pending requests and run the resumed turn. */
-  respond(...responses: InputResponse[]): Promise<EveEvalTurn>;
+  respond(responses: readonly InputResponse[], options?: SendTurnOptions): Promise<EveEvalTurn>;
   /** Resolve every pending request with the same option id. */
   respondAll(optionId: string): Promise<EveEvalTurn>;
   /** Send one turn through this session. */
-  send(input: SendTurnInput): Promise<EveEvalTurn>;
+  send(message: SendTurnInput["message"], options?: SendTurnOptions): Promise<EveEvalTurn>;
   /** Start one text turn and return as soon as its session is accepted. */
-  start(message: string): Promise<EveEvalLiveTurn>;
+  start(message: string, options?: SendTurnOptions): Promise<EveEvalLiveTurn>;
   /** Send one text turn with a local file attached as a data URL. */
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
 }

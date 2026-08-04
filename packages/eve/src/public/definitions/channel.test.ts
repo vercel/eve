@@ -179,15 +179,13 @@ describe("defineChannel", () => {
         return { state };
       },
       routes: [
-        POST<State>("/x", async (_request, { send }) => {
-          await send("x", {
+        POST<State>("/x", async (_request, { from }) => {
+          await from("x").send("hello", {
             auth: null,
-            message: "hello",
             state: { completedTurns: 1 },
           });
-          await send("x", {
+          await from("x").send("hello", {
             auth: null,
-            message: "hello",
             // @ts-expect-error route send state is inferred from defineChannel state.
             state: { completedTurns: "1" },
           });
@@ -569,6 +567,9 @@ describe("defineChannel", () => {
         return {
           id: channelId,
           async send() {
+            return { sessionId: channelId, status: "accepted" as const };
+          },
+          async respond() {
             return { sessionId: channelId, status: "accepted" as const };
           },
           async cancel() {

@@ -103,7 +103,7 @@ GitHub comments have no interactive button or card affordance. A human-in-the-lo
 
 ### Proactive sessions
 
-Start a session without an inbound comment invocation through `send(github, { message, target, auth })` from a schedule `run` handler, or `args.receive(github, ...)` from another channel. The target requires `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`.
+Start a session without an inbound comment invocation through `to(github, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(github, target).send(message, { auth })` from another channel. The target requires `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`.
 
 ### Attachments
 

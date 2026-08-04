@@ -7,9 +7,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "Dynamic tool authored inside an extension resolves and runs when mounted.",
   async test(t) {
-    await t.send({
-      message: "Call the `toolkit__toolkit_forecast` tool and report the token it returned.",
-    });
+    await t.send("Call the `toolkit__toolkit_forecast` tool and report the token it returned.");
 
     t.succeeded();
     t.calledTool("toolkit__toolkit_forecast", { output: { token: TOOLKIT_FORECAST_TOKEN } });

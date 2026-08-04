@@ -189,7 +189,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({ message: "Hello" });
+      sendPromise = helpers?.send("Hello");
       await Promise.resolve();
     });
 
@@ -259,7 +259,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({ message: "What word is currently selected?" });
+      sendPromise = helpers?.send("What word is currently selected?");
       await Promise.resolve();
     });
 
@@ -304,7 +304,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({ message: "Hello" });
+      sendPromise = helpers?.send("Hello");
       await Promise.resolve();
     });
 
@@ -339,7 +339,7 @@ describe("useEveAgent", () => {
     });
 
     await act(async () => {
-      await helpers?.send({ message: "Hello" });
+      await helpers?.send("Hello");
     });
 
     expect(seenErrors.map((error) => error.message)).toEqual(["Network failed"]);
@@ -389,7 +389,7 @@ describe("useEveAgent", () => {
 
     let firstSendPromise: Promise<void> | undefined;
     await act(async () => {
-      firstSendPromise = helpers?.send({ message: "First" });
+      firstSendPromise = helpers?.send("First");
       await Promise.resolve();
     });
 
@@ -402,7 +402,7 @@ describe("useEveAgent", () => {
 
     let secondSendPromise: Promise<void> | undefined;
     await act(async () => {
-      secondSendPromise = helpers?.send({ message: "Second" });
+      secondSendPromise = helpers?.send("Second");
       await Promise.resolve();
     });
 
@@ -471,7 +471,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({ message: "Hello" });
+      sendPromise = helpers?.send("Hello");
       await Promise.resolve();
     });
 
@@ -539,7 +539,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({ message: "Hello" });
+      sendPromise = helpers?.send("Hello");
       await Promise.resolve();
     });
 
@@ -586,9 +586,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({
-        inputResponses: [{ optionId: "deny", requestId: "approval_1" }],
-      });
+      sendPromise = helpers?.respond([{ optionId: "deny", requestId: "approval_1" }]);
       await Promise.resolve();
     });
 

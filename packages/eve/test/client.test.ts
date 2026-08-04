@@ -345,7 +345,7 @@ describe("Session.send (result)", () => {
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
-    const res = await session.send({ message: "Hello" });
+    const res = await session.send("Hello");
 
     expect(res.sessionId).toBe("session_001");
 
@@ -373,8 +373,8 @@ describe("Session.send (result)", () => {
       .mockResolvedValueOnce(createEagerStreamResponse(secondEvents));
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
-    await (await session.send({ message: "Hello" })).result();
-    const second = await (await session.send({ message: "Follow up" })).result();
+    await (await session.send("Hello")).result();
+    const second = await (await session.send("Follow up")).result();
 
     expect(second.message).toBe("Reply: Follow up");
     expect(second.status).toBe("waiting");
@@ -407,7 +407,7 @@ describe("Session.send (result)", () => {
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
-    const result = await (await session.send({ message: "Hello" })).result();
+    const result = await (await session.send("Hello")).result();
 
     expect(result.status).toBe("failed");
     expect(result.message).toBeUndefined();
@@ -432,7 +432,7 @@ describe("Session.send (result)", () => {
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
-    const result = await (await session.send({ message: "Do a task" })).result();
+    const result = await (await session.send("Do a task")).result();
 
     expect(result.status).toBe("completed");
     expect(result.message).toBe("Done");
@@ -473,7 +473,7 @@ describe("Session.send (result)", () => {
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
-    const response = await session.send<{ title: string }>({ message: "Summarize", outputSchema });
+    const response = await session.send<{ title: string }>("Summarize", { outputSchema });
     const result = await response.result();
 
     expect(result.data).toEqual({ title: "Done" });
@@ -509,8 +509,8 @@ describe("Session.send (result)", () => {
       .mockResolvedValueOnce(createEagerStreamResponse(secondEvents));
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
-    await (await session.send({ message: "Task" })).result();
-    await (await session.send({ message: "New conversation" })).result();
+    await (await session.send("Task")).result();
+    await (await session.send("New conversation")).result();
 
     expect(new URL(String(fetchMock.mock.calls[2]?.[0])).pathname).toBe(
       "/eve/v1/session/session_001",
@@ -524,7 +524,7 @@ describe("Session.send (result)", () => {
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
 
-    await expect(session.send({ message: "Hello" })).rejects.toThrow(ClientError);
+    await expect(session.send("Hello")).rejects.toThrow(ClientError);
   });
 });
 
@@ -541,7 +541,7 @@ describe("Session.send (stream)", () => {
       .mockResolvedValueOnce(stream.response);
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
-    const res = await session.send({ message: "Hello" });
+    const res = await session.send("Hello");
     const collected: UnstampedMessageStreamEvent[] = [];
 
     const iterationPromise = (async () => {
@@ -579,7 +579,7 @@ describe("Session.send (stream)", () => {
       .mockResolvedValueOnce(stream.response);
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
-    const res = await session.send({ message: "Hello" });
+    const res = await session.send("Hello");
 
     expect(res.sessionId).toBe("session_001");
 
@@ -602,7 +602,7 @@ describe("Session.send (stream)", () => {
       );
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
-    const res = await session.send({ message: "Hello" });
+    const res = await session.send("Hello");
 
     await res.result();
 
@@ -638,7 +638,7 @@ describe("Session.send (reconnection)", () => {
       .mockResolvedValueOnce(createEagerStreamResponse(reconnectEvents));
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
-    const res = await session.send({ message: "Hello" });
+    const res = await session.send("Hello");
 
     setTimeout(() => {
       firstStream.pushEvent(createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }));
@@ -679,7 +679,7 @@ describe("Session state", () => {
 
     expect(session.state).toEqual({ sessionId: "session_001", streamIndex: 0 });
 
-    await (await session.send({ message: "Hello" })).result();
+    await (await session.send("Hello")).result();
 
     expect(session.state).toEqual({
       sessionId: "session_001",
@@ -698,7 +698,7 @@ describe("Session state", () => {
     const client = new Client({ host: "http://localhost:3000" });
     const session = client.sessions.attach("session_001", { streamIndex: 5 });
 
-    await (await session.send({ message: "I'm back" })).result();
+    await (await session.send("I'm back")).result();
 
     const streamUrl = String(fetchMock.mock.calls[1]?.[0]);
     expect(streamUrl).toContain("startIndex=5");
@@ -715,7 +715,7 @@ describe("Session state", () => {
     const client = new Client({ host: "http://localhost:3000" });
     const session = client.sessions.attach("session_001");
 
-    await (await session.send({ message: "Hello" })).result();
+    await (await session.send("Hello")).result();
 
     expect(new URL(String(fetchMock.mock.calls[0]?.[0])).pathname).toBe(
       "/eve/v1/session/session_001",
@@ -744,8 +744,8 @@ describe("Session state", () => {
     const sessionA = client.sessions.attach("session_a");
     const sessionB = client.sessions.attach("session_b");
 
-    const resultA = await (await sessionA.send({ message: "A" })).result();
-    const resultB = await (await sessionB.send({ message: "B" })).result();
+    const resultA = await (await sessionA.send("A")).result();
+    const resultB = await (await sessionB.send("B")).result();
 
     expect(resultA.message).toBe("Reply: A");
     expect(resultB.message).toBe("Reply: B");
@@ -851,7 +851,7 @@ describe("Client auth (async bearer)", () => {
       host: "http://localhost:3000",
     });
 
-    await (await client.sessions.attach("session_001").send({ message: "Hello" })).result();
+    await (await client.sessions.attach("session_001").send("Hello")).result();
 
     expect(tokenCounter).toBe(2);
     const postHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);

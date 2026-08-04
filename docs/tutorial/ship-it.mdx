@@ -43,7 +43,7 @@ export function AgentChat() {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
         const message = String(data.get("q") ?? "").trim();
-        if (message) void agent.send({ message });
+        if (message) void agent.send(message);
       }}
     >
       {agent.data.messages.map((message) => (

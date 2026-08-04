@@ -19,7 +19,7 @@ import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-error
 import { isReservedSessionCommandToken } from "#execution/session-command-token.js";
 import type { RunMode } from "#shared/run-mode.js";
 
-interface BaseChannelAddressSendOptions {
+interface BaseChannelAddressDeliveryOptions {
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly initiatorAuth?: SessionAuthContext | null;
@@ -27,10 +27,10 @@ interface BaseChannelAddressSendOptions {
   readonly title?: string;
 }
 
-/** Send options for a channel address whose continuation token is already bound. */
-export type ChannelAddressSendOptions<TState = undefined> = [TState] extends [undefined]
-  ? BaseChannelAddressSendOptions
-  : BaseChannelAddressSendOptions & { readonly state: TState };
+/** Delivery options for a channel address whose continuation token is already bound. */
+export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends [undefined]
+  ? BaseChannelAddressDeliveryOptions
+  : BaseChannelAddressDeliveryOptions & { readonly state?: TState };
 
 /**
  * Dynamic handle for whichever durable session currently owns one channel-local address.
@@ -38,9 +38,14 @@ export type ChannelAddressSendOptions<TState = undefined> = [TState] extends [un
  */
 export interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
+  deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
   send(
-    input: string | UserContent | SendPayload,
-    options: ChannelAddressSendOptions<TState>,
+    message: string | UserContent,
+    options: ChannelAddressDeliveryOptions<TState>,
+  ): Promise<Session>;
+  respond(
+    inputResponses: SendPayload["inputResponses"],
+    options: ChannelAddressDeliveryOptions<TState>,
   ): Promise<Session>;
   cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
   compact(): Promise<CompactSessionResult>;
@@ -70,7 +75,7 @@ export function createChannelAddress<TState = undefined>(input: {
 
   return {
     continuationToken: input.continuationToken,
-    async send(sendInput, options) {
+    async deliver(sendInput, options) {
       const payload = normalizeSendInput(sendInput);
       const command: Extract<SessionCommand, { readonly kind: "send" }> = {
         auth: options.auth,
@@ -133,6 +138,15 @@ export function createChannelAddress<TState = undefined>(input: {
         if (winner !== undefined) return winner;
         throw error;
       }
+    },
+    async send(message, options) {
+      return await this.deliver({ message }, options);
+    },
+    async respond(inputResponses, options) {
+      if (inputResponses === undefined || inputResponses.length === 0) {
+        throw new Error("respond() requires at least one input response.");
+      }
+      return await this.deliver({ inputResponses }, options);
     },
     async cancel(options) {
       return await input.runtime.dispatchContinuation({

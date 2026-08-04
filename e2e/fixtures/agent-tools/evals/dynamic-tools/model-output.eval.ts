@@ -6,10 +6,9 @@ export default defineEval({
   tags: ["real-model"],
   description: "Dynamic tools smoke: action.result carries the raw execute output.",
   async test(t) {
-    await t.send({
-      message:
-        "Use the `check_model_output` tool with value 'hello' and tell me what the result contains.",
-    });
+    await t.send(
+      "Use the `check_model_output` tool with value 'hello' and tell me what the result contains.",
+    );
 
     t.succeeded();
     t.calledTool("check_model_output", {

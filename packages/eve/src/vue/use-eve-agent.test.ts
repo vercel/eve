@@ -359,7 +359,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
     expect(agent.status.value).toBe("ready");
     expect(agent.data.value.messages).toEqual([]);
 
-    const sendPromise = agent.send({ message: "Hello" });
+    const sendPromise = agent.send("Hello");
     await Promise.resolve();
     expect(agent.status.value).toBe("submitted");
 
@@ -396,7 +396,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
     const dataBeforeDispose = agent.data.value;
     scope.stop();
 
-    await agent.send({ message: "After" });
+    await agent.send("After");
 
     expect(agent.data.value).toBe(dataBeforeDispose);
     expect(agent.data.value.messages).toEqual([]);
@@ -424,7 +424,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
 
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failed"));
     const dataBeforeSend = agent.data.value;
-    await agent.send({ message: "ignored" });
+    await agent.send("ignored");
 
     expect(agent.data.value).toBe(dataBeforeSend);
     expect(agent.status.value).toBe("ready");

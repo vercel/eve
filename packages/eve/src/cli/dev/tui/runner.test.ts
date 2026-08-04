@@ -58,7 +58,7 @@ function stubSession(): ClientSession {
 
 function mockSessionCreation(client: Client, session: ClientSession) {
   return vi.spyOn(client.sessions, "create").mockImplementation(async (input) => ({
-    response: await session.send(input),
+    response: await session.send(input.message, input),
     session,
   }));
 }
@@ -529,17 +529,20 @@ describe("EveTUIRunner agent header", () => {
 function sessionYielding(events: readonly unknown[]): ClientSession {
   const session = stubSession();
   vi.spyOn(session, "send").mockImplementation(async () => messageResponseOf(events));
+  vi.spyOn(session, "respond").mockImplementation(async () => messageResponseOf(events));
   return session;
 }
 
 function sessionYieldingTurns(turns: ReadonlyArray<readonly unknown[]>): ClientSession {
   const session = stubSession();
   let index = 0;
-  vi.spyOn(session, "send").mockImplementation(async () => {
+  const nextResponse = async () => {
     const events = turns[index] ?? [];
     index += 1;
     return messageResponseOf(events);
-  });
+  };
+  vi.spyOn(session, "send").mockImplementation(nextResponse);
+  vi.spyOn(session, "respond").mockImplementation(nextResponse);
   return session;
 }
 
@@ -1099,8 +1102,7 @@ describe("EveTUIRunner initial input", () => {
     // The seed is a draft, not an auto-submit: the turn carries the text the
     // user actually sent, not the seeded value.
     expect(session.send).toHaveBeenCalledTimes(1);
-    expect(session.send).toHaveBeenNthCalledWith(1, {
-      message: "edited and sent",
+    expect(session.send).toHaveBeenNthCalledWith(1, "edited and sent", {
       signal: expect.any(AbortSignal),
     });
   });
@@ -1156,15 +1158,14 @@ describe("EveTUIRunner native continuation state", () => {
 
     await runner.run();
 
-    expect(session.send).toHaveBeenCalledTimes(2);
-    expect(session.send).toHaveBeenNthCalledWith(1, {
-      message: "approve this",
+    expect(session.send).toHaveBeenCalledTimes(1);
+    expect(session.send).toHaveBeenNthCalledWith(1, "approve this", {
       signal: expect.any(AbortSignal),
     });
-    expect(session.send).toHaveBeenNthCalledWith(2, {
-      inputResponses: [{ requestId: "request-1", optionId: "approve" }],
-      signal: expect.any(AbortSignal),
-    });
+    expect(session.respond).toHaveBeenCalledWith(
+      [{ requestId: "request-1", optionId: "approve" }],
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it.each([{ chosenOptionId: "continue" }, { chosenOptionId: "stop" }])(
@@ -1236,10 +1237,10 @@ describe("EveTUIRunner native continuation state", () => {
         }),
         expect.anything(),
       );
-      expect(session.send).toHaveBeenNthCalledWith(2, {
-        inputResponses: [{ requestId: "wrun_1:limit:input:19093", optionId: chosenOptionId }],
-        signal: expect.any(AbortSignal),
-      });
+      expect(session.respond).toHaveBeenCalledWith(
+        [{ requestId: "wrun_1:limit:input:19093", optionId: chosenOptionId }],
+        { signal: expect.any(AbortSignal) },
+      );
     },
   );
 });
@@ -1316,7 +1317,7 @@ describe("EveTUIRunner failure rendering", () => {
     const client = stubClient();
     vi.spyOn(client.sessions, "create").mockImplementation(async (input) => {
       const session = sessionYielding([]);
-      return { response: await session.send(input), session };
+      return { response: await session.send(input.message, input), session };
     });
 
     const renderer: AgentTUIRenderer = {
@@ -3042,11 +3043,8 @@ describe("EveTUIRunner mid-turn message queue", () => {
     await runner.run();
 
     expect(session.send).toHaveBeenCalledTimes(2);
-    expect(session.send).toHaveBeenNthCalledWith(1, expect.objectContaining({ message: "hello" }));
-    expect(session.send).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ message: "queued follow-up" }),
-    );
+    expect(session.send).toHaveBeenNthCalledWith(1, "hello", expect.any(Object));
+    expect(session.send).toHaveBeenNthCalledWith(2, "queued follow-up", expect.any(Object));
     // The drained prompt bypasses the interactive prompt read entirely.
     expect(renderer.readPrompt).toHaveBeenCalledTimes(2);
   });

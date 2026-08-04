@@ -94,7 +94,7 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        const parked = await t.send({ message: "run pwd" });
+        const parked = await t.send("run pwd");
         parked.calledTool("bash", { status: "pending", count: 1 });
         const request = t.requireInputRequest({
           display: "confirmation",
@@ -142,7 +142,7 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        await t.send({ message: "case prompt" });
+        await t.send("case prompt");
       }, "input-eval"),
     });
 
@@ -178,8 +178,8 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        await t.send({ message: "primary" });
-        await t.newSession().send({ message: "secondary" });
+        await t.send("primary");
+        await t.newSession().send("secondary");
       }, "multi-session"),
     });
 
@@ -216,8 +216,8 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        const first = await t.send({ message: "first" });
-        const second = await t.send({ message: "second" });
+        const first = await t.send("first");
+        const second = await t.send("second");
         expect(first.requireToolCall("alpha", { status: "pending" }).name).toBe("alpha");
         first.calledTool("alpha", { status: "pending", count: 1 });
         second.notCalledTool("alpha");
@@ -257,10 +257,10 @@ describe("executeTask", () => {
       target,
       evaluation: createTestEval(async (t) => {
         const session = t.newSession();
-        await session.send({ message: "first" });
+        await session.send("first");
         session.calledTool("alpha", { status: "pending", count: 1 });
         session.event("turn.started", { count: 1 });
-        await session.send({ message: "second" });
+        await session.send("second");
       }, "session-snapshot"),
     });
 
@@ -305,7 +305,7 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        const turn = await t.send({ message: "run" });
+        const turn = await t.send("run");
         turn.requireToolCall("missing");
       }, "required-tool"),
     });
@@ -417,7 +417,7 @@ describe("executeTask", () => {
         childTurn.calledTool("wait-for-cancellation", { status: "pending", count: 1 });
         await expect(parent.waitForEvent("subagent.completed")).rejects.toThrow(/session\.waiting/);
 
-        const childFollowUp = await child.session.send({ message: "continue child" });
+        const childFollowUp = await child.session.send("continue child");
         childFollowUp.messageIncludes("child continued");
       }, "live-turns"),
     });
@@ -537,7 +537,7 @@ describe("executeTask", () => {
       target,
       evaluation: createTestEval(async (t) => {
         const session = await t.target.attachSession("channel-session");
-        const followUp = await session.send({ message: "continue please" });
+        const followUp = await session.send("continue please");
         followUp.expectOk();
         followUp.messageIncludes("follow-up done");
       }, "attach-send"),
@@ -578,7 +578,7 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        const turn = await t.send({ message: "structured", outputSchema: { type: "object" } });
+        const turn = await t.send("structured", { outputSchema: { type: "object" } });
         turn.outputMatches(z.object({ count: z.number(), title: z.string() }));
         turn.outputEquals({ count: 2, title: "Done" });
       }, "structured-output"),

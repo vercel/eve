@@ -56,7 +56,7 @@ With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-a
     const text = message.trim();
     if (!text || isBusy) return;
     message = "";
-    await agent.send({ message: text });
+    await agent.send(text);
   }
 </script>
 

@@ -196,10 +196,13 @@ describe("dispatchChannelRequest", () => {
     await expect(response.text()).resolves.toBe("ok");
   });
 
-  it("hands the route handler an args.receive() that hits another channel's receive", async () => {
+  it("hands the route handler a ctx.to() that hits another channel's receive", async () => {
     const targetReceive = vi.fn().mockResolvedValue({
       id: "sess_target",
       async send() {
+        return { sessionId: "sess_target", status: "accepted" };
+      },
+      async respond() {
         return { sessionId: "sess_target", status: "accepted" };
       },
       async cancel() {
@@ -234,9 +237,7 @@ describe("dispatchChannelRequest", () => {
         {
           handler: async (_req, args) => {
             capturedArgs = args;
-            await args.receive(targetDefinition, {
-              message: "handoff",
-              target: { foo: "bar" },
+            await args.to(targetDefinition, { foo: "bar" }).send("handoff", {
               auth: {
                 attributes: {},
                 authenticator: "app",
@@ -279,13 +280,12 @@ describe("dispatchChannelRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(typeof capturedArgs?.receive).toBe("function");
+    expect(typeof capturedArgs?.to).toBe("function");
     expect(targetReceive).toHaveBeenCalledTimes(1);
     const [input, ctx] = targetReceive.mock.calls[0]!;
     expect(input.message).toBe("handoff");
     expect(input.target).toEqual({ foo: "bar" });
-    expect(typeof ctx.send).toBe("function");
-    expect(typeof ctx.reset).toBe("function");
+    expect(typeof ctx.from).toBe("function");
   });
 
   it("tags route sends with Vercel's request id", async () => {
@@ -300,9 +300,8 @@ describe("dispatchChannelRequest", () => {
       channels: [
         {
           handler: async (_req, args) => {
-            await args.send("route-token", {
+            await args.from("route-token").send("hello", {
               auth: null,
-              message: "hello",
             });
             return new Response("ok");
           },
@@ -347,7 +346,7 @@ describe("dispatchChannelRequest", () => {
         {
           handler: async (_req, args) =>
             Response.json(
-              await args.reset("direct:+15551234567:+15557654321", {
+              await args.from("direct:+15551234567:+15557654321").reset({
                 reason: "User requested /new",
               }),
             ),
@@ -390,7 +389,7 @@ describe("dispatchChannelRequest", () => {
       channels: [
         {
           handler: async (_req, args) =>
-            Response.json(await args.clear("direct:+15551234567:+15557654321")),
+            Response.json(await args.from("direct:+15551234567:+15557654321").clear()),
           fetch: async () => new Response("ok"),
           logicalPath: "agent/channels/imessage.ts",
           method: "POST",
@@ -431,9 +430,8 @@ describe("dispatchChannelRequest", () => {
       channels: [
         {
           handler: async (_req, args) => {
-            await args.send("route-token", {
+            await args.from("route-token").send("hello", {
               auth: null,
-              message: "hello",
             });
             return new Response("ok");
           },
@@ -503,10 +501,9 @@ describe("dispatchChannelRequest", () => {
       context: { ok: true },
     });
     expect(capturedArgs?.requestIp).toBe("203.0.113.4");
-    expect(typeof capturedArgs?.send).toBe("function");
-    expect(typeof capturedArgs?.cancel).toBe("function");
+    expect(typeof capturedArgs?.from).toBe("function");
     expect(typeof capturedArgs?.attachSession).toBe("function");
-    expect(typeof capturedArgs?.receive).toBe("function");
+    expect(typeof capturedArgs?.to).toBe("function");
     expect(waitUntil).toHaveBeenCalledTimes(1);
   });
 

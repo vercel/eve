@@ -160,7 +160,7 @@ await channel.linear.updateSession({
 
 ## Proactive sessions
 
-Use the channel's proactive target to continue an existing Agent Session or create one from a Linear issue or root comment. The target accepts an existing `agentSessionId`, or an `issueId` or root `commentId` to create a new session before sending the message. The example below runs from a schedule; a route handler uses the same target shape through its own `receive` helper.
+Use the channel's proactive target to continue an existing Agent Session or create one from a Linear issue or root comment. The target accepts an existing `agentSessionId`, or an `issueId` or root `commentId` to create a new session before sending the message. The example below runs from a schedule; a route handler uses the same target shape through `ctx.to(...)`.
 
 ```ts
 import { defineSchedule } from "eve/schedules";
@@ -169,15 +169,13 @@ import linear from "../channels/linear";
 
 export default defineSchedule({
   cron: "0 14 * * 1",
-  async run({ send, waitUntil, appAuth }) {
+  async run({ to, waitUntil, appAuth }) {
     waitUntil(
-      send(linear, {
+      to(linear, {
+        issueId: "EVE-123",
+        initialActivity: "Preparing the status update.",
+      }).send("Post a concise status update with blockers and next actions.", {
         auth: appAuth,
-        message: "Post a concise status update with blockers and next actions.",
-        target: {
-          issueId: "EVE-123",
-          initialActivity: "Preparing the status update.",
-        },
       }),
     );
   },

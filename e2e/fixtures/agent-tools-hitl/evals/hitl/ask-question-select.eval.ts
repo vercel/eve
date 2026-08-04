@@ -9,15 +9,15 @@ export default defineEval({
   tags: ["real-model"],
   description: "HITL smoke: ask-question select parks and resumes with the chosen option.",
   async test(t) {
-    await t.send({
-      message: [
+    await t.send(
+      [
         "Use the `ask_question` tool exactly once to ask me which color I prefer.",
         "Set prompt to: 'Pick a color.'",
         'Provide exactly two options: - id "red", label "Red" - id "blue", label "Blue"',
         "Do not answer the question yourself, wait for my response.",
         "After I respond, reply confirming the color I chose by name.",
       ].join("\n"),
-    });
+    );
 
     t.requireInputRequest({
       display: (value) => value === undefined || value === "select",

@@ -6,7 +6,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { telegramChannel, type TelegramChannelState } from "#public/channels/telegram/index.js";
 
@@ -88,8 +88,8 @@ async function firePost(
 
   const response = await post.handler(signedRequest(JSON.stringify(body)), {
     attachSession: vi.fn() as any,
-    ...mockChannelOperations(send),
-    receive: vi.fn() as any,
+    ...mockChannelContext(send),
+    to: vi.fn() as any,
     params: {},
     requestIp: null,
     waitUntil,
@@ -253,7 +253,6 @@ describe("telegramChannel() inbound route", () => {
     expect(input).toMatchObject({
       inputResponses: [{ requestId: "telegram_reply:55", text: "approved" }],
     });
-    expect(String((input as { message: string }).message)).toContain("approved");
   });
 
   it("rejects requests with invalid webhook verification", async () => {
@@ -273,8 +272,8 @@ describe("telegramChannel() inbound route", () => {
       }),
       {
         attachSession: vi.fn() as any,
-        ...mockChannelOperations(send),
-        receive: vi.fn() as any,
+        ...mockChannelContext(send),
+        to: vi.fn() as any,
         params: {},
         requestIp: null,
         waitUntil: vi.fn(),
@@ -629,7 +628,7 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      mockChannelOperations(send),
+      mockChannelContext(send),
     );
 
     expect(send).toHaveBeenCalledWith(
@@ -668,7 +667,7 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      mockChannelOperations(send),
+      mockChannelContext(send),
     );
 
     expect(send).toHaveBeenCalledWith(
@@ -709,7 +708,7 @@ describe("telegramChannel().receive", () => {
           auth: null,
           message: "run",
         },
-        mockChannelOperations(send),
+        mockChannelContext(send),
       );
 
       expect(send).toHaveBeenCalledWith(
@@ -746,7 +745,7 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      mockChannelOperations(send),
+      mockChannelContext(send),
     );
 
     expect(send).toHaveBeenCalledWith(
@@ -785,7 +784,7 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      mockChannelOperations(send),
+      mockChannelContext(send),
     );
 
     expect(send).toHaveBeenCalledWith(
@@ -806,7 +805,7 @@ describe("telegramChannel().receive", () => {
     const send = vi.fn();
 
     await expect(
-      channel.receive!({ target: {}, auth: null, message: "run" }, mockChannelOperations(send)),
+      channel.receive!({ target: {}, auth: null, message: "run" }, mockChannelContext(send)),
     ).rejects.toThrow(/requires target.chatId/);
     await expect(
       channel.receive!(
@@ -815,7 +814,7 @@ describe("telegramChannel().receive", () => {
           auth: null,
           message: "run",
         },
-        mockChannelOperations(send),
+        mockChannelContext(send),
       ),
     ).rejects.toThrow(/mutually exclusive/);
   });

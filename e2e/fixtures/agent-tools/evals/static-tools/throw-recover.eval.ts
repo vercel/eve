@@ -6,17 +6,16 @@ export default defineEval({
   tags: ["real-model"],
   description: "Static tools smoke: tool throw surfaces as failed and the session recovers.",
   async test(t) {
-    const first = await t.send({
-      message:
-        'Call the `always-throws` tool exactly once with reason "smoke". ' +
+    const first = await t.send(
+      'Call the `always-throws` tool exactly once with reason "smoke". ' +
         "After it fails, reply with a one-line acknowledgement that the tool failed.",
-    });
+    );
     first.expectOk();
     first.calledTool("always-throws", { status: "failed", count: 1 });
 
-    const second = await t.send({
-      message: "Are you still responsive? Reply with exactly the single word: yes.",
-    });
+    const second = await t.send(
+      "Are you still responsive? Reply with exactly the single word: yes.",
+    );
     second.messageIncludes(/\byes\b/iu);
 
     t.succeeded();

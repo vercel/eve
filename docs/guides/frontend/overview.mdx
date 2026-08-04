@@ -36,7 +36,7 @@ export function Chat() {
         const form = new FormData(event.currentTarget);
         const message = String(form.get("message") ?? "").trim();
         if (message.length > 0) {
-          void agent.send({ message });
+          void agent.send(message);
         }
       }}
     >
@@ -68,7 +68,8 @@ export function Chat() {
 | `error`   | The last `Error` thrown, if any.                                            |
 | `events`  | Raw eve stream events for this session.                                     |
 | `session` | Serializable fixed session cursor (`sessionId`, `streamIndex`).             |
-| `send`    | Send text or the full turn payload (multi-part messages, HITL responses).   |
+| `send`    | Send text or a multi-part message, with per-turn options.                   |
+| `respond` | Answer pending HITL input requests, with per-turn options.                  |
 | `stop`    | Abort the client's in-flight stream. The server-side turn keeps running.    |
 | `reset`   | Clear local events, data, errors, and the local session cursor.             |
 
@@ -78,22 +79,20 @@ Most chat UIs only need `data.messages` and `status`. Drop down to `events` when
 
 ## Sending and streaming
 
-Pass an object to `send()` for text, multi-part messages, attachments, HITL responses, and per-turn context:
+Pass the message first and optional per-turn settings second. Use `respond()` for HITL answers:
 
 ```tsx
-await agent.send({ message: "Summarize this session." });
+await agent.send("Summarize this session.");
 
-await agent.send({
-  message: [
-    { type: "text", text: "What is in this file?" },
-    {
-      type: "file",
-      data: fileDataUrl, // base64 data URL
-      mediaType: "application/pdf",
-      filename: "report.pdf",
-    },
-  ],
-});
+await agent.send([
+  { type: "text", text: "What is in this file?" },
+  {
+    type: "file",
+    data: fileDataUrl, // base64 data URL
+    mediaType: "application/pdf",
+    filename: "report.pdf",
+  },
+]);
 ```
 
 Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to abort the client's in-flight stream, and `reset()` to clear local state so the next send starts a fresh durable session.
@@ -112,7 +111,7 @@ received attachment as a `file` part on the user message. The part includes `med
 
 ## Human-in-the-loop prompts
 
-Tools opt into approval with `approval`, and the model can also ask a question with `ask_question` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `send()`:
+Tools opt into approval with `approval`, and the model can also ask a question with `ask_question` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `respond()`:
 
 ```tsx
 const request = agent.data.messages
@@ -121,9 +120,7 @@ const request = agent.data.messages
   ?.toolMetadata?.eve?.inputRequest;
 
 if (request) {
-  await agent.send({
-    inputResponses: [{ requestId: request.requestId, optionId: "approve" }],
-  });
+  await agent.respond([{ requestId: request.requestId, optionId: "approve" }]);
 }
 ```
 
@@ -163,11 +160,10 @@ For fully custom state machines, `authorization.required` and `authorization.com
 
 ## Attach page context per turn
 
-`clientContext` adds ephemeral context for the next model call only. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, so it never dispatches a turn on its own and never lands in durable session history. Pass it directly to `send()`:
+`clientContext` adds ephemeral context for the next model call only. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, so it never dispatches a turn on its own and never lands in durable session history. Pass it in the second argument to `send()` or `respond()`:
 
 ```tsx
-await agent.send({
-  message: "What should I do on this screen?",
+await agent.send("What should I do on this screen?", {
   clientContext: { route: "/billing", plan: "pro", seatsUsed: 4 },
 });
 ```

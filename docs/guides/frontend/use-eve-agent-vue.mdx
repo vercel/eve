@@ -32,7 +32,8 @@ const { data } = useEveAgent();
 | `error`   | `ComputedRef<Error \| undefined>`              | Last transport-level error.                                               |
 | `events`  | `ComputedRef<readonly MessageStreamEvent[]>`   | Raw server events for this session.                                       |
 | `session` | `ComputedRef<ClientSessionState \| undefined>` | Fixed session ID and stream cursor.                                       |
-| `send`    | `(input: SendTurnPayload) => Promise<void>`    | Send text or a full turn (multi-part, attachments, HITL responses).       |
+| `send`    | `(message, options?) => Promise<void>`         | Send text or a multi-part message.                                        |
+| `respond` | `(inputResponses, options?) => Promise<void>`  | Answer pending HITL input requests.                                       |
 | `stop`    | `() => void`                                   | Abort the client's in-flight stream.                                      |
 | `reset`   | `() => void`                                   | Clear state and start a new session.                                      |
 
@@ -52,7 +53,7 @@ async function handleSubmit() {
   const text = message.value.trim();
   if (!text) return;
   message.value = "";
-  await send({ message: text });
+  await send(text);
 }
 </script>
 
@@ -77,24 +78,22 @@ async function onFileChange(event: Event) {
   if (!file) return;
   const bytes = new Uint8Array(await file.arrayBuffer());
   const base64 = btoa(String.fromCodePoint(...bytes));
-  await send({
-    message: [
-      { type: "text", text: "Describe this image." },
-      { type: "file", data: `data:${file.type};base64,${base64}`, mediaType: file.type },
-    ],
-  });
+  await send([
+    { type: "text", text: "Describe this image." },
+    { type: "file", data: `data:${file.type};base64,${base64}`, mediaType: file.type },
+  ]);
 }
 </script>
 ```
 
 ## Human-in-the-loop prompts
 
-A tool opts into approval with `approval` ([Tools](../../tools)). When it triggers, the pending request shows up as a `dynamic-tool` part on the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `send({ inputResponses })`:
+A tool opts into approval with `approval` ([Tools](../../tools)). When it triggers, the pending request shows up as a `dynamic-tool` part on the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `respond(inputResponses)`:
 
 ```ts
 import type { EveDynamicToolPart, EveMessagePart } from "eve/vue";
 
-const { data, send } = useEveAgent();
+const { data, respond } = useEveAgent();
 
 const isDynamicToolPart = (part: EveMessagePart): part is EveDynamicToolPart =>
   part.type === "dynamic-tool";
@@ -106,9 +105,7 @@ const request = data.value.messages
   .find((value) => value !== undefined);
 
 if (request) {
-  await send({
-    inputResponses: [{ requestId: request.requestId, optionId: "approve" }],
-  });
+  await respond([{ requestId: request.requestId, optionId: "approve" }]);
 }
 ```
 
@@ -143,11 +140,10 @@ const agent = useEveAgent({
 
 ## Attach page context per turn
 
-`clientContext` adds ephemeral context for the next model call and nothing more. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, never dispatches a turn on its own, and never lands in durable session history. Pass it to `send()`:
+`clientContext` adds ephemeral context for the next model call and nothing more. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, never dispatches a turn on its own, and never lands in durable session history. Pass it in the second argument to `send()` or `respond()`:
 
 ```ts
-await send({
-  message: "What should I do on this screen?",
+await send("What should I do on this screen?", {
   clientContext: { route: "/billing", plan: "pro", seatsUsed: 4 },
 });
 ```

@@ -1,6 +1,11 @@
 import type { UserContent } from "ai";
 
-import type { ChannelOperations, ChannelSendInput } from "#channel/channel-operations.js";
+import type { ChannelAddressDeliveryOptions } from "#channel/channel-address.js";
+import {
+  INTERNAL_CHANNEL_DELIVER,
+  type ChannelFrom,
+  type InternalChannelSource,
+} from "#channel/channel-operations.js";
 import { normalizeSendInput } from "#channel/send-input.js";
 import type { SendPayload } from "#channel/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -47,25 +52,19 @@ const MAX_TYPING_STATUS = 80;
 
 type ChatSdkAdapters = Record<string, Adapter>;
 type ChatSdkSendInput = string | UserContent | SendPayload;
-type MutableChannelSendInput<TState> = {
-  -readonly [Key in keyof ChannelSendInput<TState>]: ChannelSendInput<TState>[Key];
+type MutableDeliveryOptions<TState> = {
+  -readonly [Key in keyof ChannelAddressDeliveryOptions<TState>]: ChannelAddressDeliveryOptions<TState>[Key];
 };
 type EventData<T extends UnstampedMessageStreamEvent["type"]> =
   Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 interface ActiveWebhookContext {
-  readonly cancel: ChannelOperations<ChatSdkChannelState>["cancel"];
-  readonly send: ChannelOperations<ChatSdkChannelState>["send"];
+  readonly from: ChannelFrom<ChatSdkChannelState>;
 }
 
 const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-webhook");
 
-/**
- * Durable channel state used by `chatSdkChannel`. Stores the last Chat SDK
- * thread for the eve session so event handlers can post replies without
- * depending on hidden Chat SDK subscription state, plus the bookkeeping the
- * default handlers use to stream assistant output and surface typing status.
- */
+/** Durable Chat SDK thread state plus default-handler streaming bookkeeping. */
 export interface ChatSdkChannelState extends Record<string, unknown> {
   thread: SerializedThread | null;
   /** Message id of the in-flight streamed assistant post (edit fallback). */
@@ -137,8 +136,8 @@ export type ChatSdkChannelEvents<TAdapters extends ChatSdkAdapters = ChatSdkAdap
  */
 export interface ChatSdkSendOptions {
   readonly auth?: SessionAuthContext | null;
-  readonly callback?: ChannelSendInput<ChatSdkChannelState>["callback"];
-  readonly mode?: ChannelSendInput<ChatSdkChannelState>["mode"];
+  readonly callback?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["callback"];
+  readonly mode?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["mode"];
   readonly thread: SerializedThread | Thread | string;
   readonly title?: string;
   /**
@@ -309,7 +308,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       ): Promise<Response> => {
         const webhook = bot.webhooks[adapterName];
         const ctx = new ContextContainer();
-        ctx.setVirtualContext(ActiveWebhookKey, { cancel: args.cancel, send: args.send });
+        ctx.setVirtualContext(ActiveWebhookKey, { from: args.from });
         return contextStorage.run(ctx, () =>
           webhook(request, {
             ...config.webhook,
@@ -321,11 +320,10 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       };
       return [GET<ChatSdkChannelState>(path, handler), POST<ChatSdkChannelState>(path, handler)];
     }),
-    async receive(input, { send }) {
+    async receive(input, { from }) {
       const thread = serializeReceiveTarget(bot, input.target);
-      return send(thread.id, {
+      return from(thread.id).send(input.message, {
         auth: input.auth,
-        message: input.message,
         state: { thread },
       });
     },
@@ -559,18 +557,19 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
     );
   }
   const thread = serializeThread(bot, options.thread, options.adapterName);
-  const sendInput: MutableChannelSendInput<ChatSdkChannelState> = {
-    ...normalizeSendInput(input),
+  const payload = normalizeSendInput(input);
+  const deliveryOptions: MutableDeliveryOptions<ChatSdkChannelState> = {
     auth: options.auth ?? null,
     state: { thread },
   };
-  if (options.callback !== undefined) sendInput.callback = options.callback;
-  if (options.mode !== undefined) sendInput.mode = options.mode;
-  if (options.title !== undefined) sendInput.title = options.title;
+  if (options.callback !== undefined) deliveryOptions.callback = options.callback;
+  if (options.mode !== undefined) deliveryOptions.mode = options.mode;
+  if (options.title !== undefined) deliveryOptions.title = options.title;
+  const source = active.from(thread.id) as InternalChannelSource<ChatSdkChannelState>;
   if (options.turnPolicy === "experimental-steer" && hasMessageInput(input)) {
-    await active.cancel(thread.id);
+    await source.cancel();
   }
-  return active.send(thread.id, sendInput);
+  return source[INTERNAL_CHANNEL_DELIVER](payload, deliveryOptions);
 }
 
 function hasMessageInput(input: ChatSdkSendInput): boolean {

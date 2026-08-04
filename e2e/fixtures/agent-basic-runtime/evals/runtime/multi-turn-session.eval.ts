@@ -11,9 +11,9 @@ export default defineEval({
   description: "Session runtime smoke: multi-turn.",
 
   async test(t) {
-    const first = await t.send({ message: "My favorite word is marigold. Remember it." });
+    const first = await t.send("My favorite word is marigold. Remember it.");
 
-    const second = await t.send({ message: "What is my favorite word? Reply with just the word." });
+    const second = await t.send("What is my favorite word? Reply with just the word.");
 
     await t.require(second.sessionId, equals(first.sessionId));
 

@@ -7,14 +7,12 @@ export default defineEval({
   description:
     "Dynamic tools smoke: helper-built and inline tools from one resolver survive replay.",
   async test(t) {
-    const first = await t.send({
-      message: "Call the `nested_query` tool and tell me exactly what it returned.",
-    });
+    const first = await t.send(
+      "Call the `nested_query` tool and tell me exactly what it returned.",
+    );
     first.expectOk();
 
-    await t.send({
-      message: "Now call the `nested_status` tool and tell me exactly what it returned.",
-    });
+    await t.send("Now call the `nested_status` tool and tell me exactly what it returned.");
 
     t.succeeded();
     t.calledTool("nested_query", {

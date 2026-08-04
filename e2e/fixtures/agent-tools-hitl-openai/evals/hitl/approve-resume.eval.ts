@@ -16,19 +16,19 @@ export default defineEval({
   tags: ["real-model"],
   description: "HITL regression (#236): approve-resume executes and replays on OpenAI Responses.",
   async test(t) {
-    const parked = await t.send({
-      message: 'Call the guarded-echo tool with note "openai-approve".',
-    });
+    const parked = await t.send('Call the guarded-echo tool with note "openai-approve".');
     parked.calledTool("guarded-echo", { status: "pending", count: 1 });
     const request = t.requireInputRequest({
       display: "confirmation",
       toolName: "guarded-echo",
     });
 
-    const approved = await t.respond({
-      requestId: request.requestId,
-      optionId: "approve",
-    });
+    const approved = await t.respond([
+      {
+        requestId: request.requestId,
+        optionId: "approve",
+      },
+    ]);
     approved.expectOk();
     approved.event("action.result", {
       data: {
@@ -42,7 +42,7 @@ export default defineEval({
       count: 1,
     });
 
-    const followup = await t.send({ message: "Reply with exactly OPENAI-REPLAY-OK." });
+    const followup = await t.send("Reply with exactly OPENAI-REPLAY-OK.");
     followup.expectOk();
     followup.messageIncludes(/OPENAI-REPLAY-OK/i);
 

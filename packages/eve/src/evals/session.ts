@@ -4,7 +4,13 @@ import { basename, extname } from "node:path";
 import { createTextWithFileContent } from "#client/file-parts.js";
 import type { Client } from "#client/client.js";
 import type { ClientSession } from "#client/session.js";
-import type { CancelSessionResult, ClientSessionState, SendTurnInput } from "#client/types.js";
+import type {
+  CancelSessionResult,
+  ClientSessionState,
+  SendTurnInput,
+  SendTurnOptions,
+  SendTurnPayload,
+} from "#client/types.js";
 import type { MessageStreamEvent, TurnFailureStreamEvent } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
@@ -132,12 +138,15 @@ export class EvalSessionDriver implements EveEvalSession {
     return matching[0]!;
   }
 
-  async respond(...responses: InputResponse[]): Promise<EveEvalTurn> {
+  async respond(
+    responses: readonly InputResponse[],
+    options: SendTurnOptions = {},
+  ): Promise<EveEvalTurn> {
     if (responses.length === 0) {
       throw new Error("respond() requires at least one input response.");
     }
 
-    return await this.send({ inputResponses: responses });
+    return await (await this.#start({ ...options, inputResponses: responses })).result();
   }
 
   async respondAll(optionId: string): Promise<EveEvalTurn> {
@@ -150,30 +159,43 @@ export class EvalSessionDriver implements EveEvalSession {
     }
 
     return await this.respond(
-      ...requests.map((request) => ({
+      requests.map((request) => ({
         optionId,
         requestId: request.requestId,
       })),
     );
   }
 
-  async send(input: SendTurnInput): Promise<EveEvalTurn> {
-    return await (await this.#start(input)).result();
+  async send(
+    message: SendTurnInput["message"],
+    options: SendTurnOptions = {},
+  ): Promise<EveEvalTurn> {
+    return await (await this.#start({ ...options, message })).result();
   }
 
-  async start(message: string): Promise<EveEvalLiveTurn> {
-    return await this.#start({ message });
+  async start(message: string, options: SendTurnOptions = {}): Promise<EveEvalLiveTurn> {
+    return await this.#start({ ...options, message });
   }
 
-  async #start(input: SendTurnInput): Promise<EveEvalLiveTurn> {
+  async #start(input: SendTurnPayload): Promise<EveEvalLiveTurn> {
     const turnInput = attachSignal(input, this.#signal);
     let response;
     if (this.#session === undefined) {
-      const created = await this.#client.sessions.create(turnInput);
+      if (turnInput.message === undefined) {
+        throw new Error("Eval session has not started.");
+      }
+      const created = await this.#client.sessions.create({
+        ...turnInput,
+        message: turnInput.message,
+      });
       this.#session = created.session;
       response = created.response;
     } else {
-      response = await this.#session.send(turnInput);
+      const { inputResponses, message, ...options } = turnInput;
+      response =
+        inputResponses === undefined
+          ? await this.#session.send(message!, options)
+          : await this.#session.respond(inputResponses, options);
     }
     return new EvalLiveTurn({
       events: response,
@@ -191,7 +213,7 @@ export class EvalSessionDriver implements EveEvalSession {
       mediaType: mediaType ?? inferMediaType(filePath),
       text,
     });
-    return await this.send({ message });
+    return await this.send(message);
   }
 
   async readTurn(options?: { readonly startIndex?: number }): Promise<EveEvalTurn> {
@@ -560,7 +582,7 @@ export class EvalSessionManager {
   }
 }
 
-function attachSignal(input: SendTurnInput, signal: AbortSignal | undefined): SendTurnInput {
+function attachSignal(input: SendTurnPayload, signal: AbortSignal | undefined): SendTurnPayload {
   if (signal === undefined) return input;
   return input.signal === undefined ? { ...input, signal } : input;
 }

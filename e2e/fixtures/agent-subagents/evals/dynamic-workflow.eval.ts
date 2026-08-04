@@ -21,10 +21,9 @@ export default defineEval({
   description:
     "Dynamic Workflow smoke: model-authored JavaScript fans out two local subagent calls and combines their results.",
   async test(t) {
-    const turn = await t.send({
-      message:
-        "Use the Workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside Workflow. Then reply with the returned array verbatim as JSON.",
-    });
+    const turn = await t.send(
+      "Use the Workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside Workflow. Then reply with the returned array verbatim as JSON.",
+    );
 
     t.succeeded();
     t.calledTool("Workflow", { input: isFanOutProgram, count: 1 });

@@ -90,7 +90,7 @@ HITL renders as Discord components. Confirmations and options become buttons, `d
 
 ### Proactive sessions
 
-Start a session without an inbound interaction through `send(discord, { message, target, auth })` from a schedule `run` handler, or `args.receive(discord, ...)` from another channel. The proactive target shape is `{ channelId, conversationId?, initialMessage? }`. Either path needs a bot token, supplied by Connect or `DISCORD_BOT_TOKEN`.
+Start a session without an inbound interaction through `to(discord, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(discord, target).send(message, { auth })` from another channel. The proactive target shape is `{ channelId, conversationId?, initialMessage? }`. Either path needs a bot token, supplied by Connect or `DISCORD_BOT_TOKEN`.
 
 ### Attachments
 

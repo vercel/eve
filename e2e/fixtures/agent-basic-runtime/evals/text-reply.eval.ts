@@ -13,7 +13,7 @@ export default defineEval({
   // Instructing an exact echo keeps the smoke test stable regardless of how
   // the model would otherwise phrase its reply.
   async test(t) {
-    await t.send({ message: 'Reply with exactly the text "smoke ping" and nothing else.' });
+    await t.send('Reply with exactly the text "smoke ping" and nothing else.');
     t.succeeded();
     t.messageIncludes("smoke ping");
     t.usedNoTools();

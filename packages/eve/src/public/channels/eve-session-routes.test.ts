@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
-import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
 
@@ -19,6 +19,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "wrun_A",
     send: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
+    respond: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     cancel: vi.fn().mockResolvedValue({ status: "accepted" }),
     compact: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     clear: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
@@ -31,9 +32,9 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
 
 function createArgs(session = createFixedSession()): RouteHandlerArgs {
   return {
-    ...mockChannelOperations(vi.fn()),
+    ...mockChannelContext(vi.fn()),
     attachSession: () => session,
-    receive: vi.fn() as never,
+    to: vi.fn() as never,
     params: { sessionId: "wrun_A" },
     waitUntil: vi.fn(),
     requestIp: "127.0.0.1",
@@ -92,13 +93,10 @@ describe("eve ID-addressed session routes", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(session.send).toHaveBeenCalledWith({
-      auth: expect.objectContaining({ authenticator: "none" }),
-      context: undefined,
-      inputResponses: undefined,
-      message: "follow-up",
-      outputSchema: undefined,
-    });
+    expect(session.send).toHaveBeenCalledWith(
+      "follow-up",
+      expect.objectContaining({ auth: expect.objectContaining({ authenticator: "none" }) }),
+    );
 
     const rejected = await handler(
       new Request("https://eve.test/eve/v1/session/wrun_A", {

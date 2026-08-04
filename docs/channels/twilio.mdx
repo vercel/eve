@@ -66,7 +66,7 @@ SMS and voice have no native button or card affordance, so HITL prompts do not r
 
 ### Proactive sessions
 
-Start a session without an inbound message through `send(twilio, { message, target, auth })` from a schedule `run` handler, or `args.receive(twilio, ...)` from another channel. `target.phoneNumber` is required, and the channel needs `messaging.from` or `messaging.messagingServiceSid` for the outbound sender.
+Start a session without an inbound message through `to(twilio, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(twilio, target).send(message, { auth })` from another channel. `target.phoneNumber` is required, and the channel needs `messaging.from` or `messaging.messagingServiceSid` for the outbound sender.
 
 ### Attachments
 

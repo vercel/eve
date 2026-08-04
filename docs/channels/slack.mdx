@@ -129,7 +129,8 @@ Message and interaction hooks expose every current-owner operation directly on `
 
 ```ts
 async onAppMention(ctx) {
-  await ctx.send({ message: "Run a separate turn." });
+  await ctx.send("Run a separate turn.");
+  await ctx.respond(inputResponses);
   await ctx.cancel();
   await ctx.compact();
   await ctx.clear();
@@ -162,7 +163,7 @@ Reset returns `{ status: "reset", previousSessionId }` when the thread had a ses
 
 ### Other Events API callbacks
 
-Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send({ message, target, auth })` zero, one, or many times to start turns. Each call returns the resulting session.
+Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send(message, { target, auth })` zero, one, or many times to start turns. Each call returns the resulting session.
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -172,16 +173,18 @@ const onboardingChannels = ["C0123ABC", "C0456DEF"];
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  async onEvent({ send }, event) {
+  async onEvent(ctx, event) {
     if (event.type !== "team_join") return;
 
     await Promise.all(
       onboardingChannels.map((channelId) =>
-        send({
-          message: `A user joined the Slack workspace. Onboard them from this event:\n${JSON.stringify(event)}`,
-          target: { channelId },
-          auth: null,
-        }),
+        ctx.send(
+          `A user joined the Slack workspace. Onboard them from this event:\n${JSON.stringify(event)}`,
+          {
+            target: { channelId },
+            auth: null,
+          },
+        ),
       ),
     );
   },
@@ -195,7 +198,8 @@ Because a generic event is not necessarily tied to one thread, put the target in
 ```ts
 const target = { channelId, threadTs };
 
-await ctx.send({ auth: null, message: "Follow up", target });
+await ctx.send("Follow up", { auth: null, target });
+await ctx.respond(inputResponses, { auth: null, target });
 await ctx.cancel({ target, turnId });
 await ctx.compact({ target });
 await ctx.clear({ target });
@@ -260,7 +264,7 @@ The default handlers reply in-thread and show progress. Typing indicators post a
 
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
 
-When a session starts without a `threadTs` (say, from a schedule's `send(slack, ...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
+When a session starts without a `threadTs` (say, from a schedule's `to(slack, target).send(...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
 
 The example below overrides `onAppMention` to gate on an authored message and posts the completed reply to the thread. Event handlers receive `(eventData, channel, ctx)`, with Slack platform handles on `channel.thread` and `channel.slack`:
 
@@ -299,7 +303,7 @@ events: {
 
 ### Proactive sessions
 
-Start a session without an inbound message through `send(slack, { message, target, auth })` from a schedule `run` handler, or `args.receive(slack, ...)` from another channel. The proactive target shape is `{ channelId }`.
+Start a session without an inbound message through `ctx.to(slack, target).send(message, { auth })` from another channel, or `to(slack, target).send(message, { auth })` from a schedule `run` handler. The proactive target shape is `{ channelId, threadTs?, initialMessage? }`.
 
 ### Attachments
 

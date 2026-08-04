@@ -3,9 +3,9 @@ import {
   ClientError,
   type ClientSession,
   type MessageStreamEvent,
-  type SendTurnPayload,
   type ClientSessionState,
 } from "#client/index.js";
+import type { SendTurnPayload } from "#client/types.js";
 import { collectTurnEvents, summarizeTurnEvents } from "#client/session-utils.js";
 import { resolveLocalDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import { resolveLinkedDevelopmentOidcToken } from "#services/dev-client/request-headers.js";
@@ -59,14 +59,21 @@ export async function runInvoke(input: RunInvokeInput): Promise<InvokeResult> {
   try {
     const payload = { ...input.operation.payload, signal: input.signal };
     if (resume === undefined) {
-      const created = await client.sessions.create(payload);
+      if (payload.message === undefined) {
+        throw new Error("Cannot answer an input request before the session starts.");
+      }
+      const created = await client.sessions.create({ ...payload, message: payload.message });
       session = created.session;
       response = created.response;
     } else {
       session = client.sessions.attach(resume.session.sessionId, {
         streamIndex: resume.session.streamIndex,
       });
-      response = await session.send(payload);
+      const { inputResponses, message, ...options } = payload;
+      response =
+        inputResponses === undefined
+          ? await session.send(message!, options)
+          : await session.respond(inputResponses, options);
     }
   } catch (error) {
     const authentication = authenticationFailure(error, undefined, deploymentResolution);

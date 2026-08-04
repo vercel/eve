@@ -37,7 +37,7 @@ console.log(cleared.status);
 Use `result()` when you only need the final turn summary:
 
 ```ts
-const response = await session.send({ message: "Summarize the latest forecast." });
+const response = await session.send("Summarize the latest forecast.");
 const result = await response.result();
 
 console.log(result.status);
@@ -56,7 +56,7 @@ This consumes the stream until the current turn boundary:
 Use `for await...of` when you want to render progress:
 
 ```ts
-const response = await session.send({ message: "Draft a plan and show your work." });
+const response = await session.send("Draft a plan and show your work.");
 
 for await (const event of response) {
   if (event.type === "message.appended") {
@@ -128,8 +128,7 @@ If your consumer persists events, key on `event.meta.id`. It is stable across re
 Set `streamReconnectPolicy: { reconnect: false }` when a relay or proxy owns the cursor and reconnection policy. This makes a single stream GET attempt and returns when that connection ends; it does not stop the server-side turn:
 
 ```ts
-const response = await session.send({
-  message: "Run the long operation.",
+const response = await session.send("Run the long operation.", {
   streamReconnectPolicy: { reconnect: false },
 });
 
@@ -220,8 +219,7 @@ Arm the timeout before awaiting `send()` so it covers the POST as well as the st
 const controller = new AbortController();
 const timeout = setTimeout(() => controller.abort(), 10_000);
 
-const response = await session.send({
-  message: "Run a long analysis.",
+const response = await session.send("Run a long analysis.", {
   signal: controller.signal,
 });
 

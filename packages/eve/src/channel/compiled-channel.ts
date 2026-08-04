@@ -1,5 +1,6 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import type { ChannelOperations } from "#channel/channel-operations.js";
+import type { UserContent } from "ai";
+import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
@@ -31,11 +32,11 @@ export interface CompiledChannel<
   readonly __metadata?: TMetadata;
   readonly receive?: (
     input: {
-      readonly message: string;
+      readonly message: string | UserContent;
       readonly target: Readonly<TReceiveTarget>;
       readonly auth: SessionAuthContext | null;
     },
-    args: ChannelOperations<TState>,
+    ctx: ChannelReceiveContext<TState>,
   ) => Promise<Session>;
 }
 

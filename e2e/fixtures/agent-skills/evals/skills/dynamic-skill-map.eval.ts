@@ -12,9 +12,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "Skills smoke: dynamic skill-map resolution.",
   async test(t) {
-    await t.send({
-      message: "Please use the dynamic multi alpha skill and follow its instructions exactly.",
-    });
+    await t.send("Please use the dynamic multi alpha skill and follow its instructions exactly.");
 
     t.succeeded();
     t.loadedSkill("alpha", {

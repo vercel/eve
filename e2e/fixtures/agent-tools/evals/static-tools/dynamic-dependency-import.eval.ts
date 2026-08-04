@@ -4,10 +4,9 @@ export default defineEval({
   tags: ["real-model"],
   description: "Static tools smoke: authored modules and dependencies can use dynamic imports.",
   async test(t) {
-    await t.send({
-      message:
-        "Call the `read-dynamic-dependency` tool. Reply with its marker exactly as returned.",
-    });
+    await t.send(
+      "Call the `read-dynamic-dependency` tool. Reply with its marker exactly as returned.",
+    );
 
     t.succeeded();
     t.calledTool("read-dynamic-dependency", {

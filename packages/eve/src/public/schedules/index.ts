@@ -7,6 +7,6 @@ export {
   type ScheduleDefinition,
   type ScheduleHandlerArgs,
   type ScheduleRunHandler,
-  type ScheduleSendFn,
+  type ScheduleToFn,
   type TypedReceiveTarget,
 } from "#public/definitions/schedule.js";

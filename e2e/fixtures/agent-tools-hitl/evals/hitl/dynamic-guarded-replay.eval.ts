@@ -12,9 +12,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "HITL smoke: replayed dynamic tools preserve approval.",
   async test(t) {
-    const parked = await t.send({
-      message: `Call the \`${TOOL_NAME}\` tool with note "before-approval".`,
-    });
+    const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with note "before-approval".`);
     t.requireInputRequest({
       display: "confirmation",
       toolName: TOOL_NAME,

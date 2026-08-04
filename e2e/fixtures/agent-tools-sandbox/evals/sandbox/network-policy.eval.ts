@@ -24,10 +24,9 @@ export default defineEval({
   tags: ["real-model"],
   description: "Sandbox: setNetworkPolicy('deny-all') blocks sandbox egress mid-turn.",
   async test(t) {
-    await t.send({
-      message:
-        "Use the `network-probe` tool and tell me whether sandbox network egress was blocked.",
-    });
+    await t.send(
+      "Use the `network-probe` tool and tell me whether sandbox network egress was blocked.",
+    );
 
     t.succeeded();
     t.calledTool("network-probe", {

@@ -1,6 +1,6 @@
 /**
  * The `run` form of {@link ScheduleDefinition} invokes this handler when a
- * schedule's cron fires. It receives {@link ScheduleHandlerArgs} (`send`,
+ * schedule's cron fires. It receives {@link ScheduleHandlerArgs} (`to`,
  * `waitUntil`, `appAuth`) and may return synchronously or as a promise.
  */
 export type GenericScheduleRunHandler<TArgs> = (args: TArgs) => Promise<void> | void;
@@ -20,7 +20,7 @@ export interface GenericScheduleDefinitionFields<TArgs> {
  *   on the prompt and discards the output (equivalent to the `<name>.md`
  *   markdown form).
  * - `run`: full handler ({@link GenericScheduleRunHandler}). Receives
- *   `{ receive, waitUntil, appAuth }` and decides what to do.
+ *   `{ to, waitUntil, appAuth }` and decides what to do.
  *
  * Identity is derived from the file path under `agent/schedules/`; authored
  * definitions do not carry a `name` field.

@@ -4,10 +4,9 @@ export default defineEval({
   tags: ["real-model"],
   description: "Mounted extension tool returns the config bound at the mount site.",
   async test(t) {
-    await t.send({
-      message:
-        "Call the `toolkit__toolkit_lookup` tool with account 'acme' and report exactly what it returned.",
-    });
+    await t.send(
+      "Call the `toolkit__toolkit_lookup` tool with account 'acme' and report exactly what it returned.",
+    );
 
     t.succeeded();
     t.calledTool("toolkit__toolkit_lookup", {

@@ -1,4 +1,5 @@
 import { shallowRef, computed, onScopeDispose, type ComputedRef } from "vue";
+import type { UserContent } from "ai";
 
 import {
   EveAgentStore,
@@ -15,7 +16,8 @@ import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
   ClientAuth,
   HeadersValue,
-  SendTurnPayload,
+  RespondTurnOptions,
+  SendTurnOptions,
   ClientSessionState,
 } from "#client/types.js";
 
@@ -49,8 +51,16 @@ export interface UseEveAgentReturn<TData> {
   readonly events: ComputedRef<readonly MessageStreamEvent[]>;
   /** Clear all state and start a new session. */
   readonly reset: () => void;
-  /** Send a turn with full structured input (message, attachments, input responses). */
-  readonly send: <TOutput = unknown>(input: SendTurnPayload<TOutput>) => Promise<void>;
+  /** Send a message with optional turn settings. */
+  readonly send: <TOutput = unknown>(
+    message: string | UserContent,
+    options?: SendTurnOptions<TOutput>,
+  ) => Promise<void>;
+  /** Answer pending HITL input requests. */
+  readonly respond: <TOutput = unknown>(
+    inputResponses: Parameters<ClientSession["respond"]>[0],
+    options?: RespondTurnOptions<TOutput>,
+  ) => Promise<void>;
   /** Current session identity and stream cursor. */
   readonly session: ComputedRef<ClientSessionState | undefined>;
   /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
@@ -136,7 +146,7 @@ export function useEveAgent<TData>(
  * Without a `reducer`, events project into `EveMessageData` via
  * `defaultMessageReducer()`; pass `reducer` to project into a custom `TData`.
  * Returns reactive refs (`data`, `error`, `events`, `session`, `status`) plus
- * `send`, `stop`, and `reset`. Configuration is read once on store creation;
+ * `send`, `respond`, `stop`, and `reset`. Configuration is read once on store creation;
  * remount to change it. On scope dispose, the in-flight request is aborted and
  * the store unsubscribed.
  */
@@ -182,7 +192,12 @@ export function useEveAgent<TData>(
     error: computed(() => snapshot.value.error),
     events: computed(() => snapshot.value.events),
     reset: () => store.reset(),
-    send: <TOutput = unknown>(input: SendTurnPayload<TOutput>) => store.send(input),
+    respond: <TOutput = unknown>(
+      inputResponses: Parameters<ClientSession["respond"]>[0],
+      options?: RespondTurnOptions<TOutput>,
+    ) => store.send({ ...options, inputResponses }),
+    send: <TOutput = unknown>(message: string | UserContent, options?: SendTurnOptions<TOutput>) =>
+      store.send({ ...options, message }),
     session: computed(() => snapshot.value.session),
     status: computed(() => snapshot.value.status),
     stop: () => store.stop(),

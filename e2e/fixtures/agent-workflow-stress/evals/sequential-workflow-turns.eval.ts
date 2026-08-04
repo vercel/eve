@@ -13,7 +13,7 @@ export default defineEval({
     for (let turnNumber = 1; turnNumber <= TURN_COUNT; turnNumber += 1) {
       const marker = `sequential-turn-${String(turnNumber).padStart(3, "0")}`;
       const startedAt = performance.now();
-      const result = await t.send({ message: marker });
+      const result = await t.send(marker);
       const elapsedSeconds = (performance.now() - startedAt) / 1_000;
 
       t.log(

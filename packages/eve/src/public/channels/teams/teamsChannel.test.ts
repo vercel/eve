@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
-import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { teamsChannel, type TeamsChannelState } from "#public/channels/teams/index.js";
 
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
@@ -37,6 +37,7 @@ async function firePost(
     id: "SESSION",
   }));
   const waitUntil = vi.fn();
+  const baseFrom = mockChannelContext<TeamsChannelState>(send).from;
   const response = await post.handler(
     new Request("https://eve.test/eve/v1/teams", {
       body: JSON.stringify(body),
@@ -44,14 +45,16 @@ async function firePost(
       method: "POST",
     }),
     {
-      ...mockChannelOperations<TeamsChannelState>(send),
-      attachSession: vi.fn() as any,
+      from(continuationToken) {
+        return baseFrom(continuationToken);
+      },
       resolveSession: (continuationToken) =>
         (overrides.resolveSession ?? vi.fn().mockResolvedValue(undefined))(
           continuationToken,
         ) as never,
+      attachSession: vi.fn() as any,
       params: {},
-      receive: vi.fn(),
+      to: vi.fn(),
       requestIp: null,
       waitUntil,
     },
@@ -344,7 +347,7 @@ describe("teamsChannel", () => {
         auth: null,
         message: "Begin",
       },
-      mockChannelOperations(send),
+      mockChannelContext(send),
     );
 
     expect(requests[0]!.url).toBe("https://service.example/teams/v3/conversations/CONV/activities");

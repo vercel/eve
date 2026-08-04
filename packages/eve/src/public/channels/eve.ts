@@ -330,13 +330,16 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         let result: Awaited<ReturnType<Session["send"]>>;
         try {
-          result = await attachSession(sessionId).send({
+          const session = attachSession(sessionId);
+          const options = {
             auth: dispatchAuth,
             context,
-            inputResponses: body.inputResponses,
-            message: body.message,
             outputSchema: body.outputSchema,
-          });
+          };
+          result =
+            body.inputResponses === undefined
+              ? await session.send(body.message!, options)
+              : await session.respond(body.inputResponses, options);
         } catch (error) {
           const errorId = logError(log, "session-message request failed", error, { sessionId });
           return Response.json(
@@ -674,9 +677,16 @@ function parseSessionMessageBody(
   if (message === undefined && inputResponses === undefined) {
     return Response.json(
       {
-        error: "Expected a non-empty 'message', a non-empty 'inputResponses' array, or both.",
+        error: "Expected a non-empty 'message' or a non-empty 'inputResponses' array.",
         ok: false,
       },
+      { status: 400 },
+    );
+  }
+
+  if (message !== undefined && inputResponses !== undefined) {
+    return Response.json(
+      { error: "'message' and 'inputResponses' are mutually exclusive.", ok: false },
       { status: 400 },
     );
   }

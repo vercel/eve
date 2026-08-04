@@ -53,7 +53,7 @@ import type {
   SlackInteractionContext,
   SlackInteractionUser,
 } from "#public/channels/slack/slackChannel.js";
-import type { ChannelOperations } from "#channel/channel-operations.js";
+import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
 
 const log = createLogger("slack.interactions");
@@ -340,7 +340,8 @@ export interface InteractionHandlerDeps {
 export async function handleInteractionPost(
   rawBody: string,
   ctx: {
-    operations: ChannelOperations<SlackChannelState>;
+    from: ChannelFrom<SlackChannelState>;
+    resolveSession: ChannelResolveSession;
     waitUntil: (task: Promise<unknown>) => void;
   },
   deps: InteractionHandlerDeps,
@@ -382,8 +383,9 @@ export async function handleInteractionPost(
     if (!user) return ack;
 
     ctx.waitUntil(
-      ctx.operations
-        .send(continuationToken, {
+      ctx
+        .from(continuationToken)
+        .respond(inputResponses, {
           auth: buildSlackAuthContext({
             channelId: interaction.channelId,
             teamId: interaction.teamId,
@@ -391,13 +393,6 @@ export async function handleInteractionPost(
             userId: user.id,
             userName: user.username ?? user.name,
           }),
-          inputResponses,
-          state: {
-            channelId: interaction.channelId,
-            threadTs: interaction.threadTs,
-            teamId: interaction.teamId ?? null,
-            triggeringUserId: user.id,
-          },
         })
         .catch((error: unknown) => {
           log.error("HITL interaction delivery failed", { error });
@@ -432,7 +427,8 @@ export async function handleInteractionPost(
             userId: actionUser.id,
             userName: actionUser.username ?? actionUser.name,
           }),
-          operations: ctx.operations,
+          from: ctx.from,
+          resolveSession: ctx.resolveSession,
           state: {
             channelId: interaction.channelId,
             teamId: interaction.teamId ?? null,
@@ -512,7 +508,7 @@ async function openFreeformModal(input: {
 async function handleViewSubmission(
   payload: SlackViewSubmissionPayload,
   ctx: {
-    operations: ChannelOperations<SlackChannelState>;
+    from: ChannelFrom<SlackChannelState>;
     waitUntil: (task: Promise<unknown>) => void;
   },
   _deps: InteractionHandlerDeps,
@@ -553,8 +549,9 @@ async function handleViewSubmission(
   const teamId = user?.teamId ?? payload.teamId ?? null;
 
   ctx.waitUntil(
-    ctx.operations
-      .send(metadata.continuationToken, {
+    ctx
+      .from(metadata.continuationToken)
+      .respond([{ requestId: metadata.requestId, text }], {
         auth: buildSlackAuthContext({
           channelId: metadata.channelId,
           teamId,
@@ -562,13 +559,6 @@ async function handleViewSubmission(
           userId: triggeringUserId,
           userName: user?.username ?? user?.name,
         }),
-        inputResponses: [{ requestId: metadata.requestId, text }],
-        state: {
-          channelId: metadata.channelId,
-          threadTs: metadata.threadTs,
-          teamId,
-          triggeringUserId,
-        },
       })
       .catch((error: unknown) => {
         log.error("freeform answer delivery failed", { error });

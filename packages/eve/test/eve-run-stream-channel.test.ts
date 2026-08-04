@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { MessageStreamEvent } from "../src/protocol/message.js";
 import { stampTestEvents } from "../src/internal/testing/events.js";
-import { mockChannelOperations } from "../src/internal/testing/mocks/mock-channel-operations.js";
+import { mockChannelContext } from "../src/internal/testing/mocks/mock-channel-operations.js";
 import type { AttachSessionFn, RouteHandlerArgs } from "../src/channel/routes.js";
 import type { Session } from "../src/channel/session.js";
 import { EVE_SESSION_STREAM_ROUTE_PATTERN } from "../src/protocol/routes.js";
@@ -174,6 +174,9 @@ function createMockAttachSession(events: ReadableStream<MessageStreamEvent>) {
     async send() {
       return { sessionId: "session_xyz", status: "accepted" };
     },
+    async respond() {
+      return { sessionId: "session_xyz", status: "accepted" };
+    },
     async cancel() {
       return { status: "no_active_turn" };
     },
@@ -200,9 +203,9 @@ function createArgs(input: {
   readonly params: Readonly<Record<string, string>>;
 }): RouteHandlerArgs {
   return {
-    ...mockChannelOperations(vi.fn()),
+    ...mockChannelContext(vi.fn()),
     attachSession: input.attachSession,
-    receive: vi.fn() as any,
+    to: vi.fn() as any,
     params: input.params,
     waitUntil: () => undefined,
     requestIp: "127.0.0.1",

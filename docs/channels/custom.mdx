@@ -20,25 +20,26 @@ import { defineChannel, GET, POST } from "eve/channels";
 
 export default defineChannel({
   routes: [
-    POST("/threads/:threadId/messages", async (request, { params, reset, send }) => {
+    POST("/threads/:threadId/messages", async (request, { from, params }) => {
       const body = await request.json();
+      const source = from(params.threadId);
 
       if (body.message === "/new") {
-        return Response.json(await reset(params.threadId, { reason: "User requested /new" }));
+        return Response.json(await source.reset({ reason: "User requested /new" }));
       }
 
-      const session = await send(params.threadId, { auth: null, message: body.message });
+      const session = await source.send(body.message, { auth: null });
       return Response.json({ sessionId: session.id });
     }),
 
-    POST("/threads/:threadId/cancel", async (_request, { cancel, params }) =>
-      Response.json(await cancel(params.threadId)),
+    POST("/threads/:threadId/cancel", async (_request, { from, params }) =>
+      Response.json(await from(params.threadId).cancel()),
     ),
-    POST("/threads/:threadId/compact", async (_request, { compact, params }) =>
-      Response.json(await compact(params.threadId)),
+    POST("/threads/:threadId/compact", async (_request, { from, params }) =>
+      Response.json(await from(params.threadId).compact()),
     ),
-    POST("/threads/:threadId/clear", async (_request, { clear, params }) =>
-      Response.json(await clear(params.threadId)),
+    POST("/threads/:threadId/clear", async (_request, { from, params }) =>
+      Response.json(await from(params.threadId).clear()),
     ),
 
     GET("/sessions/:sessionId/stream", async (_request, { attachSession, params }) => {
@@ -59,9 +60,10 @@ export default defineChannel({
 
 Each route receives these operation surfaces:
 
-- `send(address, input)`, `cancel(address, options?)`, `compact(address)`, `clear(address)`, `reset(address, options?)`, and `resolveSession(address)` target a channel-local continuation address.
+- `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `reset` to a channel-local continuation address.
+- `resolveSession(address)` snapshots the session currently owning a channel-local continuation address.
 - `attachSession(sessionId)` creates an I/O-free handle pinned to one durable session ID.
-- `receive(channel, options)` hands work to another authored channel.
+- `to(channel, target).send(message, options)` hands work to another authored channel.
 - `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
 
 Event handlers receive `(eventData, channel, ctx)`. `ctx.session.id` identifies
@@ -76,11 +78,14 @@ Channel operations are dynamic: every call targets whichever session currently
 owns the address. Only `send()` can create a session when the address is unowned.
 
 ```ts
-const session = await send(threadId, { auth, message: "Hello" });
-await cancel(threadId, { turnId });
-await compact(threadId);
-await clear(threadId);
-await reset(threadId, { reason: "Start over" });
+const source = from(threadId);
+
+const session = await source.send("Hello", { auth });
+await source.respond(inputResponses, { auth });
+await source.cancel({ turnId });
+await source.compact();
+await source.clear();
+await source.reset({ reason: "Start over" });
 
 const currentSession = await resolveSession(threadId);
 ```
@@ -91,7 +96,8 @@ follows, or resolves a replacement.
 ```ts
 const session = attachSession(sessionId);
 
-await session.send({ auth, message: "Follow up" });
+await session.send("Follow up", { auth });
+await session.respond(inputResponses, { auth });
 await session.cancel({ turnId });
 await session.compact();
 await session.clear();
@@ -146,16 +152,16 @@ import { defineChannel, WS } from "eve/channels";
 
 export default defineChannel({
   routes: [
-    WS("/voice/ws", async (_req, { send }) => ({
+    WS("/voice/ws", async (_req, { from }) => ({
       async message(_peer, message) {
-        await send("voice-demo", { auth: null, message: message.text() });
+        await from("voice-demo").send(message.text(), { auth: null });
       },
     })),
   ],
 });
 ```
 
-`WS()` handlers receive the same channel operations, `attachSession`, `receive`,
+`WS()` handlers receive the same `from`, `to`, and `attachSession` operations,
 `params`, `waitUntil`, and `requestIp` arguments as HTTP route handlers. The
 returned hooks are eve-owned structural types compatible with Nitro/H3 websocket
 routing, including `upgrade`, `open`, `message`, `close`, and `error`.
@@ -180,7 +186,7 @@ The bridge server does not listen on its own port. It receives only upgrade even
 
 ## Cross-channel hand-off
 
-Route handlers can start a session on a different channel via `args.receive(channel, ...)`. Use this when an inbound request on one channel should pivot the conversation onto another, such as an incident webhook that opens an investigation thread in Slack.
+Route handlers can start a session on a different channel via `ctx.to(channel, target).send(message, options)`. Use this when an inbound request on one channel should pivot the conversation onto another, such as an incident webhook that opens an investigation thread in Slack.
 
 ```ts
 import { defineChannel, POST } from "eve/channels";
@@ -188,20 +194,20 @@ import slack from "./slack";
 
 export default defineChannel({
   routes: [
-    POST("/incident", async (req, args) => {
+    POST("/incident", async (req, ctx) => {
       const incident = await req.json();
 
-      args.waitUntil(
-        args.receive(slack, {
-          message: `Investigate ${incident.reference}: ${incident.title}`,
-          target: { channelId: "C0123ABC" },
-          auth: {
-            authenticator: "incidentio",
-            principalType: "service",
-            principalId: incident.actor.id,
-            attributes: { reference: incident.reference, severity: incident.severity },
-          },
-        }),
+      ctx.waitUntil(
+        ctx
+          .to(slack, { channelId: "C0123ABC" })
+          .send(`Investigate ${incident.reference}: ${incident.title}`, {
+            auth: {
+              authenticator: "incidentio",
+              principalType: "service",
+              principalId: incident.actor.id,
+              attributes: { reference: incident.reference, severity: incident.severity },
+            },
+          }),
       );
 
       return new Response("ok");
@@ -212,9 +218,9 @@ export default defineChannel({
 
 Semantics:
 
-- The target channel's authored `receive(input, { send })` hook owns the continuation-token format and initial state. Callers supply only `{ message, target, auth }`.
+- The target channel's authored `receive(input, { from })` hook owns the continuation-token format and initial state. Callers supply the target to `to(...)`, then the message and auth to `send(...)`.
 - `auth` flows through to `session.auth.initiator` so the target's event handlers and the agent's tools can read who started the session.
-- Calling `args.receive(...)` does not also start a session on the current channel. The inbound channel's response is whatever the route handler returns explicitly.
+- Calling `ctx.to(...).send(...)` does not also start a session on the current channel. The inbound channel's response is whatever the route handler returns explicitly.
 - The first argument is the target channel module's default export. Import it directly from `agent/channels/<name>.ts`. Identity is matched by reference.
 
 ## Channel metadata
@@ -239,11 +245,10 @@ export default defineChannel({
   },
 
   routes: [
-    POST("/start", async (req, { send }) => {
+    POST("/start", async (req, { from }) => {
       const body = await req.json();
-      await send(body.token, {
+      await from(body.token).send(body.message, {
         auth: null,
-        message: body.message,
         state: { topic: body.topic, contextMessages: body.context, internalCounter: 0 },
       });
 
@@ -311,18 +316,18 @@ At the next workflow boundary, the runtime claims the new park hook before relea
 
 ## File uploads
 
-`send()` accepts a `message` containing `string | UserContent`, while
+`from(address).send()` accepts a `message` containing `string | UserContent`, while
 `Session.send()` accepts `string | UserContent` directly. To include file
 attachments, pass a `UserContent` array mixing text and file parts:
 
 ```ts
-await send(continuationToken, {
-  auth,
-  message: [
+await from(continuationToken).send(
+  [
     { type: "text", text: body.message },
     { type: "file", data: imageBytes, mediaType: "image/png" },
   ],
-});
+  { auth },
+);
 ```
 
 For platforms like Slack where files sit behind authenticated URLs, put a `URL` object in `FilePart.data` and declare `fetchFile` on the channel config:
@@ -337,10 +342,9 @@ defineChannel({
   },
 
   routes: [
-    POST("/webhook", async (req, { send }) => {
-      await send(continuationToken, {
-        auth,
-        message: [
+    POST("/webhook", async (req, { from }) => {
+      await from(continuationToken).send(
+        [
           { type: "text", text: message.text },
           ...message.attachments.map((a) => ({
             type: "file" as const,
@@ -348,8 +352,11 @@ defineChannel({
             mediaType: a.mediaType,
           })),
         ],
-        state,
-      });
+        {
+          auth,
+          state,
+        },
+      );
     }),
   ],
 });

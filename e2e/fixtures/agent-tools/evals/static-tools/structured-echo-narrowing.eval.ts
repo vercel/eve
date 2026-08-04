@@ -8,10 +8,9 @@ export default defineEval({
   tags: ["real-model"],
   description: "Static tools smoke: structured tool-result narrowing via toolResultFrom.",
   async test(t) {
-    await t.send({
-      message:
-        'Call the `structured-echo` tool with label "smoke-test". Reply with the echoed value verbatim.',
-    });
+    await t.send(
+      'Call the `structured-echo` tool with label "smoke-test". Reply with the echoed value verbatim.',
+    );
 
     t.succeeded();
     t.calledTool("structured-echo", {

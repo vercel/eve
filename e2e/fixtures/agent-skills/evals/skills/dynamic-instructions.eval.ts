@@ -12,7 +12,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "Skills smoke: dynamic instructions injection at session start.",
   async test(t) {
-    await t.send({ message: "Acknowledge this message." });
+    await t.send("Acknowledge this message.");
 
     t.succeeded();
     t.messageIncludes(DYNAMIC_INSTRUCTIONS_TOKEN);

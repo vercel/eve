@@ -100,8 +100,7 @@ Set `redirect` to `"manual"` or `"error"` on credential-bearing clients so fetch
 Per-request headers can be attached to an individual turn:
 
 ```ts
-const response = await session.send({
-  message: "Run the check.",
+const response = await session.send("Run the check.", {
   headers: { "x-request-id": requestId },
 });
 
@@ -118,7 +117,7 @@ For an ID-addressed session, create it explicitly with the first message:
 const { session, response } = await client.sessions.create({ message: "Summarize account A." });
 await response.result();
 
-await (await session.send({ message: "Now list the risks." })).result();
+await (await session.send("Now list the risks.")).result();
 await session.compact();
 await session.clear();
 ```
@@ -132,7 +131,7 @@ const session = client.sessions.attach("wrun_A");
 The fixed client handle exposes the full lifecycle around that ID. The calls below show the available shapes independently:
 
 ```ts
-const response = await session.send({ message: "Continue the analysis." });
+const response = await session.send("Continue the analysis.");
 await response.result();
 
 await session.cancel({ turnId: "turn_123" });

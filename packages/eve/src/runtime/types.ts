@@ -232,7 +232,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   /**
    * Universal entry point for new sessions, called by cross-channel
    * initiators (the schedule dispatcher today). Typed precisely as
-   * {@link CompiledChannel.receive} — `(input, operations) => Session` —
+   * {@link CompiledChannel.receive} — `(input, ctx) => Session` —
    * so any caller passing the wrong context shape is a typecheck error,
    * not a runtime crash.
    *
@@ -244,7 +244,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly receive?: CompiledChannel["receive"];
   /**
    * Reference to the authored {@link CompiledChannel} value the channel
-   * module exported. Preserved so callers of `args.receive(channel, …)`
+   * module exported. Preserved so callers of `ctx.to(channel, target)`
    * can identify a target by the same imported reference. `undefined`
    * for framework-internal channels constructed without going through
    * `defineChannel`.

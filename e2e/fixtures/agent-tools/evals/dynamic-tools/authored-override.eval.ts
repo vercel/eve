@@ -10,9 +10,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "Dynamic tools smoke: a dynamic tool overrides a same-named authored tool.",
   async test(t) {
-    await t.send({
-      message: "Call the `override-target` tool and report the `source` value it returns.",
-    });
+    await t.send("Call the `override-target` tool and report the `source` value it returns.");
 
     t.succeeded();
     t.calledTool("override-target", {

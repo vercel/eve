@@ -47,6 +47,15 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"message":"How about tomorrow?"}'
 ```
 
+The first request requires `message`. A follow-up request accepts exactly one of
+`message` or `inputResponses`; use the latter to answer a pending HITL request:
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session/wrun_A \
+  -H "Content-Type: application/json" \
+  -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
+```
+
 Sending a message to an unknown or terminal session ID returns `409` with `{"code":"session_not_active"}`. It never creates or follows a replacement session.
 
 ### Stream events

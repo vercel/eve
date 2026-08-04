@@ -14,9 +14,8 @@ export default defineEval({
   description: "Session runtime smoke: client context.",
 
   async test(t) {
-    await t.send({
+    await t.send("Say hello.", {
       clientContext: [`include the exact token ${CLIENT_CONTEXT_TOKEN} verbatim`],
-      message: "Say hello.",
     });
 
     t.succeeded();

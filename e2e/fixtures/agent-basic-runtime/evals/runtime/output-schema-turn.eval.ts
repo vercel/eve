@@ -14,8 +14,7 @@ export default defineEval({
   description: "Session runtime smoke: output schema.",
 
   async test(t) {
-    const structured = await t.send({
-      message: "Summarize this turn as structured output.",
+    const structured = await t.send("Summarize this turn as structured output.", {
       outputSchema: {
         properties: { count: { type: "integer" }, title: { type: "string" } },
         required: ["title", "count"],
@@ -24,7 +23,7 @@ export default defineEval({
     });
     structured.expectOk();
 
-    const plain = await t.send({ message: "Reply normally without structured output." });
+    const plain = await t.send("Reply normally without structured output.");
     plain.expectOk();
     plain.notEvent("result.completed");
 

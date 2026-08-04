@@ -1,4 +1,5 @@
 import { createSubscriber } from "svelte/reactivity";
+import type { UserContent } from "ai";
 
 import {
   EveAgentStore,
@@ -14,7 +15,8 @@ import type { ClientSession } from "#client/session.js";
 import type {
   ClientAuth,
   HeadersValue,
-  SendTurnPayload,
+  RespondTurnOptions,
+  SendTurnOptions,
   ClientSessionState,
 } from "#client/types.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
@@ -51,8 +53,16 @@ export interface UseEveAgentReturn<TData> {
   readonly events: readonly MessageStreamEvent[];
   /** Clear all state and start a new session. */
   readonly reset: () => void;
-  /** Send a turn with full structured input (message, attachments, input responses). */
-  readonly send: <TOutput = unknown>(input: SendTurnPayload<TOutput>) => Promise<void>;
+  /** Send a message with optional turn settings. */
+  readonly send: <TOutput = unknown>(
+    message: string | UserContent,
+    options?: SendTurnOptions<TOutput>,
+  ) => Promise<void>;
+  /** Answer pending HITL input requests. */
+  readonly respond: <TOutput = unknown>(
+    inputResponses: Parameters<ClientSession["respond"]>[0],
+    options?: RespondTurnOptions<TOutput>,
+  ) => Promise<void>;
   /** Current session identity and stream cursor. */
   readonly session: ClientSessionState | undefined;
   /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
@@ -172,8 +182,18 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
     this.#store.reset();
   };
 
-  send = <TOutput = unknown>(input: SendTurnPayload<TOutput>): Promise<void> => {
-    return this.#store.send(input);
+  respond = <TOutput = unknown>(
+    inputResponses: Parameters<ClientSession["respond"]>[0],
+    options?: RespondTurnOptions<TOutput>,
+  ): Promise<void> => {
+    return this.#store.send({ ...options, inputResponses });
+  };
+
+  send = <TOutput = unknown>(
+    message: string | UserContent,
+    options?: SendTurnOptions<TOutput>,
+  ): Promise<void> => {
+    return this.#store.send({ ...options, message });
   };
 
   stop = (): void => {

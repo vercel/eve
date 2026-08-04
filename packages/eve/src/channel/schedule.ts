@@ -1,9 +1,6 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
-import {
-  createCrossChannelReceiveFn,
-  toCrossChannelTargets,
-} from "#channel/cross-channel-receive.js";
+import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import { createSession, type Session } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import { expectFunction } from "#internal/authored-module.js";
@@ -45,7 +42,7 @@ export interface ScheduleDispatchInput {
  *
  * For handler schedules: builds {@link ScheduleHandlerArgs} against the
  * request-scoped channel bundle and invokes the author's `run`. The
- * author owns control flow — `args.send(channel, …)` hands work off
+ * author owns control flow — `args.to(channel, target).send(…)` hands work off
  * to a channel; `args.waitUntil(promise)` extends the task lifetime
  * so the dispatcher awaits in-flight work before settling.
  *
@@ -77,17 +74,19 @@ export class ScheduleDispatcher {
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const sessions: Session[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
-    const receiveOnChannel = createCrossChannelReceiveFn(
-      this.runtime,
-      toCrossChannelTargets(this.channels),
-    );
+    const toChannel = createCrossChannelToFn(this.runtime, toCrossChannelTargets(this.channels));
 
     const args: ScheduleHandlerArgs = {
       appAuth: SCHEDULE_APP_AUTH,
-      send: async (channel, options) => {
-        const session = await receiveOnChannel(channel, options);
-        sessions.push(session);
-        return session;
+      to(channel, target) {
+        const destination = toChannel(channel, target);
+        return {
+          async send(message, options) {
+            const session = await destination.send(message, options);
+            sessions.push(session);
+            return session;
+          },
+        };
       },
       waitUntil(task) {
         waitUntilTasks.push(task);

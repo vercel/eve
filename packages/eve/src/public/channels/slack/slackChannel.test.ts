@@ -5,11 +5,14 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
-import type { ChannelOperations } from "#channel/channel-operations.js";
+import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
+import {
+  mockChannelContext,
+  type ObservedChannelDelivery,
+} from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
 import {
@@ -251,7 +254,14 @@ function buildEventBody(
 async function firePost(
   channel: unknown,
   request: Request,
-  overrides: Partial<ChannelOperations<SlackChannelState>> = {},
+  overrides: {
+    readonly cancel?: (address: string, options?: { readonly turnId?: string }) => Promise<unknown>;
+    readonly clear?: (address: string) => Promise<unknown>;
+    readonly compact?: (address: string) => Promise<unknown>;
+    readonly reset?: (address: string, options?: { readonly reason?: string }) => Promise<unknown>;
+    readonly resolveSession?: (address: string) => Promise<unknown>;
+    readonly send?: ReturnType<typeof vi.fn>;
+  } = {},
 ): Promise<{
   cancel: ReturnType<typeof vi.fn<(options?: Record<string, unknown>) => Promise<unknown>>>;
   reset: ReturnType<typeof vi.fn<(options?: Record<string, unknown>) => Promise<unknown>>>;
@@ -271,22 +281,39 @@ async function firePost(
     .fn<(options?: Record<string, unknown>) => Promise<unknown>>()
     .mockResolvedValue({ status: "reset", previousSessionId: "session_previous" });
   const send = vi.fn().mockResolvedValue({ id: "s1" });
-  const operations: ChannelOperations<SlackChannelState> = {
-    ...mockChannelOperations<SlackChannelState>(send),
-    cancel: (continuationToken, options) => cancel({ ...options, continuationToken }) as never,
-    compact: vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" }),
-    clear: vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" }),
-    reset: (continuationToken, options) => reset({ ...options, continuationToken }) as never,
-    resolveSession: vi.fn().mockResolvedValue({ id: "s1" }),
-    ...overrides,
+  const observeSend = overrides.send ?? send;
+  const baseFrom = mockChannelContext<SlackChannelState>(
+    observeSend as (address: string, input: ObservedChannelDelivery<SlackChannelState>) => unknown,
+  ).from;
+  const from: ChannelFrom<SlackChannelState> = (address) => {
+    const source = baseFrom(address);
+    return {
+      ...source,
+      cancel: (options) =>
+        (overrides.cancel?.(address, options) ??
+          cancel({ ...options, continuationToken: address })) as ReturnType<
+          ChannelSource<SlackChannelState>["cancel"]
+        >,
+      clear: () =>
+        (overrides.clear?.(address) ??
+          Promise.resolve({ sessionId: "s1", status: "accepted" })) as never,
+      compact: () =>
+        (overrides.compact?.(address) ??
+          Promise.resolve({ sessionId: "s1", status: "accepted" })) as never,
+      reset: (options) =>
+        (overrides.reset?.(address, options) ??
+          reset({ ...options, continuationToken: address })) as never,
+    };
   };
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
-    ...operations,
+    from,
+    resolveSession: (address) =>
+      (overrides.resolveSession?.(address) ?? Promise.resolve({ id: "s1" })) as never,
     waitUntil,
     attachSession: vi.fn() as any,
-    receive: vi.fn() as any,
+    to: vi.fn() as any,
     params: {},
     requestIp: null,
   });
@@ -1122,7 +1149,7 @@ describe("slackChannel() inbound mention pipeline", () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onAppMention(ctx) {
-        await ctx.send({ message: "Imperative follow-up" });
+        await ctx.send("Imperative follow-up");
         return null;
       },
     });
@@ -1762,9 +1789,8 @@ describe("slackChannel() generic Events API pipeline", () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
-        await ctx.send({
+        await ctx.send("follow up", {
           auth: null,
-          message: "follow up",
           target: { channelId: "C01", threadTs: "1700000000.000001" },
         });
       },
@@ -1805,7 +1831,7 @@ describe("slackChannel() generic Events API pipeline", () => {
     });
   });
 
-  it("can start multiple turns through the flat send function", async () => {
+  it("can start multiple turns through ctx.send", async () => {
     const auth = {
       attributes: { source: "reaction" },
       authenticator: "test",
@@ -1814,17 +1840,15 @@ describe("slackChannel() generic Events API pipeline", () => {
     };
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
-      async onEvent({ send }, event) {
+      async onEvent(ctx, event) {
         expect(event.type).toBe("reaction_added");
         await Promise.all([
-          send({
+          ctx.send("Investigate the first message.", {
             auth,
-            message: "Investigate the first message.",
             target: { channelId: "C01", threadTs: "1700000000.000001" },
           }),
-          send({
+          ctx.send("Investigate the second message.", {
             auth: null,
-            message: "Investigate the second message.",
             target: { channelId: "C02", threadTs: "1700000000.000002" },
           }),
         ]);
@@ -1859,9 +1883,8 @@ describe("slackChannel() generic Events API pipeline", () => {
       credentials: { botToken: "xoxb-test" },
       onEvent(ctx) {
         ctx.waitUntil(
-          ctx.send({
+          ctx.send("Run detached work.", {
             auth: null,
-            message: "Run detached work.",
             target: { channelId: "C01" },
           }),
         );
@@ -2295,12 +2318,6 @@ describe("slackChannel() HITL interaction pipeline", () => {
         principalType: "user",
       },
       inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }],
-      state: {
-        channelId: "C01",
-        teamId: "T01",
-        threadTs: "1700000000.000001",
-        triggeringUserId: "U_APPROVER",
-      },
     });
   });
 
@@ -2636,12 +2653,6 @@ describe("slackChannel() HITL interaction pipeline", () => {
         principalType: "user",
       },
       inputResponses: [{ requestId: "call_abc123", text: "approved with context" }],
-      state: {
-        channelId: "C01",
-        teamId: "T01",
-        threadTs: "1700000000.000001",
-        triggeringUserId: "U_SUBMITTER",
-      },
     });
   });
 });
@@ -2739,7 +2750,7 @@ describe("slackChannel().receive", () => {
         target: { channelId: "C123", threadTs: "1700000000.000001" },
         auth: { attributes: {}, authenticator: "app", principalId: "p", principalType: "user" },
       },
-      mockChannelOperations(send),
+      mockChannelContext(send),
     );
     expect(send).toHaveBeenCalledTimes(1);
     const [continuationToken, input] = send.mock.calls[0]!;
@@ -2769,8 +2780,8 @@ describe("slackChannel().receive", () => {
         auth: null,
       };
 
-      await receive(input, mockChannelOperations(send));
-      await receive(input, mockChannelOperations(send));
+      await receive(input, mockChannelContext(send));
+      await receive(input, mockChannelContext(send));
 
       expect(send.mock.calls.map(([continuationToken]) => continuationToken)).toEqual([
         "C123:00000000-0000-4000-8000-000000000001",
@@ -2785,7 +2796,7 @@ describe("slackChannel().receive", () => {
   it("requires channelId", async () => {
     const send = vi.fn();
     await expect(
-      buildReceive()({ message: "x", target: {}, auth: null }, mockChannelOperations(send)),
+      buildReceive()({ message: "x", target: {}, auth: null }, mockChannelContext(send)),
     ).rejects.toThrow(/requires target.channelId/);
     expect(send).not.toHaveBeenCalled();
   });
@@ -2811,7 +2822,7 @@ describe("slackChannel().receive", () => {
         },
         auth: null,
       },
-      mockChannelOperations(send),
+      mockChannelContext(send),
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -2844,7 +2855,7 @@ describe("slackChannel().receive", () => {
           },
           auth: null,
         },
-        mockChannelOperations(send),
+        mockChannelContext(send),
       ),
     ).rejects.toThrow(/mutually exclusive/);
     expect(send).not.toHaveBeenCalled();
@@ -2871,7 +2882,7 @@ describe("slackChannel().receive", () => {
           },
           auth: null,
         },
-        mockChannelOperations(send),
+        mockChannelContext(send),
       ),
     ).rejects.toThrow(/not_in_channel/);
     expect(send).not.toHaveBeenCalled();
@@ -2904,7 +2915,7 @@ describe("slackChannel().receive", () => {
         },
         auth: null,
       },
-      mockChannelOperations(send),
+      mockChannelContext(send),
     );
     const receiveToken = send.mock.calls[0]![0] as string;
     expect(receiveToken).toBe(`C123:${initialMessageTs}`);
@@ -2938,9 +2949,9 @@ describe("slackChannel().receive", () => {
     const waitUntil = vi.fn();
     await post.handler(req, {
       attachSession: vi.fn() as any,
-      ...mockChannelOperations(inboundSend),
+      ...mockChannelContext(inboundSend),
       waitUntil,
-      receive: vi.fn() as any,
+      to: vi.fn() as any,
       params: {},
       requestIp: null,
     });

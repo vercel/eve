@@ -14,9 +14,9 @@ export default defineEval({
   description: "Subagent tool approval proxied through the parent session.",
 
   async test(t) {
-    await t.send({
-      message: `Call the stock-price subagent exactly once with message 'Call the get_stock_price tool exactly once with ticker "GOOG". After it returns, do not call any tool again; return the result.'. After that single subagent call finishes, do not call any subagent or tool again; include the exact stock price in your final reply.`,
-    });
+    await t.send(
+      `Call the stock-price subagent exactly once with message 'Call the get_stock_price tool exactly once with ticker "GOOG". After it returns, do not call any tool again; return the result.'. After that single subagent call finishes, do not call any subagent or tool again; include the exact stock price in your final reply.`,
+    );
 
     // The child's approval request must surface on the parent stream.
     t.requireInputRequest({ toolName: "get_stock_price" });

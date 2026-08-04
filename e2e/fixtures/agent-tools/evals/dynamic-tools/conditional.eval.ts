@@ -7,18 +7,17 @@ export default defineEval({
   tags: ["real-model"],
   description: "Dynamic tools smoke: the resolver runs once per session, not per turn.",
   async test(t) {
-    const first = await t.send({
-      message: "Use the `check_stability` tool and tell me the branch and invocations values.",
-    });
+    const first = await t.send(
+      "Use the `check_stability` tool and tell me the branch and invocations values.",
+    );
     first.expectOk();
     first.calledTool("check_stability", {
       output: { branch: "first" },
     });
 
-    const second = await t.send({
-      message:
-        "Use the `check_stability` tool to check stability. Call it now and report the branch and invocations values.",
-    });
+    const second = await t.send(
+      "Use the `check_stability` tool to check stability. Call it now and report the branch and invocations values.",
+    );
     second.calledTool("check_stability", {
       output: { branch: "first" },
     });

@@ -60,17 +60,15 @@ await response.result();
 `send()` accepts AI SDK `UserContent`, so a message can mix text and file parts:
 
 ```ts
-const response = await session.send({
-  message: [
-    { type: "text", text: "Summarize this report." },
-    {
-      type: "file",
-      data: reportDataUrl,
-      mediaType: "application/pdf",
-      filename: "report.pdf",
-    },
-  ],
-});
+const response = await session.send([
+  { type: "text", text: "Summarize this report." },
+  {
+    type: "file",
+    data: reportDataUrl,
+    mediaType: "application/pdf",
+    filename: "report.pdf",
+  },
+]);
 
 await response.result();
 ```
@@ -83,17 +81,15 @@ import { readFile } from "node:fs/promises";
 const bytes = await readFile("report.pdf");
 const reportDataUrl = `data:application/pdf;base64,${bytes.toString("base64")}`;
 
-const response = await session.send({
-  message: [
-    { type: "text", text: "Summarize this report." },
-    {
-      type: "file",
-      data: reportDataUrl,
-      mediaType: "application/pdf",
-      filename: "report.pdf",
-    },
-  ],
-});
+const response = await session.send([
+  { type: "text", text: "Summarize this report." },
+  {
+    type: "file",
+    data: reportDataUrl,
+    mediaType: "application/pdf",
+    filename: "report.pdf",
+  },
+]);
 
 await response.result();
 ```
@@ -111,7 +107,7 @@ import type { InputRequest } from "eve/client";
 
 let pendingRequests: readonly InputRequest[] = [];
 
-const response = await session.send({ message: "Run the deployment checks." });
+const response = await session.send("Run the deployment checks.");
 
 for await (const event of response) {
   if (event.type === "input.requested") {
@@ -119,17 +115,17 @@ for await (const event of response) {
   }
 }
 
-const resumed = await session.send({
-  inputResponses: pendingRequests.map((request) => ({
+const resumed = await session.respond(
+  pendingRequests.map((request) => ({
     requestId: request.requestId,
     optionId: "approve",
   })),
-});
+);
 
 await resumed.result();
 ```
 
-You can send `message`, `inputResponses`, and `clientContext` together when the resumed turn needs both a human answer and follow-up text.
+`send(message, options)` and `respond(inputResponses, options)` are separate operations. Put `clientContext`, `outputSchema`, headers, or stream options in the second argument to either method.
 
 ## Single-use responses
 

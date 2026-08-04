@@ -61,7 +61,7 @@ describe("Client.sessions", () => {
 
     const session = client.sessions.attach("wrun_A");
     expect(requests).toHaveLength(0);
-    await session.send({ message: "follow-up" });
+    await session.send("follow-up");
     await session.cancel();
     await session.compact();
     await session.clear();

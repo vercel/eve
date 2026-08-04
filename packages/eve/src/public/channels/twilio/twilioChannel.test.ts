@@ -6,7 +6,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { TwilioTextMessage } from "#public/channels/twilio/inbound.js";
 import { twilioChannel, type TwilioContext } from "#public/channels/twilio/twilioChannel.js";
@@ -111,8 +111,8 @@ async function firePost(
 
   const response = await post.handler(signedFormRequest(path, params), {
     attachSession: vi.fn() as any,
-    ...mockChannelOperations(send),
-    receive: vi.fn() as any,
+    ...mockChannelContext(send),
+    to: vi.fn() as any,
     params: {},
     requestIp: null,
     waitUntil,
@@ -147,8 +147,8 @@ async function fireGet(
 
   const response = await get.handler(signedGetRequest(path, params), {
     attachSession: vi.fn() as any,
-    ...mockChannelOperations(send),
-    receive: vi.fn() as any,
+    ...mockChannelContext(send),
+    to: vi.fn() as any,
     params: {},
     requestIp: null,
     waitUntil,
@@ -361,8 +361,8 @@ describe("twilioChannel() inbound text pipeline", () => {
       }),
       {
         attachSession: vi.fn() as any,
-        ...mockChannelOperations(send),
-        receive: vi.fn() as any,
+        ...mockChannelContext(send),
+        to: vi.fn() as any,
         params: {},
         requestIp: null,
         waitUntil: vi.fn(),
@@ -650,7 +650,7 @@ describe("twilioChannel() default event handlers", () => {
         message: "start",
       },
       {
-        ...mockChannelOperations(send),
+        ...mockChannelContext(send),
       },
     );
 

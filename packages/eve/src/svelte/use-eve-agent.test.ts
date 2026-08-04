@@ -75,7 +75,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
 
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failed"));
 
-    await agent.send({ message: "ignored" });
+    await agent.send("ignored");
 
     expect(agent.data).toBe(dataBeforeSend);
     expect(agent.status).toBe("ready");
@@ -98,7 +98,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
       },
     });
 
-    await agent.send({ message: "Hello" });
+    await agent.send("Hello");
 
     expect(seenEvents).toEqual(stampTestEvents(events));
   });

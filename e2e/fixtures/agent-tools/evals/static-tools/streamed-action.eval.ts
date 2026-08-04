@@ -118,11 +118,10 @@ export default defineEval({
   description:
     "Static tools smoke: a local generator streams preliminary output before its result.",
   async test(t) {
-    const turn = await t.send({
-      message:
-        `Call the \`${TOOL_NAME}\` tool exactly once with label "${LABEL}". ` +
+    const turn = await t.send(
+      `Call the \`${TOOL_NAME}\` tool exactly once with label "${LABEL}". ` +
         "After it returns, reply with the label verbatim.",
-    });
+    );
     turn.expectOk();
 
     t.succeeded();

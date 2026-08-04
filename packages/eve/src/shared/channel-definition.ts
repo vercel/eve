@@ -1,5 +1,6 @@
 import { type ChannelCors } from "#channel/cors.js";
-import type { ChannelOperations } from "#channel/channel-operations.js";
+import type { UserContent } from "ai";
+import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -26,7 +27,7 @@ export type FetchFileFunction = (url: string) => Promise<Buffer | FetchFileResul
  * schedule proactively routes a message to it.
  */
 export interface GenericReceiveInput<TReceiveTarget = Record<string, unknown>> {
-  readonly message: string;
+  readonly message: string | UserContent;
   readonly target: Readonly<TReceiveTarget>;
   readonly auth: SessionAuthContext | null;
 }
@@ -73,7 +74,7 @@ export interface GenericChannelDefinition<
   readonly routes: readonly RouteDefinition<TState>[];
   receive?(
     input: GenericReceiveInput<TReceiveTarget>,
-    args: ChannelOperations<TState>,
+    ctx: ChannelReceiveContext<TState>,
   ): Promise<Session>;
 
   readonly events?: TEvents;

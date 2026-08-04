@@ -11,13 +11,13 @@ export default defineEval({
   tags: ["real-model"],
   description: "Sandbox: built-in write_file/grep tools operate on the sandbox filesystem.",
   async test(t) {
-    await t.send({
-      message: [
+    await t.send(
+      [
         `Use the write_file tool to create the file ${FILE_TOOLS_PATH} with exactly this content: ${FILE_TOOLS_TOKEN}`,
         `Then use the grep tool to search for ${FILE_TOOLS_TOKEN} under /workspace.`,
         "Reply with the matching line verbatim.",
       ].join("\n"),
-    });
+    );
 
     t.succeeded();
     t.calledTool("write_file");

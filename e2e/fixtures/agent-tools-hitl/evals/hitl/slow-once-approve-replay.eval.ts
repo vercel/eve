@@ -18,19 +18,21 @@ export default defineEval({
   tags: ["real-model"],
   description: "HITL regression (#460): approved slow tool result survives replay.",
   async test(t) {
-    const parked = await t.send({
-      message: `Call the ${TOOL_NAME} tool with note "alpha". After its result arrives, call it again with note "beta". Use strictly one call at a time, never in parallel. When both results are in, reply with exactly SLOW-DONE.`,
-    });
+    const parked = await t.send(
+      `Call the ${TOOL_NAME} tool with note "alpha". After its result arrives, call it again with note "beta". Use strictly one call at a time, never in parallel. When both results are in, reply with exactly SLOW-DONE.`,
+    );
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
     const request = t.requireInputRequest({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
 
-    const approved = await t.respond({
-      requestId: request.requestId,
-      optionId: "approve",
-    });
+    const approved = await t.respond([
+      {
+        requestId: request.requestId,
+        optionId: "approve",
+      },
+    ]);
     approved.expectOk();
 
     t.calledTool(TOOL_NAME, {
@@ -39,7 +41,7 @@ export default defineEval({
       count: 2,
     });
 
-    const followup = await t.send({ message: "Reply with exactly SLOW-REPLAY-OK." });
+    const followup = await t.send("Reply with exactly SLOW-REPLAY-OK.");
     followup.expectOk();
     followup.messageIncludes(/SLOW-REPLAY-OK/i);
 

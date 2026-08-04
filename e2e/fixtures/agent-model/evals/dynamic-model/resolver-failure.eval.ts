@@ -4,9 +4,7 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   description: "Dynamic model smoke: a throwing resolver falls back instead of failing the turn.",
   async test(t) {
-    await t.send({
-      message: '[model: boom] Reply with exactly the text "still here" and nothing else.',
-    });
+    await t.send('[model: boom] Reply with exactly the text "still here" and nothing else.');
 
     t.succeeded();
     t.messageIncludes("still here");

@@ -14,9 +14,7 @@ export default defineEval({
   description: "Session runtime smoke: stream event ids are stamped and stable across a rewind.",
 
   async test(t) {
-    const turn = await t.send({
-      message: 'Reply with exactly the text "id smoke" and nothing else.',
-    });
+    const turn = await t.send('Reply with exactly the text "id smoke" and nothing else.');
     t.succeeded();
 
     const ids = turn.events.map((event) => event.meta.id);

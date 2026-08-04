@@ -12,16 +12,15 @@ export default defineEval({
   tags: ["real-model"],
   description: "Sandbox: workspace filesystem persists across turns in the same session.",
   async test(t) {
-    const first = await t.send({
-      message:
-        `Run the bash command \`printf %s ${PERSIST_TOKEN} > ${PERSIST_PATH}\`. ` +
+    const first = await t.send(
+      `Run the bash command \`printf %s ${PERSIST_TOKEN} > ${PERSIST_PATH}\`. ` +
         "Reply with the single word: done.",
-    });
+    );
     first.expectOk();
 
-    const second = await t.send({
-      message: `Run the bash command \`cat ${PERSIST_PATH}\` and reply with the file contents verbatim.`,
-    });
+    const second = await t.send(
+      `Run the bash command \`cat ${PERSIST_PATH}\` and reply with the file contents verbatim.`,
+    );
 
     await t.require(second.sessionId, equals(first.sessionId));
 

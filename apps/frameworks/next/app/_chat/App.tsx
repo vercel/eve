@@ -110,7 +110,7 @@ export function App() {
     if (agent.session?.sessionId === undefined && agent.data.turns.length > 0) {
       agent.reset();
     }
-    await agent.send({ message });
+    await agent.send(message);
   };
 
   const isSendable = !isComposeInProgress && hasComposerText;

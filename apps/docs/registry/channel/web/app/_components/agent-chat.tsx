@@ -121,7 +121,7 @@ export function AgentChat() {
     prepareTurn();
 
     if (message.files.length === 0) {
-      await agent.send({ message: text });
+      await agent.send(text);
       return;
     }
 
@@ -138,7 +138,7 @@ export function AgentChat() {
       });
     }
 
-    await agent.send({ message: parts });
+    await agent.send(parts);
   };
 
   const composer = (
@@ -184,7 +184,7 @@ export function AgentChat() {
                 message={message}
                 onInputResponses={(inputResponses) => {
                   prepareTurn();
-                  return agent.send({ inputResponses });
+                  return agent.respond(inputResponses);
                 }}
               />
             ))}

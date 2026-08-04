@@ -45,7 +45,7 @@ const session = client.sessions.attach(saved.sessionId, {
   streamIndex: saved.streamIndex,
 });
 
-const response = await session.send({ message: "Now shorten it." });
+const response = await session.send("Now shorten it.");
 console.log((await response.result()).message);
 ```
 

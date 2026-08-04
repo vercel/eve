@@ -1,54 +1,81 @@
-import type { ChannelOperations, ChannelSendInput } from "#channel/channel-operations.js";
+import type {
+  ChannelFrom,
+  ChannelResolveSession,
+  ChannelRespondOptions,
+  ChannelSendOptions,
+  ChannelSource,
+} from "#channel/channel-operations.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { InputResponse } from "#runtime/input/types.js";
+import type { UserContent } from "ai";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 
-type SlackOperations = ChannelOperations<SlackChannelState>;
+type SlackSource = ChannelSource<SlackChannelState>;
 
-/** Input for a send already bound to one Slack thread. */
-export type SlackSendInput = Omit<ChannelSendInput<SlackChannelState>, "auth" | "state"> & {
+/** Options for a message send already bound to one Slack thread. */
+export type SlackSendOptions = Omit<ChannelSendOptions<SlackChannelState>, "auth" | "state"> & {
+  readonly auth?: SessionAuthContext | null;
+};
+
+/** Options for an input response already bound to one Slack thread. */
+export type SlackRespondOptions = Omit<ChannelRespondOptions, "auth"> & {
   readonly auth?: SessionAuthContext | null;
 };
 
 /** Current-owner operations already bound to one Slack thread. */
 export interface SlackSessionOperations {
-  send(input: SlackSendInput): ReturnType<SlackOperations["send"]>;
-  cancel(options?: { readonly turnId?: string }): ReturnType<SlackOperations["cancel"]>;
-  compact(): ReturnType<SlackOperations["compact"]>;
-  clear(): ReturnType<SlackOperations["clear"]>;
-  reset(options?: { readonly reason?: string }): ReturnType<SlackOperations["reset"]>;
-  resolveSession(): ReturnType<SlackOperations["resolveSession"]>;
+  send(message: string | UserContent, options?: SlackSendOptions): ReturnType<SlackSource["send"]>;
+  respond(
+    inputResponses: readonly InputResponse[],
+    options?: SlackRespondOptions,
+  ): ReturnType<SlackSource["respond"]>;
+  cancel(options?: { readonly turnId?: string }): ReturnType<SlackSource["cancel"]>;
+  compact(): ReturnType<SlackSource["compact"]>;
+  clear(): ReturnType<SlackSource["clear"]>;
+  reset(options?: { readonly reason?: string }): ReturnType<SlackSource["reset"]>;
+  resolveSession(): ReturnType<ChannelResolveSession>;
 }
 
-/** Binds Slack state and default auth needed only when a send creates a session. */
+/** Binds Slack state and default auth needed only when a message creates a session. */
 export function bindSlackSessionOperations(input: {
   readonly address: string;
   readonly defaultAuth: SessionAuthContext | null;
-  readonly operations: SlackOperations;
+  readonly from: ChannelFrom<SlackChannelState>;
+  readonly resolveSession: ChannelResolveSession;
   readonly state: SlackChannelState;
 }): SlackSessionOperations {
+  const source = input.from(input.address);
+  const auth = (value: SessionAuthContext | null | undefined) =>
+    value === undefined ? input.defaultAuth : value;
+
   return {
-    async send(sendInput) {
-      const auth = sendInput.auth === undefined ? input.defaultAuth : sendInput.auth;
-      return await input.operations.send(input.address, {
-        ...sendInput,
-        auth,
+    async send(message, options = {}) {
+      return await source.send(message, {
+        ...options,
+        auth: auth(options.auth),
         state: input.state,
       });
     },
+    async respond(inputResponses, options = {}) {
+      return await source.respond(inputResponses, {
+        ...options,
+        auth: auth(options.auth),
+      });
+    },
     async cancel(options) {
-      return await input.operations.cancel(input.address, options);
+      return await source.cancel(options);
     },
     async compact() {
-      return await input.operations.compact(input.address);
+      return await source.compact();
     },
     async clear() {
-      return await input.operations.clear(input.address);
+      return await source.clear();
     },
     async reset(options) {
-      return await input.operations.reset(input.address, options);
+      return await source.reset(options);
     },
     async resolveSession() {
-      return await input.operations.resolveSession(input.address);
+      return await input.resolveSession(input.address);
     },
   };
 }

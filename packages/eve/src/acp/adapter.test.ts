@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { EveAcpAdapter } from "#acp/adapter.js";
 import { ClientError } from "#client/client-error.js";
-import type { SendTurnInput } from "#client/types.js";
+import type { SendTurnInput, SendTurnPayload } from "#client/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 type TestStreamEvent<T = HandleMessageStreamEvent> = T extends unknown ? Omit<T, "meta"> : never;
@@ -11,14 +11,24 @@ type TestStreamEvent<T = HandleMessageStreamEvent> = T extends unknown ? Omit<T,
 class FakeClientSession {
   readonly cancel = vi.fn(async () => ({ status: "accepted" }));
   readonly reset = vi.fn(async () => ({ status: "reset" }));
-  readonly sends: SendTurnInput[] = [];
+  readonly sends: SendTurnPayload[] = [];
   readonly #turns: Array<readonly TestStreamEvent[]>;
 
   constructor(turns: Array<readonly TestStreamEvent[]>) {
     this.#turns = turns;
   }
 
-  async send(input: SendTurnInput): Promise<AsyncIterable<HandleMessageStreamEvent>> {
+  async send(message: SendTurnInput["message"]): Promise<AsyncIterable<HandleMessageStreamEvent>> {
+    return await this.#next({ message });
+  }
+
+  async respond(
+    inputResponses: NonNullable<SendTurnPayload["inputResponses"]>,
+  ): Promise<AsyncIterable<HandleMessageStreamEvent>> {
+    return await this.#next({ inputResponses });
+  }
+
+  async #next(input: SendTurnPayload): Promise<AsyncIterable<HandleMessageStreamEvent>> {
     this.sends.push(input);
     const events = this.#turns.shift() ?? [];
     return (async function* () {
@@ -36,7 +46,7 @@ function fakeClient(session: FakeClientSession) {
   return {
     sessions: {
       async create(input: SendTurnInput) {
-        return { response: await session.send(input), session };
+        return { response: await session.send(input.message), session };
       },
     },
   };

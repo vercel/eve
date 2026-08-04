@@ -31,12 +31,13 @@ describe("runAcpServerOnStreams", () => {
     const session = {
       cancel: vi.fn(async () => ({ status: "accepted" })),
       reset,
-      send: vi.fn(async (_input: SendTurnInput) => emptyEvents()),
+      respond: vi.fn(async () => emptyEvents()),
+      send: vi.fn(async (_message: SendTurnInput["message"]) => emptyEvents()),
     };
     const client = {
       sessions: {
         async create(input: SendTurnInput) {
-          return { response: await session.send(input), session };
+          return { response: await session.send(input.message), session };
         },
       },
     };

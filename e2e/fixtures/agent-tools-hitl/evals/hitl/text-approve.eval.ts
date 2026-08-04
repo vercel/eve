@@ -10,13 +10,11 @@ export default defineEval({
   tags: ["real-model"],
   description: "HITL smoke: text approve resolves a pending tool approval.",
   async test(t) {
-    const parked = await t.send({
-      message: 'Call the guarded-echo tool with note "text-approve".',
-    });
+    const parked = await t.send('Call the guarded-echo tool with note "text-approve".');
     parked.calledTool("guarded-echo", { status: "pending", count: 1 });
     t.requireInputRequest({ display: "confirmation", toolName: "guarded-echo" });
 
-    const approved = await t.send({ message: "approve" });
+    const approved = await t.send("approve");
     approved.expectOk();
     approved.event("action.result", {
       data: {

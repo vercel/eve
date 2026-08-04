@@ -90,11 +90,10 @@ export default defineEval({
     const originalInstructions = await readFile(INSTRUCTIONS_PATH, "utf8");
     try {
       // t0: write a marker file into this session's sandbox workspace.
-      const write = await t.send({
-        message:
-          `Run the bash command \`printf %s ${FILE_TOKEN} > ${FILE_PATH}\`. ` +
+      const write = await t.send(
+        `Run the bash command \`printf %s ${FILE_TOKEN} > ${FILE_PATH}\`. ` +
           "Reply with the single word: done.",
-      });
+      );
       write.expectOk();
       write.calledTool("bash");
 
@@ -107,9 +106,9 @@ export default defineEval({
       await waitForAliasToServe(t, INSTRUCTIONS_MARKER);
 
       // t2: the same session reattaches to the same sandbox.
-      const persist = await t.send({
-        message: `Run the bash command \`cat ${FILE_PATH}\` and reply with the file contents verbatim.`,
-      });
+      const persist = await t.send(
+        `Run the bash command \`cat ${FILE_PATH}\` and reply with the file contents verbatim.`,
+      );
       persist.expectOk();
       persist.calledTool("bash", { output: new RegExp(FILE_TOKEN) });
       persist.messageIncludes(FILE_TOKEN);
@@ -125,11 +124,10 @@ export default defineEval({
       // file is still present. When turn dispatch gains preview
       // latest-routing (issue #582), this gate flips to /absent/ (and the
       // skill becomes loadable in session A too).
-      const probe = await t.send({
-        message:
-          `Run the bash command \`test -f ${FILE_PATH} && echo present || echo absent\` ` +
+      const probe = await t.send(
+        `Run the bash command \`test -f ${FILE_PATH} && echo present || echo absent\` ` +
           "and reply with the command output verbatim.",
-      });
+      );
       probe.expectOk();
       probe.calledTool("bash", { output: /present/ });
       probe.messageIncludes("present");
@@ -137,9 +135,9 @@ export default defineEval({
       // t4: a fresh session adopts the new deployment — the added skill is
       // advertised and usable.
       const adopted = t.newSession();
-      const skill = await adopted.send({
-        message: `Load the \`${SKILL_NAME}\` skill and follow its instructions exactly.`,
-      });
+      const skill = await adopted.send(
+        `Load the \`${SKILL_NAME}\` skill and follow its instructions exactly.`,
+      );
       skill.expectOk();
       skill.loadedSkill(SKILL_NAME);
       skill.messageIncludes(SKILL_TOKEN);

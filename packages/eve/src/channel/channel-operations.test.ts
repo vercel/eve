@@ -20,15 +20,14 @@ function createRuntime(): Runtime {
 describe("createChannelOperations", () => {
   it("sends through a channel-local address without serializing operation options", async () => {
     const runtime = createRuntime();
-    const operations = createChannelOperations({
+    const { from } = createChannelOperations({
       adapter: { kind: "slack" },
       channelName: "slack",
       runtime,
     });
 
-    const session = await operations.send("C1:T1", {
+    const session = await from("C1:T1").send("hello", {
       auth: null,
-      message: "hello",
       title: "Support thread",
     });
     await session.clear();
@@ -50,16 +49,17 @@ describe("createChannelOperations", () => {
 
   it("targets every control operation by raw channel-local address", async () => {
     const runtime = createRuntime();
-    const operations = createChannelOperations({
+    const { from } = createChannelOperations({
       adapter: { kind: "slack" },
       channelName: "slack",
       runtime,
     });
 
-    await operations.cancel("C1:T1", { turnId: "turn_1" });
-    await operations.compact("C1:T1");
-    await operations.clear("C1:T1");
-    await operations.reset("C1:T1", { reason: "fresh start" });
+    const source = from("C1:T1");
+    await source.cancel({ turnId: "turn_1" });
+    await source.compact();
+    await source.clear();
+    await source.reset({ reason: "fresh start" });
 
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(1, {
       command: { kind: "cancel", turnId: "turn_1" },
@@ -82,13 +82,13 @@ describe("createChannelOperations", () => {
   it("resolves an address owner only when explicitly requested", async () => {
     const runtime = createRuntime();
     vi.mocked(runtime.resolveContinuation).mockResolvedValue({ sessionId: "sess_2" });
-    const operations = createChannelOperations({
+    const { resolveSession } = createChannelOperations({
       adapter: { kind: "slack" },
       channelName: "slack",
       runtime,
     });
 
-    const session = await operations.resolveSession("C1:T1");
+    const session = await resolveSession("C1:T1");
     await session?.clear();
 
     expect(runtime.resolveContinuation).toHaveBeenCalledWith("slack:C1:T1");

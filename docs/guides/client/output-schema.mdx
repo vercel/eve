@@ -86,11 +86,10 @@ If more than one `result.completed` appears in the consumed event list, `result(
 
 ## Send payloads with output schema
 
-Pass `outputSchema` in the same input object as the message, headers, signal, context, attachments, or HITL responses:
+Pass `outputSchema` in the second argument to `send()` or `respond()` alongside headers, signal, or client context:
 
 ```ts
-const response = await session.send<Summary>({
-  message: "Summarize this PDF.",
+const response = await session.send<Summary>("Summarize this PDF.", {
   clientContext: { reportId: "rpt_123" },
   outputSchema,
 });
@@ -101,9 +100,7 @@ const result = await response.result();
 It also works on follow-up turns and HITL response turns:
 
 ```ts
-const response = await session.send({
-  inputResponses: [{ requestId, optionId: "approve" }],
-  message: "Return the approved action as structured output.",
+const response = await session.respond([{ requestId, optionId: "approve" }], {
   outputSchema,
 });
 
@@ -115,10 +112,10 @@ const result = await response.result();
 Client `outputSchema` is scoped to the turn that sends it. It doesn't become a permanent setting for the conversation:
 
 ```ts
-const response = await session.send({ message: "Return a structured summary.", outputSchema });
+const response = await session.send("Return a structured summary.", { outputSchema });
 await response.result();
 
-const followUpResponse = await session.send({ message: "Now answer normally." });
+const followUpResponse = await session.send("Now answer normally.");
 const followUp = await followUpResponse.result();
 
 console.log(followUp.data); // undefined unless this turn also requested a schema

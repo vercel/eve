@@ -1,5 +1,6 @@
 import type { ContextAccessor } from "#context/key.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import type { UserContent } from "ai";
 import type {
   CancelTurnResult,
   ClearSessionResult,
@@ -9,16 +10,25 @@ import type {
   SessionAuthContext,
   SessionSendCommandResult,
 } from "#channel/types.js";
-import type { SendPayload } from "#channel/routes.js";
-import { normalizeSendInput, serializeUrlFilePartsInMessage } from "#channel/send-input.js";
+import { serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
+import type { InputResponse } from "#runtime/input/types.js";
+import type { JsonObject } from "#shared/json.js";
 
 /** Immutable-ID handle for one exact durable session. */
 export interface Session {
   readonly id: string;
-  /** Sends input to this exact session ID without creating or following a replacement. */
-  send(input: SessionSendInput): Promise<SessionSendCommandResult>;
+  /** Sends a message to this exact session ID without creating or following a replacement. */
+  send(
+    message: string | UserContent,
+    options: SessionSendOptions,
+  ): Promise<SessionSendCommandResult>;
+  /** Answers pending input requests on this exact session ID. */
+  respond(
+    inputResponses: readonly InputResponse[],
+    options: SessionRespondOptions,
+  ): Promise<SessionSendCommandResult>;
   /** Requests cancellation of this exact session's active turn. */
   cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
@@ -31,10 +41,17 @@ export interface Session {
   getStreamTailIndex(): Promise<number>;
 }
 
-/** Message and authorization for delivery through a fixed session handle. */
-export interface SessionSendInput extends SendPayload {
+interface SessionDeliveryOptions {
   readonly auth: SessionAuthContext | null;
+  readonly context?: readonly string[];
+  readonly outputSchema?: JsonObject;
 }
+
+/** Options for sending a message through a fixed session handle. */
+export type SessionSendOptions = SessionDeliveryOptions;
+
+/** Options for answering pending input requests through a fixed session handle. */
+export type SessionRespondOptions = SessionDeliveryOptions;
 
 /**
  * Live handle to the current session, exposed on `ctx.session` to
@@ -59,17 +76,40 @@ export function createSession(
 ): Session {
   return {
     id,
-    async send(input) {
-      const { auth, ...sendInput } = input;
-      const payload = normalizeSendInput(sendInput);
+    async send(message, options) {
+      const payload: {
+        context?: readonly string[];
+        message: string | UserContent | undefined;
+        outputSchema?: JsonObject;
+      } = { message: serializeUrlFilePartsInMessage(message) };
+      if (options.context !== undefined) payload.context = options.context;
+      if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       return await runtime.dispatchSession({
         command: {
-          auth,
+          auth: options.auth,
           kind: "send",
-          payload: {
-            ...payload,
-            message: serializeUrlFilePartsInMessage(payload.message),
-          },
+          payload,
+          requestId: metadata.requestId,
+        },
+        sessionId: id,
+      });
+    },
+    async respond(inputResponses, options) {
+      if (inputResponses.length === 0) {
+        throw new Error("respond() requires at least one input response.");
+      }
+      const payload: {
+        context?: readonly string[];
+        inputResponses: readonly InputResponse[];
+        outputSchema?: JsonObject;
+      } = { inputResponses };
+      if (options.context !== undefined) payload.context = options.context;
+      if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
+      return await runtime.dispatchSession({
+        command: {
+          auth: options.auth,
+          kind: "send",
+          payload,
           requestId: metadata.requestId,
         },
         sessionId: id,

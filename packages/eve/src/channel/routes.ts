@@ -1,7 +1,7 @@
 import type { UserContent } from "ai";
 
-import type { CrossChannelReceiveFn } from "#channel/cross-channel-receive.js";
-import type { ChannelOperations } from "#channel/channel-operations.js";
+import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
+import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
@@ -10,20 +10,22 @@ import type { ChannelMethod } from "#public/definitions/channel.js";
 type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Record<string, string>;
 
 /**
- * Second argument passed to every route handler. Channel operations target a
- * continuation address, `attachSession` binds an immutable-ID handle, and
- * `receive` hands inbound work to a different channel.
+ * Second argument passed to every route handler. `from` binds local operations,
+ * `resolveSession` snapshots the current owner, `to` selects a proactive target
+ * on another channel, and `attachSession` binds an immutable-ID handle.
  */
-export interface RouteHandlerArgs<TState = undefined> extends ChannelOperations<TState> {
+export interface RouteHandlerArgs<TState = undefined> {
+  /** Binds a raw channel-local address to its current-owner operations. */
+  readonly from: ChannelFrom<TState>;
+  /** Snapshots the session currently owning a raw channel-local address. */
+  readonly resolveSession: ChannelResolveSession;
   /** Attaches a fixed operation handle to one exact durable session ID without performing I/O. */
   attachSession: AttachSessionFn;
   /**
-   * Starts a session on a different channel to hand off inbound work (e.g. an
-   * HTTP webhook routing the conversation onto Slack). The target's authored
-   * `receive` hook owns continuation-token format and initial state; the caller
-   * supplies the payload, channel-specific args, and auth.
+   * Selects a proactive target on another channel. Call `.send(message, options)`
+   * on the returned handle; the target channel owns its address and initial state.
    */
-  receive: CrossChannelReceiveFn;
+  readonly to: CrossChannelToFn;
   /** Path parameters matched for the current route. */
   params: Readonly<Record<string, string>>;
   /** Keeps background work alive after the route returns its response. */

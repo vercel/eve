@@ -6,7 +6,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { linearChannel, type LinearChannelState } from "#public/channels/linear/linearChannel.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
@@ -128,9 +128,9 @@ async function firePost(
 
   const response = await post.handler(request, {
     attachSession: vi.fn() as any,
-    ...mockChannelOperations(send),
+    ...mockChannelContext(send),
     params: {},
-    receive: vi.fn() as any,
+    to: vi.fn() as any,
     requestIp: null,
     waitUntil,
   });
@@ -507,7 +507,7 @@ describe("linearChannel default event handlers", () => {
         target: { agentSessionId: "agent_session_1" },
       },
       {
-        ...mockChannelOperations(send),
+        ...mockChannelContext(send),
       },
     );
 
@@ -557,7 +557,7 @@ describe("linearChannel default event handlers", () => {
         target: { issueId: "issue_1" },
       },
       {
-        ...mockChannelOperations(send),
+        ...mockChannelContext(send),
       },
     );
 
