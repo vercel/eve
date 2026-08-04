@@ -8,6 +8,8 @@ const GENERIC_MARKDOWN_INSTRUCTION =
   "- Page-level Markdown: append .md or .mdx to a documentation URL";
 const INTERNAL_GETTING_STARTED_INSTRUCTION =
   "get it as Markdown from /llms.mdx/getting-started (or via /llms.txt)";
+const fullDocumentationInstruction = (origin: string): string =>
+  `- [Full documentation context](${origin}/llms.txt): All configured documentation as Markdown`;
 
 const escapeMarkdown = (value: string): string => value.replace(/([\\[\]])/g, "\\$1");
 
@@ -15,9 +17,12 @@ export const transformAgentsMarkdown = (
   markdown: string,
   { origin, templates }: { origin: string; templates: TemplateDiscoveryEntry[] },
 ): string => {
+  const upstreamFullDocumentationInstruction = fullDocumentationInstruction(origin);
+
   if (
     !markdown.includes(GENERIC_MARKDOWN_INSTRUCTION) ||
-    !markdown.includes(INTERNAL_GETTING_STARTED_INSTRUCTION)
+    !markdown.includes(INTERNAL_GETTING_STARTED_INSTRUCTION) ||
+    !markdown.includes(upstreamFullDocumentationInstruction)
   ) {
     throw new Error("Geistdocs agents.md Markdown guidance changed; update the eve transform.");
   }
@@ -34,6 +39,13 @@ export const transformAgentsMarkdown = (
     .replace(
       INTERNAL_GETTING_STARTED_INSTRUCTION,
       "get it as Markdown from /docs/getting-started.md (or via /llms.txt)",
+    )
+    .replace(
+      upstreamFullDocumentationInstruction,
+      [
+        `- [Documentation index](${origin}/llms.txt): Curated task-oriented map of the most useful documentation`,
+        `- [Full documentation context](${origin}/llms-full.txt): All configured documentation as Markdown`,
+      ].join("\n"),
     );
 
   const templateLines = templates.map(

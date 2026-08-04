@@ -14,6 +14,7 @@ export const config = {
   // These routes need the locale rewrite even though the general matcher ignores static extensions.
   matcher: [
     "/llms.txt",
+    "/llms-full.txt",
     "/rss.xml",
     "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|eve\\.tgz$|.*\\.(?!mdx?$)[^/]+$).*)",
   ],

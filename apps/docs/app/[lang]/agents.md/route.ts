@@ -4,8 +4,8 @@ import { config } from "@/lib/geistdocs/config";
 import { templateEntries } from "@/lib/templates/data";
 
 // Static, CDN-cacheable. /agents.md surfaces the agent instructions from the
-// Geistdocs config and points agents at /llms.txt and individual /llms.mdx
-// pages. Keeping this route prerendered avoids a per-request function on an
+// Geistdocs config and points agents at the machine-readable documentation
+// surfaces. Keeping this route prerendered avoids a per-request function on an
 // endpoint crawlers and agents poll repeatedly.
 export const revalidate = false;
 

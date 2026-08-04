@@ -7,6 +7,8 @@ const input = `# eve
 
 - Page-level Markdown: append .md or .mdx to a documentation URL
 
+- [Full documentation context](https://eve.dev/llms.txt): All configured documentation as Markdown
+
 - To create an agent, get it as Markdown from /llms.mdx/getting-started (or via /llms.txt).
 `;
 
@@ -22,6 +24,15 @@ describe("transformAgentsMarkdown", () => {
     expect(output).toContain("/docs/getting-started.md (or via /llms.txt)");
     expect(output).not.toContain("/llms.mdx/getting-started");
     expect(output).not.toContain("append .md or .mdx to a documentation URL");
+    expect(output).toContain(
+      "[Documentation index](https://eve.dev/llms.txt): Curated task-oriented map",
+    );
+    expect(output).toContain(
+      "[Full documentation context](https://eve.dev/llms-full.txt): All configured documentation",
+    );
+    expect(output).not.toContain(
+      "[Full documentation context](https://eve.dev/llms.txt): All configured documentation",
+    );
   });
 
   it("adds concise canonical template discovery entries", () => {

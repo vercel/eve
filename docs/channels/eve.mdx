@@ -5,6 +5,8 @@ description: "The default HTTP API for an agent, covering session routes, auth, 
 
 The eve channel is the framework's default HTTP API. It's what the terminal UI, [`useEveAgent`](../guides/frontend/overview), `curl`, and any SDK client talk to when they start sessions, send messages, and stream events. `eveChannel()` mounts the canonical session routes under `/eve/v1/session*`, and they are enabled by default even when `agent/channels/eve.ts` does not exist.
 
+Every running eve app exposes its own API. `eve.dev` publishes framework documentation; it is not a shared API, authorization server, MCP server, or A2A server. Each deployment supplies its own host and authentication policy.
+
 Reach for it when something needs HTTP access to your agent, including local tooling, a browser frontend, the terminal UI, or another API client. Most apps never write this file. Add `agent/channels/eve.ts` only to override the defaults, usually the route auth policy.
 
 ```ts title="agent/channels/eve.ts"
