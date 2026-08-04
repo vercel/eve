@@ -1105,7 +1105,7 @@ describe("compileAgent", () => {
         logicalPath: "subagents/weather.ts",
         name: "weather",
         nodeId: "subagents/weather.ts",
-        path: "/eve/v1/session",
+        path: "/eve/v1/sessions",
         sourceId: "subagents/weather.ts",
       },
     ]);
@@ -1118,7 +1118,7 @@ describe("compileAgent", () => {
         logicalPath: "subagents/qux.ts",
         name: "qux",
         nodeId: "subagents/qux.ts",
-        path: "/eve/v1/session",
+        path: "/eve/v1/sessions",
         sourceId: "subagents/qux.ts",
         url: "https://qux.example.com",
       },

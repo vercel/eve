@@ -237,7 +237,7 @@ describe("startRemoteAgentSession", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://remote.example.com/eve/agents/researcher/eve/v1/session",
+      "https://remote.example.com/eve/agents/researcher/eve/v1/sessions",
       expect.objectContaining({ method: "POST" }),
     );
   });
@@ -663,7 +663,7 @@ describe("cancelRemoteAgentTurn", () => {
     expect(auth).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "https://remote.example.com/eve/v1/session/remote%2Fsession%20id/cancel",
+      "https://remote.example.com/eve/v1/sessions/remote%2Fsession%20id/cancel",
       {
         headers: {
           authorization: "Bearer first",
@@ -700,7 +700,7 @@ describe("cancelRemoteAgentTurn", () => {
     ).resolves.toEqual({ status: "accepted" });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://remote.example.com/eve/agents/researcher/eve/v1/session/remote%2Fsession%20id/cancel",
+      "https://remote.example.com/eve/agents/researcher/eve/v1/sessions/remote%2Fsession%20id/cancel",
       expect.objectContaining({ method: "POST" }),
     );
   });
@@ -770,7 +770,7 @@ function createRemoteAgent(): ResolvedRuntimeRemoteAgentNode {
     logicalPath: "subagents/research.ts",
     name: "research",
     nodeId: "subagents/research.ts",
-    path: "/eve/v1/session",
+    path: "/eve/v1/sessions",
     sourceId: "subagents/research.ts",
     sourceKind: "module",
     url: "https://remote.example.com",

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
-import type { FixedSession, Session } from "#channel/session.js";
+import type { Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
@@ -14,7 +14,7 @@ function route(method: "GET" | "POST", path: string) {
   return found.handler as (request: Request, args: RouteHandlerArgs) => Promise<Response>;
 }
 
-function createFixedSession(overrides: Partial<FixedSession> = {}): FixedSession {
+function createFixedSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "wrun_A",
     send: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
@@ -29,16 +29,9 @@ function createFixedSession(overrides: Partial<FixedSession> = {}): FixedSession
 }
 
 function createArgs(session = createFixedSession()): RouteHandlerArgs {
-  const legacySession = { ...session, continuationToken: "" } satisfies Session & FixedSession;
   return {
     attachSession: () => session,
-    send: vi.fn(),
-    resolveActiveSession: async () => undefined,
-    cancel: vi.fn(),
-    clear: vi.fn(),
-    compact: vi.fn(),
-    reset: vi.fn(),
-    getSession: () => legacySession,
+    channelAddress: vi.fn() as never,
     receive: vi.fn() as never,
     params: { sessionId: "wrun_A" },
     waitUntil: vi.fn(),
@@ -49,7 +42,6 @@ function createArgs(session = createFixedSession()): RouteHandlerArgs {
 describe("eve ID-addressed session routes", () => {
   it("creates a session without a continuation token", async () => {
     const createSession = vi.fn().mockResolvedValue({
-      continuationToken: "wrun_A",
       events: new ReadableStream(),
       sessionId: "wrun_A",
     });

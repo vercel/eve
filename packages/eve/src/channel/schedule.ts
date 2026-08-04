@@ -112,7 +112,7 @@ export class ScheduleDispatcher {
       input: { message: markdown },
       mode: "task",
     });
-    return createSession(handle.sessionId, handle.continuationToken, this.runtime);
+    return createSession(handle.sessionId, this.runtime);
   }
 }
 

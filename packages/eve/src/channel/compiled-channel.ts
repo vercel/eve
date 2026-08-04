@@ -1,6 +1,7 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { ChannelAddressFn } from "#channel/channel-address.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
-import type { RouteDefinition, SendFn } from "#channel/routes.js";
+import type { RouteDefinition } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
@@ -34,7 +35,7 @@ export interface CompiledChannel<
       readonly target: Readonly<TReceiveTarget>;
       readonly auth: SessionAuthContext | null;
     },
-    args: { send: SendFn<TState> },
+    args: { channelAddress: ChannelAddressFn<TState> },
   ) => Promise<Session>;
 }
 

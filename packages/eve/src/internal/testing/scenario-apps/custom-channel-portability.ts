@@ -12,18 +12,17 @@ export default defineChannel({
   },
 
   routes: [
-    POST("/api/message", async (req, { send }) => {
+    POST("/api/message", async (req, { channelAddress }) => {
       const body = await req.json();
-      const session = await send(body.message, {
+      const session = await channelAddress("test:" + crypto.randomUUID()).send(body.message, {
         auth: null,
-        continuationToken: "test:" + crypto.randomUUID(),
         state: { lastSender: body.userId ?? "anonymous" },
       });
-      return Response.json({ sessionId: session.id, continuationToken: session.continuationToken });
+      return Response.json({ sessionId: session.id });
     }),
 
-    GET("/api/stream/:sessionId", async (req, { getSession, params }) => {
-      const session = getSession(params.sessionId);
+    GET("/api/stream/:sessionId", async (req, { attachSession, params }) => {
+      const session = attachSession(params.sessionId);
       const events = await session.getEventStream();
       return new Response(events, { headers: { "content-type": "text/event-stream" } });
     }),

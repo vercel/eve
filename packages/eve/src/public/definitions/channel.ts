@@ -4,54 +4,39 @@ import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channe
 import { normalizeChannelCors, type ChannelCorsOptions } from "#channel/cors.js";
 import { HTTP_ADAPTER_KIND } from "#channel/http.js";
 import type { TypedReceiveTarget } from "#channel/receive-target.js";
-import type { RouteDefinition, SendFn } from "#channel/routes.js";
-import type { Session, SessionHandle } from "#channel/session.js";
 import type {
-  CancelTurnInput,
-  CancelTurnResult,
-  DeliverInput,
-  DeliverPayload,
-  GetEventStreamOptions,
-  RunHandle,
-  RunInput,
-} from "#channel/types.js";
+  ChannelAddress,
+  ChannelAddressFn,
+  ChannelAddressSendOptions,
+} from "#channel/channel-address.js";
+import type { RouteDefinition } from "#channel/routes.js";
+import type { Session, SessionHandle } from "#channel/session.js";
+import type { DeliverPayload } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { GenericChannelDefinition, GenericReceiveInput } from "#shared/channel-definition.js";
 
 declare const CHANNEL_METADATA_TYPE: unique symbol;
 
 export type {
-  CancelTurnInput,
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
   GetEventStreamOptions,
+  ResetSessionResult,
 } from "#channel/types.js";
-export type { FixedSession, Session, SessionHandle } from "#channel/session.js";
+export type { Session, SessionHandle } from "#channel/session.js";
 export type { SessionSendInput } from "#channel/session.js";
+export type { ChannelAddress, ChannelAddressFn, ChannelAddressSendOptions };
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
 export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
 export type {
   AttachSessionFn,
-  CancelFn,
-  CancelOptions,
-  ClearFn,
-  ClearOptions,
-  CompactFn,
-  CompactOptions,
-  ResetFn,
-  ResetOptions,
-  ResetResult,
   HttpRouteDefinition,
   RouteDefinition,
   RouteHandlerArgs,
-  SendFn,
-  SendOptions,
   SendPayload,
-  ResolveActiveSessionFn,
-  GetSessionFn,
   WebSocketMessage,
   WebSocketPeer,
   WebSocketRouteDefinition,
@@ -81,27 +66,14 @@ export type ChannelRouteMethod = ChannelMethod | "WEBSOCKET";
  * framework constructs this per request and passes it as the second
  * argument.
  *
- * Routes call into the agent to start sessions, deliver follow-ups,
- * cancel turns, and read events.
+ * Framework callback routes use this for request metadata and background work.
  */
 export interface RouteContext {
-  /**
-   * Handle to the agent that this route sends inbound requests to.
-   * Conceptually the runtime + harness combined: routes call `run`,
-   * `deliver`, `cancelTurn`, and `getEventStream` to drive sessions of
-   * this agent without knowing about the workflow runtime, the harness,
-   * or any other execution-layer detail.
-   *
-   * Every route speaks the same `RunInput` shape regardless of which
-   * webhook it serves — `agent` is platform-agnostic.
-   */
-  readonly agent: Agent;
   /**
    * Hands a background promise to the request host so the serverless
    * invocation stays alive until the promise resolves. Use this when the
    * route responds to the platform immediately (e.g. a Slack `200 OK`
-   * acknowledgement) but still needs to drive an `agent.run()` call to
-   * completion.
+   * acknowledgement) but still needs to finish background work.
    */
   readonly waitUntil: (task: Promise<unknown>) => void;
   /**
@@ -121,58 +93,6 @@ export interface RouteContext {
    * when implementing IP allowlisting in a route.
    */
   readonly requestIp: string | null;
-}
-
-/**
- * Route-facing handle to the agent that owns this request.
- *
- * `Agent` is conceptually the workflow runtime plus the tool-loop harness:
- * routes call `run` to start a new session of the agent, `deliver` to
- * send a follow-up to a parked session, `cancelTurn` to stop in-flight work,
- * and `getEventStream` to read events from a previously-started session.
- * The framework's internal `Runtime`
- * interface (in `channel/types.ts`) is the underlying primitive — `Agent`
- * is the *public* shape exposed on `RouteContext` so route authors
- * speak in terms of the agent rather than the runtime.
- */
-export interface Agent {
-  /**
-   * Starts a new agent session and returns a handle. The session's identity
-   * is the supplied `continuationToken` — subsequent calls to `deliver()`
-   * with the same token resume the same session.
-   */
-  run(input: RunInput): Promise<RunHandle>;
-  /**
-   * Requests cancellation of a session's in-flight turn. A `turnId` limits
-   * the request to the turn the caller observed.
-   *
-   * `"accepted"` means a cancellation hook accepted the request; observe
-   * the event stream for `turn.cancelled` to confirm that it affected the
-   * current turn. `"no_active_turn"` means no cancellable hook was active.
-   * Both outcomes are successful.
-   */
-  cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
-  /**
-   * Sends a follow-up message to a session that is currently parked waiting
-   * for input. Throws if no parked session exists for the supplied
-   * `continuationToken` — routes typically catch the failure and fall back
-   * to `run()` to start a new session.
-   */
-  deliver(input: DeliverInput): Promise<{ sessionId: string }>;
-  /**
-   * Returns a readable NDJSON-style stream of lifecycle events for an
-   * existing session. Used by the framework's HTTP session-stream route and by
-   * any user-authored route that exposes an event-streaming endpoint.
-   *
-   * Nonnegative `options.startIndex` values skip events the caller has already
-   * consumed. Negative values read relative to the current tail (`-1` starts
-   * at the latest event). The framework HTTP session-stream route forwards
-   * the `startIndex` query parameter unchanged.
-   */
-  getEventStream(
-    sessionId: string,
-    options?: GetEventStreamOptions,
-  ): Promise<ReadableStream<MessageStreamEvent>>;
 }
 
 /**
@@ -220,8 +140,11 @@ type EventData<T extends UnstampedMessageStreamEvent["type"]> =
  * Session operations on the `channel` argument of every channel event handler.
  */
 export interface ChannelSessionOps {
-  readonly continuationToken: string;
-  setContinuationToken(token: string): void;
+  readonly session: { readonly id: string };
+  readonly continuation?: {
+    readonly token: string;
+    rekey(token: string): void;
+  };
 }
 
 /**
@@ -313,7 +236,7 @@ export interface Channel<
   readonly cors?: ChannelCorsOptions;
   readonly receive?: (
     input: ReceiveInput<TReceiveTarget>,
-    args: { send: SendFn<TState> },
+    args: { channelAddress: ChannelAddressFn<TState> },
   ) => Promise<Session>;
 }
 
@@ -400,8 +323,14 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
       eventHandlers[eventType] = (data: unknown, adapterCtx: any) => {
         const channel = {
           ...adapterCtx,
-          continuationToken: adapterCtx.session?.continuationToken ?? "",
-          setContinuationToken: (token: string) => adapterCtx.session?.setContinuationToken(token),
+          continuation:
+            adapterCtx.session?.continuation === undefined
+              ? undefined
+              : {
+                  token: adapterCtx.session.continuation.token,
+                  rekey: (token: string) => adapterCtx.session.continuation?.rekey(token),
+                },
+          session: { id: adapterCtx.session?.id ?? "" },
         };
         if (eventType === "session.failed") {
           return (userHandler as (data: unknown, channel: any) => void | Promise<void>)(

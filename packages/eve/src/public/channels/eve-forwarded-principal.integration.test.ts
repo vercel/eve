@@ -9,8 +9,7 @@ import { describe, expect, it, vi } from "vitest";
  * Vercel Connect requires on the receiving deployment.
  */
 
-import type { RouteHandlerArgs, SendFn, SendOptions } from "#channel/routes.js";
-import type { Session as ChannelSession } from "#channel/session.js";
+import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey } from "#context/keys.js";
@@ -19,6 +18,7 @@ import { isConnectionAuthorizationFailedError } from "#public/connections/errors
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { eveChannel, type EveChannelInput } from "#public/channels/eve.js";
+import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 
 const ROUTER_CALLER: SessionAuthContext = {
   attributes: {},
@@ -50,41 +50,29 @@ const FORWARDED_INITIATOR: SessionAuthContext = {
 function createEveCreateHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const createRoute = channel.routes.find(
-    (route) => route.method === "POST" && route.path === "/eve/v1/session",
+    (route) => route.method === "POST" && route.path === "/eve/v1/sessions",
   );
   if (!createRoute) throw new Error("No create POST route found");
 
-  const mockSend = vi.fn<SendFn>().mockResolvedValue({
-    id: "receiver-session-id",
-    continuationToken: "eve:test",
-    async cancel() {
-      return { status: "no_active_turn" };
-    },
-    async getEventStream() {
-      return new ReadableStream();
-    },
-    async getStreamTailIndex() {
-      return -1;
-    },
-  } satisfies ChannelSession);
+  const createSession = vi.fn().mockResolvedValue({
+    events: new ReadableStream(),
+    sessionId: "receiver-session-id",
+  });
 
   return {
-    send: mockSend,
+    createSession,
     async fetch(req: Request) {
-      const args: RouteHandlerArgs = {
-        attachSession: vi.fn() as any,
-        send: mockSend,
-        resolveActiveSession: async () => undefined,
-        cancel: vi.fn(),
-        clear: vi.fn(),
-        compact: vi.fn(),
-        reset: vi.fn(),
-        getSession: vi.fn(),
-        receive: vi.fn() as never,
-        params: {},
-        waitUntil: () => undefined,
-        requestIp: "127.0.0.1",
-      };
+      const args = attachRouteSessionCreator<RouteHandlerArgs>(
+        {
+          attachSession: vi.fn() as any,
+          channelAddress: vi.fn() as any,
+          receive: vi.fn() as never,
+          params: {},
+          waitUntil: () => undefined,
+          requestIp: "127.0.0.1",
+        },
+        createSession,
+      );
       return (
         createRoute as { handler: (req: Request, args: RouteHandlerArgs) => unknown }
       ).handler(req, args) as Promise<Response>;
@@ -100,7 +88,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     });
 
     const response = await handler.fetch(
-      new Request("https://receiver.example.com/eve/v1/session", {
+      new Request("https://receiver.example.com/eve/v1/sessions", {
         body: JSON.stringify({
           forwardedPrincipal: { current: FORWARDED_CURRENT, initiator: FORWARDED_INITIATOR },
           message: "check my dashboards",
@@ -114,15 +102,14 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toMatchObject({ ok: true });
 
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+      RunInput,
+      "adapter" | "channelName" | "requestId"
+    >;
     const run: RunInput = {
       adapter: { kind: "eve" },
-      auth: options.auth,
       channelName: "eve",
-      continuationToken: "eve:test",
-      initiatorAuth: options.initiatorAuth,
-      input: { message: "check my dashboards" },
-      mode: "task",
+      ...options,
     };
     const ctx = buildRunContext({ bundle: {} as CompiledBundle, run });
 
@@ -163,23 +150,23 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     });
 
     await handler.fetch(
-      new Request("https://receiver.example.com/eve/v1/session", {
+      new Request("https://receiver.example.com/eve/v1/sessions", {
         body: JSON.stringify({ message: "check my dashboards", mode: "task" }),
         headers: { "content-type": "application/json" },
         method: "POST",
       }),
     );
 
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+      RunInput,
+      "adapter" | "channelName" | "requestId"
+    >;
     const ctx = buildRunContext({
       bundle: {} as CompiledBundle,
       run: {
         adapter: { kind: "eve" },
-        auth: options.auth,
         channelName: "eve",
-        continuationToken: "eve:test",
-        input: { message: "check my dashboards" },
-        mode: "task",
+        ...options,
       },
     });
 

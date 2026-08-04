@@ -284,13 +284,13 @@ function typeOnlyFixtures(): void {
     },
     events: {
       "turn.started"(_data, channel, ctx) {
-        const continuationToken: string = channel.continuationToken;
+        const continuationToken: string | undefined = channel.continuation?.token;
         const sessionId: string = ctx.session.id;
         void continuationToken;
         void sessionId;
       },
       "session.failed"(_data, channel) {
-        const continuationToken: string = channel.continuationToken;
+        const continuationToken: string | undefined = channel.continuation?.token;
         void continuationToken;
       },
     },

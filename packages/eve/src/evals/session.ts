@@ -8,7 +8,7 @@ import type {
   CancelSessionResult,
   SendTurnInput,
   SendTurnPayload,
-  SessionState,
+  ClientSessionState,
 } from "#client/types.js";
 import type { MessageStreamEvent, TurnFailureStreamEvent } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
@@ -59,7 +59,8 @@ export class EveEvalTurnFailedError extends Error {
 export interface EvalSessionDriver extends EveEvalAssertions, EveEvalOutputAssertions {}
 
 export class EvalSessionDriver implements EveEvalSession {
-  readonly #session: ClientSession;
+  readonly #client: Client;
+  #session: ClientSession | undefined;
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
   readonly #events: MessageStreamEvent[] = [];
@@ -67,10 +68,12 @@ export class EvalSessionDriver implements EveEvalSession {
   #pendingInputRequests: readonly InputRequest[] = [];
 
   constructor(input: {
+    readonly client: Client;
     readonly collector: AssertionCollector;
-    readonly session: ClientSession;
+    readonly session?: ClientSession;
     readonly signal?: AbortSignal;
   }) {
+    this.#client = input.client;
     this.#collector = input.collector;
     this.#session = input.session;
     this.#signal = input.signal;
@@ -100,14 +103,15 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   get sessionId(): string | undefined {
-    return this.#session.state.sessionId ?? this.#lastTurn?.sessionId;
+    return this.#session?.state.sessionId ?? this.#lastTurn?.sessionId;
   }
 
-  get state(): SessionState {
-    return this.#session.state;
+  get state(): ClientSessionState | undefined {
+    return this.#session?.state;
   }
 
   async cancel(): Promise<CancelSessionResult> {
+    if (this.#session === undefined) throw new Error("Eval session has not started.");
     return await this.#session.cancel();
   }
 
@@ -163,7 +167,15 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   async start(input: SendTurnInput): Promise<EveEvalLiveTurn> {
-    const response = await this.#session.send(attachSignal(input, this.#signal));
+    const turnInput = attachSignal(input, this.#signal);
+    let response;
+    if (this.#session === undefined) {
+      const created = await this.#client.sessions.create(turnInput);
+      this.#session = created.session;
+      response = created.response;
+    } else {
+      response = await this.#session.send(turnInput);
+    }
     return new EvalLiveTurn({
       events: response,
       record: (events) => this.#recordObservedTurn(response.sessionId, events),
@@ -192,6 +204,7 @@ export class EvalSessionDriver implements EveEvalSession {
     options?: { readonly startIndex?: number },
     sessionId = requireSessionId(this.sessionId),
   ): EveEvalLiveTurn {
+    if (this.#session === undefined) throw new Error("Eval session has not started.");
     return new EvalLiveTurn({
       events: this.#session.stream({
         signal: this.#signal,
@@ -210,7 +223,7 @@ export class EvalSessionDriver implements EveEvalSession {
       events: [...this.#events],
       primary,
       sessionId,
-      state: this.#session.state,
+      state: this.#session?.state,
     };
   }
 
@@ -523,8 +536,8 @@ export class EvalSessionManager {
 
   #createSession(): EvalSessionDriver {
     const session = new EvalSessionDriver({
+      client: this.#client,
       collector: this.#collector,
-      session: this.#client.session(),
       signal: this.#signal,
     });
     this.#sessions.push(session);
@@ -536,8 +549,11 @@ export class EvalSessionManager {
     options?: { readonly startIndex?: number },
   ): EvalSessionDriver {
     const session = new EvalSessionDriver({
+      client: this.#client,
       collector: this.#collector,
-      session: this.#client.session({ sessionId, streamIndex: options?.startIndex ?? 0 }),
+      session: this.#client.sessions.attach(sessionId, {
+        streamIndex: options?.startIndex ?? 0,
+      }),
       signal: this.#signal,
     });
     this.#sessions.push(session);

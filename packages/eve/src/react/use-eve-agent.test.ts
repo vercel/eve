@@ -15,7 +15,7 @@ import {
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
-import type { SessionState } from "#client/types.js";
+import type { ClientSessionState } from "#client/types.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -155,7 +155,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent("eve:http:session_1"),
+      createSessionWaitingEvent(),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -164,16 +164,19 @@ describe("useEveAgent", () => {
       .mockReturnValueOnce(startResponse.promise)
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
+    const lifecycle: string[] = [];
     const seenEvents: UnstampedMessageStreamEvent[] = [];
-    const seenSessions: SessionState[] = [];
+    const seenSessions: Array<ClientSessionState | undefined> = [];
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
 
     function TestComponent() {
       helpers = useEveAgent({
         onEvent(event) {
+          lifecycle.push(`event:${event.type}`);
           seenEvents.push(event);
         },
         onSessionChange(session) {
+          lifecycle.push(`session:${String(session?.streamIndex)}`);
           seenSessions.push(session);
         },
       });
@@ -200,17 +203,20 @@ describe("useEveAgent", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(lifecycle[0]).toBe("session:0");
     expect(seenEvents).toEqual(stampTestEvents(events));
     expect(seenSessions).toEqual([
       {
-        continuationToken: "http:session_1",
+        sessionId: "session_1",
+        streamIndex: 0,
+      },
+      {
         sessionId: "session_1",
         streamIndex: 3,
       },
     ]);
     expect(helpers?.status).toBe("ready");
     expect(helpers?.session).toEqual({
-      continuationToken: "http:session_1",
       sessionId: "session_1",
       streamIndex: 3,
     });
@@ -228,9 +234,7 @@ describe("useEveAgent", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
-      .mockResolvedValueOnce(
-        createEagerStreamResponse([createSessionWaitingEvent("eve:http:session_1")]),
-      );
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
 
     let randomWord = "jazz";
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
@@ -283,9 +287,7 @@ describe("useEveAgent", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
-      .mockResolvedValueOnce(
-        createEagerStreamResponse([createSessionWaitingEvent("eve:http:session_1")]),
-      );
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
 
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
 
@@ -311,9 +313,9 @@ describe("useEveAgent", () => {
       await sendPromise;
     });
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/eve/agents/support/eve/v1/session");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/eve/agents/support/eve/v1/sessions");
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      "/eve/agents/support/eve/v1/session/session_1/stream",
+      "/eve/agents/support/eve/v1/sessions/session_1/stream",
     );
   });
 
@@ -361,7 +363,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_2",
       }),
-      createSessionWaitingEvent("eve:http:session_1"),
+      createSessionWaitingEvent(),
     ];
 
     vi.spyOn(globalThis, "fetch")
@@ -511,7 +513,7 @@ describe("useEveAgent", () => {
         sequence: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent("eve:http:session_1"),
+      createSessionWaitingEvent(),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -556,16 +558,13 @@ describe("useEveAgent", () => {
     const startResponse = createDeferred<Response>();
     vi.spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
-      .mockResolvedValueOnce(
-        createEagerStreamResponse([createSessionWaitingEvent("eve:http:session_1")]),
-      );
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
 
     let helpers: UseEveAgentHelpers<readonly string[]> | undefined;
 
     function TestComponent() {
       helpers = useEveAgent<readonly string[]>({
         initialSession: {
-          continuationToken: "http:session_1",
           sessionId: "session_1",
           streamIndex: 0,
         },

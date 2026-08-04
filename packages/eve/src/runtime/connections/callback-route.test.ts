@@ -20,7 +20,6 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
 
 function buildRouteContext(params: Readonly<Record<string, string>>): RouteContext {
   return {
-    agent: {} as RouteContext["agent"],
     waitUntil: () => {},
     params,
     requestIp: null,

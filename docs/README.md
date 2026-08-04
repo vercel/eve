@@ -86,21 +86,21 @@ eve then gives you:
 The public surface stays filesystem-first, but the implementation model underneath is still useful to
 know:
 
-- channels normalize inbound transport input and define the `continuationToken`
+- channels normalize inbound transport input and map platform addresses to sessions
 - the harness does one unit of AI work and decides whether to continue, wait, or finish
 - the runtime persists session state, streams events, and owns workflow orchestration
 
-That is why eve exposes two identifiers:
-
-- `continuationToken` for the next user message
-- `sessionId` for streaming and inspection
+The default HTTP API exposes one durable `sessionId` for messages, controls, and
+streaming. Platform channels additionally own channel-local continuation
+addresses so a Slack thread or custom conversation ID can point at its current
+session without leaking that routing identity into the HTTP client contract.
 
 ## How to use these docs
 
 - Start with the authored filesystem shape and `agent.ts`.
 - Then add runtime surfaces in this order: skills, tools, workspace, sandbox, channels.
 - Then learn the durable runtime model: HITL, session context, sessions, streaming, and
-  continuation-token follow-ups.
+  ID-addressed follow-ups and channel address routing.
 - Then add advanced features: subagents, schedules, route protection, deployment.
 
 ## Good companions in this repo

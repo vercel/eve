@@ -293,7 +293,7 @@ describe("multi-agent callback routing", () => {
         logicalPath: "agent/agents/research.ts",
         name: "research",
         nodeId: "agent/agents/research.ts",
-        path: "/eve/v1/session",
+        path: "/eve/v1/sessions",
         sourceId: "agent/agents/research.ts",
         sourceKind: "module",
         url: remoteAgentOrigin,

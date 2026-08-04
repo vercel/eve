@@ -14,7 +14,7 @@ import {
 } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
-import type { SessionState } from "#client/types.js";
+import type { ClientSessionState } from "#client/types.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -139,7 +139,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent("eve:http:session_1"),
+      createSessionWaitingEvent(),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -152,7 +152,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     });
 
     const seenEvents: UnstampedMessageStreamEvent[] = [];
-    const seenSessions: SessionState[] = [];
+    const seenSessions: Array<ClientSessionState | undefined> = [];
     store.setCallbacks({
       onEvent(event) {
         seenEvents.push(event);
@@ -191,7 +191,10 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     );
     expect(seenSessions).toEqual([
       {
-        continuationToken: "http:session_1",
+        sessionId: "session_1",
+        streamIndex: 0,
+      },
+      {
         sessionId: "session_1",
         streamIndex: 3,
       },
@@ -297,13 +300,10 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     const startResponse = createDeferred<Response>();
     vi.spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
-      .mockResolvedValueOnce(
-        createEagerStreamResponse([createSessionWaitingEvent("eve:http:session_1")]),
-      );
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
 
     const store = new EveAgentStore<readonly string[]>({
       initialSession: {
-        continuationToken: "http:session_1",
         sessionId: "session_1",
         streamIndex: 0,
       },
@@ -344,7 +344,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent("eve:http:session_1"),
+      createSessionWaitingEvent(),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -385,7 +385,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
       .mockResolvedValueOnce(
         createEagerStreamResponse([
           createMessageReceivedEvent({ message: "After", sequence: 0, turnId: "turn_1" }),
-          createSessionWaitingEvent("eve:http:session_1"),
+          createSessionWaitingEvent(),
         ]),
       );
 
@@ -414,7 +414,6 @@ describe("useEveAgent (Vue composable wiring)", () => {
         }),
       ]),
       initialSession: {
-        continuationToken: "http:session_1",
         sessionId: "session_1",
         streamIndex: 2,
       },

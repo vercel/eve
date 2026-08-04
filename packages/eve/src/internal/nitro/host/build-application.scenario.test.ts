@@ -36,8 +36,8 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
           { handle: "filesystem" },
           { dest: "/eve/v1/health", src: "/eve/v1/health" },
           {
-            dest: "/eve/v1/session/[sessionId]/stream",
-            src: "^/eve/v1/session/(?<sessionId>[^/]+)/stream$",
+            dest: "/eve/v1/sessions/[sessionId]/stream",
+            src: "^/eve/v1/sessions/(?<sessionId>[^/]+)/stream$",
           },
           { dest: "/index", src: "/" },
           { dest: "/__server", src: "/(.*)" },
@@ -502,7 +502,7 @@ describe("buildApplication", () => {
       { dest: "/eve/__server", src: "/eve/v1/health" },
       {
         dest: "/eve/__server",
-        src: "^/eve/v1/session/(?<sessionId>[^/]+)/stream$",
+        src: "^/eve/v1/sessions/(?<sessionId>[^/]+)/stream$",
       },
     ]);
     expect(runVercelBuildPrewarmMock).toHaveBeenCalledWith(

@@ -33,6 +33,14 @@ import {
 } from "#public/channels/slack/slackChannel.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 
+function mockChannelAddress(send: (input: unknown, options: Record<string, unknown>) => unknown) {
+  return (continuationToken: string) =>
+    ({
+      send: (input: unknown, options: Record<string, unknown>) =>
+        send(input, { ...options, continuationToken }),
+    }) as never;
+}
+
 function getAdapter(channel: unknown): ChannelAdapter<any> {
   if (!isCompiledChannel(channel)) {
     throw new Error("Expected a CompiledChannel.");
@@ -86,7 +94,7 @@ function callEvent(
 
 /**
  * Accessor whose `set` writes are captured so tests can assert on
- * `setContinuationToken` flowing through the SessionHandle. Returns
+ * `continuation.rekey` flowing through the SessionHandle. Returns
  * undefined for unset keys (matching the real `ContextContainer`
  * behavior), while seeding the current continuation token so
  * SessionHandle can preserve the runtime namespace.
@@ -250,13 +258,18 @@ async function firePost(
   channel: unknown,
   request: Request,
   overrides: {
-    readonly cancel?: ReturnType<typeof vi.fn>;
-    readonly reset?: ReturnType<typeof vi.fn>;
-    readonly resolveActiveSession?: ReturnType<typeof vi.fn>;
+    readonly cancel?: ReturnType<
+      typeof vi.fn<(options?: Record<string, unknown>) => Promise<unknown>>
+    >;
+    readonly channelAddress?: ReturnType<typeof vi.fn<(token: string) => any>>;
+    readonly reset?: ReturnType<
+      typeof vi.fn<(options?: Record<string, unknown>) => Promise<unknown>>
+    >;
   } = {},
 ): Promise<{
-  cancel: ReturnType<typeof vi.fn>;
-  reset: ReturnType<typeof vi.fn>;
+  cancel: ReturnType<typeof vi.fn<(options?: Record<string, unknown>) => Promise<unknown>>>;
+  channelAddress: ReturnType<typeof vi.fn<(token: string) => any>>;
+  reset: ReturnType<typeof vi.fn<(options?: Record<string, unknown>) => Promise<unknown>>>;
   response: Response;
   send: ReturnType<typeof vi.fn>;
   waitUntil: ReturnType<typeof vi.fn>;
@@ -266,24 +279,39 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected slack channel to define a POST route.");
   }
-  const cancel = overrides.cancel ?? vi.fn().mockResolvedValue({ status: "accepted" });
+  const cancel =
+    overrides.cancel ??
+    vi
+      .fn<(options?: Record<string, unknown>) => Promise<unknown>>()
+      .mockResolvedValue({ status: "accepted" });
   const reset =
     overrides.reset ??
-    vi.fn().mockResolvedValue({ status: "reset", previousSessionId: "session_previous" });
-  const send = vi.fn().mockResolvedValue({ id: "s1", continuationToken: "ct" });
+    vi
+      .fn<(options?: Record<string, unknown>) => Promise<unknown>>()
+      .mockResolvedValue({ status: "reset", previousSessionId: "session_previous" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
+  const channelAddress =
+    overrides.channelAddress ??
+    vi.fn((continuationToken: string) => ({
+      continuationToken,
+      cancel: (options?: { turnId?: string }) => cancel({ ...options, continuationToken }),
+      compact: vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" }),
+      clear: vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" }),
+      reset: (options?: { reason?: string }) => reset({ ...options, continuationToken }),
+      resolveSession: vi.fn().mockResolvedValue({ id: "s1" }),
+      send: (input: unknown, options: Record<string, unknown>) =>
+        send(input, { ...options, continuationToken }),
+    }));
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
-    cancel,
-    reset,
-    send,
-    resolveActiveSession:
-      overrides.resolveActiveSession ?? vi.fn().mockResolvedValue({ sessionId: "s1" }),
+    channelAddress,
     waitUntil,
-    getSession: vi.fn() as any,
+    attachSession: vi.fn() as any,
+    receive: vi.fn() as any,
     params: {},
     requestIp: null,
-  } as any);
+  });
 
   let drained = 0;
   while (drained < waitUntil.mock.calls.length) {
@@ -292,7 +320,7 @@ async function firePost(
     await Promise.allSettled(pending);
   }
 
-  return { cancel, reset, response, send, waitUntil };
+  return { cancel, channelAddress, reset, response, send, waitUntil };
 }
 
 describe("slackChannel() default event handlers", () => {
@@ -957,7 +985,7 @@ describe("rebuildSlackContext", () => {
     expect((adapter.state as { threadTs: string | null }).threadTs).toBe("1800000000.123456");
 
     // The anchor moment wrote the new continuation token to context
-    // via `session.setContinuationToken(...)`. The workflow body picks
+    // via `session.continuation.rekey(...)`. The workflow body picks
     // this up via `reconcileSessionContinuationToken` after the step.
     const tokenWrites = writes.filter(([key]) => key === "eve.continuationToken");
     expect(tokenWrites).toEqual([["eve.continuationToken", "slack:C01:1800000000.123456"]]);
@@ -984,7 +1012,7 @@ describe("rebuildSlackContext", () => {
     const secondBody = parseSlackRequestBody(fetchMock.mock.calls[1]![1] as RequestInit);
     expect(secondBody.thread_ts).toBe("1800000000.123456");
 
-    // Once anchored, setContinuationToken does not fire again — the
+    // Once anchored, continuation.rekey does not fire again — the
     // raw token is unchanged across subsequent posts.
     const allTokenWrites = writes.filter(([key]) => key === "eve.continuationToken");
     expect(allTokenWrites).toHaveLength(1);
@@ -1093,11 +1121,41 @@ describe("slackChannel() inbound mention pipeline", () => {
     });
   });
 
+  it("binds onAppMention to an aligned conversation handle", async () => {
+    const clear = vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" });
+    const conversation = {
+      continuationToken: "C_BOUND:1700000000.000300",
+      cancel: vi.fn(),
+      compact: vi.fn(),
+      clear,
+      reset: vi.fn(),
+      resolveSession: vi.fn(),
+      send: vi.fn(),
+    };
+    const channelAddress = vi.fn().mockReturnValue(conversation);
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.conversation.clear();
+        return { auth: null };
+      },
+    });
+    const { body } = buildMentionBody({
+      channel: "C_BOUND",
+      threadTs: "1700000000.000300",
+    });
+
+    await firePost(channel, buildSignedRequest({ body }), { channelAddress });
+
+    expect(channelAddress).toHaveBeenCalledWith("C_BOUND:1700000000.000300");
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+
   it("lets onAppMention cancel the active turn before dispatching its replacement", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onAppMention(ctx) {
-        await ctx.cancel({ turnId: "turn_observed" });
+        await ctx.conversation.cancel({ turnId: "turn_observed" });
         return { auth: null };
       },
     });
@@ -1120,7 +1178,7 @@ describe("slackChannel() inbound mention pipeline", () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onAppMention(ctx) {
-        await ctx.reset({ reason: "Slack user requested a fresh conversation" });
+        await ctx.conversation.reset({ reason: "Slack user requested a fresh conversation" });
         return { auth: null };
       },
     });
@@ -1669,11 +1727,12 @@ describe("slackChannel() generic Events API pipeline", () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
-        await ctx.cancel({
-          channelId: "C01",
-          threadTs: "1700000000.000001",
-          turnId: "turn_observed",
-        });
+        await ctx
+          .conversation({
+            channelId: "C01",
+            threadTs: "1700000000.000001",
+          })
+          .cancel({ turnId: "turn_observed" });
       },
     });
     const body = buildEventBody({ type: "reaction_added", user: "U01" });
@@ -1686,15 +1745,75 @@ describe("slackChannel() generic Events API pipeline", () => {
     });
   });
 
+  it("constructs aligned conversations for generic Slack events", async () => {
+    const compact = vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" });
+    const channelAddress = vi.fn().mockReturnValue({
+      continuationToken: "C01:1700000000.000001",
+      cancel: vi.fn(),
+      compact,
+      clear: vi.fn(),
+      reset: vi.fn(),
+      resolveSession: vi.fn(),
+      send: vi.fn(),
+    });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx.conversation({ channelId: "C01", threadTs: "1700000000.000001" }).compact();
+      },
+    });
+
+    const body = buildEventBody({ type: "reaction_added", user: "U01" });
+    await firePost(channel, buildSignedRequest({ body }), { channelAddress });
+
+    expect(channelAddress).toHaveBeenCalledWith("C01:1700000000.000001");
+    expect(compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("binds Slack session state when a generic conversation send creates", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+    const channelAddress = vi.fn().mockReturnValue({
+      continuationToken: "C01:1700000000.000001",
+      cancel: vi.fn(),
+      compact: vi.fn(),
+      clear: vi.fn(),
+      reset: vi.fn(),
+      resolveSession: vi.fn(),
+      send,
+    });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx
+          .conversation({ channelId: "C01", threadTs: "1700000000.000001" })
+          .send("follow up", { auth: null });
+      },
+    });
+
+    const body = buildEventBody({ type: "reaction_added", user: "U01" }, { teamId: "T_WORKSPACE" });
+    await firePost(channel, buildSignedRequest({ body }), { channelAddress });
+
+    expect(send).toHaveBeenCalledWith("follow up", {
+      auth: null,
+      state: {
+        channelId: "C01",
+        teamId: "T_WORKSPACE",
+        threadTs: "1700000000.000001",
+        triggeringUserId: "U01",
+      },
+    });
+  });
+
   it("resets a targeted Slack thread from onEvent", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
-        await ctx.reset({
-          channelId: "C01",
-          threadTs: "1700000000.000001",
-          reason: "Reaction requested a fresh conversation",
-        });
+        await ctx
+          .conversation({
+            channelId: "C01",
+            threadTs: "1700000000.000001",
+          })
+          .reset({ reason: "Reaction requested a fresh conversation" });
       },
     });
     const body = buildEventBody({ type: "reaction_added", user: "U01" });
@@ -2084,7 +2203,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       credentials: { botToken: "xoxb-test" },
       async onInteraction(action, ctx) {
         expect(action.actionId).toBe("stop");
-        await ctx.cancel({ turnId: "turn_observed" });
+        await ctx.conversation.cancel({ turnId: "turn_observed" });
       },
     });
 
@@ -2116,7 +2235,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       credentials: { botToken: "xoxb-test" },
       async onInteraction(action, ctx) {
         expect(action.actionId).toBe("new-conversation");
-        await ctx.reset({ reason: "New conversation button clicked" });
+        await ctx.conversation.reset({ reason: "New conversation button clicked" });
       },
     });
 
@@ -2636,14 +2755,14 @@ describe("slackChannel().receive", () => {
   }
 
   it("sends with an explicit continuation token built from channelId + threadTs", async () => {
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
     await buildReceive()(
       {
         message: "do the thing",
         target: { channelId: "C123", threadTs: "1700000000.000001" },
         auth: { attributes: {}, authenticator: "app", principalId: "p", principalType: "user" },
       },
-      { send },
+      { channelAddress: mockChannelAddress(send) },
     );
     expect(send).toHaveBeenCalledTimes(1);
     const [message, options] = send.mock.calls[0]!;
@@ -2663,7 +2782,7 @@ describe("slackChannel().receive", () => {
       .spyOn(crypto, "randomUUID")
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000001")
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000002");
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
 
     try {
       const receive = buildReceive();
@@ -2673,8 +2792,8 @@ describe("slackChannel().receive", () => {
         auth: null,
       };
 
-      await receive(input, { send });
-      await receive(input, { send });
+      await receive(input, { channelAddress: mockChannelAddress(send) });
+      await receive(input, { channelAddress: mockChannelAddress(send) });
 
       expect(send.mock.calls.map(([, options]) => options.continuationToken)).toEqual([
         "C123:00000000-0000-4000-8000-000000000001",
@@ -2689,7 +2808,10 @@ describe("slackChannel().receive", () => {
   it("requires channelId", async () => {
     const send = vi.fn();
     await expect(
-      buildReceive()({ message: "x", target: {}, auth: null }, { send }),
+      buildReceive()(
+        { message: "x", target: {}, auth: null },
+        { channelAddress: mockChannelAddress(send) },
+      ),
     ).rejects.toThrow(/requires target.channelId/);
     expect(send).not.toHaveBeenCalled();
   });
@@ -2700,7 +2822,7 @@ describe("slackChannel().receive", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
 
     const { Card, CardText } = await import("#compiled/chat/index.js");
     await buildReceive()(
@@ -2715,7 +2837,7 @@ describe("slackChannel().receive", () => {
         },
         auth: null,
       },
-      { send },
+      { channelAddress: mockChannelAddress(send) },
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -2748,7 +2870,7 @@ describe("slackChannel().receive", () => {
           },
           auth: null,
         },
-        { send },
+        { channelAddress: mockChannelAddress(send) },
       ),
     ).rejects.toThrow(/mutually exclusive/);
     expect(send).not.toHaveBeenCalled();
@@ -2775,7 +2897,7 @@ describe("slackChannel().receive", () => {
           },
           auth: null,
         },
-        { send },
+        { channelAddress: mockChannelAddress(send) },
       ),
     ).rejects.toThrow(/not_in_channel/);
     expect(send).not.toHaveBeenCalled();
@@ -2793,7 +2915,7 @@ describe("slackChannel().receive", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
     const { Card, CardText } = await import("#compiled/chat/index.js");
 
     await buildReceive()(
@@ -2808,7 +2930,7 @@ describe("slackChannel().receive", () => {
         },
         auth: null,
       },
-      { send },
+      { channelAddress: mockChannelAddress(send) },
     );
     const receiveToken = (send.mock.calls[0]![1] as { continuationToken: string })
       .continuationToken;
@@ -2818,7 +2940,7 @@ describe("slackChannel().receive", () => {
     // under the anchor card. The inbound dispatch path builds the
     // token from `event.thread_ts` so it matches the one receive()
     // used, and the parked session resumes via runtime.deliver.
-    const inboundSend = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const inboundSend = vi.fn().mockResolvedValue({ id: "s" });
     const mentionBody = JSON.stringify({
       type: "event_callback",
       team_id: "T01",
@@ -2842,13 +2964,13 @@ describe("slackChannel().receive", () => {
     if (!post) throw new Error("expected POST route");
     const waitUntil = vi.fn();
     await post.handler(req, {
-      send: inboundSend,
+      attachSession: vi.fn() as any,
+      channelAddress: mockChannelAddress(inboundSend),
       waitUntil,
-      getSession: vi.fn() as any,
       receive: vi.fn() as any,
       params: {},
       requestIp: null,
-    } as any);
+    });
 
     let drained = 0;
     while (drained < waitUntil.mock.calls.length) {

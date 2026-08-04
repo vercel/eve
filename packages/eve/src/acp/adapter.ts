@@ -16,7 +16,7 @@ import {
   type ToolCall,
 } from "#compiled/@agentclientprotocol/sdk/index.js";
 import { Client, ClientError } from "#client/index.js";
-import type { ClientOptions, SendTurnInput, SessionState } from "#client/types.js";
+import type { ClientOptions, SendTurnInput } from "#client/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
@@ -36,18 +36,22 @@ interface ActivePrompt {
 }
 
 interface AdapterClientSession {
-  readonly state: SessionState;
   send(input: SendTurnInput): Promise<AsyncIterable<HandleMessageStreamEvent>>;
   cancel(options?: { turnId?: string }): Promise<unknown>;
   reset(): Promise<unknown>;
 }
 
 interface AdapterClient {
-  session(): AdapterClientSession;
+  readonly sessions: {
+    create(input: SendTurnInput): Promise<{
+      readonly response: AsyncIterable<HandleMessageStreamEvent>;
+      readonly session: AdapterClientSession;
+    }>;
+  };
 }
 
 interface AcpSession {
-  readonly client: AdapterClientSession;
+  client?: AdapterClientSession;
   active?: ActivePrompt;
   readonly tools: Map<string, ToolCall>;
 }
@@ -87,7 +91,6 @@ export class EveAcpAdapter {
         auth: options.auth,
         headers: options.headers,
         host: options.serverUrl,
-        preserveCompletedSessions: true,
         redirect: "manual",
       });
   }
@@ -134,7 +137,6 @@ export class EveAcpAdapter {
 
     const sessionId = randomUUID();
     this.#sessions.set(sessionId, {
-      client: this.#client.session(),
       tools: new Map(),
     });
     return { sessionId };
@@ -180,7 +182,14 @@ export class EveAcpAdapter {
       }
       let input: SendTurnInput = { message };
       for (;;) {
-        const response = await session.client.send(input);
+        let response: AsyncIterable<HandleMessageStreamEvent>;
+        if (session.client === undefined) {
+          const created = await this.#client.sessions.create(input);
+          session.client = created.session;
+          response = created.response;
+        } else {
+          response = await session.client.send(input);
+        }
         if (active.cancelRequested || active.protocolCancelled) {
           await this.#cancelActive(session);
         }
@@ -278,7 +287,7 @@ export class EveAcpAdapter {
     }
 
     try {
-      await session.client.reset();
+      await session.client?.reset();
     } catch (resetError) {
       if (cancellationError !== undefined) {
         throw new AggregateError(
@@ -293,7 +302,7 @@ export class EveAcpAdapter {
 
   async #cancelActive(session: AcpSession): Promise<void> {
     session.active?.outboundController.abort();
-    if (session.client.state.sessionId === undefined) return;
+    if (session.client === undefined) return;
     await session.client.cancel(
       session.active?.turnId === undefined ? undefined : { turnId: session.active.turnId },
     );

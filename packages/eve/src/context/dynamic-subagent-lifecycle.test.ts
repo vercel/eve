@@ -198,7 +198,7 @@ describe("dynamic subagent lifecycle", () => {
       remoteAgent: {
         credentialsStepId: "eve:dynamic-remote-agent//researcher",
         forwardPrincipal: true,
-        path: "/eve/v1/session",
+        path: "/eve/v1/sessions",
         url: "https://research.example.com",
       },
     });

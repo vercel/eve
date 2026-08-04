@@ -13,7 +13,7 @@ import {
   messageToUserContent,
   type ChatSdkChannelState,
 } from "#public/channels/chat-sdk/index.js";
-import type { CancelFn, RouteHandlerArgs, SendFn } from "#public/definitions/channel.js";
+import type { RouteHandlerArgs } from "#public/definitions/channel.js";
 import type {
   Adapter,
   AdapterPostableMessage,
@@ -88,9 +88,9 @@ async function firePost(
   path: string,
   body: Record<string, unknown>,
 ): Promise<{
-  cancel: ReturnType<typeof vi.fn<CancelFn>>;
+  cancel: ReturnType<typeof vi.fn>;
   response: Response;
-  send: ReturnType<typeof vi.fn<SendFn<ChatSdkChannelState>>>;
+  send: ReturnType<typeof vi.fn>;
   waitUntil: ReturnType<typeof vi.fn>;
 }> {
   const compiled = asCompiled<ChatSdkChannelState>(channel);
@@ -98,20 +98,8 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error(`Expected POST ${path}.`);
   }
-  const send = vi.fn<SendFn<ChatSdkChannelState>>().mockResolvedValue({
-    continuationToken: "chat-sdk:test",
-    id: "session-1",
-    async cancel() {
-      return { status: "no_active_turn" as const };
-    },
-    async getEventStream() {
-      return new ReadableStream();
-    },
-    async getStreamTailIndex() {
-      return -1;
-    },
-  });
-  const cancel = vi.fn<CancelFn>().mockResolvedValue({ status: "accepted" });
+  const send = vi.fn().mockResolvedValue({ id: "session-1" });
+  const cancel = vi.fn().mockResolvedValue({ status: "accepted" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(
@@ -122,16 +110,20 @@ async function firePost(
     }),
     {
       attachSession: vi.fn() as any,
-      getSession: vi.fn() as any,
-      resolveActiveSession: async () => undefined,
-      cancel,
-      clear: vi.fn(),
-      compact: vi.fn(),
-      reset: vi.fn(),
+      channelAddress: (continuationToken) =>
+        ({
+          continuationToken,
+          send: (input: unknown, options: Record<string, unknown>) =>
+            send(input, { ...options, continuationToken }),
+          cancel: () => cancel({ continuationToken }),
+          compact: vi.fn().mockResolvedValue({ status: "accepted" }),
+          clear: vi.fn().mockResolvedValue({ status: "accepted" }),
+          reset: vi.fn().mockResolvedValue({ status: "not_found" }),
+          resolveSession: vi.fn().mockResolvedValue(undefined),
+        }) as never,
       params: {},
       receive: vi.fn() as any,
       requestIp: null,
-      send,
       waitUntil,
     } satisfies RouteHandlerArgs<ChatSdkChannelState>,
   );
@@ -182,16 +174,10 @@ describe("chatSdkChannel", () => {
       new Request("https://example.com/eve/v1/test?crc_token=abc123", { method: "GET" }),
       {
         attachSession: vi.fn() as any,
-        getSession: vi.fn() as any,
-        resolveActiveSession: async () => undefined,
-        cancel: vi.fn(),
-        clear: vi.fn(),
-        compact: vi.fn(),
-        reset: vi.fn(),
+        channelAddress: vi.fn() as any,
         params: {},
         receive: vi.fn() as any,
         requestIp: null,
-        send: vi.fn() as any,
         waitUntil: vi.fn(),
       } satisfies RouteHandlerArgs<ChatSdkChannelState>,
     );
@@ -320,19 +306,7 @@ describe("chatSdkChannel", () => {
       state: memoryState(),
       userName: "bot",
     });
-    const send = vi.fn<SendFn<ChatSdkChannelState>>().mockResolvedValue({
-      continuationToken: "chat-sdk:test",
-      id: "session-1",
-      async cancel() {
-        return { status: "no_active_turn" as const };
-      },
-      async getEventStream() {
-        return new ReadableStream();
-      },
-      async getStreamTailIndex() {
-        return -1;
-      },
-    });
+    const send = vi.fn().mockResolvedValue({ id: "session-1" });
 
     await bridge.channel.receive?.(
       {
@@ -340,7 +314,13 @@ describe("chatSdkChannel", () => {
         message: "proactive",
         target: { adapterName: "test", threadId: THREAD_ID },
       },
-      { send },
+      {
+        channelAddress: (continuationToken) =>
+          ({
+            send: (input: unknown, options: Record<string, unknown>) =>
+              send(input, { ...options, continuationToken }),
+          }) as never,
+      },
     );
 
     expect(send).toHaveBeenCalledWith("proactive", {

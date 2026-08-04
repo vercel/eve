@@ -94,7 +94,7 @@ curl -X POST http://localhost:2000/eve/v1/dev/schedules/heartbeat
 # -> { "scheduleId": "heartbeat", "sessionIds": ["..."] }
 ```
 
-`:scheduleId` is the path-derived schedule name (`agent/schedules/heartbeat.ts` → `heartbeat`; URL-encode the `/` in nested names). It runs the exact dispatch path the production cron handler uses and returns the started session ids as JSON, so you can subscribe to each one's [stream](./concepts/sessions-runs-and-streaming) at `GET /eve/v1/session/:sessionId/stream`. An unknown id comes back `404` with `availableScheduleIds`, listing the schedules the app actually defines.
+`:scheduleId` is the path-derived schedule name (`agent/schedules/heartbeat.ts` → `heartbeat`; URL-encode the `/` in nested names). It runs the exact dispatch path the production cron handler uses and returns the started session ids as JSON, so you can subscribe to each one's [stream](./concepts/sessions-runs-and-streaming) at `GET /eve/v1/sessions/:sessionId/stream`. An unknown id comes back `404` with `availableScheduleIds`, listing the schedules the app actually defines.
 
 The route is dev-only. Production builds never mount it, and it needs no auth since the dev server is local-only.
 

@@ -45,7 +45,7 @@ describe("stream following over real sockets", () => {
       { type: "step.started", data: {} },
       { type: "step.completed", data: {} },
       { type: "step.started", data: {} },
-      { type: "session.waiting", data: { wait: "next-user-message", continuationToken: "eve:x" } },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
     ];
     let connections = 0;
     const host = await listen(
@@ -64,7 +64,7 @@ describe("stream following over real sockets", () => {
     );
 
     const client = new Client({ host });
-    const session = client.session({ sessionId: "s1", streamIndex: 0 });
+    const session = client.sessions.attach("s1");
 
     const received: string[] = [];
     for await (const event of session.stream()) {
@@ -142,7 +142,7 @@ describe("stream following over real sockets", () => {
     );
 
     const client = new Client({ host });
-    const session = client.session({ sessionId: "s1", streamIndex: 0 });
+    const session = client.sessions.attach("s1");
 
     const received: string[] = [];
     for await (const event of session.stream({ follow: false })) {

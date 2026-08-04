@@ -53,7 +53,14 @@ function stubClient(): Client {
 
 /** Real `ClientSession` handle; harmless until `send`/`stream` are spied. */
 function stubSession(): ClientSession {
-  return stubClient().session();
+  return stubClient().sessions.attach("session_test");
+}
+
+function mockSessionCreation(client: Client, session: ClientSession) {
+  return vi.spyOn(client.sessions, "create").mockImplementation(async (input) => ({
+    response: await session.send(input),
+    session,
+  }));
 }
 
 /**
@@ -66,7 +73,6 @@ function messageResponseOf(events: readonly unknown[]): MessageResponse {
     isStamped(event) ? event : stampTestEvent(event as UnstampedMessageStreamEvent, index),
   );
   return new MessageResponse({
-    continuationToken: "eve:test",
     createStream: async function* () {
       for (const event of stamped) yield event;
     },
@@ -561,13 +567,10 @@ describe("EveTUIRunner development session continuity", () => {
 
         if (method === "POST") {
           const sessionId =
-            url.pathname === "/eve/v1/session"
+            url.pathname === "/eve/v1/sessions"
               ? `session-${String(++nextSession)}`
-              : (url.pathname.split("/").at(-1) ?? `session-${String(++nextSession)}`);
-          return Response.json({
-            continuationToken: `token-${sessionId}`,
-            sessionId,
-          });
+              : (url.pathname.split("/").at(-2) ?? `session-${String(++nextSession)}`);
+          return Response.json({ sessionId });
         }
 
         return new Response(
@@ -578,10 +581,7 @@ describe("EveTUIRunner development session continuity", () => {
                   `${JSON.stringify(
                     stampTestEvent({
                       type: "session.waiting",
-                      data: {
-                        continuationToken: "token-session-1",
-                        wait: "next-user-message",
-                      },
+                      data: { wait: "next-user-message" },
                     } as UnstampedMessageStreamEvent),
                   )}\n`,
                 ),
@@ -595,8 +595,8 @@ describe("EveTUIRunner development session continuity", () => {
 
     const client = stubClient();
     vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
-    const session = client.session();
-    const createSession = vi.spyOn(client, "session");
+    const session = client.sessions.attach("session-1");
+    const createSession = vi.spyOn(client.sessions, "create");
     const prompts: Array<string | undefined> = ["first", "second", undefined];
     const runner = new EveTUIRunner({
       client,
@@ -621,10 +621,10 @@ describe("EveTUIRunner development session continuity", () => {
       requests
         .filter(
           (request) =>
-            request.method === "POST" && request.url.pathname.startsWith("/eve/v1/session"),
+            request.method === "POST" && request.url.pathname.startsWith("/eve/v1/sessions"),
         )
         .map((request) => request.url.pathname),
-    ).toEqual(["/eve/v1/session", "/eve/v1/session/session-1"]);
+    ).toEqual(["/eve/v1/sessions/session-1/messages", "/eve/v1/sessions/session-1/messages"]);
   });
 
   it("starts a fresh session only after an explicit /reset command", async () => {
@@ -634,7 +634,7 @@ describe("EveTUIRunner development session continuity", () => {
       .mockResolvedValue({ previousSessionId: "session_1", status: "reset" });
     const newSession = sessionYielding([{ type: "session.waiting" }]);
     const client = stubClient();
-    const createSession = vi.spyOn(client, "session").mockReturnValue(newSession);
+    const createSession = mockSessionCreation(client, newSession);
     const prompts: Array<string | undefined> = ["first", "/reset", "second", undefined];
     const runner = new EveTUIRunner({
       client,
@@ -667,7 +667,7 @@ describe("EveTUIRunner development session continuity", () => {
       (async function* () {
         yield stampTestEvent(
           {
-            data: { continuationToken: "eve:test", wait: "next-user-message" },
+            data: { wait: "next-user-message" },
             type: "session.waiting",
           },
           0,
@@ -709,7 +709,7 @@ describe("EveTUIRunner development session continuity", () => {
         (async function* () {
           yield stampTestEvent(
             {
-              data: { continuationToken: "eve:test", wait: "next-user-message" },
+              data: { wait: "next-user-message" },
               type: "session.waiting",
             },
             0,
@@ -742,11 +742,7 @@ describe("EveTUIRunner development session continuity", () => {
   );
 
   it("cancels an active turn without sending a prompt", async () => {
-    const session = stubClient().session({
-      continuationToken: "eve:test",
-      sessionId: "session_1",
-      streamIndex: 0,
-    });
+    const session = stubClient().sessions.attach("session_1");
     const cancel = vi
       .spyOn(session, "cancel")
       .mockResolvedValue({ sessionId: "session_1", status: "accepted" });
@@ -755,7 +751,7 @@ describe("EveTUIRunner development session continuity", () => {
       (async function* () {
         yield stampTestEvent(
           {
-            data: { continuationToken: "eve:test", wait: "next-user-message" },
+            data: { wait: "next-user-message" },
             type: "session.waiting",
           },
           0,
@@ -787,8 +783,6 @@ describe("EveTUIRunner development session continuity", () => {
   });
 
   it("does not call the cancel API before a session has started", async () => {
-    const session = stubSession();
-    const cancel = vi.spyOn(session, "cancel");
     const results: string[] = [];
     const prompts: Array<string | undefined> = ["/cancel", undefined];
     const runner = new EveTUIRunner({
@@ -797,12 +791,10 @@ describe("EveTUIRunner development session continuity", () => {
         readPrompt: vi.fn(async () => prompts.shift()),
         renderCommandResult: (message) => results.push(message),
       }),
-      session,
     });
 
     await runner.run();
 
-    expect(cancel).not.toHaveBeenCalled();
     expect(results).toEqual(["No active turn to cancel."]);
   });
 
@@ -836,7 +828,7 @@ describe("EveTUIRunner development session continuity", () => {
       .mockResolvedValue({ previousSessionId: "session_1", status: "reset" });
     const newSession = sessionYielding([]);
     const client = stubClient();
-    const createSession = vi.spyOn(client, "session").mockReturnValue(newSession);
+    const createSession = mockSessionCreation(client, newSession);
     const prompts: Array<string | undefined> = ["first", undefined];
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async () => prompts.shift()),
@@ -857,7 +849,7 @@ describe("EveTUIRunner development session continuity", () => {
     await runner.run();
 
     expect(reset).toHaveBeenCalledOnce();
-    expect(createSession).toHaveBeenCalledOnce();
+    expect(createSession).not.toHaveBeenCalled();
     expect(initialSession.send).toHaveBeenCalledOnce();
     expect(newSession.send).not.toHaveBeenCalled();
   });
@@ -876,7 +868,7 @@ describe("EveTUIRunner terminal-failure recovery", () => {
     ]);
     const recoveredSession = sessionYielding([]);
     const client = stubClient();
-    const sessionFactory = vi.spyOn(client, "session").mockImplementation(() => recoveredSession);
+    const sessionFactory = mockSessionCreation(client, recoveredSession);
 
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
@@ -901,7 +893,7 @@ describe("EveTUIRunner terminal-failure recovery", () => {
 
     // Exactly one recovery session was created, and the failed session was
     // only used for the one (failing) turn.
-    expect(sessionFactory).toHaveBeenCalledTimes(1);
+    expect(sessionFactory).not.toHaveBeenCalled();
     expect(failingSession.send).toHaveBeenCalledTimes(1);
     expect(recoveredSession.send).not.toHaveBeenCalled();
     expect(notices).toHaveLength(1);
@@ -914,7 +906,7 @@ describe("EveTUIRunner terminal-failure recovery", () => {
 
     const strandedSession = sessionYielding([{ type: "turn.started", data: {} }]);
     const client = stubClient();
-    const sessionFactory = vi.spyOn(client, "session");
+    const sessionFactory = vi.spyOn(client.sessions, "create");
 
     const runner = new EveTUIRunner({
       client,
@@ -946,7 +938,7 @@ describe("EveTUIRunner terminal-failure recovery", () => {
     const interruptedSession = sessionYielding([{ type: "turn.started", data: {} }]);
     const replacementSession = sessionYielding([]);
     const client = stubClient();
-    const sessionFactory = vi.spyOn(client, "session").mockReturnValue(replacementSession);
+    const sessionFactory = mockSessionCreation(client, replacementSession);
 
     const runner = new EveTUIRunner({
       client,
@@ -967,7 +959,7 @@ describe("EveTUIRunner terminal-failure recovery", () => {
 
     await runner.run();
 
-    expect(sessionFactory).toHaveBeenCalledTimes(1);
+    expect(sessionFactory).not.toHaveBeenCalled();
     expect(notices).toHaveLength(1);
     expect(notices[0]).toContain("new session");
     expect(notices[0]).toContain("may still be running");
@@ -1042,12 +1034,12 @@ describe("EveTUIRunner /traces", () => {
     expect(open).toHaveBeenCalledTimes(2);
     expect(open).toHaveBeenNthCalledWith(1, {
       appRoot: "/tmp/weather-agent",
-      sessionId: undefined,
+      sessionId: "session_test",
       reference: "abc123",
     });
     expect(open).toHaveBeenNthCalledWith(2, {
       appRoot: "/tmp/weather-agent",
-      sessionId: undefined,
+      sessionId: "session_test",
       reference: undefined,
     });
   });
@@ -1322,7 +1314,10 @@ describe("EveTUIRunner failure rendering", () => {
       { type: "session.failed", data: { ...failureData, sessionId: "s0" } },
     ]);
     const client = stubClient();
-    vi.spyOn(client, "session").mockImplementation(() => sessionYielding([]));
+    vi.spyOn(client.sessions, "create").mockImplementation(async (input) => {
+      const session = sessionYielding([]);
+      return { response: await session.send(input), session };
+    });
 
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
@@ -1994,7 +1989,7 @@ describe("EveTUIRunner remote authentication", () => {
     resolveDeployment?: NonNullable<RemoteConnectionControllerOptions["resolveDeployment"]>;
   }): Promise<void> {
     await new EveTUIRunner({
-      session: input.client.session(),
+      session: input.client.sessions.attach("session_test"),
       client: input.client,
       renderer: fakeRenderer({ setupFlow: idleSetupFlow(), ...input.renderer }),
       serverUrl: target.serverUrl,
@@ -2123,7 +2118,7 @@ describe("EveTUIRunner remote authentication", () => {
   it("demotes a ready remote after turn dispatch fails", async () => {
     const client = stubClient();
     vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
-    const session = client.session();
+    const session = client.sessions.attach("session_test");
     vi.spyOn(session, "send").mockRejectedValue(new Error("socket down"));
     const statuses: string[] = [];
     const readPrompt = vi.fn().mockResolvedValueOnce("hello").mockResolvedValueOnce(undefined);
@@ -2244,8 +2239,8 @@ describe("EveTUIRunner renderer teardown", () => {
 
   it("finishes the section on the child's own turn boundary, before subagent.completed", async () => {
     const client = stubClient();
-    const childSession = client.session({ sessionId: "child-session", streamIndex: 0 });
-    vi.spyOn(client, "session").mockReturnValue(childSession);
+    const childSession = client.sessions.attach("child-session");
+    vi.spyOn(client.sessions, "attach").mockReturnValue(childSession);
     vi.spyOn(childSession, "stream").mockImplementation(() => ({
       async *[Symbol.asyncIterator]() {
         yield stampTestEvent(
@@ -2330,9 +2325,9 @@ describe("EveTUIRunner renderer teardown", () => {
 
   it("aborts child-session streams when Ctrl-C exits the runner", async () => {
     const client = stubClient();
-    const childSession = client.session({ sessionId: "child-session", streamIndex: 0 });
+    const childSession = client.sessions.attach("child-session");
     let childSignal: AbortSignal | undefined;
-    vi.spyOn(client, "session").mockReturnValue(childSession);
+    vi.spyOn(client.sessions, "attach").mockReturnValue(childSession);
     vi.spyOn(childSession, "stream").mockImplementation((options) => {
       const signal = options?.signal;
       if (signal === undefined) {
@@ -3084,7 +3079,6 @@ describe("EveTUIRunner mid-turn message queue", () => {
     vi.spyOn(session, "send").mockImplementation(
       async () =>
         new MessageResponse({
-          continuationToken: "eve:test",
           createStream: async function* () {
             yield stampTestEvent(
               {
@@ -3208,7 +3202,6 @@ describe("EveTUIRunner session id reporting", () => {
     vi.spyOn(session, "send").mockImplementation(
       async () =>
         new MessageResponse({
-          continuationToken: "eve:test",
           createStream: async function* () {
             yield { type: "turn.started", data: { turnId: "turn-1", sequence: 1 } } as never;
             await gate.promise;
@@ -3263,7 +3256,7 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
       },
     });
     const client = stubClient();
-    vi.spyOn(client, "session").mockReturnValue({
+    vi.spyOn(client.sessions, "attach").mockReturnValue({
       stream: (options?: { signal?: AbortSignal }) => childStream(options),
     } as never);
 

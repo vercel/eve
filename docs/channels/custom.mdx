@@ -13,181 +13,113 @@ The channel file stem becomes the channel id, so `agent/channels/internal-webhoo
 
 ## Define a channel
 
-```ts
+Bind the platform's conversation identity once, then perform every operation on
+the returned address:
+
+```ts title="agent/channels/support.ts"
 import { defineChannel, GET, POST } from "eve/channels";
 
 export default defineChannel({
   routes: [
-    POST("/message", async (req, { send }) => {
-      const body = await req.json();
-      const session = await send(body.message, {
-        auth: null,
-        continuationToken: body.token,
-      });
+    POST("/threads/:threadId/messages", async (request, { channelAddress, params }) => {
+      const body = await request.json();
+      const thread = channelAddress(params.threadId);
 
+      if (body.message === "/new") {
+        return Response.json(await thread.reset({ reason: "User requested /new" }));
+      }
+
+      const session = await thread.send(body.message, { auth: null });
       return Response.json({ sessionId: session.id });
     }),
-    GET("/sessions/:sessionId/stream", async (_req, { getSession, params }) => {
-      const session = getSession(params.sessionId);
-      const stream = await session.getEventStream();
 
+    POST("/threads/:threadId/cancel", async (_request, { channelAddress, params }) =>
+      Response.json(await channelAddress(params.threadId).cancel()),
+    ),
+    POST("/threads/:threadId/compact", async (_request, { channelAddress, params }) =>
+      Response.json(await channelAddress(params.threadId).compact()),
+    ),
+    POST("/threads/:threadId/clear", async (_request, { channelAddress, params }) =>
+      Response.json(await channelAddress(params.threadId).clear()),
+    ),
+
+    GET("/sessions/:sessionId/stream", async (_request, { attachSession, params }) => {
+      const stream = await attachSession(params.sessionId).getEventStream();
       return new Response(stream, {
         headers: { "content-type": "application/x-ndjson; charset=utf-8" },
       });
     }),
   ],
+
   events: {
-    "message.completed"(event, channel, ctx) {
-      // deliver completed messages back to the surface that owns this channel
+    "message.completed"(event, channel) {
+      console.log(channel.session.id, event.message);
     },
   },
 });
 ```
 
-Declare routes with the `POST()` and `GET()` helpers. Each route handler receives the raw `Request` and a helpers object:
+Each route receives these operation surfaces:
 
-- `attachSession(sessionId)` creates an I/O-free handle pinned to one durable session ID. Its `send()`, control, and stream methods never follow a replacement session.
-- `send(message, { auth, continuationToken, state?, title? })` starts or resumes a session. `title` overrides the new workflow session's display title without changing the model message. Returns a `Session`.
-- `cancel({ continuationToken, turnId? })` requests cancellation of the active turn on the session that owns the token. See [Cancel a turn](#cancel-a-turn).
-- `clear({ continuationToken })` removes the model-message history while preserving the session and its durable resources. See [Clear session context](#clear-session-context).
-- `compact({ continuationToken })` queues context compaction for the session that owns the token without sending model input. See [Compact a session](#compact-a-session).
-- `reset({ continuationToken, reason? })` retires the session that owns the token so the next `send()` starts a fresh session. See [Reset a session](#reset-a-session).
-- `getSession(sessionId)` looks up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming, `getStreamTailIndex()` for resolving the durable tail when a route wants to serve bounded reads, and `cancel({ turnId? })` for session-id-addressed cancellation.
-- `receive(channel, ...)` hands inbound work to a different channel for cross-channel hand-off.
-- `params` holds route parameters extracted from the path pattern.
-- `waitUntil(promise)` extends the request lifetime for background work.
-- `requestIp` is the client IP, or `null` when the host cannot provide it.
+- `channelAddress(continuationToken)` binds a channel-local conversation address.
+- `attachSession(sessionId)` creates an I/O-free handle pinned to one durable session ID.
+- `receive(channel, options)` hands work to another authored channel.
+- `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
 
-Event handlers like `"message.completed"` are declared under the `events` key. They receive `(eventData, channel, ctx)`, where `eventData` is the event payload, `channel` carries platform handles and session continuation operations, and `ctx` is the eve `SessionContext`. Every channel kind shares this signature. The one exception is `session.failed`, which receives only `(eventData, channel)` with no `ctx`.
+Event handlers receive `(eventData, channel, ctx)`. `channel.session.id` identifies
+the exact session, while `channel.continuation` exposes the current address and
+`rekey()` when this channel needs to move it. `session.failed` receives only
+`(eventData, channel)`.
 
-## Fixed session handles
+## Address and session handles
 
-Use `attachSession(sessionId)` when you already have a durable session ID and must target that exact session. Attaching performs no I/O and never creates or follows a replacement session:
+`ChannelAddress` is dynamic: every call targets whichever session currently owns
+the address. Only `send()` can create a session when the address is unowned.
 
 ```ts
-POST("/control/:sessionId/clear", async (_request, { attachSession, params }) => {
-  const session = attachSession(params.sessionId);
-  return Response.json(await session.clear());
-});
+const thread = channelAddress(threadId);
+
+const session = await thread.send("Hello", { auth });
+await thread.cancel({ turnId });
+await thread.compact();
+await thread.clear();
+await thread.reset({ reason: "Start over" });
+
+const currentSession = await thread.resolveSession();
 ```
 
-The handle keeps every operation next to the ID it targets. The calls below show the available shapes independently:
+`Session` is fixed: every call targets exactly one durable ID. It never creates,
+follows, or resolves a replacement.
 
 ```ts
 const session = attachSession(sessionId);
 
-await session.send({ auth: null, message: "Continue the analysis." });
+await session.send({ auth, message: "Follow up" });
 await session.cancel({ turnId });
 await session.compact();
 await session.clear();
-await session.reset({ reason: "User requested a fresh session" });
-
-const stream = await session.getEventStream({ startIndex: 0 });
-const tailIndex = await session.getStreamTailIndex();
+await session.reset({ reason: "Retire this session" });
+await session.getEventStream({ startIndex: 12 });
 ```
 
-`send()` reports `session_not_active` instead of creating a session when the ID is unknown or terminal. Control methods are benign for an inactive ID. After `reset()`, the handle remains pinned to the retired ID.
+Attaching does no lookup. The first operation reports whether the ID is active.
+Call `resolveSession()` only when you explicitly need to snapshot an address's
+current owner as a fixed handle.
 
-## Cancel a turn
+## Operation semantics
 
-A stop route cancels a session's in-flight turn with the `cancel` helper, addressed by the same channel-local continuation token used with `send()`:
+- `cancel` cooperatively stops the active turn. Confirm it with `turn.cancelled`
+  followed by `session.waiting`; the session accepts another message afterward.
+- `compact` summarizes model context without adding a synthetic user message. A
+  success emits `compaction.requested`, `compaction.completed`, then `session.waiting`.
+- `clear` removes model-message history in place. It preserves the system prompt,
+  skills, tools, durable state, limits, address ownership, and session sandbox.
+- `reset` terminally retires the current session. A later address `send()` creates
+  a fresh session; a fixed `Session` handle remains pinned to the retired ID.
 
-```ts
-import { defineChannel, POST } from "eve/channels";
-
-export default defineChannel({
-  routes: [
-    POST("/threads/:threadId/stop", async (_req, { cancel, params }) => {
-      const result = await cancel({ continuationToken: params.threadId });
-      return Response.json(result);
-    }),
-  ],
-});
-```
-
-Both result statuses are successful. `"accepted"` means the cancellation request was consumed, not that the observed turn will cancel; confirmation is `turn.cancelled` followed by `session.waiting` on the event stream. `"no_active_turn"` covers an unknown token and a session with nothing to cancel — idle, parked, or already completed.
-
-Semantics:
-
-- `cancel` never starts a session, sends input, or clears history. The session parks and accepts the next message normally.
-- Pass `turnId` (stamped on every turn-scoped stream event) to guard against stale stop requests. A mismatched guard is consumed as a benign no-op and cannot cancel a newer turn.
-- The helper addresses only this channel's sessions; it cannot cancel a session owned by another channel.
-- Cancellation stops work without replacement input. Partial streamed output and completed side effects remain observable, and active local or remote subagents receive cancellation recursively.
-- The route owns authentication of the inbound stop request, exactly as for `send()`.
-
-When you already hold a `Session` — returned by `send()` or `getSession(sessionId)` — call `session.cancel({ turnId? })` to request the same cancellation addressed by session id.
-
-## Clear session context
-
-Call `clear` with the channel-local continuation token to remove a session's durable model-message history without replacing the session:
-
-```ts
-import { defineChannel, POST } from "eve/channels";
-
-export default defineChannel({
-  routes: [
-    POST("/threads/:threadId/clear", async (_req, { clear, params }) => {
-      const result = await clear({ continuationToken: params.threadId });
-      return Response.json(result);
-    }),
-  ],
-});
-```
-
-`"accepted"` means the clear was queued. The stream emits `context.cleared` followed by `session.waiting`, after which the next ordinary message resumes the same session with no prior model messages. The system prompt, configured tools and skills, durable state, limits, continuation-token ownership, and session-scoped sandbox remain. `"no_active_session"` means the token has no current owner.
-
-## Compact a session
-
-Call `compact` with the channel-local continuation token to summarize durable conversation history without delivering a command to the model:
-
-```ts
-import { defineChannel, POST } from "eve/channels";
-
-export default defineChannel({
-  routes: [
-    POST("/threads/:threadId/compact", async (_req, { compact, params }) => {
-      const result = await compact({ continuationToken: params.threadId });
-      return Response.json(result);
-    }),
-  ],
-});
-```
-
-`"accepted"` means the durable session queued the operation. A successful compaction emits `compaction.requested` followed by `compaction.completed`, then the operation returns through `session.waiting`. If summarization fails, the stream returns through `session.waiting` without `compaction.completed` and preserves the previous history. If a turn is active, eve runs the compaction after that turn settles; it does not cancel the turn. `"no_active_session"` means the token has no current owner. Both outcomes are successful, and compaction never starts a session or appends a synthetic user message.
-
-## Reset a session
-
-Identity-addressed channels can consume commands such as `/new` in their route, without sending the command to the model. Call `reset` with the same channel-local continuation token used by `send()`:
-
-```ts
-import { defineChannel, POST } from "eve/channels";
-
-export default defineChannel({
-  routes: [
-    POST("/messages", async (request, { reset, send }) => {
-      const body = await request.json();
-
-      if (body.message.trim().toLowerCase() === "/new") {
-        await reset({
-          continuationToken: body.conversationId,
-          reason: "User requested /new",
-        });
-        return Response.json({ message: "Started a new conversation." });
-      }
-
-      const session = await send(body.message, {
-        auth: null,
-        continuationToken: body.conversationId,
-      });
-      return Response.json({ sessionId: session.id });
-    }),
-  ],
-});
-```
-
-`reset` returns `{ status: "reset", previousSessionId }` when it observed an owner, or `{ status: "no_active_session" }` when the token was already free. Both outcomes are successful. It terminally cancels the observed workflow run and waits until its non-retained continuation hook no longer blocks reuse, so the next `send()` using the same token creates a new session with fresh history and state.
-
-The replacement session owns a new session-scoped sandbox. eve initializes it lazily on that session's first sandbox use, so it never reuses the prior session's workspace or sandbox state. Resetting does not clear history in place, roll back tool calls, or delete the previous run or its sandbox; normal retention and backend cleanup policies still apply. Side effects or partial output that were already committed remain committed. Authenticate and deduplicate inbound command webhooks before calling this helper: a delayed duplicate `/new` can otherwise reset a newer session that has already reclaimed the same token.
+Control operations never create a session. Unknown or inactive targets return a
+benign no-active status. Authenticate and deduplicate command webhooks before
+calling `reset`, because a delayed duplicate can retire a newer address owner.
 
 ## CORS
 
@@ -217,19 +149,19 @@ import { defineChannel, WS } from "eve/channels";
 
 export default defineChannel({
   routes: [
-    WS("/voice/ws", async (_req, { send }) => ({
+    WS("/voice/ws", async (_req, { channelAddress }) => ({
       async message(_peer, message) {
-        await send(message.text(), {
-          auth: null,
-          continuationToken: "voice-demo",
-        });
+        await channelAddress("voice-demo").send(message.text(), { auth: null });
       },
     })),
   ],
 });
 ```
 
-`WS()` handlers receive the same helpers as HTTP route handlers: `attachSession`, `send`, `cancel`, `clear`, `compact`, `reset`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
+`WS()` handlers receive the same `channelAddress`, `attachSession`, `receive`,
+`params`, `waitUntil`, and `requestIp` arguments as HTTP route handlers. The
+returned hooks are eve-owned structural types compatible with Nitro/H3 websocket
+routing, including `upgrade`, `open`, `message`, `close`, and `error`.
 
 ### Node upgrade server escape hatch
 
@@ -283,7 +215,7 @@ export default defineChannel({
 
 Semantics:
 
-- The target channel's authored `receive(input, { send })` hook owns the continuation-token format and initial state. Callers supply only `{ message, target, auth }`.
+- The target channel's authored `receive(input, { channelAddress })` hook owns the continuation-token format and initial state. Callers supply only `{ message, target, auth }`.
 - `auth` flows through to `session.auth.initiator` so the target's event handlers and the agent's tools can read who started the session.
 - Calling `args.receive(...)` does not also start a session on the current channel. The inbound channel's response is whatever the route handler returns explicitly.
 - The first argument is the target channel module's default export. Import it directly from `agent/channels/<name>.ts`. Identity is matched by reference.
@@ -310,11 +242,10 @@ export default defineChannel({
   },
 
   routes: [
-    POST("/start", async (req, { send }) => {
+    POST("/start", async (req, { channelAddress }) => {
       const body = await req.json();
-      await send(body.message, {
+      await channelAddress(body.token).send(body.message, {
         auth: null,
-        continuationToken: body.token,
         state: { topic: body.topic, contextMessages: body.context, internalCounter: 0 },
       });
 
@@ -335,7 +266,7 @@ When a parent agent dispatches a subagent, the framework forwards the parent's c
 
 ## Continuation tokens
 
-Each call to `send(message, { auth, continuationToken, state?, title? })` from a channel route addresses a session by its channel-local raw token. The framework prepends the channel name, derived from the file stem under `agent/channels/`, before handing the token to the runtime.
+Each `channelAddress(rawToken)` call uses a channel-local token. The framework prepends the channel name, derived from the file stem under `agent/channels/`, before handing the token to the runtime.
 
 ```ts
 import { slackContinuationToken } from "eve/channels/slack";
@@ -347,11 +278,11 @@ twilioContinuationToken("+15551234567", "+15557654321"); // "+15551234567:+15557
 
 Custom channels write their own function that joins the identity fields. The framework derives nothing for you; the channel owns its token format.
 
-When the identity that should address a session is not known until later, the channel can re-key the parked session by calling `session.setContinuationToken(...)`. Pass the channel-local raw token; the runtime preserves the current channel namespace.
+When the identity that should address a session is not known until later, re-key the live address with `channel.continuation?.rekey(rawToken)`. The runtime preserves the current channel namespace.
 
 Re-keying changes the address of the current session. `reset` is different: it terminally retires the current session and makes its existing address available to a later `send()`. `cancel` is narrower still: it stops only the active turn and leaves the session, history, and continuation-token ownership intact.
 
-The `context(state, session)` config option builds the per-step `channel` argument handed to every event handler. It receives the channel's live adapter `state` and a `SessionHandle`, and returns the channel-owned context (thread handles, API clients, late-bound callbacks). The framework injects [`ChannelSessionOps`](#define-a-channel) and passes the result as the second positional argument to each handler. Closing over `session` lets the factory register callbacks that re-key the session later. State mutations made through the returned context are written back to adapter state.
+The `context(state, session)` config option builds the per-step `channel` argument handed to every event handler. It receives the channel's live adapter `state` and a `SessionHandle`, and returns the channel-owned context (thread handles, API clients, late-bound callbacks). The framework injects [`ChannelSessionOps`](#define-a-channel) and passes the result as the second positional argument to each handler. Closing over `session` lets the factory register callbacks that re-key the address later. State mutations made through the returned context are written back to adapter state.
 
 ```ts
 import { defineChannel } from "eve/channels";
@@ -365,7 +296,7 @@ defineChannel<{ ref: string | null }>({
       state,
       registerAnchor(ref: string) {
         state.ref = ref;
-        session.setContinuationToken(ref);
+        session.continuation?.rekey(ref);
       },
     };
   },
@@ -382,15 +313,15 @@ At the next workflow boundary, the runtime claims the new park hook before relea
 
 ## File uploads
 
-`send()` accepts `string | UserContent`. To include file attachments, pass a `UserContent` array mixing text and file parts:
+`ChannelAddress.send()` and `Session.send()` accept `string | UserContent`. To include file attachments, pass a `UserContent` array mixing text and file parts:
 
 ```ts
-await send(
+await channelAddress(continuationToken).send(
   [
     { type: "text", text: body.message },
     { type: "file", data: imageBytes, mediaType: "image/png" },
   ],
-  { auth, continuationToken },
+  { auth },
 );
 ```
 
@@ -406,8 +337,8 @@ defineChannel({
   },
 
   routes: [
-    POST("/webhook", async (req, { send }) => {
-      await send(
+    POST("/webhook", async (req, { channelAddress }) => {
+      await channelAddress(continuationToken).send(
         [
           { type: "text", text: message.text },
           ...message.attachments.map((a) => ({
@@ -416,7 +347,7 @@ defineChannel({
             mediaType: a.mediaType,
           })),
         ],
-        { auth, continuationToken, state },
+        { auth, state },
       );
     }),
   ],

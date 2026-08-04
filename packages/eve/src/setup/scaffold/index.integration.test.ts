@@ -385,8 +385,9 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("preserveCompletedSessions: true");
-    expect(agentChatSource).toContain("session.cancel({ turnId })");
+    expect(agentChatSource).toContain(".attach(sessionId)");
+    expect(agentChatSource).toContain(".cancel({ turnId })");
+    expect(agentChatSource).toContain("onSessionChange(session)");
     expect(agentChatSource).toContain("cancellation.sentTurnId === turnId");
     expect(agentChatSource).not.toContain("onStop={agent.stop}");
   });

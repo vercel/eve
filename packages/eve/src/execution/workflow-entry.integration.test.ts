@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 
-import { createSendFn } from "#channel/send.js";
+import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
@@ -392,10 +392,13 @@ describe("workflowEntry integration", () => {
         expect(filterEventsByType(events, "session.failed")).toHaveLength(0);
         await expect(run.returnValue).resolves.toEqual({ output: "" });
 
-        const send = createSendFn(workflowRuntime, { kind: "http" }, "http");
-        const replacement = await send("start fresh", {
-          auth: null,
+        const replacement = await createChannelAddress({
+          adapter: { kind: "http" },
+          channelName: "http",
           continuationToken: "workflow-entry-timeout",
+          runtime: workflowRuntime,
+        }).send("start fresh", {
+          auth: null,
         });
         replacementSessionId = replacement.id;
 

@@ -22,18 +22,15 @@ function turnEvents(): MessageStreamEvent[] {
       stepIndex: 0,
       turnId: "turn_1",
     }),
-    createSessionWaitingEvent("http:session_1"),
+    createSessionWaitingEvent(),
   ] as UnstampedMessageStreamEvent[]);
 }
 
 function startedResponse(): Response {
-  return new Response(
-    JSON.stringify({ continuationToken: "http:session_1", ok: true, sessionId: "session_1" }),
-    {
-      headers: { "content-type": "application/json", [EVE_SESSION_ID_HEADER]: "session_1" },
-      status: 202,
-    },
-  );
+  return new Response(JSON.stringify({ ok: true, sessionId: "session_1", status: "accepted" }), {
+    headers: { "content-type": "application/json", [EVE_SESSION_ID_HEADER]: "session_1" },
+    status: 202,
+  });
 }
 
 function streamResponse(events: readonly MessageStreamEvent[]): Response {
@@ -104,7 +101,7 @@ describe("EveAgentStore stream overlap", () => {
 
   it("applies a pre-v20 event whose envelope has no id", async () => {
     const legacy = preV20MessageCompletedEvent();
-    const boundary = stampTestEvents([createSessionWaitingEvent("http:session_1")])[0]!;
+    const boundary = stampTestEvents([createSessionWaitingEvent()])[0]!;
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(startedResponse())
       .mockResolvedValueOnce(streamResponse([legacy, boundary]));

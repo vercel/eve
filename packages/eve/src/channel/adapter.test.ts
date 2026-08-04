@@ -101,18 +101,20 @@ describe("ChannelAdapter helpers", () => {
     expect(defaultDeliverResult({})).toBeUndefined();
   });
 
-  it("publishes a continuation token re-keyed by the waiting handler", async () => {
+  it("lets a waiting handler re-key its channel address without exposing it in the event", async () => {
     let continuationToken = "slack:temporary";
     const context: ChannelAdapterContext = {
       ctx: {} as ChannelAdapterContext["ctx"],
       session: {
         auth: { current: null, initiator: null },
-        get continuationToken() {
-          return continuationToken;
-        },
         id: "session-1",
-        setContinuationToken(token) {
-          continuationToken = `slack:${token}`;
+        continuation: {
+          get token() {
+            return continuationToken;
+          },
+          rekey(token: string) {
+            continuationToken = `slack:${token}`;
+          },
         },
       },
       state: {},
@@ -120,19 +122,16 @@ describe("ChannelAdapter helpers", () => {
     const adapter: ChannelAdapter = {
       kind: "slack",
       "session.waiting"(_data, ctx) {
-        ctx.session.setContinuationToken("C1:T1");
+        ctx.session.continuation?.rekey("C1:T1");
       },
     };
 
-    const event = await callAdapterEventHandler(
-      adapter,
-      createSessionWaitingEvent("slack:temporary"),
-      context,
-    );
+    const event = await callAdapterEventHandler(adapter, createSessionWaitingEvent(), context);
 
     expect(event).toEqual({
-      data: { continuationToken: "C1:T1", wait: "next-user-message" },
+      data: { wait: "next-user-message" },
       type: "session.waiting",
     });
+    expect(continuationToken).toBe("slack:C1:T1");
   });
 });

@@ -2,7 +2,7 @@ import { z } from "#compiled/zod/index.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { AgentHandleError } from "#protocol/agent-handle-error.js";
-import { createEveCallbackRoutePath, createEveCancelTurnRoutePath } from "#protocol/routes.js";
+import { createEveCallbackRoutePath, createEveSessionCancelRoutePath } from "#protocol/routes.js";
 import type { CancelTurnResult, SessionAuthContext } from "#channel/types.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import type { HeadersValue } from "#client/types.js";
@@ -412,7 +412,7 @@ function createRemoteAgentCancelTurnUrl(
   remote: ResolvedRuntimeRemoteAgentNode,
   sessionId: string,
 ): string {
-  return createRemoteAgentRouteUrl(remote.url, createEveCancelTurnRoutePath(sessionId));
+  return createRemoteAgentRouteUrl(remote.url, createEveSessionCancelRoutePath(sessionId));
 }
 
 function createRemoteAgentContinueUrl(

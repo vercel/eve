@@ -51,12 +51,11 @@ export default defineChannel({
     };
   },
   routes: [
-    POST<AnchorState>("/anchor/start", async (request, { send }) => {
+    POST<AnchorState>("/anchor/start", async (request, { channelAddress }) => {
       const body = readBody(await request.json().catch(() => ({})));
       const anchorToken = `thread:${body.threadId}`;
-      const session = await send(body.message, {
+      const session = await channelAddress(`pending:${body.threadId}`).send(body.message, {
         auth: authFor("start", body.marker),
-        continuationToken: `pending:${body.threadId}`,
         state: initialState(anchorToken),
       });
 
@@ -68,12 +67,11 @@ export default defineChannel({
       });
     }),
 
-    POST<AnchorState>("/anchor/reply", async (request, { send }) => {
+    POST<AnchorState>("/anchor/reply", async (request, { channelAddress }) => {
       const body = readBody(await request.json().catch(() => ({})));
       const anchorToken = `thread:${body.threadId}`;
-      const session = await send(body.message, {
+      const session = await channelAddress(anchorToken).send(body.message, {
         auth: authFor("reply", body.marker),
-        continuationToken: anchorToken,
         state: initialState(anchorToken),
       });
 
@@ -89,8 +87,13 @@ export default defineChannel({
       channel.state.completedMessages.push(event.message ?? "");
 
       const anchorToken = channel.state.anchorToken;
-      if (anchorToken !== null && !channel.continuationToken.endsWith(`:${anchorToken}`)) {
-        channel.setContinuationToken(anchorToken);
+      const continuation = channel.continuation;
+      if (
+        anchorToken !== null &&
+        continuation !== undefined &&
+        !continuation.token.endsWith(`:${anchorToken}`)
+      ) {
+        continuation.rekey(anchorToken);
       }
     },
   },

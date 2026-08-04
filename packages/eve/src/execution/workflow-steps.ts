@@ -462,7 +462,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
 
   // Re-stamp the in-memory session's continuation token in case a
-  // handler called `setContinuationToken(...)` (eg. Slack auto-anchor).
+  // handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).
   const rekeyed = reconcileSessionContinuationToken(ctx, stepResult.session);
   const nextSerializedContext = serializeContext(ctx);
   stepResult = { ...stepResult, session: rekeyed };

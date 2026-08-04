@@ -109,7 +109,7 @@ export async function settleCancelledTurnStep(input: {
             turnId: activeTurnId(emissionState),
           }) ?? baseEmit;
         return {
-          result: await emitCancelledTurn(emit, emissionState, enrichedSession.continuationToken),
+          result: await emitCancelledTurn(emit, emissionState),
           session: enrichedSession,
         };
       });

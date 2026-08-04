@@ -97,20 +97,6 @@ export interface ClientOptions {
    * redirect.
    */
   readonly redirect?: ClientRedirectPolicy;
-
-  /**
-   * Keep a session's continuation token after a normal `session.completed`
-   * boundary.
-   *
-   * By default, completed turns reset the client-side session so the next
-   * `send()` starts a fresh server-side conversation. Interactive clients can
-   * set this to preserve durable session state, including framework-managed
-   * sandbox state, across follow-up prompts until they explicitly create a new
-   * session.
-   *
-   * @default false
-   */
-  readonly preserveCompletedSessions?: boolean;
 }
 
 /**
@@ -247,7 +233,7 @@ export type ClearResult =
       readonly status: Extract<ClearStatus, "accepted">;
     }
   | {
-      /** The client had no continuation token or the token was already free. */
+      /** The fixed session ID was unknown or no longer active. */
       readonly status: Extract<ClearStatus, "no_active_session">;
     };
 
@@ -259,19 +245,19 @@ export type CompactResult =
       readonly status: Extract<CompactStatus, "accepted">;
     }
   | {
-      /** The client had no continuation token or the token was already free. */
+      /** The fixed session ID was unknown or no longer active. */
       readonly status: Extract<CompactStatus, "no_active_session">;
     };
 
 /** Result of terminally resetting a client session. */
 export type ResetResult =
   | {
-      /** The prior session was retired and its continuation token released. */
+      /** The prior session was terminally retired. */
       readonly previousSessionId: string;
       readonly status: Extract<ResetStatus, "reset">;
     }
   | {
-      /** The client had no continuation token or the token was already free. */
+      /** The fixed session ID was unknown or no longer active. */
       readonly status: Extract<ResetStatus, "no_active_session">;
     };
 
@@ -329,12 +315,10 @@ export interface HealthResult {
 }
 
 /**
- * Serializable session cursor. Persist this value and pass it back to
- * {@link Client.session} to resume a conversation later.
+ * Serializable cursor for one fixed, ID-addressed client session.
  */
-export interface SessionState {
-  readonly continuationToken?: string;
-  readonly sessionId?: string;
+export interface ClientSessionState {
+  readonly sessionId: string;
   readonly streamIndex: number;
 }
 
@@ -346,5 +330,5 @@ export interface SessionSnapshot {
   readonly events: readonly MessageStreamEvent[];
 
   /** Session cursor advanced exactly past {@link events}. */
-  readonly session: SessionState;
+  readonly session: ClientSessionState;
 }

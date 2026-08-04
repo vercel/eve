@@ -7,7 +7,7 @@ import {
   getOptionalStringRecordProperty,
 } from "#internal/authored-module.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
-import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_SESSIONS_ROUTE_PATH } from "#protocol/routes.js";
 import type { JsonObject } from "#shared/json.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 
@@ -56,10 +56,7 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
     url: string;
   } = {
     description: expectString(record.description, message),
-    path:
-      record.path === undefined
-        ? EVE_CREATE_SESSION_ROUTE_PATH
-        : expectString(record.path, message),
+    path: record.path === undefined ? EVE_SESSIONS_ROUTE_PATH : expectString(record.path, message),
     url,
   };
 

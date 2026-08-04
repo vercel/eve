@@ -15,9 +15,7 @@ async function firePost(
   channel: unknown,
   body: Record<string, unknown>,
   overrides: {
-    readonly resolveActiveSession?: (options: {
-      readonly continuationToken: string;
-    }) => Promise<{ readonly sessionId: string } | undefined>;
+    readonly resolveSession?: (continuationToken: string) => Promise<unknown>;
   } = {},
 ): Promise<{
   readonly response: Response;
@@ -46,16 +44,21 @@ async function firePost(
     }),
     {
       attachSession: vi.fn() as any,
-      getSession: vi.fn(),
-      resolveActiveSession: overrides.resolveActiveSession ?? vi.fn().mockResolvedValue(undefined),
-      cancel: vi.fn(),
-      clear: vi.fn(),
-      compact: vi.fn(),
-      reset: vi.fn(),
+      channelAddress: (continuationToken) =>
+        ({
+          continuationToken,
+          send: (input: unknown, options: Record<string, unknown>) =>
+            send(input, { ...options, continuationToken }),
+          cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
+          compact: vi.fn().mockResolvedValue({ status: "accepted" }),
+          clear: vi.fn().mockResolvedValue({ status: "accepted" }),
+          reset: vi.fn().mockResolvedValue({ status: "not_found" }),
+          resolveSession: () =>
+            (overrides.resolveSession ?? vi.fn().mockResolvedValue(undefined))(continuationToken),
+        }) as never,
       params: {},
       receive: vi.fn(),
       requestIp: null,
-      send,
       waitUntil,
     },
   );
@@ -133,7 +136,7 @@ describe("teamsChannel", () => {
 
   it("exposes the subscription helper to onMessage", async () => {
     const observed: boolean[] = [];
-    const resolveActiveSession = vi.fn().mockResolvedValue({ sessionId: "SESSION" });
+    const resolveSession = vi.fn().mockResolvedValue({ id: "SESSION" });
     const channel = teamsChannel({
       credentials: { webhookVerifier: () => true },
       async onMessage(ctx) {
@@ -145,12 +148,10 @@ describe("teamsChannel", () => {
     raw.entities = [];
     raw.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
 
-    await firePost(channel, raw, { resolveActiveSession });
+    await firePost(channel, raw, { resolveSession });
 
     expect(observed).toEqual([true]);
-    expect(resolveActiveSession).toHaveBeenCalledWith({
-      continuationToken: "TENANT:CONV:THREAD_ROOT",
-    });
+    expect(resolveSession).toHaveBeenCalledWith("TENANT:CONV:THREAD_ROOT");
   });
 
   it("allows a mention-or-subscription onMessage policy", async () => {
@@ -165,7 +166,7 @@ describe("teamsChannel", () => {
     raw.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
 
     const { send } = await firePost(channel, raw, {
-      resolveActiveSession: vi.fn().mockResolvedValue({ sessionId: "SESSION" }),
+      resolveSession: vi.fn().mockResolvedValue({ id: "SESSION" }),
     });
 
     expect(send).toHaveBeenCalledTimes(1);
@@ -349,7 +350,13 @@ describe("teamsChannel", () => {
         auth: null,
         message: "Begin",
       },
-      { send },
+      {
+        channelAddress: (continuationToken) =>
+          ({
+            send: (input: unknown, options: Record<string, unknown>) =>
+              send(input, { ...options, continuationToken }),
+          }) as never,
+      },
     );
 
     expect(requests[0]!.url).toBe("https://service.example/teams/v3/conversations/CONV/activities");

@@ -6,7 +6,7 @@ import { isCompiledChannel } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { ContextAccessor } from "#context/key.js";
-import { SessionKey, type Session } from "#context/keys.js";
+import { SessionIdKey, SessionKey, type Session } from "#context/keys.js";
 import type { slackChannel, SlackInstrumentationMetadata } from "#public/channels/slack/index.js";
 import type {
   twilioChannel,
@@ -179,15 +179,13 @@ describe("defineChannel", () => {
         return { state };
       },
       routes: [
-        POST<State>("/x", async (_request, { send }) => {
-          await send("hello", {
+        POST<State>("/x", async (_request, { channelAddress }) => {
+          await channelAddress("x").send("hello", {
             auth: null,
-            continuationToken: "x",
             state: { completedTurns: 1 },
           });
-          await send("hello", {
+          await channelAddress("x").send("hello", {
             auth: null,
-            continuationToken: "x",
             // @ts-expect-error route send state is inferred from defineChannel state.
             state: { completedTurns: "1" },
           });
@@ -321,7 +319,9 @@ describe("defineChannel", () => {
       readonly threadTs: string | null;
     }
 
-    const captured: { sessions: Array<{ setContinuationToken: (t: string) => void }> } = {
+    const captured: {
+      sessions: Array<{ continuation?: { rekey(token: string): void } }>;
+    } = {
       sessions: [],
     };
     const channel = defineChannel<State, { state: State }>({
@@ -337,7 +337,7 @@ describe("defineChannel", () => {
     const adapter = getAdapter(channel);
 
     // Stand up a minimal accessor whose `set` calls are captured so the
-    // session handle's `setContinuationToken` is observable.
+    // session handle's continuation rekey is observable.
     const writes: Array<[string, unknown]> = [];
     let continuationToken = "slack:C123:";
     const accessor: ContextAccessor = {
@@ -369,7 +369,7 @@ describe("defineChannel", () => {
     // The session is the one ctx.session exposes (same reference).
     expect(adapterCtx.session).toBe(captured.sessions[0]);
 
-    captured.sessions[0]!.setContinuationToken("C123:T456");
+    captured.sessions[0]!.continuation?.rekey("C123:T456");
     expect(writes).toEqual([["eve.continuationToken", "slack:C123:T456"]]);
   });
 
@@ -395,6 +395,7 @@ describe("defineChannel", () => {
     };
     const ctx = new ContextContainer();
     ctx.set(SessionKey, session);
+    ctx.set(SessionIdKey, session.sessionId);
 
     const accessor: ContextAccessor = {
       get: (key) => ctx.get(key as any),
@@ -415,8 +416,8 @@ describe("defineChannel", () => {
     expect(typeof capturedCtx.getSkill).toBe("function");
     expect(capturedCtx.session.id).toBe("sess-channel-test");
     expect(capturedCtx.session.turn).toEqual({ id: "turn-1", sequence: 0 });
-    expect(typeof capturedChannel.continuationToken).toBe("string");
-    expect(typeof capturedChannel.setContinuationToken).toBe("function");
+    expect(capturedChannel.session.id).toBe("sess-channel-test");
+    expect(capturedChannel.continuation).toBeUndefined();
   });
 
   it("registers reasoning event handlers with channel and session context", async () => {
@@ -446,6 +447,7 @@ describe("defineChannel", () => {
     };
     const ctx = new ContextContainer();
     ctx.set(SessionKey, session);
+    ctx.set(SessionIdKey, session.sessionId);
 
     const accessor: ContextAccessor = {
       get: (key) => ctx.get(key as any),
@@ -495,7 +497,8 @@ describe("defineChannel", () => {
       reasoning: "Need to inspect the repo.",
       turnId: "turn-1",
     });
-    expect(typeof capturedChannel.continuationToken).toBe("string");
+    expect(capturedChannel.session.id).toBe("sess-channel-test");
+    expect(capturedChannel.continuation).toBeUndefined();
     expect(capturedCtx.session.id).toBe("sess-channel-test");
   });
 
@@ -557,9 +560,20 @@ describe("defineChannel", () => {
 
         return {
           id: channelId,
-          continuationToken: channelId,
+          async send() {
+            return { sessionId: channelId, status: "accepted" as const };
+          },
           async cancel() {
             return { status: "no_active_turn" as const };
+          },
+          async compact() {
+            return { sessionId: channelId, status: "accepted" as const };
+          },
+          async clear() {
+            return { sessionId: channelId, status: "accepted" as const };
+          },
+          async reset() {
+            return { previousSessionId: channelId, status: "reset" as const };
           },
           async getEventStream() {
             return new ReadableStream();

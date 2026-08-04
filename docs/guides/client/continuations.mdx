@@ -1,137 +1,106 @@
 ---
-title: "Continuations"
-description: "Persist and resume eve client sessions with continuation tokens, session IDs, and stream cursors."
+title: "Session State"
+description: "Persist and resume eve client sessions with durable session IDs and stream cursors."
 ---
 
-Every eve client turn returns two handles, and mixing them up is a common mistake. The TypeScript client tracks both for you:
-
-- `continuationToken`: the resume handle. Use it to send the next user turn.
-- `sessionId`: the stream-and-inspect handle. Use it to attach to event history.
-
-`ClientSession` also tracks `streamIndex`, the count of events already consumed. Together these three fields make a `SessionState`.
+The TypeScript client uses one durable session ID for messages, controls, and
+streams. A `ClientSession` adds a local `streamIndex` cursor so reconnects do not
+replay events already consumed by that handle.
 
 ## Read and persist state
 
-After a streamed turn finishes, read `session.state`:
+Create the session with its first turn, then persist `session.state` after
+consuming the response:
 
 ```ts
-const session = client.session();
+const { session, response } = await client.sessions.create("Create a launch checklist.");
 
-const response = await session.send("Create a launch checklist.");
 await response.result();
-
 await saveSessionState(session.state);
 ```
 
-As soon as `send()` returns, `session.state.sessionId` identifies the accepted in-flight turn for cancellation or stream reconnection. Consume the response before saving a fully advanced cursor: the continuation token and `streamIndex` update as events reach the turn boundary.
-
-Store the full state object:
+The state is deliberately small:
 
 ```ts
-interface SessionState {
-  continuationToken?: string;
-  sessionId?: string;
+interface ClientSessionState {
+  sessionId: string;
   streamIndex: number;
 }
 ```
 
-The continuation token resumes the conversation. The session ID and stream index let the client reconnect to the right stream position without replaying events it already consumed.
-
-`SessionState` is a cursor, not a chat transcript. If your app shows historical messages, persist the stream events separately and store them under your own chat or thread ID. On reload, pass the saved `SessionState` back to `client.session(savedState)` or `useEveAgent({ initialSession })`, and pass the saved events to your renderer or `useEveAgent({ initialEvents })`.
+It is a remote stream cursor, not a transcript. Persist events separately when
+your application renders chat history.
 
 ## Resume a saved session
 
-Pass the saved state back into `client.session()`:
+Attach a fixed handle to the saved ID and restore its cursor:
 
 ```ts
-import type { SessionState } from "eve/client";
+import type { ClientSessionState } from "eve/client";
 
-const saved = (await loadSessionState()) as SessionState;
-const session = client.session(saved);
+const saved = (await loadSessionState()) as ClientSessionState;
+const session = client.sessions.attach(saved.sessionId, {
+  streamIndex: saved.streamIndex,
+});
 
 const response = await session.send("Now shorten it.");
-const result = await response.result();
-console.log(result.message);
+console.log((await response.result()).message);
 ```
 
-If all you have is a continuation token, pass it as shorthand:
+`attach()` performs no request. Every later operation targets exactly
+`saved.sessionId`; it never follows or creates a replacement.
+
+## Waiting, completed, and reset sessions
+
+A session that emits `session.waiting` accepts another message through the same
+handle. A terminal or reset session does not. Start a fresh conversation
+explicitly with another `client.sessions.create(firstTurn)` call.
 
 ```ts
-const session = client.session(continuationToken);
-const response = await session.send("Continue where we left off.");
-await response.result();
+const reset = await session.reset({ reason: "Start over" });
+const { session: fresh, response } = await client.sessions.create("Begin again.");
 ```
 
-The shorthand can send a follow-up, but it doesn't know the previous stream cursor. Prefer full `SessionState` when you control persistence.
-
-## Waiting, completed, and failed sessions
-
-When a turn ends with `session.waiting`, the event carries the current channel-owned `data.continuationToken` and the client preserves the state so the next send continues the conversation.
-
-When a turn ends with `session.completed` or `session.failed`, the client resets its local state. The next send starts a fresh durable session:
-
-```ts
-const response = await session.send("Do this one-shot task.");
-const result = await response.result();
-
-if (result.status === "completed") {
-  // session.state is now a fresh cursor: { streamIndex: 0 }
-}
-```
-
-This matches the runtime contract, where only waiting sessions can accept the next user input.
+The old `session` remains pinned to its retired ID; `fresh` owns a different ID.
 
 ## Multiple sessions
 
-Create a separate `ClientSession` per conversation:
+Create one handle per conversation:
 
 ```ts
-const research = client.session();
-const support = client.session();
+const { session: research, response: researchResponse } =
+  await client.sessions.create("Research competitors.");
+const { session: support, response: supportResponse } =
+  await client.sessions.create("Draft a support reply.");
 
-const researchResponse = await research.send("Research competitors.");
-await researchResponse.result();
-
-const supportResponse = await support.send("Draft a support reply.");
-await supportResponse.result();
-
+await Promise.all([researchResponse.result(), supportResponse.result()]);
 await save("research", research.state);
 await save("support", support.state);
 ```
 
-The shared `Client` only owns host, auth, headers, and reconnect settings. Conversation state lives on each `ClientSession`.
-
-For a multi-chat UI, this usually means one application row per chat with two eve fields: the latest `SessionState` and the ordered event log for rendering. Do not reuse one `ClientSession` across sidebar conversations, and do not treat `streamIndex` as your database row index; it is only the remote stream cursor for that eve session.
+The shared `Client` owns host, auth, headers, and redirect policy. Each
+`ClientSession` owns its fixed ID and stream cursor.
 
 ## Reconnect an existing stream
 
-When a session already has a `sessionId`, `session.stream()` reattaches to its stream from the saved cursor. Resuming a saved `SessionState` after a restart is the common reason to do this:
+`stream()` starts from the handle's saved cursor and advances it as events are
+read:
 
 ```ts
-const session = client.session(savedState);
+const session = client.sessions.attach(saved.sessionId, {
+  streamIndex: saved.streamIndex,
+});
 
 for await (const event of session.stream()) {
   console.log(event.type);
 }
 ```
 
-`stream()` attaches to an existing run; to send new user input, use `send()`. For overriding the cursor with `startIndex` and the full reconnection model, see [Streaming](./streaming#open-a-stream-manually).
-
-If you only persisted `sessionId`, read the latest durable event to recover the current token from a waiting session:
-
-```ts
-const session = client.session({ sessionId, streamIndex: 0 });
-
-for await (const event of session.stream({ startIndex: -1 })) {
-  if (event.type === "session.waiting") {
-    await saveContinuationToken(event.data.continuationToken);
-  }
-  break;
-}
-```
+Use `send()` for new input. For explicit cursors, tail-relative reads, and
+bounded catch-up, see [Streaming](./streaming#open-a-stream-manually).
 
 ## What to read next
 
 - [Streaming](./streaming): stream events and reconnect by index
 - [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the raw HTTP contract
-- [eve channel](../../channels/eve): where continuation tokens come from
+- [eve channel](../../channels/eve): the ID-addressed routes

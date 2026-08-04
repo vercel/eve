@@ -55,12 +55,9 @@ describe("message stream protocol", () => {
     });
   });
 
-  it("publishes the channel-local continuation token on session.waiting", () => {
-    expect(createSessionWaitingEvent("slack:C1:T1")).toEqual({
-      data: {
-        continuationToken: "C1:T1",
-        wait: "next-user-message",
-      },
+  it("keeps channel routing identity out of session.waiting", () => {
+    expect(createSessionWaitingEvent()).toEqual({
+      data: { wait: "next-user-message" },
       type: "session.waiting",
     });
   });

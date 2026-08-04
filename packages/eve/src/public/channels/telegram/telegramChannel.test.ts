@@ -11,6 +11,14 @@ import { telegramChannel, type TelegramChannelState } from "#public/channels/tel
 
 const SECRET = "telegram-secret";
 
+function mockChannelAddress(send: (input: unknown, options: Record<string, unknown>) => unknown) {
+  return (continuationToken: string) =>
+    ({
+      send: (input: unknown, options: Record<string, unknown>) =>
+        send(input, { ...options, continuationToken }),
+    }) as never;
+}
+
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
   if (!isCompiledChannel(channel)) {
     throw new Error("Expected a CompiledChannel.");
@@ -82,16 +90,17 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected telegram channel to define a POST route.");
   }
-  const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(signedRequest(JSON.stringify(body)), {
-    getSession: vi.fn() as any,
+    attachSession: vi.fn() as any,
+    channelAddress: mockChannelAddress(send),
+    receive: vi.fn() as any,
     params: {},
     requestIp: null,
-    send,
     waitUntil,
-  } as any);
+  });
 
   let drained = 0;
   while (drained < waitUntil.mock.calls.length) {
@@ -272,12 +281,13 @@ describe("telegramChannel() inbound route", () => {
         method: "POST",
       }),
       {
-        getSession: vi.fn() as any,
+        attachSession: vi.fn() as any,
+        channelAddress: () => ({ send }) as never,
+        receive: vi.fn() as any,
         params: {},
         requestIp: null,
-        send,
         waitUntil: vi.fn(),
-      } as any,
+      },
     );
 
     expect(response.status).toBe(401);
@@ -620,7 +630,7 @@ describe("telegramChannel().receive", () => {
         credentials: { botToken: "bot-token" },
       }),
     );
-    const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await channel.receive!(
       {
@@ -628,7 +638,7 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      { send },
+      { channelAddress: mockChannelAddress(send) },
     );
 
     expect(send).toHaveBeenCalledWith(
@@ -659,7 +669,7 @@ describe("telegramChannel().receive", () => {
         credentials: { botToken: "bot-token" },
       }),
     );
-    const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await channel.receive!(
       {
@@ -667,7 +677,7 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      { send },
+      { channelAddress: mockChannelAddress(send) },
     );
 
     expect(send).toHaveBeenCalledWith(
@@ -700,7 +710,7 @@ describe("telegramChannel().receive", () => {
           credentials: { botToken: "bot-token" },
         }),
       );
-      const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+      const send = vi.fn().mockResolvedValue({ id: "s1" });
 
       await channel.receive!(
         {
@@ -708,7 +718,7 @@ describe("telegramChannel().receive", () => {
           auth: null,
           message: "run",
         },
-        { send },
+        { channelAddress: mockChannelAddress(send) },
       );
 
       expect(send).toHaveBeenCalledWith(
@@ -737,7 +747,7 @@ describe("telegramChannel().receive", () => {
         credentials: { botToken: "bot-token" },
       }),
     );
-    const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await channel.receive!(
       {
@@ -745,7 +755,7 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      { send },
+      { channelAddress: mockChannelAddress(send) },
     );
 
     expect(send).toHaveBeenCalledWith(
@@ -776,7 +786,7 @@ describe("telegramChannel().receive", () => {
         credentials: { botToken: "bot-token" },
       }),
     );
-    const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await channel.receive!(
       {
@@ -784,7 +794,7 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      { send },
+      { channelAddress: mockChannelAddress(send) },
     );
 
     expect(send).toHaveBeenCalledWith(
@@ -805,7 +815,10 @@ describe("telegramChannel().receive", () => {
     const send = vi.fn();
 
     await expect(
-      channel.receive!({ target: {}, auth: null, message: "run" }, { send }),
+      channel.receive!(
+        { target: {}, auth: null, message: "run" },
+        { channelAddress: mockChannelAddress(send) },
+      ),
     ).rejects.toThrow(/requires target.chatId/);
     await expect(
       channel.receive!(
@@ -814,7 +827,7 @@ describe("telegramChannel().receive", () => {
           auth: null,
           message: "run",
         },
-        { send },
+        { channelAddress: mockChannelAddress(send) },
       ),
     ).rejects.toThrow(/mutually exclusive/);
   });

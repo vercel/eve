@@ -118,7 +118,7 @@ eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry
 Set `traceChannelRequests: true` on `defineInstrumentation` to also wrap each inbound channel HTTP request in a single OpenTelemetry `SERVER` span named for the registered route, which parents the turn tree above (and any `hook.resume` and outgoing HTTP spans):
 
 ```text
-POST /eve/v1/session/:sessionId
+POST /eve/v1/sessions/:sessionId/messages
   └── hook.resume
         ├── GET hooks/by-token
         └── POST hook_received
@@ -181,7 +181,7 @@ When `eve build` fails on discovery errors, the CLI prints the full diagnostics 
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tool not discovered (the model never sees it) | Run `eve info`. Confirm the file is in the right slot (`agent/tools/<name>.ts`) and default-exports `defineTool(...)`, and check `.eve/diagnostics.json` for shape errors. `schedules/` are root-only.                                                                      |
 | Model won't call a tool it should             | Tighten the tool `description` and `inputSchema`; put procedural guidance in a [skill](../skills), not the description. Confirm it's in the active set with `eve info`.                                                                                                     |
-| Stuck on `session.waiting`                    | The turn is parked on an approval, a question, or a connection sign-in. Answer it, or POST a follow-up with the `continuationToken` (a stale token is rejected).                                                                                                            |
+| Stuck on `session.waiting`                    | The turn is parked for input. Answer the pending approval or question, or POST a follow-up to `/eve/v1/sessions/:sessionId/messages`.                                                                                                                                       |
 | 401 on production routes                      | Expected: auth fails closed. Replace `placeholderAuth()` with your route policy. Use `vercelOidc()` only for Vercel-issued tokens; otherwise configure `httpBasic()`, JWT/OIDC helpers, or a custom `AuthFn`. See [Auth and route protection](./auth-and-route-protection). |
 | Build fails with discovery errors             | Read the printed diagnostics and `.eve/diagnostics.json`; confirm the root-vs-subagent boundary is valid and secrets come from env vars.                                                                                                                                    |
 

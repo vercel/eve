@@ -14,9 +14,10 @@ Start with route auth.
 
 The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`) and guards three routes:
 
-- `POST /eve/v1/session`
-- `POST /eve/v1/session/:sessionId`
-- `GET /eve/v1/session/:sessionId/stream`
+- `POST /eve/v1/sessions`
+- `POST /eve/v1/sessions/:sessionId/messages`
+- `POST /eve/v1/sessions/:sessionId/{cancel,compact,clear,reset}`
+- `GET /eve/v1/sessions/:sessionId/stream`
 
 These routes are protected by the channel's auth policy. eve fails closed by default: production traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
 
@@ -181,7 +182,7 @@ import { createUnauthorizedResponse } from "eve/channels/auth";
 
 export default defineChannel({
   routes: [
-    POST("/message", async (req, { send }) => {
+    POST("/message", async (req) => {
       if (!isAllowed(req)) {
         return createUnauthorizedResponse({
           status: 403, // defaults to 401; code defaults to "forbidden" / "unauthorized"

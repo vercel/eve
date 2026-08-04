@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ACP_MAX_LINE_BYTES } from "#acp/line-limit.js";
 import { runAcpServerOnStreams } from "#acp/server.js";
-import type { SendTurnInput, SessionState } from "#client/types.js";
+import type { SendTurnInput } from "#client/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 function streams() {
@@ -26,15 +26,19 @@ describe("runAcpServerOnStreams", () => {
     await expect(server).resolves.toBeUndefined();
   });
 
-  it("closes the transport and resets sessions when shutdown is requested", async () => {
+  it("closes the transport without creating an eve session before the first prompt", async () => {
     const reset = vi.fn(async () => ({ status: "reset" }));
+    const session = {
+      cancel: vi.fn(async () => ({ status: "accepted" })),
+      reset,
+      send: vi.fn(async (_input: SendTurnInput) => emptyEvents()),
+    };
     const client = {
-      session: () => ({
-        cancel: vi.fn(async () => ({ status: "accepted" })),
-        reset,
-        send: vi.fn(async (_input: SendTurnInput) => emptyEvents()),
-        state: { streamIndex: 0 } satisfies SessionState,
-      }),
+      sessions: {
+        async create(input: SendTurnInput) {
+          return { response: await session.send(input), session };
+        },
+      },
     };
     const controller = new AbortController();
     const transport = streams();
@@ -65,7 +69,7 @@ describe("runAcpServerOnStreams", () => {
     controller.abort();
 
     await expect(server).resolves.toBeUndefined();
-    expect(reset).toHaveBeenCalledOnce();
+    expect(reset).not.toHaveBeenCalled();
   });
 });
 

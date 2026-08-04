@@ -45,7 +45,7 @@ export class UnknownDevScheduleError extends Error {
  * `dispatchScheduleTask` resolves the compiled schedule, loads the agent
  * bundle, and invokes `ScheduleDispatcher.trigger(...)`. The dev server's
  * workflow runtime owns the resulting sessions, so the caller can stream
- * them via the existing `/eve/v1/session/:sessionId/stream` route as soon
+ * them via the existing `/eve/v1/sessions/:sessionId/stream` route as soon
  * as this resolves.
  *
  * Re-resolves authored schedule registrations from disk on every call so

@@ -21,7 +21,7 @@ import {
   expectOnlyKnownKeys,
   expectString,
 } from "#internal/authored-module.js";
-import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_SESSIONS_ROUTE_PATH } from "#protocol/routes.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
@@ -413,10 +413,7 @@ function normalizeRemoteAgentDefinition(
   return {
     description: expectString(record.description, message),
     outputSchema: serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined),
-    path:
-      record.path === undefined
-        ? EVE_CREATE_SESSION_ROUTE_PATH
-        : expectString(record.path, message),
+    path: record.path === undefined ? EVE_SESSIONS_ROUTE_PATH : expectString(record.path, message),
     // A function `url` is resolved at runtime, not baked into the manifest.
     url: typeof record.url === "function" ? undefined : expectString(record.url, message),
   };

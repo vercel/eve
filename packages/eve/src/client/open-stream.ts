@@ -1,6 +1,6 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
-import { createEveMessageStreamRoutePath } from "#protocol/routes.js";
+import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import type {
@@ -82,8 +82,6 @@ interface FollowStreamInput {
   readonly sessionId: string;
   readonly signal?: AbortSignal;
   readonly startIndex: number;
-  /** Explicit transport path for ID-addressed session APIs. */
-  readonly streamPath?: string;
   /** Follow the live stream after the durable tail (default). `false` bounds the read at the tail. */
   readonly follow?: boolean;
 }
@@ -228,7 +226,7 @@ export async function openStreamBody(
   for (let attempt = 0; attempt < openRetryPolicy.maxAttempts; attempt += 1) {
     const url = createClientUrl(
       input.host,
-      input.streamPath ?? createEveMessageStreamRoutePath(input.sessionId),
+      createEveSessionStreamRoutePath(input.sessionId),
       Object.keys(searchParams).length > 0 ? searchParams : undefined,
     );
 

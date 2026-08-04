@@ -72,7 +72,8 @@ export interface HookContext extends SessionContext {
   };
   readonly channel: {
     readonly kind?: string;
-    readonly continuationToken?: string;
+    /** Channel-owned routing address, absent for ID-only transports such as the eve HTTP API. */
+    readonly continuation?: { readonly token: string };
   };
 }
 

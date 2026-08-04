@@ -11,7 +11,12 @@ import { resolveEveAgentHost } from "#client/agent-host.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
-import type { ClientAuth, HeadersValue, SendTurnPayload, SessionState } from "#client/types.js";
+import type {
+  ClientAuth,
+  HeadersValue,
+  SendTurnPayload,
+  ClientSessionState,
+} from "#client/types.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 
 export type { PrepareSend };
@@ -49,7 +54,7 @@ export interface UseEveAgentReturn<TData> {
   /** Send a turn with full structured input (message, attachments, input responses). */
   readonly send: <TOutput = unknown>(input: SendTurnPayload<TOutput>) => Promise<void>;
   /** Current session identity and stream cursor. */
-  readonly session: SessionState;
+  readonly session: ClientSessionState | undefined;
   /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
   readonly status: UseEveAgentStatus;
   /** Abort the in-flight request. */
@@ -93,7 +98,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   /** Ordered prefix of the session stream used to rehydrate projected state. */
   readonly initialEvents?: readonly MessageStreamEvent[];
   /** Seed session identity and stream cursor for resuming a prior conversation. */
-  readonly initialSession?: SessionState;
+  readonly initialSession?: ClientSessionState;
   /**
    * Project submitted user messages before eve confirms them with a
    * `message.received` stream event. Optimistic events are reducer-facing
@@ -153,7 +158,7 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
     return this.#snapshot.events;
   }
 
-  get session(): SessionState {
+  get session(): ClientSessionState | undefined {
     this.#subscribe();
     return this.#snapshot.session;
   }

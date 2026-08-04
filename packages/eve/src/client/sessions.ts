@@ -21,14 +21,15 @@ export class ClientSessions {
   async create<TOutput = unknown>(
     input: SendTurnInput<TOutput>,
   ): Promise<CreatedClientSession<TOutput>> {
-    const session = new ClientSession(this.#context, { streamIndex: 0 }, "sessions");
-    const response = await session.send(input);
-    return { response, session };
+    return await ClientSession.create(this.#context, input);
   }
 
   /** Attaches a fixed handle to a known session ID without performing I/O. */
-  attach(sessionId: string): ClientSession {
+  attach(sessionId: string, options?: { readonly streamIndex?: number }): ClientSession {
     if (sessionId.length === 0) throw new Error("sessionId must be a non-empty string.");
-    return new ClientSession(this.#context, { sessionId, streamIndex: 0 }, "sessions");
+    return new ClientSession(this.#context, {
+      sessionId,
+      streamIndex: options?.streamIndex ?? 0,
+    });
   }
 }

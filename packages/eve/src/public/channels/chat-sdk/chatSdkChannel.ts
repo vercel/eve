@@ -28,12 +28,12 @@ import {
   GET,
   POST,
   type Channel,
+  type ChannelAddress,
+  type ChannelAddressFn,
+  type ChannelAddressSendOptions,
   type ChannelEvents,
   type ChannelSessionOps,
-  type CancelFn,
   type RouteHandlerArgs,
-  type SendFn,
-  type SendOptions,
   type Session,
 } from "#public/definitions/channel.js";
 
@@ -44,13 +44,15 @@ const DEFAULT_STREAMING_EDIT_INTERVAL_MS = 1_000;
 const MAX_TYPING_STATUS = 80;
 
 type ChatSdkAdapters = Record<string, Adapter>;
-type ChatSdkSendInput = Parameters<SendFn<ChatSdkChannelState>>[0];
+type ChatSdkSendInput = Parameters<ChannelAddress<ChatSdkChannelState>["send"]>[0];
+type MutableChannelAddressSendOptions<TState> = {
+  -readonly [Key in keyof ChannelAddressSendOptions<TState>]: ChannelAddressSendOptions<TState>[Key];
+};
 type EventData<T extends UnstampedMessageStreamEvent["type"]> =
   Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 interface ActiveWebhookContext {
-  readonly cancel: CancelFn;
-  readonly send: SendFn<ChatSdkChannelState>;
+  readonly channelAddress: ChannelAddressFn<ChatSdkChannelState>;
 }
 
 const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-webhook");
@@ -132,8 +134,8 @@ export type ChatSdkChannelEvents<TAdapters extends ChatSdkAdapters = ChatSdkAdap
  */
 export interface ChatSdkSendOptions {
   readonly auth?: SessionAuthContext | null;
-  readonly callback?: SendOptions<ChatSdkChannelState>["callback"];
-  readonly mode?: SendOptions<ChatSdkChannelState>["mode"];
+  readonly callback?: ChannelAddressSendOptions<ChatSdkChannelState>["callback"];
+  readonly mode?: ChannelAddressSendOptions<ChatSdkChannelState>["mode"];
   readonly thread: SerializedThread | Thread | string;
   readonly title?: string;
   /**
@@ -304,7 +306,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       ): Promise<Response> => {
         const webhook = bot.webhooks[adapterName];
         const ctx = new ContextContainer();
-        ctx.setVirtualContext(ActiveWebhookKey, { cancel: args.cancel, send: args.send });
+        ctx.setVirtualContext(ActiveWebhookKey, { channelAddress: args.channelAddress });
         return contextStorage.run(ctx, () =>
           webhook(request, {
             ...config.webhook,
@@ -316,11 +318,10 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       };
       return [GET<ChatSdkChannelState>(path, handler), POST<ChatSdkChannelState>(path, handler)];
     }),
-    async receive(input, { send }) {
+    async receive(input, { channelAddress }) {
       const thread = serializeReceiveTarget(bot, input.target);
-      return send(input.message, {
+      return channelAddress(thread.id).send(input.message, {
         auth: input.auth,
-        continuationToken: thread.id,
         state: { thread },
       });
     },
@@ -554,24 +555,18 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
     );
   }
   const thread = serializeThread(bot, options.thread, options.adapterName);
-  const sendOptions: SendOptions<ChatSdkChannelState> = {
+  const sendOptions: MutableChannelAddressSendOptions<ChatSdkChannelState> = {
     auth: options.auth ?? null,
-    continuationToken: thread.id,
     state: { thread },
   };
-  if (options.callback) {
-    sendOptions.callback = options.callback;
-  }
-  if (options.mode) {
-    sendOptions.mode = options.mode;
-  }
-  if (options.title) {
-    sendOptions.title = options.title;
-  }
+  if (options.callback !== undefined) sendOptions.callback = options.callback;
+  if (options.mode !== undefined) sendOptions.mode = options.mode;
+  if (options.title !== undefined) sendOptions.title = options.title;
+  const conversation = active.channelAddress(thread.id);
   if (options.turnPolicy === "experimental-steer" && hasMessageInput(input)) {
-    await active.cancel({ continuationToken: thread.id });
+    await conversation.cancel();
   }
-  return active.send(input, sendOptions);
+  return conversation.send(input, sendOptions);
 }
 
 function hasMessageInput(input: ChatSdkSendInput): boolean {

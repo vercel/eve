@@ -1,26 +1,18 @@
 import type { H3Event } from "nitro";
-import type { Agent, RouteContext } from "#public/definitions/channel.js";
+import type { RouteContext } from "#public/definitions/channel.js";
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import {
   createCrossChannelReceiveFn,
   toCrossChannelTargets,
 } from "#channel/cross-channel-receive.js";
-import type { DeliverInput, RunInput, Runtime } from "#channel/types.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
-import { createCancelFn } from "#channel/cancel.js";
-import { createClearFn } from "#channel/clear-session.js";
-import { createCompactFn } from "#channel/compact-session.js";
-import { createResetFn } from "#channel/reset-session.js";
-import { createSendFn } from "#channel/send.js";
-import { createResolveActiveSessionFn } from "#channel/resolve-active-session.js";
-import { createAttachSessionFn, createGetSessionFn } from "#channel/session.js";
+import { createChannelAddressFn } from "#channel/channel-address.js";
+import { createAttachSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import {
   attachAgentInfoRouteResponse,
-  attachRouteAgent,
   attachRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
@@ -32,7 +24,6 @@ import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-o
 const log = createLogger("channel.dispatch");
 
 interface BuiltRouteArgs {
-  readonly agent: Agent;
   readonly args: RouteHandlerArgs;
   readonly backgroundTasks: Promise<unknown>[];
 }
@@ -48,11 +39,8 @@ interface BuiltRouteArgs {
  * Nitro forwards that work to `event.waitUntil()` so webhook
  * acknowledgements can return immediately.
  *
- * Two dispatch shapes: authored channels (`defineChannel` and its
- * wrappers) carry a `handler` field and receive `RouteHandlerArgs` with
- * `send`, `getSession`, etc. Framework-internal channels (the
- * connection callback route) build `ResolvedChannelDefinition` directly
- * with just `fetch` and receive a `RouteContext` carrying `agent`.
+ * Authored channels receive `RouteHandlerArgs`; framework-internal channels
+ * receive the smaller `RouteContext` used by callback routes.
  */
 export async function dispatchChannelRequest(
   event: H3Event,
@@ -100,7 +88,6 @@ export async function dispatchChannelRequest(
         // Framework-internal fetch-only channel (e.g. the connection
         // callback route). Build a RouteContext with the agent handle.
         const ctx: RouteContext = {
-          agent: routeArgs.agent,
           waitUntil: routeArgs.args.waitUntil,
           params: routeArgs.args.params,
           requestIp: routeArgs.args.requestIp,
@@ -214,91 +201,45 @@ function buildRouteArgs(
   };
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };
-  const agent = createRouteAgent(bundle.runtime, requestId);
-  const send = createSendFn(bundle.runtime, adapter, channelName, { requestId });
-  const resolveActiveSession = createResolveActiveSessionFn(bundle.runtime, channelName);
-  const cancel = createCancelFn(bundle.runtime, channelName);
-  const clear = createClearFn(bundle.runtime, channelName);
-  const compact = createCompactFn(bundle.runtime, channelName);
-  const reset = createResetFn(bundle.runtime, channelName);
+  const channelAddress = createChannelAddressFn({
+    adapter,
+    channelName,
+    metadata: { requestId },
+    runtime: bundle.runtime,
+  });
   const attachSession = createAttachSessionFn(bundle.runtime, { requestId });
-  const getSession = createGetSessionFn(bundle.runtime, { requestId });
   const receive = createCrossChannelReceiveFn(
     bundle.runtime,
     toCrossChannelTargets(bundle.channels),
   );
 
-  const args = attachRouteAgent(
-    attachRouteSessionCreator(
-      attachAgentInfoRouteResponse(
-        {
-          attachSession,
-          send,
-          resolveActiveSession,
-          cancel,
-          clear,
-          compact,
-          reset,
-          getSession,
-          receive,
-          params,
-          waitUntil,
-          requestIp,
-        },
-        async () => {
-          const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-          return await handleAgentInfoRequest(config);
-        },
-      ),
-      async (input) =>
-        await bundle.runtime.createSession({
-          ...input,
-          adapter,
-          channelName,
-          requestId,
-        }),
+  const args = attachRouteSessionCreator(
+    attachAgentInfoRouteResponse(
+      {
+        attachSession,
+        channelAddress,
+        receive,
+        params,
+        waitUntil,
+        requestIp,
+      },
+      async () => {
+        const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+        return await handleAgentInfoRequest(config);
+      },
     ),
-    agent,
+    async (input) =>
+      await bundle.runtime.createSession({
+        ...input,
+        adapter,
+        channelName,
+        requestId,
+      }),
   );
 
   return {
-    agent,
     args,
     backgroundTasks,
-  };
-}
-
-function createRouteAgent(runtime: Runtime, requestId: string | undefined): Agent {
-  return {
-    async cancelTurn(input) {
-      return await runtime.dispatchSession({
-        command: { kind: "cancel", turnId: input.turnId },
-        sessionId: input.sessionId,
-      });
-    },
-    async deliver(input) {
-      const deliverInput: DeliverInput = { ...input, requestId }; // Avoid mutating a frozen caller input.
-      const result = await runtime.dispatchContinuation({
-        command: {
-          auth: deliverInput.auth,
-          kind: "send",
-          payload: deliverInput.payload,
-          requestId: deliverInput.requestId,
-        },
-        continuationToken: deliverInput.continuationToken,
-      });
-      if (result.status === "session_not_active") {
-        throw new RuntimeNoActiveSessionError(deliverInput.continuationToken);
-      }
-      return { sessionId: result.sessionId };
-    },
-    async getEventStream(sessionId, options) {
-      return await runtime.getEventStream(sessionId, options);
-    },
-    async run(input) {
-      const runInput: RunInput = { ...input, requestId }; // Avoid mutating a frozen caller input.
-      return await runtime.createSession(runInput);
-    },
   };
 }
 

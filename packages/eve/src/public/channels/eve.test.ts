@@ -4,13 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
-import { createJsonMessageRequest, createMockAgent } from "#internal/testing/route-harness.js";
-import { attachRouteAgent } from "#internal/nitro/routes/channel-route-context.js";
+import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { type AuthFn, none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth, type EveChannelInput } from "#public/channels/eve.js";
-import type { SessionAuthContext } from "#channel/types.js";
-import type { RouteHandlerArgs, SendFn, SendOptions, SendPayload } from "#channel/routes.js";
-import type { Session as ChannelSession } from "#channel/session.js";
+import type { RunInput, SessionAuthContext } from "#channel/types.js";
+import type { RouteHandlerArgs, SendPayload } from "#channel/routes.js";
+import type { Session } from "#channel/session.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
@@ -47,49 +46,83 @@ const OVERRIDE_AUTH: SessionAuthContext = {
   principalType: "user",
 };
 
-/**
- * Creates a POST handler test harness for the create route (POST /eve/v1/session).
- * Returns a `fetch(req)` function and a `send` mock so tests can inspect
- * what the handler passed through.
- */
-function createEveCreateHandler(input: EveChannelInput) {
-  const channel = eveChannel(input);
-  const createRoute = channel.routes.find(
-    (r) => r.method === "POST" && r.path === "/eve/v1/session",
-  );
-  if (!createRoute) throw new Error("No create POST route found");
+type MockSendOptions = Pick<RunInput, "auth" | "callback" | "initiatorAuth" | "mode" | "title">;
 
-  const mockSend = vi.fn<SendFn>().mockResolvedValue({
+function createJsonMessageRequest(body: unknown): Request {
+  return new Request("https://example.com/eve/v1/sessions", {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+}
+
+function createMockSession(overrides: Partial<Session> = {}): Session {
+  return {
     id: "test-session-id",
-    continuationToken: "eve:test",
-    async cancel() {
-      return { status: "no_active_turn" };
-    },
+    send: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
+    cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
+    compact: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
+    clear: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
+    reset: vi.fn().mockResolvedValue({
+      previousSessionId: "test-session-id",
+      status: "reset",
+    }),
     async getEventStream() {
       return new ReadableStream();
     },
     async getStreamTailIndex() {
       return -1;
     },
-  } satisfies ChannelSession);
+    ...overrides,
+  };
+}
+
+function createRouteArgs(): RouteHandlerArgs {
+  return {
+    attachSession: () => createMockSession(),
+    channelAddress: vi.fn() as never,
+    receive: vi.fn() as never,
+    params: {},
+    waitUntil: () => undefined,
+    requestIp: "127.0.0.1",
+  };
+}
+
+/**
+ * Creates a POST handler test harness for the create route (POST /eve/v1/sessions).
+ * Returns a `fetch(req)` function and a `send` mock so tests can inspect
+ * what the handler passed through.
+ */
+function createEveCreateHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const createRoute = channel.routes.find(
+    (r) => r.method === "POST" && r.path === "/eve/v1/sessions",
+  );
+  if (!createRoute) throw new Error("No create POST route found");
+
+  const mockSend = vi.fn().mockResolvedValue(createMockSession());
+  const createSession = vi.fn(async (runInput: RunInput) => {
+    const payload =
+      runInput.input.context === undefined && runInput.input.outputSchema === undefined
+        ? runInput.input.message
+        : runInput.input;
+    await mockSend(payload, {
+      auth: runInput.auth,
+      callback: runInput.callback,
+      initiatorAuth: runInput.initiatorAuth,
+      mode: runInput.mode,
+      title: runInput.title,
+    } satisfies MockSendOptions);
+    return {
+      events: new ReadableStream(),
+      sessionId: "test-session-id",
+    };
+  });
 
   return {
     send: mockSend,
     async fetch(req: Request) {
-      const args: RouteHandlerArgs = {
-        attachSession: vi.fn() as any,
-        send: mockSend,
-        resolveActiveSession: async () => undefined,
-        cancel: vi.fn(),
-        clear: vi.fn(),
-        compact: vi.fn(),
-        reset: vi.fn(),
-        getSession: vi.fn(),
-        receive: vi.fn() as any,
-        params: {},
-        waitUntil: () => undefined,
-        requestIp: "127.0.0.1",
-      };
+      const args = attachRouteSessionCreator(createRouteArgs(), createSession as never);
       return (createRoute as any).handler(req, args);
     },
   };
@@ -97,48 +130,25 @@ function createEveCreateHandler(input: EveChannelInput) {
 
 /**
  * Creates a POST handler test harness for the continue route
- * (POST /eve/v1/session/:sessionId).
+ * (POST /eve/v1/sessions/:sessionId/messages).
  */
 function createEveContinueHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const continueRoute = channel.routes.find(
-    (r) => r.method === "POST" && r.path === "/eve/v1/session/:sessionId",
+    (r) => r.method === "POST" && r.path === "/eve/v1/sessions/:sessionId/messages",
   );
   if (!continueRoute) throw new Error("No continue POST route found");
 
-  const mockSession: ChannelSession = {
-    id: "test-session-id",
-    continuationToken: "eve:test",
-    async cancel() {
-      return { status: "no_active_turn" };
-    },
-    async getEventStream() {
-      return new ReadableStream();
-    },
-    async getStreamTailIndex() {
-      return -1;
-    },
-  };
-
-  const mockSend = vi.fn<SendFn>().mockResolvedValue(mockSession);
-  const mockGetSession = vi.fn().mockReturnValue(mockSession);
+  const mockSend = vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" });
+  const mockSession = createMockSession({ send: mockSend });
 
   return {
     send: mockSend,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
-        attachSession: vi.fn() as any,
-        send: mockSend,
-        resolveActiveSession: async () => undefined,
-        cancel: vi.fn(),
-        clear: vi.fn(),
-        compact: vi.fn(),
-        reset: vi.fn(),
-        getSession: mockGetSession,
-        receive: vi.fn() as any,
+        ...createRouteArgs(),
+        attachSession: () => mockSession,
         params: { sessionId: "test-session-id" },
-        waitUntil: () => undefined,
-        requestIp: "127.0.0.1",
       };
       return (continueRoute as any).handler(req, args);
     },
@@ -147,45 +157,35 @@ function createEveContinueHandler(input: EveChannelInput) {
 
 /**
  * Creates a POST handler test harness for the cancel-turn route
- * (POST /eve/v1/session/:sessionId/cancel).
+ * (POST /eve/v1/sessions/:sessionId/cancel).
  */
 function createEveCancelHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const cancelRoute = channel.routes.find(
-    (r) => r.method === "POST" && r.path === "/eve/v1/session/:sessionId/cancel",
+    (r) => r.method === "POST" && r.path === "/eve/v1/sessions/:sessionId/cancel",
   );
   if (!cancelRoute) throw new Error("No cancel POST route found");
 
-  const agent = createMockAgent();
-  agent.cancelTurn.mockResolvedValue({ status: "accepted" });
+  const cancelTurn = vi.fn().mockResolvedValue({ status: "accepted" });
+  const session = createMockSession({
+    cancel: (options) => cancelTurn({ sessionId: "test-session-id", turnId: options?.turnId }),
+  });
 
   return {
-    cancelTurn: agent.cancelTurn,
+    cancelTurn,
     async fetch(req: Request) {
-      const args = attachRouteAgent(
-        {
-          attachSession: vi.fn() as any,
-          send: vi.fn(),
-          resolveActiveSession: async () => undefined,
-          cancel: vi.fn(),
-          clear: vi.fn(),
-          compact: vi.fn(),
-          reset: vi.fn(),
-          getSession: vi.fn(),
-          receive: vi.fn() as any,
-          params: { sessionId: "test-session-id" },
-          waitUntil: () => undefined,
-          requestIp: "127.0.0.1",
-        } satisfies RouteHandlerArgs,
-        agent,
-      );
+      const args: RouteHandlerArgs = {
+        ...createRouteArgs(),
+        attachSession: () => session,
+        params: { sessionId: "test-session-id" },
+      };
       return (cancelRoute as any).handler(req, args);
     },
   };
 }
 
 function cancelRequest(body?: unknown): Request {
-  return new Request("https://example.com/eve/v1/session/test-session-id/cancel", {
+  return new Request("https://example.com/eve/v1/sessions/test-session-id/cancel", {
     ...(body === undefined
       ? {}
       : {
@@ -196,11 +196,11 @@ function cancelRequest(body?: unknown): Request {
   });
 }
 
-/** Creates a POST handler test harness for the continuation-addressed reset route. */
+/** Creates a POST handler test harness for the ID-addressed reset route. */
 function createEveResetHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const resetRoute = channel.routes.find(
-    (r) => r.method === "POST" && r.path === "/eve/v1/session/reset",
+    (r) => r.method === "POST" && r.path === "/eve/v1/sessions/:sessionId/reset",
   );
   if (!resetRoute) throw new Error("No session reset POST route found");
 
@@ -213,18 +213,9 @@ function createEveResetHandler(input: EveChannelInput) {
     reset,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
-        attachSession: vi.fn() as any,
-        send: vi.fn(),
-        resolveActiveSession: async () => undefined,
-        cancel: vi.fn(),
-        clear: vi.fn(),
-        compact: vi.fn(),
-        reset,
-        getSession: vi.fn(),
-        receive: vi.fn() as any,
-        params: {},
-        waitUntil: () => undefined,
-        requestIp: "127.0.0.1",
+        ...createRouteArgs(),
+        attachSession: () => createMockSession({ reset }),
+        params: { sessionId: "test-session-id" },
       };
       return (resetRoute as any).handler(req, args);
     },
@@ -232,7 +223,7 @@ function createEveResetHandler(input: EveChannelInput) {
 }
 
 function resetRequest(body: unknown): Request {
-  return new Request("https://example.com/eve/v1/session/reset", {
+  return new Request("https://example.com/eve/v1/sessions/test-session-id/reset", {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
@@ -240,18 +231,26 @@ function resetRequest(body: unknown): Request {
 }
 
 function clearRequest(body: unknown): Request {
-  return new Request("https://example.com/eve/v1/session/clear", {
+  return new Request("https://example.com/eve/v1/sessions/test-session-id/clear", {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
   });
 }
 
-/** Creates a POST handler test harness for the continuation-addressed clear route. */
+function compactRequest(body: unknown): Request {
+  return new Request("https://example.com/eve/v1/sessions/test-session-id/compact", {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+}
+
+/** Creates a POST handler test harness for the ID-addressed clear route. */
 function createEveClearHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const clearRoute = channel.routes.find(
-    (route) => route.method === "POST" && route.path === "/eve/v1/session/clear",
+    (route) => route.method === "POST" && route.path === "/eve/v1/sessions/:sessionId/clear",
   );
   if (!clearRoute) throw new Error("No session clear POST route found");
 
@@ -264,29 +263,20 @@ function createEveClearHandler(input: EveChannelInput) {
     clear,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
-        attachSession: vi.fn() as any,
-        send: vi.fn(),
-        resolveActiveSession: async () => undefined,
-        cancel: vi.fn(),
-        clear,
-        compact: vi.fn(),
-        reset: vi.fn(),
-        getSession: vi.fn(),
-        receive: vi.fn() as any,
-        params: {},
-        waitUntil: () => undefined,
-        requestIp: "127.0.0.1",
+        ...createRouteArgs(),
+        attachSession: () => createMockSession({ clear }),
+        params: { sessionId: "test-session-id" },
       };
       return (clearRoute as any).handler(req, args);
     },
   };
 }
 
-/** Creates a POST handler test harness for the continuation-addressed compact route. */
+/** Creates a POST handler test harness for the ID-addressed compact route. */
 function createEveCompactHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const compactRoute = channel.routes.find(
-    (route) => route.method === "POST" && route.path === "/eve/v1/session/compact",
+    (route) => route.method === "POST" && route.path === "/eve/v1/sessions/:sessionId/compact",
   );
   if (!compactRoute) throw new Error("No session compact POST route found");
 
@@ -299,18 +289,9 @@ function createEveCompactHandler(input: EveChannelInput) {
     compact,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
-        attachSession: vi.fn() as any,
-        send: vi.fn(),
-        resolveActiveSession: async () => undefined,
-        cancel: vi.fn(),
-        clear: vi.fn(),
-        compact,
-        reset: vi.fn(),
-        getSession: vi.fn(),
-        receive: vi.fn() as any,
-        params: {},
-        waitUntil: () => undefined,
-        requestIp: "127.0.0.1",
+        ...createRouteArgs(),
+        attachSession: () => createMockSession({ compact }),
+        params: { sessionId: "test-session-id" },
       };
       return (compactRoute as any).handler(req, args);
     },
@@ -321,37 +302,25 @@ function createEveCompactHandler(input: EveChannelInput) {
 function createEveStreamHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const streamRoute = channel.routes.find(
-    (route) => route.method === "GET" && route.path === "/eve/v1/session/:sessionId/stream",
+    (route) => route.method === "GET" && route.path === "/eve/v1/sessions/:sessionId/stream",
   );
   if (!streamRoute) throw new Error("No session stream GET route found");
 
   const getEventStream = vi.fn().mockResolvedValue(new ReadableStream());
   const getStreamTailIndex = vi.fn().mockResolvedValue(-1);
-  const mockGetSession = vi.fn().mockReturnValue({
-    cancel: vi.fn(),
-    continuationToken: "eve:test",
+  const session = createMockSession({
     getEventStream,
     getStreamTailIndex,
-    id: "test-session-id",
-  } satisfies ChannelSession);
+  });
 
   return {
     getEventStream,
     getStreamTailIndex,
     async fetch(url: string) {
       const args: RouteHandlerArgs = {
-        attachSession: vi.fn() as any,
-        send: vi.fn(),
-        resolveActiveSession: async () => undefined,
-        cancel: vi.fn(),
-        clear: vi.fn(),
-        compact: vi.fn(),
-        reset: vi.fn(),
-        getSession: mockGetSession,
-        receive: vi.fn() as any,
+        ...createRouteArgs(),
+        attachSession: () => session,
         params: { sessionId: "test-session-id" },
-        waitUntil: () => undefined,
-        requestIp: "127.0.0.1",
       };
       return (streamRoute as any).handler(new Request(url), args);
     },
@@ -485,7 +454,7 @@ describe("eveChannel — events", () => {
       events: {
         "message.completed"(data, channel, ctx) {
           observed.push(data.message ?? "");
-          observed.push(channel.continuationToken);
+          observed.push(channel.continuation?.token ?? "");
           observed.push(ctx.session.id);
         },
       },
@@ -522,7 +491,7 @@ describe("eveChannel — events", () => {
 describe("eveChannel — stream cursor", () => {
   it("establishes the NDJSON body before the first durable event", async () => {
     const handler = createEveStreamHandler({ auth: none() });
-    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+    const response = await handler.fetch("https://eve.test/eve/v1/sessions/test-session-id/stream");
     const reader = response.body!.getReader();
 
     const firstChunk = await Promise.race([
@@ -540,7 +509,7 @@ describe("eveChannel — stream cursor", () => {
     const handler = createEveStreamHandler({ auth: none() });
 
     const response = await handler.fetch(
-      "https://eve.test/eve/v1/session/test-session-id/stream?startIndex=-1",
+      "https://eve.test/eve/v1/sessions/test-session-id/stream?startIndex=-1",
     );
 
     expect(response.status).toBe(200);
@@ -552,7 +521,7 @@ describe("eveChannel — stream cursor", () => {
     async (startIndex) => {
       const handler = createEveStreamHandler({ auth: none() });
       const response = await handler.fetch(
-        `https://eve.test/eve/v1/session/test-session-id/stream?startIndex=${encodeURIComponent(startIndex)}`,
+        `https://eve.test/eve/v1/sessions/test-session-id/stream?startIndex=${encodeURIComponent(startIndex)}`,
       );
 
       expect(response.status).toBe(400);
@@ -563,7 +532,7 @@ describe("eveChannel — stream cursor", () => {
   it("omits the tail index by default without paying for the lookup", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 
-    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+    const response = await handler.fetch("https://eve.test/eve/v1/sessions/test-session-id/stream");
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-eve-stream-tail-index")).toBeNull();
@@ -575,7 +544,7 @@ describe("eveChannel — stream cursor", () => {
     handler.getStreamTailIndex.mockResolvedValueOnce(41);
 
     const response = await handler.fetch(
-      "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1",
+      "https://eve.test/eve/v1/sessions/test-session-id/stream?includeTailIndex=1",
     );
 
     expect(response.status).toBe(200);
@@ -589,7 +558,7 @@ describe("eveChannel — onMessage", () => {
       expect(ctx.eve.caller).toEqual(ACCEPTED_AUTH);
       expect(defaultEveAuth(ctx)).toEqual(ACCEPTED_AUTH);
       expect(ctx.eve.sessionId).toBeUndefined();
-      expect(ctx.eve.request.url).toBe("https://example.com/eve/v1/session");
+      expect(ctx.eve.request.url).toBe("https://example.com/eve/v1/sessions");
       expect(message).toBe("What word is selected?");
       return { auth: defaultEveAuth(ctx), context: ["Authenticated caller profile: enterprise"] };
     });
@@ -613,7 +582,7 @@ describe("eveChannel — onMessage", () => {
       message: "What word is selected?",
       context: ["Client context:\nselection: jazz", "Authenticated caller profile: enterprise"],
     });
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
   });
 
@@ -629,7 +598,7 @@ describe("eveChannel — onMessage", () => {
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload).toEqual({ message: "hi", context: ["override context"] });
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(OVERRIDE_AUTH);
   });
 
@@ -670,7 +639,7 @@ describe("eveChannel — onMessage", () => {
     expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     expect(handler.send.mock.calls[0]?.[0]).toEqual({ message: "hi", context: [] });
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toBeNull();
   });
 
@@ -708,13 +677,12 @@ describe("eveChannel — onMessage", () => {
     const response = await handler.fetch(
       createJsonMessageRequest({
         clientContext: "approval modal open",
-        continuationToken: "http:existing",
         inputResponses: [{ requestId: "req-1", optionId: "approve" }],
         message: "yes please",
       }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(onMessage).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload.context).toEqual([
@@ -722,7 +690,7 @@ describe("eveChannel — onMessage", () => {
       "Authenticated continuation context",
     ]);
     expect(payload.inputResponses).toEqual([{ requestId: "req-1", optionId: "approve" }]);
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
   });
 
@@ -735,17 +703,16 @@ describe("eveChannel — onMessage", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
-        continuationToken: "http:existing",
         inputResponses: [{ requestId: "req-1", optionId: "deny" }],
       }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(onMessage).not.toHaveBeenCalled();
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload.context).toBeUndefined();
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
   });
 
@@ -823,6 +790,19 @@ describe("eveChannel — onMessage", () => {
 });
 
 describe("eveChannel — create session (text)", () => {
+  it("returns a structured 500 when session creation fails", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+    handler.send.mockRejectedValue(new Error("backing store outage"));
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Failed to create the session.",
+      ok: false,
+    });
+  });
+
   it("accepts a plain-string message and opens a new session", async () => {
     const handler = createEveCreateHandler({ auth: none() });
 
@@ -1095,7 +1075,7 @@ describe("eveChannel — create session (text)", () => {
     const handler = createEveCreateHandler({ auth: none() });
 
     const response = await handler.fetch(
-      new Request("https://example.com/eve/v1/session", {
+      new Request("https://example.com/eve/v1/sessions", {
         body: "not-json",
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -1344,7 +1324,7 @@ describe("eveChannel — uploadPolicy enforcement", () => {
     expect(handler.send).toHaveBeenCalledTimes(1);
   });
 
-  it("enforces upload policy on continue (continuationToken) requests as well", async () => {
+  it("enforces upload policy on ID-addressed follow-up requests as well", async () => {
     const handler = createEveContinueHandler({
       auth: none(),
       uploadPolicy: { maxBytes: 4 },
@@ -1353,7 +1333,6 @@ describe("eveChannel — uploadPolicy enforcement", () => {
     const base64 = Buffer.from("too-big-for-policy", "utf8").toString("base64");
     const response = await handler.fetch(
       createJsonMessageRequest({
-        continuationToken: "http:existing",
         message: [filePartBody({ data: base64, filename: "big.txt", mediaType: "text/plain" })],
       }),
     );
@@ -1382,18 +1361,30 @@ describe("eveChannel — uploadPolicy enforcement", () => {
 });
 
 describe("eveChannel — continue session HITL (inputResponses)", () => {
+  it("returns a structured 500 when fixed-session delivery fails", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+    handler.send.mockRejectedValue(new Error("backing store outage"));
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "follow-up" }));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Failed to send the session message.",
+      ok: false,
+    });
+  });
+
   it("forwards inputResponses alongside a message", async () => {
     const handler = createEveContinueHandler({ auth: none() });
 
     const response = await handler.fetch(
       createJsonMessageRequest({
-        continuationToken: "http:existing",
         inputResponses: [{ requestId: "req-1", optionId: "approve" }],
         message: "yes please",
       }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload.message).toBe("yes please");
@@ -1406,12 +1397,11 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
     const response = await handler.fetch(
       createJsonMessageRequest({
         clientContext: "approval modal open",
-        continuationToken: "http:existing",
         message: "yes please",
       }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload.message).toBe("yes please");
@@ -1428,13 +1418,12 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
-        continuationToken: "http:existing",
         message: "Summarize",
         outputSchema,
       }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload).toEqual({ message: "Summarize", outputSchema });
@@ -1446,7 +1435,6 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
     const response = await handler.fetch(
       createJsonMessageRequest({
         clientContext: 123,
-        continuationToken: "http:existing",
         message: "hi",
       }),
     );
@@ -1463,12 +1451,11 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
-        continuationToken: "http:existing",
         inputResponses: [{ requestId: "req-1", optionId: "deny" }],
       }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload.message).toBeUndefined();
@@ -1505,7 +1492,7 @@ describe("eveChannel — auth array shape", () => {
 
     expect(response.status).toBe(202);
     expect(order).toEqual(["skip-null", "skip-undefined", "accept"]);
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ACCEPTED);
   });
 
@@ -1536,7 +1523,7 @@ describe("eveChannel — auth array shape", () => {
     const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
 
     expect(response.status).toBe(202);
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ACCEPTED);
   });
 
@@ -1547,13 +1534,12 @@ describe("eveChannel — auth array shape", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
-        continuationToken: "http:existing",
         message: "follow-up",
       }),
     );
 
-    expect(response.status).toBe(200);
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    expect(response.status).toBe(202);
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ACCEPTED);
   });
 });
@@ -1564,9 +1550,8 @@ describe("eveChannel — cancel turn", () => {
 
     const response = await handler.fetch(cancelRequest());
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(response.headers.get("x-eve-session-id")).toBe("test-session-id");
     await expect(response.json()).resolves.toEqual({
       ok: true,
       sessionId: "test-session-id",
@@ -1584,7 +1569,7 @@ describe("eveChannel — cancel turn", () => {
 
     const response = await handler.fetch(cancelRequest({}));
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(200);
     expect(handler.cancelTurn).toHaveBeenCalledWith({
       sessionId: "test-session-id",
       turnId: undefined,
@@ -1596,7 +1581,7 @@ describe("eveChannel — cancel turn", () => {
 
     const response = await handler.fetch(cancelRequest({ turnId: "turn_2" }));
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(200);
     expect(handler.cancelTurn).toHaveBeenCalledWith({
       sessionId: "test-session-id",
       turnId: "turn_2",
@@ -1609,7 +1594,7 @@ describe("eveChannel — cancel turn", () => {
 
     const response = await handler.fetch(cancelRequest());
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       ok: true,
       sessionId: "test-session-id",
@@ -1654,10 +1639,10 @@ describe("eveChannel — cancel turn", () => {
 });
 
 describe("eveChannel — reset session", () => {
-  it("retires the owner of the supplied channel-local continuation token", async () => {
+  it("retires the exact session ID and forwards an optional reason", async () => {
     const handler = createEveResetHandler({ auth: none() });
 
-    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+    const response = await handler.fetch(resetRequest({ reason: "Start over" }));
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -1666,17 +1651,14 @@ describe("eveChannel — reset session", () => {
       previousSessionId: "test-session-id",
       status: "reset",
     });
-    expect(handler.reset).toHaveBeenCalledWith({
-      continuationToken: "eve:token",
-      reason: "Client requested session reset",
-    });
+    expect(handler.reset).toHaveBeenCalledWith({ reason: "Start over" });
   });
 
-  it("reports a token that is already free as a successful no-op", async () => {
+  it("reports an inactive session ID as a successful no-op", async () => {
     const handler = createEveResetHandler({ auth: none() });
     handler.reset.mockResolvedValue({ status: "no_active_session" });
 
-    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+    const response = await handler.fetch(resetRequest({}));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
@@ -1685,16 +1667,16 @@ describe("eveChannel — reset session", () => {
   it("rejects unauthenticated reset requests", async () => {
     const handler = createEveResetHandler({ auth: [] });
 
-    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+    const response = await handler.fetch(resetRequest({}));
 
     expect(response.status).toBe(401);
     expect(handler.reset).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["an empty token", { continuationToken: "" }],
-    ["a non-string token", { continuationToken: 7 }],
-    ["a non-object body", ["eve:token"]],
+    ["an empty reason", { reason: "" }],
+    ["a non-string reason", { reason: 7 }],
+    ["a non-object body", ["Start over"]],
   ])("rejects %s with 400", async (_description, body) => {
     const handler = createEveResetHandler({ auth: none() });
 
@@ -1708,7 +1690,7 @@ describe("eveChannel — reset session", () => {
     const handler = createEveResetHandler({ auth: none() });
     handler.reset.mockRejectedValue(new Error("backing store outage"));
 
-    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+    const response = await handler.fetch(resetRequest({}));
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({
@@ -1719,10 +1701,10 @@ describe("eveChannel — reset session", () => {
 });
 
 describe("eveChannel — compact session", () => {
-  it("queues compaction for the supplied channel-local continuation token", async () => {
+  it("queues compaction for the exact session ID", async () => {
     const handler = createEveCompactHandler({ auth: none() });
 
-    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+    const response = await handler.fetch(compactRequest({}));
 
     expect(response.status).toBe(202);
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -1731,14 +1713,14 @@ describe("eveChannel — compact session", () => {
       sessionId: "test-session-id",
       status: "accepted",
     });
-    expect(handler.compact).toHaveBeenCalledWith({ continuationToken: "eve:token" });
+    expect(handler.compact).toHaveBeenCalledWith();
   });
 
-  it("reports a token that no active session owns", async () => {
+  it("reports an inactive session ID", async () => {
     const handler = createEveCompactHandler({ auth: none() });
     handler.compact.mockResolvedValue({ status: "no_active_session" });
 
-    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+    const response = await handler.fetch(compactRequest({}));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
@@ -1746,10 +1728,10 @@ describe("eveChannel — compact session", () => {
 });
 
 describe("eveChannel — clear session context", () => {
-  it("queues a clear for the supplied channel-local continuation token", async () => {
+  it("queues a clear for the exact session ID", async () => {
     const handler = createEveClearHandler({ auth: none() });
 
-    const response = await handler.fetch(clearRequest({ continuationToken: "eve:token" }));
+    const response = await handler.fetch(clearRequest({}));
 
     expect(response.status).toBe(202);
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -1758,14 +1740,14 @@ describe("eveChannel — clear session context", () => {
       sessionId: "test-session-id",
       status: "accepted",
     });
-    expect(handler.clear).toHaveBeenCalledWith({ continuationToken: "eve:token" });
+    expect(handler.clear).toHaveBeenCalledWith();
   });
 
-  it("reports a token that no active session owns", async () => {
+  it("reports an inactive session ID", async () => {
     const handler = createEveClearHandler({ auth: none() });
     handler.clear.mockResolvedValue({ status: "no_active_session" });
 
-    const response = await handler.fetch(clearRequest({ continuationToken: "eve:token" }));
+    const response = await handler.fetch(clearRequest({}));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
@@ -1885,7 +1867,7 @@ describe("eveChannel — forwarded principal", () => {
       sessionId: "test-session-id",
     });
 
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual({
       ...FORWARDED_CURRENT,
       attributes: {
@@ -1911,7 +1893,7 @@ describe("eveChannel — forwarded principal", () => {
 
     await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
 
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.initiatorAuth).toEqual(options.auth);
   });
 
@@ -1930,7 +1912,7 @@ describe("eveChannel — forwarded principal", () => {
       }),
     );
 
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth?.attributes["eve:forwarded-by"]).toBe(ROUTER_CALLER.principalId);
   });
 
@@ -1950,7 +1932,7 @@ describe("eveChannel — forwarded principal", () => {
 
     expect(response.status).toBe(202);
     expect(onMessage).toHaveBeenCalledTimes(1);
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth?.principalId).toBe(FORWARDED_CURRENT.principalId);
   });
 
@@ -1963,9 +1945,9 @@ describe("eveChannel — forwarded principal", () => {
     const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
 
     expect(response.status).toBe(202);
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ROUTER_CALLER);
-    expect(options).not.toHaveProperty("initiatorAuth");
+    expect(options.initiatorAuth).toBeUndefined();
   });
 
   it("rejects forwarded principal on the continue route", async () => {
@@ -1975,9 +1957,8 @@ describe("eveChannel — forwarded principal", () => {
     });
 
     const response = await handler.fetch(
-      new Request("https://example.com/eve/v1/session/test-session-id", {
+      new Request("https://example.com/eve/v1/sessions/test-session-id/messages", {
         body: JSON.stringify({
-          continuationToken: "eve:test",
           forwardedPrincipal: { current: FORWARDED_CURRENT },
           message: "hi",
         }),

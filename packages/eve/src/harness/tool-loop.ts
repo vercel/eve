@@ -598,7 +598,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           turnId: activeTurnId(emissionState),
         }),
       );
-      await emit?.(createSessionWaitingEvent(session.continuationToken));
+      await emit?.(createSessionWaitingEvent());
       return { next: null, session };
     }
 
@@ -641,7 +641,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         }
       }
 
-      await emit?.(createSessionWaitingEvent(session.continuationToken));
+      await emit?.(createSessionWaitingEvent());
       return { next: null, session };
     }
 
@@ -693,12 +693,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           emissionState,
           config.runtimeIdentity,
         );
-        emissionState = await emitTurnEpilogue(
-          emit,
-          emissionState,
-          config.mode,
-          pending.session.continuationToken,
-        );
+        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
         return {
           next: null,
           session: setHarnessEmissionState(pending.session, emissionState),
@@ -2157,12 +2152,7 @@ async function handleStepResult(input: {
       );
 
       if (config.mode === "conversation") {
-        emissionState = await emitTurnEpilogue(
-          emit,
-          emissionState,
-          config.mode,
-          parkedSession.continuationToken,
-        );
+        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
         parkedSession = setHarnessEmissionState(parkedSession, emissionState);
       }
     }
@@ -2300,7 +2290,6 @@ async function emitStructuredResult(
   emissionState: ReturnType<typeof getHarnessEmissionState>,
   structured: JsonValue,
   mode: RunMode,
-  continuationToken: string,
 ): Promise<ReturnType<typeof getHarnessEmissionState>> {
   await emit(
     createResultCompletedEvent({
@@ -2310,7 +2299,7 @@ async function emitStructuredResult(
       turnId: emissionState.turnId,
     }),
   );
-  return emitTurnEpilogue(emit, emissionState, mode, continuationToken);
+  return emitTurnEpilogue(emit, emissionState, mode);
 }
 
 /**
@@ -2332,12 +2321,7 @@ async function finishTaskTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(
-        emit,
-        emissionState,
-        "task",
-        session.continuationToken,
-      );
+      emissionState = await emitTurnEpilogue(emit, emissionState, "task");
       session = setHarnessEmissionState(session, emissionState);
     }
     return { next: { done: true, output: stepOutput ?? "" }, session };
@@ -2359,13 +2343,7 @@ async function finishTaskTurn(input: {
 
   session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
-    emissionState = await emitStructuredResult(
-      emit,
-      emissionState,
-      structured,
-      "task",
-      session.continuationToken,
-    );
+    emissionState = await emitStructuredResult(emit, emissionState, structured, "task");
     session = setHarnessEmissionState(session, emissionState);
   }
   return { next: { done: true, output: structured }, session };
@@ -2390,12 +2368,7 @@ async function finishConversationTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(
-        emit,
-        emissionState,
-        "conversation",
-        session.continuationToken,
-      );
+      emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
       session = setHarnessEmissionState(session, emissionState);
     }
     const settledTurn = { output: stepOutput ?? "" } satisfies SettledTurn;
@@ -2420,13 +2393,7 @@ async function finishConversationTurn(input: {
 
   session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
-    emissionState = await emitStructuredResult(
-      emit,
-      emissionState,
-      structured,
-      "conversation",
-      session.continuationToken,
-    );
+    emissionState = await emitStructuredResult(emit, emissionState, structured, "conversation");
     session = setHarnessEmissionState(session, emissionState);
   }
   const settledTurn = { output: structured } satisfies SettledTurn;

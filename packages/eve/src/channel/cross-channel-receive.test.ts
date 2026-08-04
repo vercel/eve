@@ -22,7 +22,6 @@ function makeRuntime(): Runtime {
 function makeSession(): Session {
   return {
     id: "sess_1",
-    continuationToken: "tok",
     async cancel() {
       return { status: "no_active_turn" };
     },
@@ -31,6 +30,18 @@ function makeSession(): Session {
     },
     async getStreamTailIndex() {
       return -1;
+    },
+    async send() {
+      return { sessionId: "sess_1", status: "accepted" };
+    },
+    async compact() {
+      return { status: "no_active_session" };
+    },
+    async clear() {
+      return { status: "no_active_session" };
+    },
+    async reset() {
+      return { status: "no_active_session" };
     },
   };
 }
@@ -78,7 +89,7 @@ describe("createCrossChannelReceiveFn", () => {
       target: { channelId: "C1" },
       auth: expect.objectContaining({ principalId: "u" }),
     });
-    expect(typeof ctx.send).toBe("function");
+    expect(typeof ctx.channelAddress).toBe("function");
   });
 
   it("resolves the target by reference identity even when multiple channels are registered", async () => {

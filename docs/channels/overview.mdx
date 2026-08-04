@@ -6,7 +6,7 @@ description: "How users reach your agent: the channel contract, the base eve HTT
 A channel is the edge adapter between a platform and your agent. It does three things:
 
 - Normalizes platform input into a user message.
-- Owns the `continuationToken`, the resume handle for a conversation on that surface.
+- Owns the channel-local address that maps a platform conversation to its current durable session.
 - Decides delivery, meaning how, where, and whether a response goes back.
 
 eve ships a base HTTP channel plus first-class platform channels, and you can author your own. Browse the full set in the [Integrations](/integrations) gallery and choose the Channels filter.
@@ -36,7 +36,7 @@ The eve channel is the framework's default HTTP session API, the routes the term
 
 ## Custom channels
 
-When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel declares route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and a `send` call inside a handler to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel hand-off, channel metadata, continuation tokens, and file uploads.
+When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel declares route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and uses `channelAddress(token).send()` to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel hand-off, channel metadata, address tokens, and file uploads.
 
 ## Relationship to the Chat SDK
 

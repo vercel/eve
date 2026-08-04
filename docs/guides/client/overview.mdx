@@ -148,23 +148,15 @@ await session.reset({ reason: "User requested a fresh session" });
 
 `client.sessions` stores only the session ID and stream cursor. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement. Reset leaves the handle pinned to the retired ID.
 
-The continuation-addressed client surface remains available for callers that persist continuation tokens. Create a `ClientSession` for each conversation:
+A client can own many independent fixed sessions at once:
 
 ```ts
-const session = client.session();
-```
+const { session: alice, response: aliceResponse } =
+  await client.sessions.create("Summarize account A.");
+const { session: bob, response: bobResponse } =
+  await client.sessions.create("Summarize account B.");
 
-A client can own many sessions at once. Each session tracks its own `sessionId`, `continuationToken`, and stream cursor:
-
-```ts
-const alice = client.session();
-const bob = client.session();
-
-const aliceResponse = await alice.send("Summarize account A.");
-await aliceResponse.result();
-
-const bobResponse = await bob.send("Summarize account B.");
-await bobResponse.result();
+await Promise.all([aliceResponse.result(), bobResponse.result()]);
 ```
 
 The next pages cover the session lifecycle:

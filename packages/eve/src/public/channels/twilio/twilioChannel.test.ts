@@ -13,6 +13,14 @@ import { signTwilioRequest } from "#public/channels/twilio/verify.js";
 
 const AUTH_TOKEN = "test-auth-token";
 
+function mockChannelAddress(send: (input: unknown, options: Record<string, unknown>) => unknown) {
+  return (continuationToken: string) =>
+    ({
+      send: (input: unknown, options: Record<string, unknown>) =>
+        send(input, { ...options, continuationToken }),
+    }) as never;
+}
+
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
   if (!isCompiledChannel(channel)) {
     throw new Error("Expected a CompiledChannel.");
@@ -105,16 +113,17 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error(`Expected Twilio channel to define POST ${path}.`);
   }
-  const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(signedFormRequest(path, params), {
-    getSession: vi.fn() as any,
+    attachSession: vi.fn() as any,
+    channelAddress: mockChannelAddress(send),
+    receive: vi.fn() as any,
     params: {},
     requestIp: null,
-    send,
     waitUntil,
-  } as any);
+  });
 
   let drained = 0;
   while (drained < waitUntil.mock.calls.length) {
@@ -140,16 +149,17 @@ async function fireGet(
   if (!get || !isHttpRouteDefinition(get)) {
     throw new Error(`Expected Twilio channel to define GET ${path}.`);
   }
-  const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
   const waitUntil = vi.fn();
 
   const response = await get.handler(signedGetRequest(path, params), {
-    getSession: vi.fn() as any,
+    attachSession: vi.fn() as any,
+    channelAddress: mockChannelAddress(send),
+    receive: vi.fn() as any,
     params: {},
     requestIp: null,
-    send,
     waitUntil,
-  } as any);
+  });
 
   let drained = 0;
   while (drained < waitUntil.mock.calls.length) {
@@ -357,12 +367,13 @@ describe("twilioChannel() inbound text pipeline", () => {
         method: "POST",
       }),
       {
-        getSession: vi.fn() as any,
+        attachSession: vi.fn() as any,
+        channelAddress: () => ({ send }) as never,
+        receive: vi.fn() as any,
         params: {},
         requestIp: null,
-        send,
         waitUntil: vi.fn(),
-      } as any,
+      },
     );
 
     expect(response.status).toBe(401);
@@ -637,7 +648,7 @@ describe("twilioChannel() default event handlers", () => {
       allowFrom: "*",
       messaging: { from: "+15557654321" },
     });
-    const send = vi.fn().mockResolvedValue({ continuationToken: "+15551234567", id: "s1" });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await channel.receive!(
       {
@@ -645,7 +656,13 @@ describe("twilioChannel() default event handlers", () => {
         auth: null,
         message: "start",
       },
-      { send },
+      {
+        channelAddress: (continuationToken) =>
+          ({
+            send: (input: unknown, options: Record<string, unknown>) =>
+              send(input, { ...options, continuationToken }),
+          }) as never,
+      },
     );
 
     expect(send).toHaveBeenCalledWith("start", {

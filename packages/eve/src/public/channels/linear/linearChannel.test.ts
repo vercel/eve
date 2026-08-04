@@ -13,6 +13,20 @@ import type { InputRequest } from "#runtime/input/types.js";
 
 const SECRET = "linear-secret";
 
+function mockChannelAddress(send: (input: unknown, options: Record<string, unknown>) => unknown) {
+  return (continuationToken: string) =>
+    ({
+      continuationToken,
+      send: (input: unknown, options: Record<string, unknown>) =>
+        send(input, { ...options, continuationToken }),
+      cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
+      compact: vi.fn().mockResolvedValue({ status: "accepted" }),
+      clear: vi.fn().mockResolvedValue({ status: "accepted" }),
+      reset: vi.fn().mockResolvedValue({ status: "not_found" }),
+      resolveSession: vi.fn().mockResolvedValue(undefined),
+    }) as never;
+}
+
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
   if (!isCompiledChannel(channel)) throw new Error("Expected a CompiledChannel.");
   return channel as CompiledChannel<T>;
@@ -122,21 +136,15 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected linear channel to define a POST route.");
   }
-  const send = vi.fn().mockResolvedValue({ continuationToken: "linear:test", id: "s1" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
     attachSession: vi.fn() as any,
-    cancel: vi.fn(),
-    clear: vi.fn(),
-    compact: vi.fn(),
-    reset: vi.fn(),
-    resolveActiveSession: async () => undefined,
-    getSession: vi.fn() as any,
+    channelAddress: mockChannelAddress(send),
     params: {},
     receive: vi.fn() as any,
     requestIp: null,
-    send,
     waitUntil,
   });
 
@@ -503,7 +511,7 @@ describe("linearChannel default event handlers", () => {
 
   it("receive starts a session from an existing Agent Session id", async () => {
     const channel = linearChannel();
-    const send = vi.fn().mockResolvedValue({ continuationToken: "linear:test", id: "s1" });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await channel.receive!(
       {
@@ -511,7 +519,13 @@ describe("linearChannel default event handlers", () => {
         message: "start",
         target: { agentSessionId: "agent_session_1" },
       },
-      { send },
+      {
+        channelAddress: (continuationToken) =>
+          ({
+            send: (input: unknown, options: Record<string, unknown>) =>
+              send(input, { ...options, continuationToken }),
+          }) as never,
+      },
     );
 
     expect(send).toHaveBeenCalledWith("start", {
@@ -551,7 +565,7 @@ describe("linearChannel default event handlers", () => {
       api: { apiBaseUrl: "https://linear.test/graphql", fetch: fetchMock },
       credentials: { accessToken: "linear-token" },
     });
-    const send = vi.fn().mockResolvedValue({ continuationToken: "linear:test", id: "s1" });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await channel.receive!(
       {
@@ -559,7 +573,13 @@ describe("linearChannel default event handlers", () => {
         message: "start",
         target: { issueId: "issue_1" },
       },
-      { send },
+      {
+        channelAddress: (continuationToken) =>
+          ({
+            send: (input: unknown, options: Record<string, unknown>) =>
+              send(input, { ...options, continuationToken }),
+          }) as never,
+      },
     );
 
     expect(requestBody(fetchMock.mock.calls[0]?.[1])).toMatchObject({

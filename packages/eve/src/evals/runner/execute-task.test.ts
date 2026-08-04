@@ -119,7 +119,6 @@ describe("executeTask", () => {
     expect(server.posts.map((post) => post.body)).toEqual([
       { message: "run pwd" },
       {
-        continuationToken: "eve:session_1",
         inputResponses: [{ optionId: "approve", requestId: "approval_1" }],
       },
     ]);
@@ -354,7 +353,7 @@ describe("executeTask", () => {
             turnStarted("parent-turn"),
             subagentCalled("parent-turn", "child-session", "sleeper"),
             turnCompleted("parent-turn"),
-            sessionWaiting("eve:parent-session"),
+            sessionWaiting(),
           ],
         },
         {
@@ -363,7 +362,7 @@ describe("executeTask", () => {
             turnStarted("child-follow-up"),
             messageCompleted("child continued", "child-follow-up"),
             turnCompleted("child-follow-up"),
-            sessionWaiting("eve:child-session-next"),
+            sessionWaiting(),
           ],
         },
       ],
@@ -376,7 +375,7 @@ describe("executeTask", () => {
               turnStarted("child-turn"),
               actionsRequested("child-turn", "wait-for-cancellation"),
               turnCompleted("child-turn"),
-              sessionWaiting("eve:child-session"),
+              sessionWaiting(),
             ],
           },
         ],
@@ -426,7 +425,6 @@ describe("executeTask", () => {
     expect(outcome.error).toBeUndefined();
     expect(server.cancels).toEqual(["parent-session"]);
     expect(server.posts[1]?.body).toEqual({
-      continuationToken: "eve:child-session",
       message: "continue child",
     });
     expect(outcome.result.sessions?.map((session) => session.sessionId)).toEqual([
@@ -502,7 +500,7 @@ describe("executeTask", () => {
     expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
   });
 
-  it("sends a follow-up on an attached session via the stream-recovered continuation token", async () => {
+  it("sends a follow-up on an attached fixed session ID", async () => {
     // The attached stream parks with a token the eval never saw from a POST
     // response: the only way the follow-up can carry it is recovery from the
     // `session.waiting` boundary event.
@@ -514,7 +512,7 @@ describe("executeTask", () => {
             turnStarted("turn_2"),
             messageCompleted("follow-up done", "turn_2"),
             turnCompleted("turn_2"),
-            sessionWaiting("eve:channel-rekeyed"),
+            sessionWaiting(),
           ],
         },
       ],
@@ -526,7 +524,7 @@ describe("executeTask", () => {
               turnStarted("turn_1"),
               messageCompleted("channel done", "turn_1"),
               turnCompleted("turn_1"),
-              sessionWaiting("eve:channel-rekeyed"),
+              sessionWaiting(),
             ],
           },
         ],
@@ -547,9 +545,10 @@ describe("executeTask", () => {
 
     expect(outcome.error).toBeUndefined();
     expect(server.posts).toHaveLength(1);
-    expect(new URL(server.posts[0]!.url).pathname).toBe("/eve/v1/session/channel-session");
+    expect(new URL(server.posts[0]!.url).pathname).toBe(
+      "/eve/v1/sessions/channel-session/messages",
+    );
     expect(server.posts[0]?.body).toEqual({
-      continuationToken: "eve:channel-rekeyed",
       message: "continue please",
     });
     expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
@@ -665,7 +664,6 @@ function createScriptedServer(
 
         return Response.json(
           {
-            continuationToken: `eve:${next.sessionId}`,
             ok: true,
             sessionId: next.sessionId,
           },
@@ -706,9 +704,9 @@ function turnCompleted(turnId: string): UnstampedMessageStreamEvent {
   return { data: { sequence: 3, turnId }, type: "turn.completed" };
 }
 
-function sessionWaiting(continuationToken = "eve:session_1"): UnstampedMessageStreamEvent {
+function sessionWaiting(): UnstampedMessageStreamEvent {
   return {
-    data: { continuationToken, wait: "next-user-message" },
+    data: { wait: "next-user-message" },
     type: "session.waiting",
   };
 }

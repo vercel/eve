@@ -64,7 +64,6 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
       });
 
       const handle: RunHandle = {
-        continuationToken: "scenario-token",
         events: new ReadableStream<MessageStreamEvent>(),
         sessionId: "scenario-session",
       };

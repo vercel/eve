@@ -544,7 +544,7 @@ describe("dispatchRuntimeActionsStep", () => {
         description: "Research remote",
         kind: "remote",
         name: "research",
-        path: "/eve/v1/session",
+        path: "/eve/v1/sessions",
         url: "https://remote.example.com",
       },
     };
@@ -637,7 +637,7 @@ describe("dispatchRuntimeActionsStep", () => {
         kind: "remote",
         name: "research",
         nodeId: "remote/research",
-        path: "/eve/v1/session",
+        path: "/eve/v1/sessions",
         url: "https://remote.example.com",
       },
     };
@@ -2131,7 +2131,7 @@ describe("runProxySubagentEventStep", () => {
     const rekeyingAdapter: ChannelAdapter = {
       kind: "thread-context",
       async "input.requested"(_data, adapterCtx) {
-        adapterCtx.session.setContinuationToken("proxy-rekeyed");
+        adapterCtx.session.continuation?.rekey("proxy-rekeyed");
       },
     };
 

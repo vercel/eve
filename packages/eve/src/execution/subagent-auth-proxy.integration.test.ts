@@ -30,7 +30,7 @@ const authorizationAdapter: ChannelAdapter<AuthorizationAdapterContext> = {
   kind: "authorization-proxy-test",
   "authorization.required"(data, ctx) {
     ctx.state.pendingName = data.name;
-    ctx.session.setContinuationToken("auth-thread");
+    ctx.session.continuation?.rekey("auth-thread");
   },
   "authorization.completed"(data, ctx) {
     delete ctx.state.pendingName;

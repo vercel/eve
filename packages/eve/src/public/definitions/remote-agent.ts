@@ -1,7 +1,7 @@
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { HeadersValue } from "#client/types.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
-import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_SESSIONS_ROUTE_PATH } from "#protocol/routes.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -48,7 +48,7 @@ export interface RemoteAgentDefinition {
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
   /**
    * Route eve appends to `url` for the create-session request. Defaults to the
-   * framework create-session route (`/eve/v1/session`).
+   * framework create-session route (`/eve/v1/sessions`).
    */
   readonly path: string;
   /**
@@ -73,12 +73,12 @@ export type RemoteAgentDefinitionInput = Omit<RemoteAgentDefinition, "kind" | "p
  * compiler lowers it at compile time from the file path under `agent/subagents/`.
  *
  * Stamps `kind: "remote"` and, when `path` is omitted, defaults it to the
- * framework create-session route (`/eve/v1/session`) on the target `url`.
+ * framework create-session route (`/eve/v1/sessions`) on the target `url`.
  */
 export function defineRemoteAgent(input: RemoteAgentDefinitionInput): RemoteAgentDefinition {
   return {
     ...input,
     kind: "remote",
-    path: input.path ?? EVE_CREATE_SESSION_ROUTE_PATH,
+    path: input.path ?? EVE_SESSIONS_ROUTE_PATH,
   };
 }

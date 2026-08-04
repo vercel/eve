@@ -5,7 +5,6 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
 import type { FetchFileResult, FetchFileFunction } from "#shared/channel-definition.js";
-import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 
 const log = createLogger("channel.adapter");
 
@@ -23,7 +22,7 @@ const log = createLogger("channel.adapter");
  * {@link ContextAccessor} that tools and providers use).
  *
  * `session` is a live handle to the current session — id, auth,
- * continuation token, plus an imperative {@link SessionHandle.setContinuationToken}
+ * optional channel continuation address, including an imperative `rekey()`
  * for channels that need to re-key the session mid-turn (e.g. Slack's
  * auto-anchor on first post).
  */
@@ -223,9 +222,7 @@ export function getAdapterKind(adapter: ChannelAdapter): string {
 
 /**
  * Calls an adapter's event handler for a given event. Adapters perform side
- * effects rather than transforming events; after the handler runs, the
- * runtime refreshes `session.waiting` with the live continuation token so a
- * handler that re-keyed the session publishes the new resume handle.
+ * effects rather than transforming events.
  *
  * Throwing handlers are logged and swallowed so a downstream delivery
  * failure does not corrupt the event stream write path.
@@ -249,16 +246,6 @@ export async function callAdapterEventHandler(
         error,
       });
     }
-  }
-
-  if (event.type === "session.waiting") {
-    return {
-      ...event,
-      data: {
-        ...event.data,
-        continuationToken: toChannelLocalContinuationToken(ctx.session.continuationToken),
-      },
-    };
   }
 
   return event;

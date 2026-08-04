@@ -67,8 +67,8 @@ export function App() {
   const hasComposerText = composerInput.trim().length > 0;
   const hasConversation = turns.length > 0 || isComposeInProgress;
   const conversationActivityKey = [
-    agent.session.sessionId ?? "new-thread",
-    String(agent.session.streamIndex),
+    agent.session?.sessionId ?? "new-thread",
+    String(agent.session?.streamIndex ?? 0),
     String(agent.events.length),
     agent.status,
   ].join(":");
@@ -107,7 +107,7 @@ export function App() {
 
     setComposerError(undefined);
     setComposerInput("");
-    if (agent.session.sessionId === undefined && agent.data.turns.length > 0) {
+    if (agent.session?.sessionId === undefined && agent.data.turns.length > 0) {
       agent.reset();
     }
     await agent.send({ message });

@@ -4,7 +4,7 @@ import type {
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
-  ResetSessionCommandResult,
+  ResetSessionResult,
   Runtime,
   SessionAuthContext,
   SessionSendCommandResult,
@@ -14,39 +14,8 @@ import { normalizeSendInput, serializeUrlFilePartsInMessage } from "#channel/sen
 import type { SessionAuth } from "#context/keys.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
 
-/**
- * Result of starting or delivering to a session. Exposes the session
- * `id`, its channel-local `continuationToken`, and `getEventStream`, which
- * resolves to a `ReadableStream` of the session's harness events
- * (optionally from `startIndex`). Returned by {@link SendFn},
- * {@link GetSessionFn}, and a channel's `receive` hook. Unlike the live
- * {@link SessionHandle} on `ctx.session`, this is an inert result value:
- * its fields are snapshots and it cannot mutate the continuation token.
- */
+/** Immutable-ID handle for one exact durable session. */
 export interface Session {
-  readonly id: string;
-  readonly continuationToken: string;
-  /**
-   * Requests cancellation of this session's in-flight turn. `turnId` limits
-   * the request to the turn the caller observed. Both statuses are
-   * successful; confirmation is `turn.cancelled` followed by
-   * `session.waiting` on the event stream.
-   */
-  cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
-  /**
-   * Opens the durable event stream. Negative start indexes read relative to
-   * the current tail (`-1` starts at the latest event).
-   */
-  getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
-  /**
-   * Resolves the durable tail of the event stream: the zero-based index of
-   * the last recorded event, or `-1` before the first.
-   */
-  getStreamTailIndex(): Promise<number>;
-}
-
-/** Immutable-ID session handle for aligned send, control, and stream operations. */
-export interface FixedSession {
   readonly id: string;
   /** Sends input to this exact session ID without creating or following a replacement. */
   send(input: SessionSendInput): Promise<SessionSendCommandResult>;
@@ -57,7 +26,7 @@ export interface FixedSession {
   /** Queues a context clear on this exact session ID. */
   clear(): Promise<ClearSessionResult>;
   /** Terminally retires this exact session ID. */
-  reset(options?: { reason?: string }): Promise<ResetSessionCommandResult>;
+  reset(options?: { reason?: string }): Promise<ResetSessionResult>;
   getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
   getStreamTailIndex(): Promise<number>;
 }
@@ -71,25 +40,25 @@ export interface SessionSendInput extends SendPayload {
  * Live handle to the current session, exposed on `ctx.session` to
  * `deliver` and event handlers. The framework hydrates the read-only
  * fields from the active context at step start. A write through
- * {@link SessionHandle.setContinuationToken} updates the context so the
+ * `continuation.rekey()` updates the context so the
  * runtime can re-key the parked workflow hook at the next step boundary.
  */
 export interface SessionHandle {
   readonly id: string;
-  readonly continuationToken: string;
   readonly auth: SessionAuth;
-  setContinuationToken(rawToken: string): void;
+  readonly continuation?: {
+    readonly token: string;
+    rekey(rawToken: string): void;
+  };
 }
 
 export function createSession(
   id: string,
-  continuationToken: string,
   runtime: Runtime,
   metadata: { readonly requestId?: string } = {},
-): Session & FixedSession {
+): Session {
   return {
     id,
-    continuationToken,
     async send(input) {
       const { auth, ...sendInput } = input;
       const payload = normalizeSendInput(sendInput);
@@ -133,19 +102,12 @@ export function createSession(
   };
 }
 
-export function createGetSessionFn(
-  runtime: Runtime,
-  metadata: { readonly requestId?: string } = {},
-): (sessionId: string) => Session {
-  return (sessionId: string) => createSession(sessionId, "", runtime, metadata);
-}
-
 /** Builds an I/O-free factory for fixed session-ID handles. */
 export function createAttachSessionFn(
   runtime: Runtime,
   metadata: { readonly requestId?: string } = {},
-): (sessionId: string) => FixedSession {
-  return (sessionId) => createSession(sessionId, "", runtime, metadata);
+): (sessionId: string) => Session {
+  return (sessionId) => createSession(sessionId, runtime, metadata);
 }
 
 /**
@@ -163,25 +125,23 @@ export function buildSessionHandle(accessor: ContextAccessor): SessionHandle {
     get id() {
       return accessor.get(SessionIdKey) ?? "";
     },
-    get continuationToken() {
-      return accessor.get(ContinuationTokenKey) ?? "";
-    },
     get auth(): SessionAuth {
       return {
         current: accessor.get(AuthKey) ?? null,
         initiator: accessor.get(InitiatorAuthKey) ?? null,
       };
     },
-    setContinuationToken(rawToken: string): void {
-      const currentToken = accessor.get(ContinuationTokenKey) ?? "";
-      const token = namespaceContinuationToken(currentToken, rawToken);
-
-      // Idempotent: a redundant write would push the workflow body
-      // through a hook dispose / recreate cycle for no reason. The
-      // call must remain cheap so channels can call it from
-      // hot-path event handlers without measuring first.
-      if (currentToken === token) return;
-      accessor.set(ContinuationTokenKey, token);
+    get continuation() {
+      const currentToken = accessor.get(ContinuationTokenKey);
+      if (currentToken === undefined || currentToken.length === 0) return undefined;
+      return {
+        token: currentToken,
+        rekey(rawToken: string): void {
+          const token = namespaceContinuationToken(currentToken, rawToken);
+          if (currentToken === token) return;
+          accessor.set(ContinuationTokenKey, token);
+        },
+      };
     },
   };
 }

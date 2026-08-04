@@ -56,8 +56,8 @@ export interface DynamicResolveContext {
   readonly channel: {
     /** Channel type that produced the request (e.g. `"slack"`, `"http"`), when known. */
     readonly kind?: string;
-    /** Channel-owned resume handle for the conversation, when the channel supplies one. */
-    readonly continuationToken?: string;
+    /** Channel-owned routing address for the conversation, when the channel supplies one. */
+    readonly continuation?: { readonly token: string };
     /** Free-form channel-specific metadata attached to the request. */
     readonly metadata?: Readonly<Record<string, unknown>>;
   };

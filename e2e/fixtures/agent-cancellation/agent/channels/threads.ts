@@ -11,41 +11,39 @@ const AUTH = {
  * Chat-style channel for continuation-addressed session-control evals.
  *
  * Messages address a thread by channel-local continuation token. The stop
- * and session-control routes act through public channel helpers without
+ * and session-control routes act through a channel address without
  * knowing the runtime session id.
  */
 export default defineChannel({
   routes: [
-    POST("/threads/:threadId/messages", async (request, { params, send }) => {
+    POST("/threads/:threadId/messages", async (request, { channelAddress, params }) => {
       const body = (await request.json().catch(() => ({}))) as { message?: string };
-      const session = await send(body.message ?? "", {
+      const session = await channelAddress(params.threadId ?? "").send(body.message ?? "", {
         auth: AUTH,
-        continuationToken: params.threadId ?? "",
       });
       return Response.json({ ok: true, sessionId: session.id });
     }),
-    POST("/threads/:threadId/stop", async (_request, { params, cancel }) => {
-      const result = await cancel({ continuationToken: params.threadId ?? "" });
+    POST("/threads/:threadId/stop", async (_request, { channelAddress, params }) => {
+      const result = await channelAddress(params.threadId ?? "").cancel();
       return Response.json(result);
     }),
-    POST("/threads/:threadId/new", async (_request, { params, reset }) => {
-      const result = await reset({
-        continuationToken: params.threadId ?? "",
+    POST("/threads/:threadId/new", async (_request, { channelAddress, params }) => {
+      const result = await channelAddress(params.threadId ?? "").reset({
         reason: "E2E user requested /new",
       });
       return Response.json({ acknowledgement: "Started a new conversation.", ...result });
     }),
-    POST("/threads/:threadId/compact", async (_request, { compact, params }) => {
-      const result = await compact({ continuationToken: params.threadId ?? "" });
+    POST("/threads/:threadId/compact", async (_request, { channelAddress, params }) => {
+      const result = await channelAddress(params.threadId ?? "").compact();
       return Response.json(result);
     }),
-    POST("/threads/:threadId/clear", async (_request, { clear, params }) => {
-      const result = await clear({ continuationToken: params.threadId ?? "" });
+    POST("/threads/:threadId/clear", async (_request, { channelAddress, params }) => {
+      const result = await channelAddress(params.threadId ?? "").clear();
       return Response.json(result);
     }),
-    POST("/threads/:threadId/owner", async (_request, { params, resolveActiveSession }) => {
-      const owner = await resolveActiveSession({ continuationToken: params.threadId ?? "" });
-      return Response.json({ sessionId: owner?.sessionId ?? null });
+    POST("/threads/:threadId/owner", async (_request, { channelAddress, params }) => {
+      const session = await channelAddress(params.threadId ?? "").resolveSession();
+      return Response.json({ sessionId: session?.id ?? null });
     }),
   ],
 });

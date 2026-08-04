@@ -15,7 +15,6 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 function createMockRunHandle(): RunHandle {
   return {
-    continuationToken: "slack:C0123ABC:",
     events: new ReadableStream<MessageStreamEvent>(),
     sessionId: "mock-session-id",
   };

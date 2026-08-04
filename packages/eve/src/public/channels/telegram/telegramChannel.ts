@@ -52,7 +52,12 @@ import {
   type TelegramWebhookSecretToken,
   type TelegramWebhookVerifier,
 } from "#public/channels/telegram/verify.js";
-import { defineChannel, POST, type Channel, type SendFn } from "#public/definitions/channel.js";
+import {
+  defineChannel,
+  POST,
+  type Channel,
+  type ChannelAddressFn,
+} from "#public/definitions/channel.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 const log = createLogger("telegram.channel");
@@ -231,7 +236,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
     routes: [
       POST<TelegramChannelState>(
         config.route ?? "/eve/v1/telegram",
-        async (req, { send, waitUntil }) => {
+        async (req, { channelAddress, waitUntil }) => {
           const body = await verifyInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
 
@@ -252,7 +257,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
                 config,
                 message: update.message,
                 onMessage,
-                send,
+                channelAddress,
                 uploadPolicy,
               }),
             );
@@ -263,7 +268,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
             dispatchCallbackQuery({
               config,
               query: update.callbackQuery,
-              send,
+              channelAddress,
             }),
           );
           return new Response("ok");
@@ -271,7 +276,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
       ),
     ],
 
-    async receive(input, { send }) {
+    async receive(input, { channelAddress }) {
       const receiveTarget = input.target as Partial<TelegramReceiveTarget>;
       const chatId = readChatId(receiveTarget.chatId);
       if (chatId === undefined) {
@@ -304,9 +309,8 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
         await handle.sendMessage(initialMessage);
       }
 
-      return send(input.message, {
+      return channelAddress(continuationTokenFromState(receiveState)).send(input.message, {
         auth: input.auth,
-        continuationToken: continuationTokenFromState(receiveState),
         state: receiveState,
       });
     },
@@ -346,7 +350,7 @@ function buildTelegramHandle(input: {
     if (!posted.id || !shouldAnchorTelegramConversation(chatType)) return;
     state.conversationId = posted.id;
     if (state.chatId) {
-      input.session?.setContinuationToken(
+      input.session?.continuation?.rekey(
         telegramContinuationToken({
           chatId: state.chatId,
           conversationId: posted.id,
@@ -475,7 +479,7 @@ async function dispatchMessage(input: {
   readonly config: TelegramChannelConfig;
   readonly message: TelegramMessage;
   readonly onMessage: NonNullable<TelegramChannelConfig["onMessage"]>;
-  readonly send: SendFn<TelegramChannelState>;
+  readonly channelAddress: ChannelAddressFn<TelegramChannelState>;
   readonly uploadPolicy: UploadPolicy;
 }): Promise<void> {
   if (input.message.from?.isBot === true) return;
@@ -520,7 +524,7 @@ async function dispatchMessage(input: {
       : undefined;
 
   try {
-    await input.send(
+    await input.channelAddress(continuationTokenFromState(state)).send(
       {
         inputResponses: replyInputResponses,
         message: turnMessage,
@@ -528,7 +532,6 @@ async function dispatchMessage(input: {
       },
       {
         auth: result.auth,
-        continuationToken: continuationTokenFromState(state),
         state,
       },
     );
@@ -540,7 +543,7 @@ async function dispatchMessage(input: {
 async function dispatchCallbackQuery(input: {
   readonly config: TelegramChannelConfig;
   readonly query: TelegramCallbackQuery;
-  readonly send: SendFn<TelegramChannelState>;
+  readonly channelAddress: ChannelAddressFn<TelegramChannelState>;
 }): Promise<void> {
   const state = stateFromCallbackQuery(input.query, input.config);
   const telegram: TelegramContext = {
@@ -559,13 +562,12 @@ async function dispatchCallbackQuery(input: {
 
     if (!input.query.message || !state.chatId) return;
     try {
-      await input.send(
+      await input.channelAddress(continuationTokenFromState(state)).send(
         {
           inputResponses: [telegramCallbackInputResponse(input.query.data)],
         },
         {
           auth: null,
-          continuationToken: continuationTokenFromState(state),
           state,
         },
       );

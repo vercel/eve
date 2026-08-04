@@ -57,7 +57,7 @@ export type {
   SendTurnInput,
   SendTurnPayload,
   SessionSnapshot,
-  SessionState,
+  ClientSessionState,
   StreamOptions,
   StreamReconnectPolicy,
   StreamReconnectRetryPolicy,

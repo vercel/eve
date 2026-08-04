@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { EveAcpAdapter } from "#acp/adapter.js";
 import { ClientError } from "#client/client-error.js";
-import type { SendTurnInput, SessionState } from "#client/types.js";
+import type { SendTurnInput } from "#client/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 type TestStreamEvent<T = HandleMessageStreamEvent> = T extends unknown ? Omit<T, "meta"> : never;
@@ -12,7 +12,6 @@ class FakeClientSession {
   readonly cancel = vi.fn(async () => ({ status: "accepted" }));
   readonly reset = vi.fn(async () => ({ status: "reset" }));
   readonly sends: SendTurnInput[] = [];
-  state: SessionState = { streamIndex: 0 };
   readonly #turns: Array<readonly TestStreamEvent[]>;
 
   constructor(turns: Array<readonly TestStreamEvent[]>) {
@@ -21,7 +20,6 @@ class FakeClientSession {
 
   async send(input: SendTurnInput): Promise<AsyncIterable<HandleMessageStreamEvent>> {
     this.sends.push(input);
-    this.state = { ...this.state, sessionId: "eve-session" };
     const events = this.#turns.shift() ?? [];
     return (async function* () {
       for (const [index, event] of events.entries()) {
@@ -34,10 +32,20 @@ class FakeClientSession {
   }
 }
 
+function fakeClient(session: FakeClientSession) {
+  return {
+    sessions: {
+      async create(input: SendTurnInput) {
+        return { response: await session.send(input), session };
+      },
+    },
+  };
+}
+
 function adapterWith(turns: Array<readonly TestStreamEvent[]> = []) {
   const session = new FakeClientSession(turns);
   const adapter = new EveAcpAdapter({
-    client: { session: () => session },
+    client: fakeClient(session),
     eveVersion: "1.2.3",
     serverUrl: "http://127.0.0.1:2000",
     workspaceRoot: process.cwd(),
@@ -105,7 +113,7 @@ describe("EveAcpAdapter", () => {
   it("does not treat a remote ACP client's cwd as a deployment workspace", async () => {
     const session = new FakeClientSession([]);
     const adapter = new EveAcpAdapter({
-      client: { session: () => session },
+      client: fakeClient(session),
       eveVersion: "1.2.3",
       serverUrl: "https://agent.example.com",
     });
@@ -157,7 +165,7 @@ describe("EveAcpAdapter", () => {
           turnId: "t1",
         },
       },
-      { type: "session.waiting", data: { continuationToken: "secret", wait: "next-user-message" } },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
     ];
     const { adapter, session } = adapterWith([events]);
     const sessionId = await createSession(adapter);
@@ -215,9 +223,9 @@ describe("EveAcpAdapter", () => {
             turnId: "t1",
           },
         },
-        { type: "session.waiting", data: { continuationToken: "one", wait: "next-user-message" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
       ],
-      [{ type: "session.waiting", data: { continuationToken: "two", wait: "next-user-message" } }],
+      [{ type: "session.waiting", data: { wait: "next-user-message" } }],
     ]);
     const request = vi.fn(async (_method: string, params: any) => ({
       outcome: { outcome: "selected", optionId: params.options[0].optionId },
@@ -276,9 +284,9 @@ describe("EveAcpAdapter", () => {
             turnId: "turn-1",
           },
         },
-        { type: "session.waiting", data: { continuationToken: "one", wait: "next-user-message" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
       ],
-      [{ type: "session.waiting", data: { continuationToken: "two", wait: "next-user-message" } }],
+      [{ type: "session.waiting", data: { wait: "next-user-message" } }],
     ]);
     adapter.initialize({
       clientCapabilities: { elicitation: { form: {} } },
@@ -337,7 +345,7 @@ describe("EveAcpAdapter", () => {
             turnId: "turn-1",
           },
         },
-        { type: "session.waiting", data: { continuationToken: "one", wait: "next-user-message" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
       ],
     ]);
     let requestStarted!: () => void;
@@ -389,7 +397,6 @@ describe("EveAcpAdapter", () => {
     session.send = vi.fn(async () => {
       sendStarted();
       await released;
-      session.state = { sessionId: "eve-session", streamIndex: 0 };
       return (async function* () {
         yield {
           type: "turn.cancelled",
@@ -397,12 +404,12 @@ describe("EveAcpAdapter", () => {
         } as HandleMessageStreamEvent;
         yield {
           type: "session.waiting",
-          data: { continuationToken: "next", wait: "next-user-message" },
+          data: { wait: "next-user-message" },
         } as HandleMessageStreamEvent;
       })();
     });
     const adapter = new EveAcpAdapter({
-      client: { session: () => session },
+      client: fakeClient(session),
       eveVersion: "1.2.3",
       serverUrl: "http://127.0.0.1:2000",
       workspaceRoot: process.cwd(),
@@ -430,7 +437,6 @@ describe("EveAcpAdapter", () => {
     const turnObserved = new Promise<void>((resolve) => (observeTurn = resolve));
     const session = new FakeClientSession([]);
     session.send = vi.fn(async () => {
-      session.state = { sessionId: "eve-session", streamIndex: 0 };
       return (async function* () {
         observeTurn();
         yield {
@@ -444,12 +450,12 @@ describe("EveAcpAdapter", () => {
         } as HandleMessageStreamEvent;
         yield {
           type: "session.waiting",
-          data: { continuationToken: "next", wait: "next-user-message" },
+          data: { wait: "next-user-message" },
         } as HandleMessageStreamEvent;
       })();
     });
     const adapter = new EveAcpAdapter({
-      client: { session: () => session },
+      client: fakeClient(session),
       eveVersion: "1.2.3",
       serverUrl: "http://127.0.0.1:2000",
       workspaceRoot: process.cwd(),
@@ -475,7 +481,7 @@ describe("EveAcpAdapter", () => {
       throw new ClientError(401, JSON.stringify({ error: "Unauthorized" }));
     });
     const adapter = new EveAcpAdapter({
-      client: { session: () => session },
+      client: fakeClient(session),
       eveVersion: "1.2.3",
       serverUrl: "https://agent.example.com",
     });
@@ -507,7 +513,7 @@ describe("EveAcpAdapter", () => {
             turnId: "turn-1",
           },
         },
-        { type: "session.waiting", data: { continuationToken: "next", wait: "next-user-message" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
       ],
     ]);
     const sessionId = await createSession(adapter);
@@ -532,7 +538,7 @@ describe("EveAcpAdapter", () => {
             turnId: "turn-1",
           },
         },
-        { type: "session.waiting", data: { continuationToken: "next", wait: "next-user-message" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
       ],
     ]);
     const sessionId = await createSession(adapter);
@@ -563,8 +569,10 @@ describe("EveAcpAdapter", () => {
   });
 
   it("resets owned eve sessions when an ACP session or connection closes", async () => {
-    const { adapter, session } = adapterWith();
+    const waitingTurn = [{ type: "session.waiting", data: { wait: "next-user-message" } }] as const;
+    const { adapter, session } = adapterWith([waitingTurn, waitingTurn]);
     const first = await createSession(adapter);
+    await adapter.prompt(textPrompt(first), acpClient().client, new AbortController().signal);
 
     await adapter.closeSession(first);
     expect(session.reset).toHaveBeenCalledOnce();
@@ -572,14 +580,18 @@ describe("EveAcpAdapter", () => {
       adapter.prompt(textPrompt(first), acpClient().client, new AbortController().signal),
     ).rejects.toThrow("Unknown or closed");
 
-    await createSession(adapter);
+    const second = await createSession(adapter);
+    await adapter.prompt(textPrompt(second), acpClient().client, new AbortController().signal);
     await adapter.close();
     expect(session.reset).toHaveBeenCalledTimes(2);
   });
 
   it("keeps whole-connection cleanup best-effort when reset fails", async () => {
-    const { adapter, session } = adapterWith();
-    await createSession(adapter);
+    const { adapter, session } = adapterWith([
+      [{ type: "session.waiting", data: { wait: "next-user-message" } }],
+    ]);
+    const sessionId = await createSession(adapter);
+    await adapter.prompt(textPrompt(sessionId), acpClient().client, new AbortController().signal);
     session.reset.mockRejectedValueOnce(new Error("server already stopped"));
 
     await expect(adapter.close()).resolves.toBeUndefined();

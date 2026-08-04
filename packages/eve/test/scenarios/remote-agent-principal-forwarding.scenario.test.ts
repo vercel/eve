@@ -153,7 +153,7 @@ function createRemote(input: {
     logicalPath: "subagents/site-ops.ts",
     name: "site-ops",
     nodeId: "subagents/site-ops.ts",
-    path: "/eve/v1/session",
+    path: "/eve/v1/sessions",
     sourceId: "subagents/site-ops.ts",
     sourceKind: "module",
     url: input.url,

@@ -1,17 +1,17 @@
 import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import { createChannelAddressFn } from "#channel/channel-address.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
-import { createSendFn } from "#channel/send.js";
 import type { Session } from "#channel/session.js";
 import type { Runtime, SessionAuthContext } from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 /**
  * Options accepted by {@link CrossChannelReceiveFn}. Mirrors the input
- * argument of a channel's authored `receive(input, { send })` hook —
- * the runtime constructs `send` internally so route-handler callers
+ * argument of a channel's authored `receive(input, { channelAddress })` hook —
+ * the runtime constructs the bound address factory so route-handler callers
  * only supply the platform target, payload, and auth.
  */
 export interface CrossChannelReceiveOptions<TTarget = Record<string, unknown>> {
@@ -109,9 +109,9 @@ interface InvokeChannelReceiveInput {
 }
 
 /**
- * Shared `receive(input, { send })` invocation used by both the route-
+ * Shared `receive(input, { channelAddress })` invocation used by both the route-
  * handler cross-channel surface and the schedule dispatcher. Owns the
- * receive/adapter precondition checks and the per-target `send`
+ * receive/adapter precondition checks and the per-target `channelAddress`
  * factory so both call sites stay byte-identical.
  */
 export async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Session> {
@@ -121,8 +121,12 @@ export async function invokeChannelReceive(args: InvokeChannelReceiveInput): Pro
   if (!args.target.adapter) {
     throw new Error(args.describeMissingAdapter());
   }
-  const send = createSendFn(args.runtime, args.target.adapter, args.target.name);
-  return await args.target.receive(args.input, { send });
+  const channelAddress = createChannelAddressFn({
+    adapter: args.target.adapter,
+    channelName: args.target.name,
+    runtime: args.runtime,
+  });
+  return await args.target.receive(args.input, { channelAddress });
 }
 
 function resolveTargetByReference(

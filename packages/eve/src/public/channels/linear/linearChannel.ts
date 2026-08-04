@@ -31,8 +31,8 @@ import {
   defineChannel,
   POST,
   type Channel,
+  type ChannelAddressFn,
   type ChannelSessionOps,
-  type SendFn,
 } from "#public/definitions/channel.js";
 import { isObject, readNonEmptyString } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
@@ -224,7 +224,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
     routes: [
       POST<LinearChannelState>(
         config.route ?? LINEAR_CHANNEL_DEFAULT_ROUTE,
-        async (req, { send, waitUntil }) => {
+        async (req, { channelAddress, waitUntil }) => {
           const body = await verifyInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
 
@@ -239,7 +239,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
           if (event === null) return jsonOk({ ignored: true, ok: true });
 
           if (event.kind === "agent_session") {
-            waitUntil(dispatchAgentSession({ config, event, onAgentSession, send }));
+            waitUntil(dispatchAgentSession({ channelAddress, config, event, onAgentSession }));
             return jsonOk({ ok: true });
           }
 
@@ -253,7 +253,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
       ),
     ],
 
-    async receive(input, { send }) {
+    async receive(input, { channelAddress }) {
       const target = input.target as Record<string, unknown>;
       const session = await resolveReceiveSession(target, config);
 
@@ -269,9 +269,8 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
         });
       }
 
-      return send(input.message, {
+      return channelAddress(linearContinuationToken(session.id)).send(input.message, {
         auth: input.auth,
-        continuationToken: linearContinuationToken(session.id),
         state: stateFromAgentSession(session),
       });
     },
@@ -330,10 +329,10 @@ function buildLinearHandle(input: {
 }
 
 async function dispatchAgentSession(input: {
+  readonly channelAddress: ChannelAddressFn<LinearChannelState>;
   readonly config: LinearChannelConfig;
   readonly event: LinearAgentSessionEvent;
   readonly onAgentSession: NonNullable<LinearChannelConfig["onAgentSession"]>;
-  readonly send: SendFn<LinearChannelState>;
 }): Promise<void> {
   const { event } = input;
   const context: LinearSessionContext = {
@@ -350,7 +349,7 @@ async function dispatchAgentSession(input: {
     fetch: input.config.api?.fetch,
   });
 
-  await input.send(
+  await input.channelAddress(linearContinuationToken(event.agentSession.id)).send(
     {
       context: [
         formatLinearContextBlock(event),
@@ -361,7 +360,6 @@ async function dispatchAgentSession(input: {
     },
     {
       auth: result.auth,
-      continuationToken: linearContinuationToken(event.agentSession.id),
       state: stateFromAgentSession(event.agentSession),
     },
   );

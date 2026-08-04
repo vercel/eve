@@ -191,7 +191,6 @@ export function createWorkflowRuntime(config: {
       };
 
       return {
-        continuationToken: input.continuationToken ?? run.runId,
         get events() {
           return getEvents();
         },

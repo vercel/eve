@@ -1,11 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  buildSessionHandle,
-  createAttachSessionFn,
-  createGetSessionFn,
-  createSession,
-} from "#channel/session.js";
+import { buildSessionHandle, createAttachSessionFn, createSession } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
@@ -24,7 +19,7 @@ function createRuntime(): Runtime {
 describe("createSession#cancel", () => {
   it("cancels this session's turn by session id", async () => {
     const runtime = createRuntime();
-    const session = createSession("sess_1", "C1:T1", runtime);
+    const session = createSession("sess_1", runtime);
 
     await expect(session.cancel()).resolves.toEqual({ status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
@@ -35,7 +30,7 @@ describe("createSession#cancel", () => {
 
   it("forwards the turn guard", async () => {
     const runtime = createRuntime();
-    const session = createSession("sess_1", "C1:T1", runtime);
+    const session = createSession("sess_1", runtime);
 
     await session.cancel({ turnId: "turn_2" });
 
@@ -45,9 +40,9 @@ describe("createSession#cancel", () => {
     });
   });
 
-  it("is available on sessions returned by getSession", async () => {
+  it("is available on sessions returned by attachSession", async () => {
     const runtime = createRuntime();
-    const session = createGetSessionFn(runtime)("sess_2");
+    const session = createAttachSessionFn(runtime)("sess_2");
 
     await expect(session.cancel()).resolves.toEqual({ status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
@@ -112,7 +107,7 @@ describe("buildSessionHandle", () => {
     const session = buildSessionHandle(ctx);
 
     expect(session.id).toBe("sess-123");
-    expect(session.continuationToken).toBe("slack:C1:T1");
+    expect(session.continuation?.token).toBe("slack:C1:T1");
     expect(session.auth.current?.principalId).toBe("U1");
     expect(session.auth.initiator?.principalId).toBe("eve:app");
   });
@@ -121,23 +116,23 @@ describe("buildSessionHandle", () => {
     const ctx = new ContextContainer();
     const session = buildSessionHandle(ctx);
 
-    expect(session.continuationToken).toBe("");
+    expect(session.continuation).toBeUndefined();
     ctx.set(ContinuationTokenKey, "slack:C1:T1");
-    expect(session.continuationToken).toBe("slack:C1:T1");
+    expect(session.continuation?.token).toBe("slack:C1:T1");
   });
 
-  it("namespaces the channel-local token on setContinuationToken", () => {
+  it("namespaces the channel-local token on continuation.rekey", () => {
     const ctx = new ContextContainer();
     ctx.set(ContinuationTokenKey, "slack:C1:");
     const session = buildSessionHandle(ctx);
 
-    session.setContinuationToken("C1:T1");
+    session.continuation?.rekey("C1:T1");
 
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
   });
 
-  it("is idempotent: a redundant setContinuationToken does not write", () => {
-    // Authors call setContinuationToken from hot-path event handlers
+  it("is idempotent: a redundant continuation.rekey does not write", () => {
+    // Authors call continuation.rekey from hot-path event handlers
     // (e.g. Slack's `message.completed`). The handler can't always
     // know whether the token has actually changed, so the SessionHandle
     // itself short-circuits redundant writes — the workflow body
@@ -161,11 +156,11 @@ describe("buildSessionHandle", () => {
 
     const session = buildSessionHandle(observed);
 
-    session.setContinuationToken("C1:T1");
+    session.continuation?.rekey("C1:T1");
     expect(writeCount).toBe(0);
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
 
-    session.setContinuationToken("C1:T2");
+    session.continuation?.rekey("C1:T2");
     expect(writeCount).toBe(1);
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T2");
   });
@@ -174,6 +169,6 @@ describe("buildSessionHandle", () => {
     const ctx = new ContextContainer();
     const session = buildSessionHandle(ctx);
 
-    expect(() => session.setContinuationToken("C1:T1")).toThrow(/placeholder continuationToken/);
+    expect(session.continuation).toBeUndefined();
   });
 });

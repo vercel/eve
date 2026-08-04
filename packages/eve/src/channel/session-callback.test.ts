@@ -48,7 +48,7 @@ describe("parseSessionCallback callback-URL token extraction", () => {
   it("rejects a URL without the callback route", () => {
     expect(
       parseSessionCallback(
-        createCallback("https://agent.example.com/eve/agents/support/eve/v1/session"),
+        createCallback("https://agent.example.com/eve/agents/support/eve/v1/sessions"),
       ),
     ).toMatchObject({
       message: expect.stringContaining("Callback url token must match callback token"),

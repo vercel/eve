@@ -29,7 +29,7 @@ Import from `eve/svelte` and read the reactive getters directly. No `$` prefix:
 | `status`  | `UseEveAgentStatus`                         | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`.                    |
 | `error`   | `Error \| undefined`                        | Last transport-level error.                                               |
 | `events`  | `readonly MessageStreamEvent[]`             | Raw server events for this session.                                       |
-| `session` | `SessionState`                              | Snapshot of session state.                                                |
+| `session` | `ClientSessionState \| undefined`           | Fixed session ID and stream cursor.                                       |
 | `send`    | `(input: SendTurnPayload) => Promise<void>` | Send text or a full turn (multi-part, attachments, HITL responses).       |
 | `stop`    | `() => void`                                | Abort the client's in-flight stream.                                      |
 | `reset`   | `() => void`                                | Clear state and start a new session.                                      |

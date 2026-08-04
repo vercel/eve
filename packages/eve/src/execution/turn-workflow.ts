@@ -33,16 +33,6 @@ import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
 
-// A cancelled turn settles by parking the session, so the cancel hook is
-// only claimed where a park can land: conversation sessions always accept
-// follow-up input, and task sessions can park only when a continuation
-// token anchors them to a waiting parent (delegated subagents always have
-// one). A root task run without one is unparkable, so it stays
-// uncancellable rather than settling a cancel as `session.failed`.
-function canSettleCancelledTurnAsPark(input: TurnWorkflowInput): boolean {
-  return input.mode === "conversation" || input.stepInput.sessionState.continuationToken !== "";
-}
-
 export type { TurnWorkflowInput };
 
 /**
@@ -99,10 +89,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
     // Claimed after the inbox claim so a losing duplicate run never
     // contends for the session cancel token.
-    if (
-      input.driverCapabilities?.cancelledTurnSettle === true &&
-      canSettleCancelledTurnAsPark(input)
-    ) {
+    if (input.driverCapabilities?.cancelledTurnSettle === true) {
       cancellation = await createTurnCancellationControl({
         controlToken: input.completionToken,
         expectedTurnId: activeTurnId(input.stepInput.sessionState.emissionState),
@@ -124,12 +111,10 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         (cancellation?.signal.aborted === true && pendingActionKeys === undefined)
       ) {
         // No `canPark` check here: that gate rejects model-authored waits
-        // (`next: null`) in task mode, whereas a cancelled turn parks by
-        // design and its parkability was already established when the
-        // cancel hook was claimed (`canSettleCancelledTurnAsPark`). The
-        // epilogue runs in the driver (`settleCancelledTurnStep`), not as
-        // a step in this run, where queued cancel wakes could re-dispatch
-        // it.
+        // (`next: null`) in task mode, whereas every session can resume by
+        // stable ID after a cancelled turn. The epilogue runs in the driver
+        // (`settleCancelledTurnStep`), not as a step in this run, where queued
+        // cancel wakes could re-dispatch it.
         await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
         return;
       }

@@ -61,11 +61,10 @@ const TARGET_CHANNEL = `export default {
   routes: [
     { method: "POST", path: "/target", handler: async () => new Response("ok") },
   ],
-  async receive(input, { send }) {
+  async receive(input, { channelAddress }) {
     const target = input.target;
-    return send(input.message, {
+    return channelAddress(\`target:\${target.sessionId ?? "default"}\`).send(input.message, {
       auth: input.auth,
-      continuationToken: \`target:\${target.sessionId ?? "default"}\`,
     });
   },
 };
@@ -179,25 +178,6 @@ describe("cross-channel receive end-to-end", () => {
             throw new Error("webhook should not attach sessions directly");
           },
           receive,
-          resolveActiveSession: async () => undefined,
-          send: async () => {
-            throw new Error("webhook should delegate to args.receive()");
-          },
-          cancel: async () => {
-            throw new Error("webhook should not cancel turns");
-          },
-          clear: async () => {
-            throw new Error("webhook should not clear session context");
-          },
-          compact: async () => {
-            throw new Error("webhook should not compact sessions");
-          },
-          reset: async () => {
-            throw new Error("webhook should not reset sessions");
-          },
-          getSession: () => {
-            throw new Error("webhook should not read sessions directly");
-          },
           params: {},
           requestIp: null,
           waitUntil: () => undefined,

@@ -21,7 +21,7 @@ describe("runtime-artifact refresher session continuity", () => {
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://127.0.0.1:3000",
     });
-    const session = client.session();
+    const session = client.sessions.attach("session_test");
 
     await refresher.refresh({
       message: "first",
@@ -40,7 +40,10 @@ describe("runtime-artifact refresher session continuity", () => {
         return request.method === "POST" && !pathname.startsWith("/eve/v1/dev/runtime-artifacts");
       })
       .map((request) => new URL(request.url).pathname);
-    expect(postUrls).toEqual(["/eve/v1/session", "/eve/v1/session/session-1"]);
+    expect(postUrls).toEqual([
+      "/eve/v1/sessions/session_test/messages",
+      "/eve/v1/sessions/session_test/messages",
+    ]);
   });
 
   it("keeps the active session eligible when a candidate rebuild fails", async () => {
@@ -55,7 +58,7 @@ describe("runtime-artifact refresher session continuity", () => {
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://127.0.0.1:3000",
     });
-    const session = client.session();
+    const session = client.sessions.attach("session_test");
 
     await refresher.refresh({ message: "first" });
     await (await session.send({ message: "first" })).result();
@@ -71,7 +74,10 @@ describe("runtime-artifact refresher session continuity", () => {
         return request.method === "POST" && !pathname.startsWith("/eve/v1/dev/runtime-artifacts");
       })
       .map((request) => new URL(request.url).pathname);
-    expect(postUrls).toEqual(["/eve/v1/session", "/eve/v1/session/session-1"]);
+    expect(postUrls).toEqual([
+      "/eve/v1/sessions/session_test/messages",
+      "/eve/v1/sessions/session_test/messages",
+    ]);
   });
 
   it("keeps the active local session for input-response resumes after the dev artifact revision changes", async () => {
@@ -86,7 +92,7 @@ describe("runtime-artifact refresher session continuity", () => {
       serverUrl: "http://localhost:3000",
     });
     const inputResponses = [{ optionId: "approve", requestId: "request-1" }];
-    const session = client.session();
+    const session = client.sessions.attach("session_test");
 
     await refresher.refresh({
       message: "approve a tool",
@@ -110,7 +116,10 @@ describe("runtime-artifact refresher session continuity", () => {
       })
       .map((request) => new URL(request.url).pathname);
     expect(rebuilds).toHaveLength(1);
-    expect(postUrls).toEqual(["/eve/v1/session", "/eve/v1/session/session-1"]);
+    expect(postUrls).toEqual([
+      "/eve/v1/sessions/session_test/messages",
+      "/eve/v1/sessions/session_test/messages",
+    ]);
   });
 });
 
@@ -126,7 +135,7 @@ describe("createDevelopmentRuntimeArtifactRefresher", () => {
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
-    const session = client.session();
+    const session = client.sessions.attach("session_test");
 
     await refresher.refreshIdle({});
     await (await session.send({ message: "first" })).result();
@@ -157,7 +166,7 @@ describe("createDevelopmentRuntimeArtifactRefresher", () => {
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
-    const session = client.session();
+    const session = client.sessions.attach("session_test");
 
     await (await session.send({ message: "first" })).result();
     const sessionId = session.state.sessionId;
@@ -285,13 +294,10 @@ function createDevFetchMock(input: {
 
     if (method === "POST") {
       const sessionId =
-        pathname === "/eve/v1/session"
+        pathname === "/eve/v1/sessions"
           ? `session-${String(++nextSessionIndex)}`
-          : (pathname.split("/").at(-1) ?? `session-${String(++nextSessionIndex)}`);
-      return Response.json({
-        continuationToken: `token-${sessionId}`,
-        sessionId,
-      });
+          : (pathname.split("/").at(-2) ?? `session-${String(++nextSessionIndex)}`);
+      return Response.json({ sessionId });
     }
 
     return new Response(
@@ -300,10 +306,7 @@ function createDevFetchMock(input: {
           controller.enqueue(
             encoder.encode(
               `${JSON.stringify({
-                data: {
-                  continuationToken: `token-${nextSessionIndex}`,
-                  wait: "next-user-message",
-                },
+                data: { wait: "next-user-message" },
                 type: "session.waiting",
               })}\n`,
             ),

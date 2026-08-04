@@ -42,7 +42,7 @@ describe("createInstrumentationHandleEvent", () => {
       }),
     );
     await handleEvent(createTurnCompletedEvent({ sequence: 0, turnId: "turn-1" }));
-    await handleEvent(createSessionWaitingEvent("continue-1"));
+    await handleEvent(createSessionWaitingEvent());
 
     expect(order).toEqual([
       "durable:session.started",
@@ -86,7 +86,7 @@ describe("createInstrumentationHandleEvent", () => {
       turnId: "turn-1",
     })!;
 
-    await handleEvent(createSessionWaitingEvent("continue-1"));
+    await handleEvent(createSessionWaitingEvent());
 
     expect(events).toEqual([{ sessionId: "session-1", turnId: "turn-1", type: "session.waiting" }]);
   });

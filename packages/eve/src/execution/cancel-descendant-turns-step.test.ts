@@ -126,7 +126,7 @@ describe("cancelDescendantTurnsStep", () => {
   it("uses the selected dynamic remote config when cancelling", async () => {
     const dynamicRemoteAgent = {
       description: "Selected remote.",
-      path: "/eve/v1/session",
+      path: "/eve/v1/sessions",
       url: "https://selected.example.com",
     };
     installRemoteRegistry({

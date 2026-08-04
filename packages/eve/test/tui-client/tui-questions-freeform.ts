@@ -21,11 +21,10 @@ process.env.EVE_TUI_UNICODE = "1";
 
 run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   const client = new Client({ host: target.baseUrl });
-  const session = client.session();
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    session,
+    client,
     screen,
     userInput: input,
     name: "TUI smoke",

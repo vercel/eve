@@ -22,6 +22,14 @@ function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
   return channel as CompiledChannel<T>;
 }
 
+function mockChannelAddress(send: (input: unknown, options: Record<string, unknown>) => unknown) {
+  return (continuationToken: string) =>
+    ({
+      send: (input: unknown, options: Record<string, unknown>) =>
+        send(input, { ...options, continuationToken }),
+    }) as never;
+}
+
 function getAdapter(channel: unknown): ChannelAdapter<any> {
   return asCompiled(channel).adapter;
 }
@@ -122,16 +130,17 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected discord channel to define a POST route.");
   }
-  const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
-    getSession: vi.fn() as any,
+    attachSession: vi.fn() as any,
+    channelAddress: mockChannelAddress(send),
+    receive: vi.fn() as any,
     params: {},
     requestIp: null,
-    send,
     waitUntil,
-  } as any);
+  });
 
   let drained = 0;
   while (drained < waitUntil.mock.calls.length) {
@@ -517,7 +526,7 @@ describe("discordChannel() default event handlers", () => {
 
   it("receive starts a proactive channel session", async () => {
     const channel = discordChannel({ credentials: { botToken: "bot-token" } });
-    const send = vi.fn().mockResolvedValue({ continuationToken: "C01:", id: "s1" });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await channel.receive!(
       {
@@ -525,7 +534,13 @@ describe("discordChannel() default event handlers", () => {
         auth: null,
         message: "start",
       },
-      { send },
+      {
+        channelAddress: (continuationToken) =>
+          ({
+            send: (input: unknown, options: Record<string, unknown>) =>
+              send(input, { ...options, continuationToken }),
+          }) as never,
+      },
     );
 
     expect(send).toHaveBeenCalledWith("start", {

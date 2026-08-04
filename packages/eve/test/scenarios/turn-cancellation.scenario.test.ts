@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { Client } from "../../src/client/client.js";
 import { type MessageStreamEvent, isCurrentTurnBoundaryEvent } from "../../src/protocol/message.js";
-import { createEveCancelTurnRoutePath } from "../../src/protocol/routes.js";
+import { createEveSessionCancelRoutePath } from "../../src/protocol/routes.js";
 import {
   type ScenarioAppDescriptor,
   useScenarioApp,
@@ -117,8 +117,7 @@ describe("turn cancellation descendant cascade", () => {
 
         try {
           const parentClient = new Client({ host: parentServer.url });
-          const parentSession = parentClient.session();
-          const response = await parentSession.send(
+          const { session: parentSession, response } = await parentClient.sessions.create(
             [
               "Call tools in parallel: local-sleeper, remote-sleeper",
               'message: "Use wait-for-cancel."',
@@ -137,8 +136,8 @@ describe("turn cancellation descendant cascade", () => {
           }
           expect(remoteCalled.data.remote?.url).toBe(remoteServer.url);
 
-          const localIterator = parentClient
-            .session({ sessionId: localCalled.data.childSessionId, streamIndex: 0 })
+          const localIterator = parentClient.sessions
+            .attach(localCalled.data.childSessionId)
             .stream()
             [Symbol.asyncIterator]();
 
@@ -146,8 +145,8 @@ describe("turn cancellation descendant cascade", () => {
             auth: { bearer: REMOTE_TOKEN },
             host: remoteServer.url,
           });
-          const remoteIterator = remoteClient
-            .session({ sessionId: remoteCalled.data.childSessionId, streamIndex: 0 })
+          const remoteIterator = remoteClient.sessions
+            .attach(remoteCalled.data.childSessionId)
             .stream()
             [Symbol.asyncIterator]();
           await Promise.all([
@@ -164,10 +163,10 @@ describe("turn cancellation descendant cascade", () => {
           ]);
 
           const cancelResponse = await parentClient.fetch(
-            createEveCancelTurnRoutePath(response.sessionId),
+            createEveSessionCancelRoutePath(response.sessionId),
             { method: "POST" },
           );
-          expect(cancelResponse.status).toBe(202);
+          expect(cancelResponse.status).toBe(200);
           await expect(cancelResponse.json()).resolves.toMatchObject({
             ok: true,
             sessionId: response.sessionId,

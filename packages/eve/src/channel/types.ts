@@ -37,37 +37,15 @@ export interface CancelTurnResult {
   readonly reason?: string;
 }
 
-/** Identifies the continuation hook whose durable session should compact. */
-export interface CompactSessionInput {
-  readonly continuationToken: string;
-}
-
 /** Result of queueing manual context compaction for a session. */
 export type CompactSessionResult =
   | { readonly status: "accepted"; readonly sessionId: string }
   | { readonly status: "no_active_session" };
 
-/** Identifies the continuation hook whose durable session should clear context. */
-export interface ClearSessionInput {
-  readonly continuationToken: string;
-}
-
 /** Result of queueing a manual context clear for a session. */
 export type ClearSessionResult =
   | { readonly status: "accepted"; readonly sessionId: string }
   | { readonly status: "no_active_session" };
-
-/** Identifies a session to transition permanently to a terminal state. */
-export interface TerminateSessionInput {
-  /** Human-readable reason recorded on the terminal workflow transition. */
-  readonly reason?: string;
-  readonly sessionId: string;
-}
-
-/** Result of attempting to terminally retire a session. */
-export type TerminateSessionResult =
-  | { readonly status: "terminated" }
-  | { readonly status: "already_terminal" };
 
 // ---------------------------------------------------------------------------
 // Lineage
@@ -194,7 +172,8 @@ export type SessionSendCommandResult =
   | { readonly status: "accepted"; readonly sessionId: string }
   | { readonly status: "session_not_active" };
 
-export type ResetSessionCommandResult =
+/** Result of terminally resetting a session. */
+export type ResetSessionResult =
   | { readonly status: "reset"; readonly previousSessionId: string }
   | { readonly status: "no_active_session" };
 
@@ -207,7 +186,7 @@ export type SessionCommandResult<TCommand extends SessionCommand = SessionComman
         ? CompactSessionResult
         : TCommand extends { readonly kind: "clear" }
           ? ClearSessionResult
-          : ResetSessionCommandResult;
+          : ResetSessionResult;
 
 export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
   readonly command: TCommand;
@@ -419,9 +398,10 @@ export interface RunInput {
   /**
    * Session continuation token for delivery and hook creation. Channels can
    * re-key the session during the first turn via
-   * `ctx.session.setContinuationToken(...)` (e.g. Slack adopts its first
+   * `ctx.session.continuation.rekey(...)` (e.g. Slack adopts its first
    * post's `ts` as the thread root), so an initial placeholder token is
-   * acceptable when full identity isn't known until the first message.
+   * acceptable when full identity isn't known until the first message. ID-only
+   * transports omit this field.
    */
   readonly continuationToken?: string;
   /**
@@ -491,7 +471,6 @@ export type RunResult =
  * Carries the identifiers needed for stream endpoints.
  */
 export interface RunHandle {
-  readonly continuationToken: string;
   readonly events: ReadableStream<MessageStreamEvent>;
   /**
    * Runtime-owned identifier for this session. Stream and inspection APIs

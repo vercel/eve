@@ -19,6 +19,20 @@ import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
 
 const SECRET = "github-secret";
 
+function mockChannelAddress(send: (input: unknown, options: Record<string, unknown>) => unknown) {
+  return (continuationToken: string) =>
+    ({
+      continuationToken,
+      send: (input: unknown, options: Record<string, unknown>) =>
+        send(input, { ...options, continuationToken }),
+      cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
+      compact: vi.fn().mockResolvedValue({ status: "accepted" }),
+      clear: vi.fn().mockResolvedValue({ status: "accepted" }),
+      reset: vi.fn().mockResolvedValue({ status: "not_found" }),
+      resolveSession: vi.fn().mockResolvedValue(undefined),
+    }) as never;
+}
+
 function prContextFetch() {
   return vi.fn((input: Request | URL | string): Promise<Response> => {
     if (String(input).includes("/files")) {
@@ -167,21 +181,15 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected github channel to define a POST route.");
   }
-  const send = vi.fn().mockResolvedValue({ continuationToken: "github:test", id: "s1" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
     attachSession: vi.fn() as any,
-    cancel: vi.fn(),
-    clear: vi.fn(),
-    compact: vi.fn(),
-    reset: vi.fn(),
-    resolveActiveSession: async () => undefined,
-    getSession: vi.fn() as any,
+    channelAddress: mockChannelAddress(send),
     params: {},
     receive: vi.fn() as any,
     requestIp: null,
-    send,
     waitUntil,
   });
 

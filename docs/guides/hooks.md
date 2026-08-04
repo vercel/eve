@@ -35,7 +35,10 @@ Every handler receives the same `HookContext`:
 ```ts
 interface HookContext {
   readonly agent: { readonly name: string; readonly nodeId?: string };
-  readonly channel: { readonly kind?: string; readonly continuationToken?: string };
+  readonly channel: {
+    readonly kind?: string;
+    readonly continuation?: { readonly token: string };
+  };
   readonly session: { readonly id: string };
 }
 ```

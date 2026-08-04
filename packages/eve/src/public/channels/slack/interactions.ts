@@ -53,7 +53,8 @@ import type {
   SlackInteractionContext,
   SlackInteractionUser,
 } from "#public/channels/slack/slackChannel.js";
-import type { CancelFn, ResetFn, SendFn } from "#public/definitions/channel.js";
+import type { ChannelAddressFn } from "#channel/channel-address.js";
+import { bindSlackConversation } from "#public/channels/slack/conversation.js";
 
 const log = createLogger("slack.interactions");
 
@@ -339,9 +340,7 @@ export interface InteractionHandlerDeps {
 export async function handleInteractionPost(
   rawBody: string,
   ctx: {
-    cancel: CancelFn;
-    reset: ResetFn;
-    send: SendFn<SlackChannelState>;
+    channelAddress: ChannelAddressFn<SlackChannelState>;
     waitUntil: (task: Promise<unknown>) => void;
   },
   deps: InteractionHandlerDeps,
@@ -384,6 +383,7 @@ export async function handleInteractionPost(
 
     ctx.waitUntil(
       ctx
+        .channelAddress(continuationToken)
         .send(
           { inputResponses },
           {
@@ -394,7 +394,6 @@ export async function handleInteractionPost(
               userId: user.id,
               userName: user.username ?? user.name,
             }),
-            continuationToken,
             state: {
               channelId: interaction.channelId,
               threadTs: interaction.threadTs,
@@ -426,16 +425,12 @@ export async function handleInteractionPost(
         teamId: interaction.teamId,
       });
       const slackCtx: SlackInteractionContext = {
-        cancel: (options = {}) =>
-          ctx.cancel({
-            continuationToken,
-            turnId: options.turnId,
-          }),
-        reset: (options = {}) =>
-          ctx.reset({
-            continuationToken,
-            reason: options.reason,
-          }),
+        conversation: bindSlackConversation(ctx.channelAddress(continuationToken), {
+          channelId: interaction.channelId,
+          teamId: interaction.teamId ?? null,
+          threadTs: interaction.threadTs,
+          triggeringUserId: customActions[0]?.user.id ?? null,
+        }),
         thread,
         slack,
       };
@@ -508,7 +503,7 @@ async function openFreeformModal(input: {
 async function handleViewSubmission(
   payload: SlackViewSubmissionPayload,
   ctx: {
-    send: SendFn<SlackChannelState>;
+    channelAddress: ChannelAddressFn<SlackChannelState>;
     waitUntil: (task: Promise<unknown>) => void;
   },
   _deps: InteractionHandlerDeps,
@@ -550,6 +545,7 @@ async function handleViewSubmission(
 
   ctx.waitUntil(
     ctx
+      .channelAddress(metadata.continuationToken)
       .send(
         { inputResponses: [{ requestId: metadata.requestId, text }] },
         {
@@ -560,7 +556,6 @@ async function handleViewSubmission(
             userId: triggeringUserId,
             userName: user?.username ?? user?.name,
           }),
-          continuationToken: metadata.continuationToken,
           state: {
             channelId: metadata.channelId,
             threadTs: metadata.threadTs,

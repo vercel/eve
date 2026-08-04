@@ -465,7 +465,7 @@ describe("turnWorkflow", () => {
     expect(cancelHookTokens()).toEqual([]);
   });
 
-  it("registers no cancel hook when the session cannot park", async () => {
+  it("registers a cancel hook for a task session without a continuation alias", async () => {
     const sessionState = createSessionState({ continuationToken: "" });
     installInbox([]);
     vi.mocked(turnStep).mockResolvedValueOnce({
@@ -482,8 +482,8 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
-    expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeUndefined();
-    expect(cancelHookTokens()).toEqual([]);
+    expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
+    expect(cancelHookTokens()).toEqual(["turn-token:cancel"]);
   });
 
   it("deduplicates concurrent turn workflows through inbox ownership", async () => {
