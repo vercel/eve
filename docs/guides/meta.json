@@ -5,6 +5,7 @@
     "auth-and-route-protection",
     "instrumentation",
     "hooks",
+    "persistence",
     "session-context",
     "state",
     "dynamic-capabilities",

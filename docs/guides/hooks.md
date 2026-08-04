@@ -82,7 +82,7 @@ const crmSearch = toolResultFrom(event.data.result, search); // typed; matches c
 
 ### Persist events to your own database
 
-Every event carries a `meta` envelope with `meta.id`, a unique, sortable identifier for that event. It makes a natural primary key for an events table:
+Every event carries a `meta` envelope with `meta.id`, a unique, sortable identifier for that event. It makes a natural primary key for an events table (for the full storage story — schema, loading, and reconstructing a chat — see [Persistence](./persistence)):
 
 ```ts title="agent/hooks/persist.ts"
 import { defineHook } from "eve/hooks";
@@ -149,6 +149,7 @@ Stream-event hooks and channel adapter event handlers are structurally identical
 
 ## What to read next
 
+- [Persistence](./persistence)
 - [Tools](../tools)
 - [Context control](../concepts/context-control)
 - [Session context](../reference/typescript-api)

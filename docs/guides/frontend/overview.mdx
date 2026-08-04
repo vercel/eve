@@ -253,7 +253,7 @@ const agent = useEveAgent({
 });
 ```
 
-Store the full `session` object (`sessionId`, `continuationToken`, `streamIndex`), not a single field. The session cursor lets eve continue the durable conversation; the event log lets your UI render historical messages without replaying the whole stream. A database-backed chat app should usually persist stream events as they arrive with `onEvent` and then save a final snapshot in `onFinish`.
+Store the full `session` object (`sessionId`, `continuationToken`, `streamIndex`), not a single field. The session cursor lets eve continue the durable conversation; the event log lets your UI render historical messages without replaying the whole stream. A database-backed chat app should usually persist stream events as they arrive with `onEvent` and then save a final snapshot in `onFinish` — [Persistence](../persistence) walks through the schema and server side.
 
 `initialEvents` must be an ordered prefix of the same session's stream, but its endpoint does not have to line up exactly with where the stream resumes. Every event carries a stable [`meta.id`](/docs/concepts/sessions-runs-and-streaming#the-event-envelope), and the store drops any event whose id it has already applied — so a saved log that overlaps the replayed prefix renders once, and `onEvent` only fires for events your UI has not seen.
 
