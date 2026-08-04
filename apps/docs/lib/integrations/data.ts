@@ -1493,21 +1493,15 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
       "get_deployment_build_logs",
       "get_runtime_logs",
     ],
-    configureNote: `For **User** auth, select None when the Connect form asks for a token authentication method. Vercel MCP completes OAuth when each user first calls an authenticated tool.
+    configureNote: `For **User** auth, select None when prompted for a token authentication method. Each user completes OAuth when needed.
 
-For **App** auth without per-user OAuth:
+For **App** auth, run this from the eve project directory and enter a team-scoped [Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token):
 
-1. Create a [Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token) scoped to the team and projects the agent needs.
-2. From the eve project directory, create an **API Key** connector and enter the Vercel token when prompted:
+\`\`\`bash
+vercel connect create api-key --name vercel
+\`\`\`
 
-   \`\`\`bash
-   vercel connect create api-key --name vercel
-   \`\`\`
-
-3. Attach the connector to the Vercel project that runs the eve agent.
-4. Copy its connector UID (for example, \`vercel/coffee-bridge\`) and replace \`vercel/your-connector\` in the App example.
-
-Vercel tokens are always owned by a user, but Connect presents this shared credential to eve as the app principal, so agent users do not complete individual OAuth flows. Use a dedicated identity where practical, grant only the access the agent needs, and rotate the token as you would any long-lived secret.`,
+Copy the returned connector UID into the App example. This avoids per-user OAuth, though the Vercel token still belongs to the user who created it.`,
   },
   linear: {
     logo: "linear",

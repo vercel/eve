@@ -63,12 +63,11 @@ describe("Vercel MCP connection setup", () => {
       configure.indexOf("vercel connect create vercel"),
     );
     expect(configure).toContain("select None");
-    expect(configure).toContain("create an **API Key** connector");
     expect(configure).toContain("vercel connect create api-key --name vercel");
     expect(configure).toContain(
       "[Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token)",
     );
-    expect(configure).toContain("Vercel tokens are always owned by a user");
-    expect(configure).toContain("vercel/coffee-bridge");
+    expect(configure).toContain("Copy the returned connector UID into the App example");
+    expect(configure).toContain("token still belongs to the user who created it");
   });
 });
