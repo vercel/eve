@@ -7,47 +7,6 @@ description: "Trace an agent with OpenTelemetry in instrumentation.ts, read the 
 
 If you intend to export telemetry, review the exporter destination, data categories, and required legal approvals before enabling telemetry.
 
-## Zero-config local traces
-
-When no authored `instrumentation.ts` exists, `eve dev` records agent, AI SDK, and user-created OpenTelemetry spans under `.eve/traces/v1`. Each session has one trace, rooted independently from Workflow telemetry, with turns, model steps, and tool actions represented explicitly. Spans created by application code while a model or tool is executing inherit that active agent context.
-
-The directory is an immutable OTLP/JSON spool and remains available after `eve dev` exits, subject to the [retention policy](#local-trace-retention) below. Inspection tools may build a query index from these segments, but the index is derived and can be rebuilt without changing the captured trace data.
-
-Use `eve traces ls` to list captured traces and `eve traces <trace>` to inspect a session's span tree. Inside the dev TUI, [`/traces`](dev-tui#inspect-traces) opens a full-screen live viewer that re-tells the trace as a chat-style conversation (expandable message and tool-call cards) with a right-side metadata drawer. Model and tool-call spans also carry the inputs and outputs (system prompt, prompt messages, and response text for models; call arguments and results for tools, each capped at 32 KB) — set `EVE_TRACES_CONTENT=off` to keep payloads out of the spool.
-
-When a model call is served by Vercel AI Gateway, its `agent.step` span also carries the cost the gateway reported: `gen_ai.usage.cost` (raw inference, USD), `gen_ai.usage.gateway_cost` (with the gateway surcharge), `gen_ai.usage.input_cost` / `gen_ai.usage.output_cost` (the split), and `gen_ai.generation.id` for reconciliation with the gateway dashboard. These attributes only exist for gateway-served calls — other providers emit nothing. Cost per turn is the sum across the turn's step spans.
-
-Model and step spans also split token usage when the provider reports details: `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_creation.input_tokens` (named for the [OTel GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)) alongside the `agent.usage.input_tokens` / `agent.usage.output_tokens` totals — cached tokens price differently, so the split makes cost attribution exact. Providers without detailed usage emit only the totals.
-
-The local writer is an internal development default, not a second provider layered over authored instrumentation. When `instrumentation.ts` exists, its setup retains control and the zero-config writer is not installed.
-
-### Local trace retention
-
-The store is bounded, so it cannot grow without limit on a development machine. eve sweeps it when a session finishes and once when the dev server starts. A trace is kept when **any** of these holds:
-
-- its session is open in the running dev worker;
-- it received a span in the last five minutes;
-- it is one of the newest `EVE_TRACES_RETAIN_COUNT` traces;
-- it last received a span within `EVE_TRACES_MAX_AGE_MS`.
-
-Whatever survives is then evicted oldest-first while the store exceeds `EVE_TRACES_MAX_TOTAL_BYTES`. The keep-newest floor always wins: eve will exceed the size budget rather than drop below it, because a trace records something that happened and cannot be regenerated.
-
-Open sessions are tracked per dev worker, so a session waiting across a restart, or a trace a draining worker is still writing, is not covered by the first rule. The five-minute write-recency rule is what protects those, and it applies even when you set `EVE_TRACES_MAX_AGE_MS=0`.
-
-| Variable                     | Default              | Effect                                                                                      |
-| ---------------------------- | -------------------- | ------------------------------------------------------------------------------------------- |
-| `EVE_TRACES`                 | on                   | `off` stops writing traces and stops sweeping                                               |
-| `EVE_TRACES_CONTENT`         | on                   | `off` stops capturing model prompt/response and tool input/output attributes on local spans |
-| `EVE_TRACES_MAX_AGE_MS`      | `604800000` (7d)     | Age after which a trace may be evicted                                                      |
-| `EVE_TRACES_MAX_TOTAL_BYTES` | `536870912` (512 MB) | Size budget for the whole store                                                             |
-| `EVE_TRACES_RETAIN_COUNT`    | `20`                 | Newest traces kept regardless of age or size                                                |
-
-Set these in `.env.local`, which `eve dev` loads automatically. Each bound accepts `off` to disable it individually — note that `EVE_TRACES_RETAIN_COUNT=off` removes the keep-newest guarantee rather than retaining everything.
-
-`EVE_TRACES=off` disables writing _and_ sweeping, so an existing store is left exactly as it is; eve will not reclaim it later.
-
-A sweep that deletes something records one line naming the count, the bytes reclaimed, and which bound triggered it. Read it with [`eve logs`](../reference/cli#eve-logs).
-
 ## Three observability surfaces
 
 eve observes an agent through three distinct surfaces. They do not all live in this file, and they write to different places:
@@ -141,7 +100,7 @@ Channel metadata is channel-owned. Built-in channels expose only the fields they
 
 ## Authored trace hierarchy
 
-The existing authored `instrumentation.ts` path remains separate from zero-config local traces. When authored telemetry is enabled, each turn currently produces a trace like:
+When authored telemetry is enabled, each turn currently produces a trace like:
 
 ```text
 ai.eve.turn  {eve.session.id}
@@ -193,6 +152,15 @@ Tag writes are best-effort: a failure is logged once per process and then swallo
 These tags power the **Agent Runs** tab in the Vercel dashboard. When you deploy on Vercel, the platform auto-detects `eve` as the framework and surfaces an Agent Runs view under your project's **Observability** tab, where you can browse sessions and drill into each conversation's trace, with no `instrumentation.ts` required. The tab is currently gated per team. See [Deploy to Vercel](./deployment/vercel#inspect-agent-runs) for enablement. Agent Runs is separate from the OpenTelemetry export above. Use OTel when you want spans in Braintrust, Datadog, or another third-party backend.
 
 Note: By default, telemetry records full message history and model outputs You may need to disclose these data flows in your privacy materials if utilized.
+
+## Local traces
+
+Without an `instrumentation.ts`, `eve dev` records spans to disk — one trace per session, with turns, model steps, and tool calls. Read them two ways:
+
+- [`/traces`](dev-tui#inspect-traces) in the dev TUI: a live viewer that replays the trace as a conversation.
+- [`eve traces`](../reference/cli#eve-traces): a span tree in the terminal, `eve traces ls` to list. Works after `eve dev` exits.
+
+Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing is recorded locally. For span attributes, retention, and the `EVE_TRACES*` variables, see [`eve traces`](../reference/cli#eve-traces).
 
 ## Debugging
 

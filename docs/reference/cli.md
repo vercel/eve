@@ -224,7 +224,7 @@ Local dev records the last ready URL per resolved app root in `.eve/dev-server-s
 
 Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; `/new` terminally retires that session before clearing the transcript, and the next prompt starts a fresh session with a new session-scoped sandbox on first sandbox use. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
 
-When no authored `agent/instrumentation.ts` exists, local dev also records traces under `.eve/traces/`, and bounds that store by age, size, and a keep-newest floor. Configure it with `EVE_TRACES*` in `.env.local`; see [local trace retention](../guides/instrumentation#local-trace-retention) for the rules and defaults.
+When no authored `agent/instrumentation.ts` exists, local dev also records traces under `.eve/traces/`, and bounds that store by age, size, and a keep-newest floor. Configure it with `EVE_TRACES*` in `.env.local`; see [`eve traces`](#retention) for the rules and defaults.
 
 ## `eve logs`
 
@@ -264,6 +264,22 @@ A session long enough to outgrow one trace — far longer than anything you will
 One parent turn can dispatch several subagents into the same window, so a child's turn spans name the dispatch: `agent.parent.session.id`, `agent.parent.turn.id`, and `agent.parent.call_id` identify the tool call that created the child, and `agent.subagent.name` the subagent it invoked. Top-level sessions carry none of these.
 
 `agent.session` and `agent.turn` outlive the worker that opened them, so they are recorded as zero-duration markers. The span tree shows their descendant extent instead; `agent.step` and the model and tool spans beneath it carry real durations. A third-party OTel backend reports zero for the markers.
+
+Model and tool-call spans carry their inputs and outputs — system prompt, prompt messages, and response text for models; call arguments and results for tools — each capped at 32 KB. Set `EVE_TRACES_CONTENT=off` to keep payloads out of the spool.
+
+Step spans carry token counts, and cost when Vercel AI Gateway served the call. Both follow the [OTel GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) (`gen_ai.usage.*`), so a third-party backend reads them without mapping.
+
+### Retention
+
+eve sweeps the store when a session finishes and when the dev server starts, evicting oldest-first past the bounds below — except that the newest traces and anything written in the last five minutes are always kept, so a sweep will exceed the size budget rather than drop a trace you just recorded. Set the bounds in `.env.local`, which `eve dev` loads automatically; each accepts `off` to disable it individually.
+
+| Variable                     | Default              | Effect                                                                                      |
+| ---------------------------- | -------------------- | ------------------------------------------------------------------------------------------- |
+| `EVE_TRACES`                 | on                   | `off` stops writing traces and stops sweeping                                               |
+| `EVE_TRACES_CONTENT`         | on                   | `off` stops capturing model prompt/response and tool input/output attributes on local spans |
+| `EVE_TRACES_MAX_AGE_MS`      | `604800000` (7d)     | Age after which a trace may be evicted                                                      |
+| `EVE_TRACES_MAX_TOTAL_BYTES` | `536870912` (512 MB) | Size budget for the whole store                                                             |
+| `EVE_TRACES_RETAIN_COUNT`    | `20`                 | Newest traces kept regardless of age or size                                                |
 
 ## `eve link`
 
