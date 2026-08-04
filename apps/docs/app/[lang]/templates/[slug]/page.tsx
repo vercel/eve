@@ -109,25 +109,16 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
           </dl>
         </header>
 
+        <section aria-label="Filesystem" className="mt-8">
+          <FileViewer files={highlightedFiles} />
+        </section>
+
         <section aria-label="README" className="mt-16 border-gray-alpha-400 border-t pt-12">
           <div className="font-mono text-gray-700 text-label-12 uppercase tracking-wider">
             README
           </div>
           <div className="mt-5 max-w-[760px]">
             <TemplateReadme readme={entry.readme} sourceRevisionHref={entry.sourceRevisionHref} />
-          </div>
-        </section>
-
-        <section className="mt-16 border-gray-alpha-400 border-t pt-12">
-          <div>
-            <h2 className="text-heading-24 text-gray-1000">Filesystem</h2>
-            <p className="mt-2 text-copy-14 text-gray-900">
-              Browse the authored files at revision{" "}
-              <code className="text-copy-13-mono">{entry.sourceRevision.slice(0, 7)}</code>.
-            </p>
-          </div>
-          <div className="mt-4">
-            <FileViewer files={highlightedFiles} />
           </div>
         </section>
       </main>
