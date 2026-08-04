@@ -31,6 +31,13 @@ the DCO `Signed-off-by` trailer. Use `git commit -s` for every commit, and if a
 commit is missing the trailer, amend it with `git commit --amend -s --no-edit`
 before pushing.
 
+PR descriptions are reviewer-oriented explanations of the problem, solution,
+meaningful behavior changes, and validation—not file lists or commit logs. Keep
+them proportional to the change, link the prior issue, call out important scope
+boundaries or preserved behavior, and report only checks actually run. Use the
+[`gh-pr-description`](./skills/gh-pr-description/SKILL.md) skill when drafting
+or updating one.
+
 ## Commands
 
 ```sh

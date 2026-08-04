@@ -1,10 +1,18 @@
 ### Description
 
-<!-- Write a short summary of the problem and solution. -->
+<!--
+Link the issue where this change was discussed (for example, "Closes #123" or
+"Related to #123"). Explain the concrete problem and solution, then summarize
+meaningful behavior or decisions—not changed files or commits. Call out breaking
+changes, preserved behavior, scope boundaries, or stacked PRs when relevant.
+-->
 
 ### How did you test your changes?
 
-<!-- Include the commands you ran and any manual coverage. -->
+<!--
+List the exact commands you ran and useful manual coverage. Include relevant
+results or limitations. Explain when tests are not applicable.
+-->
 
 ### PR Checklist
 
