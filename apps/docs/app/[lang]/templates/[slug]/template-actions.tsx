@@ -39,7 +39,7 @@ export const TemplateActions = ({ setupPrompt, sourceHref, template }: TemplateA
   return (
     <div className="flex flex-wrap gap-2">
       <Button
-        className="w-60 justify-center font-medium text-background-100! text-label-14"
+        className="w-52 justify-center font-medium text-background-100! text-label-14"
         onClick={copyPrompt}
         type="button"
       >
