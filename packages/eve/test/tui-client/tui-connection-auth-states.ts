@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { ClientSession, MessageResponse, type HandleMessageStreamEvent } from "eve/client";
+import { ClientSession, MessageResponse, type MessageStreamEvent } from "eve/client";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { EveTUIRunner, MockScreen, MockUserInput } from "./lib/tui.ts";
 
 import { theme } from "./lib/theme.ts";
@@ -30,14 +31,14 @@ import { theme } from "./lib/theme.ts";
  */
 
 class FakeSession extends ClientSession {
-  readonly #turns: ReadonlyArray<readonly HandleMessageStreamEvent[]>;
-  readonly #continuations: ReadonlyArray<readonly HandleMessageStreamEvent[]>;
+  readonly #turns: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
+  readonly #continuations: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
   #turnIndex = 0;
   #continuationIndex = 0;
 
   constructor(input: {
-    turns: ReadonlyArray<readonly HandleMessageStreamEvent[]>;
-    continuations: ReadonlyArray<readonly HandleMessageStreamEvent[]>;
+    turns: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
+    continuations: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
   }) {
     super(
       {
@@ -61,18 +62,29 @@ class FakeSession extends ClientSession {
     });
   }
 
-  override stream(): AsyncIterable<HandleMessageStreamEvent> {
+  override stream(): AsyncIterable<MessageStreamEvent> {
     const events = this.#continuations[this.#continuationIndex] ?? [];
     this.#continuationIndex += 1;
     return pacedEvents(events);
   }
 }
 
+let nextEventIndex = 0;
+
+/** Stamps a fixture event the way an emit seam does before it hits the wire. */
+function stamp(event: UnstampedMessageStreamEvent): MessageStreamEvent {
+  nextEventIndex += 1;
+  return {
+    ...event,
+    meta: { at: new Date().toISOString(), id: `evt_smoke_${nextEventIndex}` },
+  } as MessageStreamEvent;
+}
+
 async function* pacedEvents(
-  events: readonly HandleMessageStreamEvent[],
-): AsyncGenerator<HandleMessageStreamEvent> {
+  events: readonly UnstampedMessageStreamEvent[],
+): AsyncGenerator<MessageStreamEvent> {
   for (const event of events) {
-    yield event;
+    yield stamp(event);
     // Pacing gives the renderer and smoke assertions a chance to observe
     // each lifecycle state between events, as the HTTP transport does live.
     await sleep(200);
@@ -85,7 +97,7 @@ const stepIndex = 0;
 let sequence = 0;
 const next = () => ++sequence;
 
-const firstTurn: HandleMessageStreamEvent[] = [
+const firstTurn: UnstampedMessageStreamEvent[] = [
   { type: "session.started", data: {} },
   { type: "turn.started", data: { sequence: next(), turnId } },
   { type: "step.started", data: { sequence: next(), stepIndex, turnId } },
@@ -115,7 +127,7 @@ const firstTurn: HandleMessageStreamEvent[] = [
   },
 ];
 
-const firstCallbackTurn: HandleMessageStreamEvent[] = [
+const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
   {
     type: "authorization.completed",
     data: {
@@ -137,7 +149,7 @@ const firstCallbackTurn: HandleMessageStreamEvent[] = [
 ];
 
 const secondTurnId = "turn-1";
-const secondTurn: HandleMessageStreamEvent[] = [
+const secondTurn: UnstampedMessageStreamEvent[] = [
   { type: "turn.started", data: { sequence: next(), turnId: secondTurnId } },
   { type: "step.started", data: { sequence: next(), stepIndex, turnId: secondTurnId } },
   {
@@ -164,7 +176,7 @@ const secondTurn: HandleMessageStreamEvent[] = [
   },
 ];
 
-const secondCallbackTurn: HandleMessageStreamEvent[] = [
+const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
   {
     type: "authorization.completed",
     data: {
@@ -313,12 +325,13 @@ void (async () => {
     console.log(theme.muted("[states] failure reason surfaced"));
 
     // The turn is complete; wait until the runner is back at the prompt so
-    // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
-    // turn and returns to the prompt (Claude Code's two-step exit).
+    // Two idle Ctrl+C presses exit; mid-stream Ctrl+C cancels cooperatively.
     await screen.waitForIdlePrompt(10_000);
+    input.ctrlC();
     input.ctrlC();
     await runPromise;
   } catch (error) {
+    input.ctrlC();
     input.ctrlC();
     await runPromise.catch(() => undefined);
     throw error;

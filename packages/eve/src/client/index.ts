@@ -43,6 +43,8 @@ export type {
   AgentInfoToolEntry,
   AgentInfoTools,
   CancelSessionResult,
+  ClearResult,
+  CompactResult,
   ClientAuth,
   ClientOptions,
   ClientRedirectPolicy,
@@ -53,6 +55,7 @@ export type {
   ResolvedStreamReconnectPolicy,
   SendTurnInput,
   SendTurnPayload,
+  SessionSnapshot,
   SessionState,
   StreamOptions,
   StreamReconnectPolicy,
@@ -97,6 +100,7 @@ export type {
   ConnectionAuthorizationOutcome,
   AuthorizationRequiredStreamEvent,
   HandleMessageStreamEvent,
+  MessageStreamEventMeta,
   InputRequestedStreamEvent,
   MessageAppendedStreamEvent,
   MessageCompletedStreamEvent,
@@ -109,6 +113,7 @@ export type {
   SessionFailedStreamEvent,
   SessionStartedStreamEvent,
   SessionWaitingStreamEvent,
+  MessageStreamEvent,
   StepCompletedStreamEvent,
   StepFailedStreamEvent,
   StepStartedStreamEvent,
@@ -125,9 +130,15 @@ export type {
 
 export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 
-export type { InputOption, InputRequest, InputResponse } from "#runtime/input/types.js";
+export type {
+  InputOption,
+  InputRequest,
+  InputRequestKind,
+  InputResponse,
+} from "#runtime/input/types.js";
 export {
   inputOptionSchema,
+  inputRequestKindSchema,
   inputRequestSchema,
   inputResponseSchema,
   isInputRequest,

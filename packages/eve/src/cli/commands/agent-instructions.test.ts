@@ -42,7 +42,7 @@ describe("initAgentInstructions", () => {
     const instructions = initAgentInstructions();
 
     // Channels: Slack credentials are provisioned by Connect, not hand-managed.
-    expect(instructions).toContain("eve channels add slack");
+    expect(instructions).toContain("eve add channel/slack");
     // Connections: per-user auth wires through Connect's eve helper.
     expect(instructions).toContain("agent/connections/");
     expect(instructions).toContain("@vercel/connect/eve");
@@ -65,6 +65,10 @@ describe("initAgentDevHandoff", () => {
     expect(handoff).toContain("node_modules/eve/docs/");
     expect(handoff).toContain("resolve\nthe installed `eve` package location");
     expect(handoff).toContain("agent/instructions.md");
+    expect(handoff).toContain("`eve registry search <query>`");
+    expect(handoff).toContain("`eve registry list`");
+    expect(handoff).toContain("`eve registry view <item>`");
+    expect(handoff).toContain("`eve add <item>`");
     expect(handoff).not.toContain("/tmp/triage-bot/");
 
     // Shared guidance the leaner handoff used to omit now reaches it.
@@ -89,6 +93,7 @@ describe("initAgentReplPrompt", () => {
 
     expect(prompt).toContain("The project at `.` is already scaffolded.");
     expect(prompt).toContain("What should the agent do?");
+    expect(prompt).toContain("`eve registry search <query>`");
     expect(prompt).toContain("pnpm exec eve dev --no-ui");
     expect(prompt).not.toContain("{{");
   });

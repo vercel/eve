@@ -1,6 +1,7 @@
 import { relative } from "node:path";
 
 import {
+  buildOpaqueTypesStub,
   buildUniqueSymbolStub,
   collectFilesRecursively,
   createDeclarationCopier,
@@ -86,6 +87,11 @@ const copyDeclarations = createDeclarationCopier({
       kind: "vendored",
       compiledPath: "@workflow/world",
     },
+    devalue: {
+      kind: "stub",
+      stubBaseName: "_devalue",
+      build: buildOpaqueTypesStub,
+    },
     ms: {
       kind: "stub",
       stubBaseName: "_ms",
@@ -94,10 +100,41 @@ const copyDeclarations = createDeclarationCopier({
   },
 });
 
+// @workflow/core@5.0.0-beta.38 restored runtime world selection: its
+// `createWorld()` statically imports both first-party world packages. eve
+// never calls that factory — worlds are selected and wired explicitly at
+// build time — so those imports would only drag the local world into hosted
+// Vercel output (and the Vercel world into local-only builds). Stub them
+// inside core; each world package keeps its own vendored entry.
+const CORE_WORLD_FACTORY_STUB_ID = "\0eve-core-world-factory-stub";
+
+function stubCoreWorldFactories() {
+  return {
+    name: "eve:stub-core-world-factories",
+    resolveId(source, importer) {
+      if (source !== "@workflow/world-local" && source !== "@workflow/world-vercel") return null;
+      if (typeof importer !== "string") return null;
+      if (!importer.replaceAll("\\", "/").includes("/@workflow/core/")) return null;
+      return CORE_WORLD_FACTORY_STUB_ID;
+    },
+    load(id) {
+      if (id !== CORE_WORLD_FACTORY_STUB_ID) return null;
+      return [
+        "export function createWorld() {",
+        '  throw new Error("Unsupported in eve: @workflow/core createWorld(). ' +
+          'eve selects and wires the workflow world explicitly at build time.");',
+        "}",
+        "",
+      ].join("\n");
+    },
+  };
+}
+
 export default {
   packageName: "@workflow/core",
   compiledPath: "@workflow/core",
   chunkGroup: "workflow",
+  plugins: [stubCoreWorldFactories()],
   entries: [
     {
       outputPath: "index",

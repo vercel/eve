@@ -1,7 +1,7 @@
 import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
 import type { GeistdocsGithubConfig } from "@vercel/geistdocs/config";
 
-export const Logo = () => <LogoEve height={15} />;
+export const Logo = () => <LogoEve />;
 
 export const github: GeistdocsGithubConfig = {
   owner: "vercel",
@@ -20,10 +20,6 @@ export const nav = [
   {
     label: "Templates",
     href: "/templates",
-  },
-  {
-    label: "GitHub",
-    href: `https://github.com/${github.owner}/${github.repo}/`,
   },
 ];
 

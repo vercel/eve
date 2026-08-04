@@ -1,7 +1,7 @@
 import type { FilePart, UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
-import type { DeliverInput, RunInput, Runtime, SessionAuthContext } from "#channel/types.js";
+import type { DeliverInput, RunInput, Runtime } from "#channel/types.js";
 import { createSession, type Session } from "#channel/session.js";
 import type { SendFn, SendOptions, SendPayload } from "#channel/routes.js";
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
@@ -17,12 +17,13 @@ export function createSendFn<TState = undefined>(
     input: string | UserContent | SendPayload,
     options: SendOptions<TState>,
   ): Promise<Session> => {
-    const auth = (options as { auth: SessionAuthContext | null }).auth;
-    const callback = (options as { callback?: SendOptions<TState>["callback"] }).callback;
-    const mode = (options as { mode?: SendOptions<TState>["mode"] }).mode ?? "conversation";
-    const state = (options as { state?: TState }).state;
-    const title = (options as { title?: string }).title;
-    const rawToken = (options as { continuationToken: string }).continuationToken;
+    // `SendOptions<TState>` is conditional on `TState`, so its properties are
+    // not accessible until the generic resolves; widen once to the base shape.
+    const opts = options as SendOptions<undefined> & { readonly state?: TState };
+    const { auth, callback, caller, capabilities, initiatorAuth, state, title } = opts;
+    const intent = opts.intent ?? "resume-or-start";
+    const mode = opts.mode ?? "conversation";
+    const rawToken = opts.continuationToken;
     const continuationToken = `${channelName}:${rawToken}`;
 
     const {
@@ -36,6 +37,7 @@ export function createSendFn<TState = undefined>(
     try {
       const deliverInput: DeliverInput = {
         auth,
+        caller,
         continuationToken,
         requestId: metadata.requestId,
         payload: { inputResponses, message, context, outputSchema },
@@ -44,7 +46,9 @@ export function createSendFn<TState = undefined>(
 
       return createSession(sessionId, rawToken, runtime);
     } catch (error) {
-      if (!isRuntimeNoActiveSessionError(error)) {
+      // A resume-intent miss is an expected protocol outcome; the caller
+      // (e.g. the eve channel's continue route) decides how to surface it.
+      if (!isRuntimeNoActiveSessionError(error) || intent === "resume") {
         throw error;
       }
     }
@@ -59,10 +63,12 @@ export function createSendFn<TState = undefined>(
       ? { ...adapter, state: { ...adapter.state, ...(state as Record<string, unknown>) } }
       : adapter;
 
-    const runInput: RunInput = {
+    const runInput: {
+      -readonly [K in keyof RunInput]: RunInput[K];
+    } = {
       adapter: sessionAdapter,
       auth,
-      capabilities: mode === "conversation" ? { requestInput: true } : undefined,
+      capabilities: capabilities ?? (mode === "conversation" ? { requestInput: true } : undefined),
       channelName,
       callback,
       continuationToken,
@@ -71,6 +77,9 @@ export function createSendFn<TState = undefined>(
       requestId: metadata.requestId,
       title,
     };
+    if (initiatorAuth !== undefined) {
+      runInput.initiatorAuth = initiatorAuth;
+    }
     const handle = await runtime.run(runInput);
 
     return createSession(handle.sessionId, rawToken, runtime);

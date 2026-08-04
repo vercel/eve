@@ -32,6 +32,7 @@ function request(overrides?: Partial<InputRequest>): InputRequest {
     prompt: "Choose one",
     requestId: "call_1",
     ...overrides,
+    kind: overrides?.kind ?? "question",
   };
 }
 

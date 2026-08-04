@@ -6,7 +6,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { linearChannel, type LinearChannelState } from "#public/channels/linear/linearChannel.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 import type { InputRequest } from "#runtime/input/types.js";
@@ -45,17 +45,17 @@ const stubAlsContext = (() => {
 
 function callEvent(
   adapter: ChannelAdapter,
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   ctx: any,
-): Promise<HandleMessageStreamEvent> {
+): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
-function makeEvent<T extends HandleMessageStreamEvent["type"]>(
+function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
   type: T,
   data: unknown,
-): HandleMessageStreamEvent {
-  return { data, type } as HandleMessageStreamEvent;
+): UnstampedMessageStreamEvent {
+  return { data, type } as UnstampedMessageStreamEvent;
 }
 
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
@@ -127,6 +127,8 @@ async function firePost(
 
   const response = await post.handler(request, {
     cancel: vi.fn(),
+    clear: vi.fn(),
+    compact: vi.fn(),
     reset: vi.fn(),
     resolveActiveSession: async () => undefined,
     getSession: vi.fn() as any,
@@ -153,6 +155,7 @@ function makeRequest(overrides: Partial<InputRequest> = {}): InputRequest {
     prompt: "Approve deployment?",
     requestId: "call_1",
     ...overrides,
+    kind: overrides.kind ?? "question",
   };
 }
 

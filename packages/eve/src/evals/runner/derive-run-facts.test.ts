@@ -1,16 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { JsonObject } from "#shared/json.js";
-import { createEmptyDerivedFacts, deriveRunFacts } from "#evals/runner/derive-run-facts.js";
+import { stampTestEvents } from "#internal/testing/events.js";
+import {
+  createEmptyDerivedFacts,
+  deriveRunFacts,
+  type DeriveRunFactsOptions,
+} from "#evals/runner/derive-run-facts.js";
+import type { EveEvalDerivedFacts } from "#evals/types.js";
 
-function turnStarted(turnId: string, sequence: number): HandleMessageStreamEvent {
+/** Fixtures are authored without envelopes; stamp them the way the wire would. */
+function derive(
+  events: readonly UnstampedMessageStreamEvent[],
+  options?: DeriveRunFactsOptions,
+): EveEvalDerivedFacts {
+  return deriveRunFacts(stampTestEvents(events), options);
+}
+
+function turnStarted(turnId: string, sequence: number): UnstampedMessageStreamEvent {
   return { type: "turn.started", data: { turnId, sequence } };
 }
 
 function actionsRequested(
   actions: readonly { callId: string; toolName: string; input?: JsonObject }[],
-): HandleMessageStreamEvent {
+): UnstampedMessageStreamEvent {
   return {
     type: "actions.requested",
     data: {
@@ -33,7 +47,7 @@ function actionResult(input: {
   output?: unknown;
   status?: "completed" | "failed" | "rejected";
   isError?: boolean;
-}): HandleMessageStreamEvent {
+}): UnstampedMessageStreamEvent {
   return {
     type: "action.result",
     data: {
@@ -57,13 +71,14 @@ function subagentResult(input: {
   subagentName: string;
   output: unknown;
   status: "completed" | "failed" | "rejected";
-}): HandleMessageStreamEvent {
+}): UnstampedMessageStreamEvent {
   return {
     type: "action.result",
     data: {
       result: {
         callId: input.callId,
         kind: "subagent-result",
+        origin: "child",
         output: input.output as never,
         subagentName: input.subagentName,
       },
@@ -75,7 +90,7 @@ function subagentResult(input: {
   };
 }
 
-function inputRequested(requestIds: readonly string[]): HandleMessageStreamEvent {
+function inputRequested(requestIds: readonly string[]): UnstampedMessageStreamEvent {
   return {
     type: "input.requested",
     data: {
@@ -86,6 +101,7 @@ function inputRequested(requestIds: readonly string[]): HandleMessageStreamEvent
           kind: "tool-call" as const,
           toolName: "bash",
         },
+        kind: "tool-approval" as const,
         prompt: "Approve?",
         requestId,
       })),
@@ -98,12 +114,12 @@ function inputRequested(requestIds: readonly string[]): HandleMessageStreamEvent
 
 describe("deriveRunFacts", () => {
   it("returns empty facts for no events", () => {
-    const facts = deriveRunFacts([]);
+    const facts = derive([]);
     expect(facts).toEqual({ ...createEmptyDerivedFacts(), failureCode: undefined });
   });
 
   it("pairs tool calls with their results by call id", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),
       actionsRequested([
         { callId: "c1", toolName: "get_weather", input: { city: "Brooklyn" } },
@@ -118,7 +134,7 @@ describe("deriveRunFacts", () => {
       }),
     ];
 
-    const facts = deriveRunFacts(events, { sessionId: "s1" });
+    const facts = derive(events, { sessionId: "s1" });
 
     expect(facts.toolCalls).toEqual([
       {
@@ -142,17 +158,17 @@ describe("deriveRunFacts", () => {
   });
 
   it("uses the normalized failed lifecycle status for error results", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       actionsRequested([{ callId: "c1", toolName: "bash" }]),
       actionResult({ callId: "c1", toolName: "bash", isError: true }),
     ];
 
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.toolCalls[0]?.status).toBe("failed");
   });
 
   it("distinguishes pending, completed, failed, and rejected tool calls", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       actionsRequested([
         { callId: "pending", toolName: "pending" },
         { callId: "completed", toolName: "completed" },
@@ -164,7 +180,7 @@ describe("deriveRunFacts", () => {
       actionResult({ callId: "rejected", toolName: "rejected", status: "rejected" }),
     ];
 
-    expect(deriveRunFacts(events).toolCalls.map((call) => call.status)).toEqual([
+    expect(derive(events).toolCalls.map((call) => call.status)).toEqual([
       "pending",
       "completed",
       "failed",
@@ -173,7 +189,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("derives pending tool calls from HITL input requests", () => {
-    const facts = deriveRunFacts([turnStarted("t1", 0), inputRequested(["approval"])]);
+    const facts = derive([turnStarted("t1", 0), inputRequested(["approval"])]);
 
     expect(facts.toolCalls).toEqual([
       {
@@ -188,7 +204,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("pairs HITL tool calls with resumed results by call id", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),
       inputRequested(["approval"]),
       turnStarted("t2", 1),
@@ -199,7 +215,7 @@ describe("deriveRunFacts", () => {
       }),
     ];
 
-    expect(deriveRunFacts(events).toolCalls).toEqual([
+    expect(derive(events).toolCalls).toEqual([
       {
         name: "bash",
         input: {},
@@ -212,7 +228,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("derives resolved tool calls from result-only turn events", () => {
-    const facts = deriveRunFacts([
+    const facts = derive([
       turnStarted("t2", 1),
       actionResult({ callId: "approval-call", toolName: "bash", status: "rejected" }),
     ]);
@@ -230,17 +246,17 @@ describe("deriveRunFacts", () => {
   });
 
   it("deduplicates tool calls surfaced by request and HITL events", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),
       actionsRequested([{ callId: "approval-call", toolName: "bash" }]),
       inputRequested(["approval"]),
     ];
 
-    expect(deriveRunFacts(events).toolCalls).toHaveLength(1);
+    expect(derive(events).toolCalls).toHaveLength(1);
   });
 
   it("stamps the turn index from turn.started boundaries", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),
       actionsRequested([{ callId: "c1", toolName: "first_tool" }]),
       actionResult({ callId: "c1", toolName: "first_tool" }),
@@ -249,12 +265,12 @@ describe("deriveRunFacts", () => {
       actionResult({ callId: "c2", toolName: "second_tool" }),
     ];
 
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.toolCalls.map((call) => call.turnIndex)).toEqual([0, 1]);
   });
 
   it("counts message.completed events whose step completed without tool calls", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       {
         type: "message.completed",
         data: { finishReason: "stop", message: "hello", stepIndex: 0, turnId: "t1", sequence: 1 },
@@ -274,12 +290,12 @@ describe("deriveRunFacts", () => {
         data: { finishReason: "stop", message: "world", stepIndex: 2, turnId: "t1", sequence: 3 },
       },
     ];
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.messageCount).toBe(2);
   });
 
   it("counts reasoning.completed events", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       {
         type: "reasoning.completed",
         data: { reasoning: "thinking...", stepIndex: 0, turnId: "t1", sequence: 1 },
@@ -289,12 +305,12 @@ describe("deriveRunFacts", () => {
         data: { reasoning: "more thinking...", stepIndex: 1, turnId: "t1", sequence: 2 },
       },
     ];
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.reasoningBlockCount).toBe(2);
   });
 
   it("joins subagent.called with subagent.completed by call id", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),
       {
         type: "subagent.called",
@@ -316,7 +332,7 @@ describe("deriveRunFacts", () => {
       },
     ];
 
-    const facts = deriveRunFacts(events, { sessionId: "s0" });
+    const facts = derive(events, { sessionId: "s0" });
     expect(facts.subagentCalls).toEqual([
       {
         callId: "c1",
@@ -333,7 +349,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("derives failed subagent calls from result-only events", () => {
-    const facts = deriveRunFacts([
+    const facts = derive([
       turnStarted("t1", 0),
       subagentResult({
         callId: "c1",
@@ -356,18 +372,18 @@ describe("deriveRunFacts", () => {
   });
 
   it("extracts inline subagent calls from subagent.started events", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       {
         type: "subagent.started",
         data: { callId: "c1", subagentName: "inline-agent" },
       },
     ];
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.subagentCalls.map((call) => call.name)).toEqual(["inline-agent"]);
   });
 
   it("records every subagent invocation separately", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       {
         type: "subagent.started",
         data: { callId: "c1", subagentName: "agent-a" },
@@ -377,13 +393,13 @@ describe("deriveRunFacts", () => {
         data: { callId: "c2", subagentName: "agent-a" },
       },
     ];
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.subagentCalls.map((call) => call.name)).toEqual(["agent-a", "agent-a"]);
     expect(facts.subagentCallCount).toBe(2);
   });
 
   it("captures failure code from session.failed event", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       {
         type: "session.failed",
         data: {
@@ -393,18 +409,21 @@ describe("deriveRunFacts", () => {
         },
       },
     ];
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.failureCode).toBe("TIMEOUT");
   });
 
   it("collects HITL input requests", () => {
-    const events: HandleMessageStreamEvent[] = [turnStarted("t1", 0), inputRequested(["r1", "r2"])];
-    const facts = deriveRunFacts(events);
+    const events: UnstampedMessageStreamEvent[] = [
+      turnStarted("t1", 0),
+      inputRequested(["r1", "r2"]),
+    ];
+    const facts = derive(events);
     expect(facts.inputRequests.map((request) => request.requestId)).toEqual(["r1", "r2"]);
   });
 
   it("marks the run parked when it ends on unanswered input requests", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),
       inputRequested(["r1"]),
       { type: "turn.completed", data: { sequence: 1, turnId: "t1" } },
@@ -412,14 +431,14 @@ describe("deriveRunFacts", () => {
         type: "session.waiting",
         data: { continuationToken: "eve:test", wait: "next-user-message" },
       },
-    ] as HandleMessageStreamEvent[];
+    ] as UnstampedMessageStreamEvent[];
 
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.parked).toBe(true);
   });
 
   it("does not mark the run parked when the turn continued past the input request", () => {
-    const events: HandleMessageStreamEvent[] = [
+    const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),
       inputRequested(["r1"]),
       {
@@ -431,9 +450,9 @@ describe("deriveRunFacts", () => {
         type: "session.waiting",
         data: { continuationToken: "eve:test", wait: "next-user-message" },
       },
-    ] as HandleMessageStreamEvent[];
+    ] as UnstampedMessageStreamEvent[];
 
-    const facts = deriveRunFacts(events);
+    const facts = derive(events);
     expect(facts.parked).toBe(false);
   });
 });

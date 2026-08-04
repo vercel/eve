@@ -30,7 +30,13 @@ function toolResult(toolName: string, output: unknown, isError?: boolean): Runti
 }
 
 function subagentResult(): RuntimeActionResult {
-  return { callId: "call_2", kind: "subagent-result", output: "done", subagentName: "sub" };
+  return {
+    callId: "call_2",
+    kind: "subagent-result",
+    origin: "child",
+    output: "done",
+    subagentName: "sub",
+  };
 }
 
 describe("toolResultFrom", () => {

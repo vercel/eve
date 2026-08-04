@@ -22,11 +22,12 @@ import {
   SessionKey,
   SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
+  SessionDynamicSubagentSelectionsKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
@@ -42,8 +43,9 @@ import {
   setPendingInputBatch,
 } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   getSessionTokenLimitViolation,
@@ -51,6 +53,10 @@ import {
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import {
+  createInstrumentationHooks,
+  type InstrumentationContextRunner,
+} from "#harness/instrumentation-lifecycle.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
@@ -69,7 +75,17 @@ vi.mock("ai", () => ({
   tool: vi.fn((t: unknown) => t),
 }));
 
+const { existingOtelIntegration, mockCreateAiSdkHookBridge } = vi.hoisted(() => ({
+  existingOtelIntegration: { onStart: vi.fn() },
+  mockCreateAiSdkHookBridge: vi.fn((..._args: unknown[]) => ({ onStart: vi.fn() })),
+}));
+
+vi.mock("./ai-sdk-hook-bridge.js", () => ({
+  createAiSdkHookBridge: (...args: unknown[]) => mockCreateAiSdkHookBridge(...args),
+}));
+
 vi.mock("./otel-integration.js", () => ({
+  createOtelIntegration: vi.fn(() => existingOtelIntegration),
   ensureOtelIntegration: vi.fn(),
 }));
 
@@ -184,16 +200,16 @@ function setDelegatedParent(ctx: ContextContainer): void {
 
 function createEventCollector(): {
   emit: HarnessEmitFn;
-  events: HandleMessageStreamEvent[];
+  events: UnstampedMessageStreamEvent[];
 } {
-  const events: HandleMessageStreamEvent[] = [];
+  const events: UnstampedMessageStreamEvent[] = [];
   const emit: HarnessEmitFn = async (event) => {
     events.push(event);
   };
   return { emit, events };
 }
 
-function getCompatibilityEventTypes(events: readonly HandleMessageStreamEvent[]): string[] {
+function getCompatibilityEventTypes(events: readonly UnstampedMessageStreamEvent[]): string[] {
   return events
     .filter((event) => event.type !== "message.appended" && event.type !== "reasoning.appended")
     .map((event) => event.type);
@@ -428,6 +444,7 @@ function createPendingBashApprovalSession(): HarnessSession {
         },
         allowFreeform: false,
         display: "confirmation",
+        kind: "tool-approval",
         options: [
           { id: "approve", label: "Yes" },
           { id: "deny", label: "No" },
@@ -478,6 +495,7 @@ function createPendingProtectedActionApprovalSession(): HarnessSession {
         },
         allowFreeform: false,
         display: "confirmation",
+        kind: "tool-approval",
         options: [
           { id: "approve", label: "Yes" },
           { id: "deny", label: "No" },
@@ -672,6 +690,118 @@ describe("createToolLoopHarness", () => {
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("add");
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
+  });
+
+  it("announces current agents outside the cacheable system prompt", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        persistentSubagentSessions: true,
+        resolveModel: vi.fn().mockResolvedValue(
+          new MockLanguageModelV3({
+            modelId: "claude-sonnet-4-5",
+            provider: "anthropic.messages",
+          }),
+        ),
+      }),
+    );
+    const session = createTestSession({
+      state: {
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              address: {
+                continuationToken: "private-token",
+                kind: "agent/local",
+                sessionId: "child-session-123456789012",
+              },
+              identity: {
+                id: "ag_research:123456789012",
+                name: "research",
+                nodeId: "subagents/research",
+              },
+              lastStatus: "waiting",
+              phase: "parked",
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await runStep(session, { message: "Hi" });
+
+    const { instructions } = vi.mocked(ToolLoopAgent).mock.calls[0]![0];
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
+    expect(instructions).toBe("You are a test assistant.");
+    expect(messages).toContainEqual({
+      content: expect.stringContaining(
+        '<agent id="ag_research:123456789012" name="research">waiting</agent>',
+      ),
+      role: "assistant",
+    });
+    expect(messages.at(-1)).toEqual({ content: "Hi", role: "user" });
+    expect(JSON.stringify({ instructions, messages })).not.toContain("private-token");
+    expect(result.session.history).toContainEqual({
+      content: expect.stringContaining('<agent id="ag_research:123456789012"'),
+      role: "assistant",
+    });
+  });
+
+  it("skips the agents snippet when no handle is parked", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { persistentSubagentSessions: true }),
+    );
+    const session = createTestSession({
+      state: {
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              identity: {
+                id: "ag_research:123456789012",
+                name: "research",
+                nodeId: "subagents/research",
+              },
+              operation: {
+                callId: "call-1",
+                id: "op-1",
+                kind: "start",
+                parentTurnId: "turn-1",
+              },
+              phase: "starting",
+              target: { continuationToken: "private-token", kind: "agent/local" },
+            },
+          ],
+        },
+      },
+    });
+
+    await runStep(session, { message: "Hi" });
+
+    const call = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
+    expect(JSON.stringify(call?.instructions ?? "")).not.toContain("<agents>");
+    expect(JSON.stringify(messages)).not.toContain("<agents>");
   });
 
   it("uses dynamic model selection for the model call", async () => {
@@ -911,6 +1041,78 @@ describe("createToolLoopHarness", () => {
         nodeId: "workers",
         subagentName: "worker",
       },
+    ]);
+  });
+
+  it("parks dynamic subagent calls as pending runtime actions", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { message: "investigate" },
+                toolCallId: "call-dynamic",
+                toolName: "researcher",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: { message: "investigate" },
+          toolCallId: "call-dynamic",
+          toolName: "researcher",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+    const ctx = new ContextContainer();
+    ctx.set(SessionDynamicSubagentSelectionsKey, {
+      "subagents/researcher": {
+        agentConfig: {
+          description: "Research the request.",
+          model: { id: "openai/gpt-5.5" },
+        },
+        kind: "subagent",
+        prepared: {
+          description: "Research the request.",
+          inputSchema: { type: "object" },
+          kind: "subagent",
+          logicalPath: "subagents/researcher",
+          name: "researcher",
+          nodeId: "subagents/researcher",
+          sourceId: "subagents/researcher",
+        },
+      },
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const result = await contextStorage.run(ctx, () =>
+      runStep(createTestSession(), { message: "Research this." }),
+    );
+
+    expect(events.find((event) => event.type === "actions.requested")?.data.actions).toEqual([
+      expect.objectContaining({
+        callId: "call-dynamic",
+        kind: "subagent-call",
+        nodeId: "subagents/researcher",
+        subagentName: "researcher",
+      }),
+    ]);
+    expect(getPendingRuntimeActionBatch(result.session.state)?.actions).toEqual([
+      expect.objectContaining({
+        callId: "call-dynamic",
+        kind: "subagent-call",
+        nodeId: "subagents/researcher",
+      }),
     ]);
   });
 
@@ -1209,6 +1411,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "session-limit",
           options: [
             { id: "continue", label: "Approve", style: "primary" },
             { id: "stop", label: "Stop", style: "danger" },
@@ -1309,7 +1512,33 @@ describe("createToolLoopHarness", () => {
     expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
   });
 
-  it("re-raises the limit prompt when the user replies without answering it", async () => {
+  it("fails a zero-budget task instead of raising a continuation that cannot grant tokens", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("task", emit, { capabilities: { requestInput: true } }),
+    );
+    const session = createTestSession({ limits: { maxInputTokensPerSession: 0 } });
+
+    const result = await runStep(session, { message: "Hi again" });
+
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+    expect(result.next).toEqual({
+      done: true,
+      isError: true,
+      output: "The session reached its configured input token limit.",
+    });
+    expect(events.some((event) => event.type === "input.requested")).toBe(false);
+  });
+
+  it("keeps one limit prompt pending when the user replies without answering it", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
@@ -1318,7 +1547,17 @@ describe("createToolLoopHarness", () => {
 
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(reparked.next).toBeNull();
-    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(2);
+    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
+
+    const resumed = await runStep(reparked.session, {
+      inputResponses: [{ optionId: "continue", requestId: LIMIT_REQUEST_ID }],
+    });
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(resumed.session.history).toContainEqual({
+      content: "also do this other thing",
+      role: "user",
+    });
   });
 
   it("preserves approval gates on step-scoped dynamic tools", async () => {
@@ -2283,6 +2522,7 @@ describe("createToolLoopHarness", () => {
             },
             allowFreeform: false,
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },
@@ -2556,7 +2796,7 @@ describe("createToolLoopHarness", () => {
   });
 
   it("feeds non-object tool call input back to the model as a failed tool result", async () => {
-    const invalidInput = "not an object";
+    const invalidInput = '"not an object"';
     const errorMessage =
       'Failed to parse tool-call arguments for "add" (call-bad): Expected a JSON-serializable object.';
     setupMockAgent({
@@ -3214,6 +3454,187 @@ describe("createToolLoopHarness", () => {
     expect(eventTypes).not.toContain("session.failed");
   });
 
+  it("retries a model call after an undici body timeout", async () => {
+    vi.useFakeTimers();
+    const timeout = new TypeError("terminated", {
+      cause: Object.assign(new Error("Body Timeout Error"), {
+        code: "UND_ERR_BODY_TIMEOUT",
+      }),
+    });
+    const success = {
+      finishReason: "stop",
+      response: { messages: [{ content: "Recovered", role: "assistant" }] },
+      text: "Recovered",
+      toolCalls: [],
+      toolResults: [],
+    };
+    const modelCallMock = vi.fn();
+
+    vi.mocked(ToolLoopAgent).mockImplementation(function (
+      this: ToolLoopAgent,
+      settings: MockAgentSettings,
+    ) {
+      const { onStepFinish, prepareStep } = settings;
+      this.generate = modelCallMock.mockImplementation(async (options: { messages: unknown[] }) => {
+        if (prepareStep) {
+          await prepareStep({
+            context: undefined,
+            messages: options.messages,
+            model: {},
+            stepNumber: 0,
+            steps: [],
+          });
+        }
+        if (modelCallMock.mock.calls.length === 1) {
+          throw timeout;
+        }
+        if (onStepFinish) {
+          void Promise.resolve().then(() => onStepFinish(success));
+        }
+        return createMockGenerateResult(success);
+      });
+      this.stream = vi.fn();
+      return this;
+    } as MockAgentConstructor);
+
+    try {
+      const runStep = createToolLoopHarness(createTestConfig());
+      const pending = runStep(createTestSession(), { message: "Hi" });
+      await vi.runAllTimersAsync();
+      const result = await pending;
+
+      expect(modelCallMock).toHaveBeenCalledTimes(2);
+      expect(result.session.history).toEqual([
+        { content: "Hi", role: "user" },
+        { content: "Recovered", role: "assistant" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("feeds malformed provider web search input back to the model", async () => {
+    const invalidInput = '{"query": 2025 NBA Finals champion}';
+    setupMockAgent({
+      content: [
+        {
+          input: invalidInput,
+          providerExecuted: true,
+          toolCallId: "search-malformed",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+      ],
+      finishReason: "tool-calls",
+      fullStreamParts: [
+        {
+          input: invalidInput,
+          providerExecuted: true,
+          toolCallId: "search-malformed",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ],
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: invalidInput,
+                providerExecuted: true,
+                toolCallId: "search-malformed",
+                toolName: "web_search",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: invalidInput,
+          providerExecuted: true,
+          toolCallId: "search-malformed",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        tools: new Map(),
+      }),
+    );
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "anthropic/claude-opus-5" },
+        system: "You are a test assistant.",
+        tools: [{ description: "Search the web", inputSchema: null, name: "web_search" }],
+      },
+    });
+    const firstStep = await runStep(session, {
+      message: "Who won the 2025 NBA Finals?",
+    });
+
+    expect(firstStep.next).toBe(runStep);
+    expect(events.filter((event) => event.type === "action.result")).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          error: expect.objectContaining({
+            message: expect.stringMatching(
+              /Failed to parse tool-call arguments for "web_search" \(search-malformed\):/u,
+            ),
+          }),
+          status: "failed",
+        }),
+        type: "action.result",
+      }),
+    ]);
+    const failedToolMessage = firstStep.session.history.at(-1);
+    expect(failedToolMessage).toMatchObject({
+      content: [
+        {
+          output: {
+            type: "error-text",
+            value: expect.stringMatching(
+              /Failed to parse tool-call arguments for "web_search" \(search-malformed\):/u,
+            ),
+          },
+          toolCallId: "search-malformed",
+          toolName: "web_search",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    });
+    expect(JSON.stringify(failedToolMessage)).not.toContain("Expected a JSON-serializable object.");
+
+    setupMockAgent({
+      finishReason: "stop",
+      response: {
+        messages: [{ content: "I'll fix the search arguments.", role: "assistant" }],
+      },
+      text: "I'll fix the search arguments.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    await runStep(firstStep.session);
+
+    const secondInstance = vi.mocked(ToolLoopAgent).mock.results[1]?.value as
+      | { stream: ReturnType<typeof vi.fn> }
+      | undefined;
+    const secondCall = secondInstance?.stream.mock.calls[0]?.[0] as
+      | { messages: ModelMessage[] }
+      | undefined;
+    expect(secondCall?.messages).toEqual(firstStep.session.history);
+  });
+
   it("does not start a model call when the turn signal is already aborted", async () => {
     const abortController = new AbortController();
     const cancellation = new TurnCancelledError();
@@ -3828,6 +4249,10 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
+        instrumentation: {
+          hooks: createInstrumentationHooks([]),
+          runInContext: (_operation, execute) => execute(),
+        },
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -3858,6 +4283,10 @@ describe("createToolLoopHarness", () => {
       // The second agent was constructed for the retry.
       expect(constructedCalls.count()).toBe(2);
       expect(resolveRuntimeContext).toHaveBeenCalledTimes(2);
+      expect(mockCreateAiSdkHookBridge.mock.calls.map(([attempt]) => attempt)).toEqual([
+        expect.objectContaining({ attemptIndex: 0 }),
+        expect.objectContaining({ attemptIndex: 1 }),
+      ]);
 
       // The retry succeeded — the session parked normally instead of
       // emitting any failure cascade.
@@ -6401,6 +6830,7 @@ describe("createToolLoopHarness", () => {
             },
             allowFreeform: false,
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },
@@ -6588,6 +7018,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -6752,6 +7183,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -6999,6 +7431,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -7153,6 +7586,7 @@ describe("createToolLoopHarness", () => {
               toolName: "ask_question",
             },
             display: "select",
+            kind: "question",
             options: [{ id: "one", label: "One" }],
             prompt: "Choose one.",
             requestId: "question-1",
@@ -7243,6 +7677,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: true,
           display: "select",
+          kind: "question",
           options: questionInput.options,
           prompt: questionInput.prompt,
           requestId: "question-1",
@@ -7329,6 +7764,7 @@ describe("createToolLoopHarness", () => {
           },
           allowFreeform: true,
           display: "select",
+          kind: "question",
           options: questionInput.options,
           prompt: questionInput.prompt,
           requestId: "question-1",
@@ -7452,6 +7888,168 @@ describe("createToolLoopHarness", () => {
       sessionId: "test-session",
       turnId: "turn_0",
     });
+  });
+
+  it("clears model history without replacing the session or its durable state", async () => {
+    const { emit, events } = createEventCollector();
+    const resolveModel = vi.fn();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        clearOnly: true,
+        resolveModel,
+      }),
+    );
+    const state = { retained: "yes" };
+    const limits = { maxInputTokensPerSession: 1_000 };
+    const outputSchema = { type: "string" };
+    const session = createTestSession({
+      compaction: {
+        lastKnownInputTokens: 9000,
+        lastKnownPromptMessageCount: 2,
+        recentWindowSize: 10,
+        threshold: 100_000,
+      },
+      history: [
+        { content: "old message", role: "user" },
+        { content: "old reply", role: "assistant" },
+      ],
+      limits,
+      outputSchema,
+      state,
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toMatchObject({
+      agent: session.agent,
+      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      continuationToken: session.continuationToken,
+      history: [],
+      limits,
+      outputSchema,
+      sessionId: session.sessionId,
+      state,
+    });
+    expect(getCompatibilityEventTypes(events)).toEqual(["context.cleared", "session.waiting"]);
+    expect(events.find((event) => event.type === "context.cleared")?.data).toEqual({
+      sequence: 0,
+      sessionId: "test-session",
+      turnId: "turn_0",
+    });
+    expect(resolveModel).not.toHaveBeenCalled();
+    expect(compactMessages).not.toHaveBeenCalled();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
+  it("forces compaction without starting a model turn", async () => {
+    const compactedHistory: ModelMessage[] = [
+      { content: "Summary of our conversation so far:", role: "user" },
+      { content: "summary", role: "assistant" },
+    ];
+    vi.mocked(compactMessages).mockResolvedValue(compactedHistory);
+
+    const { emit, events } = createEventCollector();
+    const onCompaction = vi.fn(() => []);
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+        onCompaction,
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ modelId: "gpt-4", provider: "openai" } as LanguageModel),
+      }),
+    );
+    const session = createTestSession({
+      compaction: {
+        lastKnownInputTokens: 9000,
+        lastKnownPromptMessageCount: 2,
+        recentWindowSize: 10,
+        threshold: 100_000,
+      },
+      history: [
+        { content: "old message", role: "user" },
+        { content: "old reply", role: "assistant" },
+      ],
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session.history).toEqual(compactedHistory);
+    expect(result.session.compaction).toEqual({ recentWindowSize: 10, threshold: 100_000 });
+    expect(shouldCompact).not.toHaveBeenCalled();
+    expect(compactMessages).toHaveBeenCalledOnce();
+    expect(onCompaction).toHaveBeenCalledOnce();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(getCompatibilityEventTypes(events)).toEqual([
+      "compaction.requested",
+      "compaction.completed",
+      "session.waiting",
+    ]);
+  });
+
+  it("returns an empty session to its waiting boundary after manual compaction", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+      }),
+    );
+    const session = createTestSession({ history: [] });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toBe(session);
+    expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(compactMessages).not.toHaveBeenCalled();
+  });
+
+  it("returns a failed manual compaction to its waiting boundary", async () => {
+    vi.mocked(compactMessages).mockRejectedValueOnce(new Error("summary failed"));
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ modelId: "gpt-4", provider: "openai" } as LanguageModel),
+      }),
+    );
+    const session = createTestSession({
+      history: [{ content: "old message", role: "user" }],
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toBe(session);
+    expect(getCompatibilityEventTypes(events)).toEqual(["compaction.requested", "session.waiting"]);
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns a failed manual model resolution to its waiting boundary", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        compactOnly: true,
+        resolveModel: vi.fn().mockRejectedValueOnce(new Error("model unavailable")),
+      }),
+    );
+    const session = createTestSession({
+      history: [{ content: "old message", role: "user" }],
+    });
+
+    const result = await runStep(session);
+
+    expect(result.next).toBeNull();
+    expect(result.session).toBe(session);
+    expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
+    expect(compactMessages).not.toHaveBeenCalled();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
 
   it("uses the authored compaction model when one is configured", async () => {
@@ -8815,7 +9413,7 @@ describe("createToolLoopHarness", () => {
 
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
         runtimeContext?: Record<string, unknown>;
-        telemetry?: { isEnabled?: boolean };
+        telemetry?: { integrations?: unknown; isEnabled?: boolean };
       };
       const runtimeContext = agentCall?.runtimeContext;
       expect(runtimeContext).toBeDefined();
@@ -8823,6 +9421,95 @@ describe("createToolLoopHarness", () => {
       expect(runtimeContext?.["eve.version"]).not.toBe("");
       expect(runtimeContext?.["eve.session.id"]).toBe("test-session");
       expect(agentCall?.telemetry?.isEnabled).toBe(true);
+      expect(agentCall?.telemetry?.integrations).toBeUndefined();
+    });
+
+    it("injects one provider-neutral bridge when lifecycle hooks opt in", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const attemptCompleted = vi.fn();
+      const hooks = createInstrumentationHooks([
+        { events: { "attempt.completed": attemptCompleted } },
+      ]);
+      const runInContext: InstrumentationContextRunner = (_operation, execute) => execute();
+      const config = createTestConfig("conversation", undefined, {
+        instrumentation: { hooks, runInContext },
+      });
+
+      const runStep = createToolLoopHarness(config);
+      await runStep(createTestSession(), { message: "hi" });
+
+      expect(mockCreateAiSdkHookBridge).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          attemptId: "test-session:turn_0:0:0",
+          attemptIndex: 0,
+          sessionId: "test-session",
+          stepIndex: 0,
+          turnId: "turn_0",
+        }),
+        hooks,
+        runInContext,
+      );
+      const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: {
+          integrations?: unknown[];
+          recordInputs?: boolean;
+          recordOutputs?: boolean;
+        };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        integrations: [bridge],
+        recordInputs: true,
+        recordOutputs: true,
+      });
+      expect(attemptCompleted).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          scope: expect.objectContaining({ attemptIndex: 0 }),
+          type: "attempt.completed",
+        }),
+      );
+    });
+
+    it("composes lifecycle hooks with existing authored OTel", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      mockGetInstrumentationConfig.mockReturnValue({ recordInputs: true, recordOutputs: false });
+      const hooks = createInstrumentationHooks([]);
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentation: {
+            hooks,
+            runInContext: (_operation, execute) => execute(),
+          },
+        }),
+      );
+
+      await runStep(createTestSession(), { message: "hi" });
+
+      const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: {
+          integrations?: unknown[];
+          recordInputs?: boolean;
+          recordOutputs?: boolean;
+        };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        integrations: [bridge, existingOtelIntegration],
+        recordInputs: true,
+        recordOutputs: false,
+      });
     });
 
     it("merges step-started runtime context before emitting step.started", async () => {
@@ -8835,7 +9522,7 @@ describe("createToolLoopHarness", () => {
       });
 
       const order: string[] = [];
-      const events: HandleMessageStreamEvent[] = [];
+      const events: UnstampedMessageStreamEvent[] = [];
       const emit: HarnessEmitFn = async (event) => {
         order.push(event.type);
         events.push(event);
@@ -9528,5 +10215,81 @@ describe("createToolLoopHarness", () => {
       ).toBe(false);
       errorSpy.mockRestore();
     });
+  });
+});
+
+describe("appendMissingToolResultMessages", () => {
+  const searchResult = {
+    type: "tool-result" as const,
+    toolCallId: "toolu_1",
+    toolName: "web_search",
+    output: { type: "json" as const, value: { winner: "OKC" } },
+  };
+
+  it("skips synthesized results for provider-executed calls already answered inline", () => {
+    // Provider-executed results live inside the *assistant* message until
+    // provider history normalization; a second result for the same id makes
+    // Anthropic reject the whole history on the next call.
+    const assistantWithInlineResult = {
+      role: "assistant" as const,
+      content: [
+        {
+          type: "tool-call" as const,
+          toolCallId: "toolu_1",
+          toolName: "web_search",
+          input: { query: "2025 NBA Finals" },
+          providerExecuted: true,
+        },
+        { ...searchResult, providerExecuted: true },
+      ],
+    };
+
+    const messages = appendMissingToolResultMessages({
+      append: [
+        {
+          type: "tool-result",
+          toolCallId: "toolu_1",
+          toolName: "web_search",
+          output: { type: "error-text", value: "Failed to parse tool-call arguments" },
+        },
+      ],
+      responseMessages: [assistantWithInlineResult],
+    });
+
+    expect(messages).toEqual([assistantWithInlineResult]);
+  });
+
+  it("still backfills calls with no result anywhere", () => {
+    const assistant = {
+      role: "assistant" as const,
+      content: [
+        {
+          type: "tool-call" as const,
+          toolCallId: "toolu_2",
+          toolName: "web_search",
+          input: {},
+        },
+      ],
+    };
+    const backfill = {
+      type: "tool-result" as const,
+      toolCallId: "toolu_2",
+      toolName: "web_search",
+      output: { type: "error-text" as const, value: "invalid input" },
+    };
+
+    expect(
+      appendMissingToolResultMessages({ append: [backfill], responseMessages: [assistant] }),
+    ).toEqual([assistant, { role: "tool", content: [backfill] }]);
+  });
+
+  it("dedupes against results already in tool messages", () => {
+    const toolMessage = { role: "tool" as const, content: [searchResult] };
+    expect(
+      appendMissingToolResultMessages({
+        append: [searchResult],
+        responseMessages: [toolMessage],
+      }),
+    ).toEqual([toolMessage]);
   });
 });

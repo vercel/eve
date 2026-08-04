@@ -1,5 +1,5 @@
 import type {
-  HandleMessageStreamEvent,
+  UnstampedMessageStreamEvent,
   MessageAppendedStreamEvent,
   ReasoningAppendedStreamEvent,
 } from "#protocol/message.js";
@@ -11,7 +11,7 @@ const MAX_PENDING_DELTA_CHARACTERS = 64 * 1024;
 interface PendingEmission {
   deltaCharacters: number;
   deltaParts?: string[];
-  event: HandleMessageStreamEvent;
+  event: UnstampedMessageStreamEvent;
   messages?: readonly import("ai").ModelMessage[];
   sourceEvents: number;
 }
@@ -163,7 +163,7 @@ export function createOrderedStreamEmitter(
 
 function mergeAdjacentAppends(
   left: PendingEmission,
-  right: HandleMessageStreamEvent,
+  right: UnstampedMessageStreamEvent,
   messages: readonly import("ai").ModelMessage[] | undefined,
 ): boolean {
   if (left.event.type === "message.appended" && right.type === "message.appended") {
@@ -187,13 +187,13 @@ function mergeAdjacentAppends(
   return false;
 }
 
-function appendDelta(event: HandleMessageStreamEvent): string | undefined {
+function appendDelta(event: UnstampedMessageStreamEvent): string | undefined {
   if (event.type === "message.appended") return event.data.messageDelta;
   if (event.type === "reasoning.appended") return event.data.reasoningDelta;
   return undefined;
 }
 
-function materializeEvent(emission: PendingEmission): HandleMessageStreamEvent {
+function materializeEvent(emission: PendingEmission): UnstampedMessageStreamEvent {
   if (emission.deltaParts === undefined) return emission.event;
 
   if (emission.event.type === "message.appended") {

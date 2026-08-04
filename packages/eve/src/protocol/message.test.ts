@@ -8,19 +8,21 @@ import {
   createActionResultEvent,
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
+  createContextClearedEvent,
   createMessageReceivedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
   createStepStartedEvent,
   createTurnCancelledEvent,
   encodeMessageStreamEvent,
-  timestampHandleMessageStreamEvent,
+  stampMessageStreamEvent,
 } from "#protocol/message.js";
+import { isEventId } from "#protocol/event-id.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("19");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("20");
   });
 
   it("publishes the channel-local continuation token on session.waiting", () => {
@@ -37,6 +39,15 @@ describe("message stream protocol", () => {
     expect(createTurnCancelledEvent({ sequence: 2, turnId: "turn_2" })).toEqual({
       data: { sequence: 2, turnId: "turn_2" },
       type: "turn.cancelled",
+    });
+  });
+
+  it("creates context.cleared events", () => {
+    expect(
+      createContextClearedEvent({ sequence: 2, sessionId: "session_1", turnId: "turn_2" }),
+    ).toEqual({
+      data: { sequence: 2, sessionId: "session_1", turnId: "turn_2" },
+      type: "context.cleared",
     });
   });
 
@@ -59,24 +70,24 @@ describe("message stream protocol", () => {
     });
   });
 
-  it("stamps durable timing metadata and preserves it through encoding", () => {
-    const timed = timestampHandleMessageStreamEvent(
-      createStepStartedEvent({
-        sequence: 0,
-        stepIndex: 1,
-        turnId: "turn_0",
-      }),
-      "2026-04-17T10:14:22.123Z",
+  it("stamps durable envelope metadata and preserves it through encoding", () => {
+    const stamped = stampMessageStreamEvent(
+      createStepStartedEvent({ sequence: 0, stepIndex: 1, turnId: "turn_0" }),
     );
 
-    expect(timed.meta).toEqual({
-      at: "2026-04-17T10:14:22.123Z",
-    });
+    expect(isEventId(stamped.meta.id)).toBe(true);
+    expect(stamped.meta.at).toBe(new Date(stamped.meta.at).toISOString());
 
-    const encoded = encodeMessageStreamEvent(timed);
-    const decoded = JSON.parse(new TextDecoder().decode(encoded).trim()) as typeof timed;
+    const encoded = encodeMessageStreamEvent(stamped);
+    const decoded = JSON.parse(new TextDecoder().decode(encoded).trim()) as typeof stamped;
 
-    expect(decoded).toEqual(timed);
+    expect(decoded).toEqual(stamped);
+  });
+
+  it("mints a distinct id for each emission of an identical payload", () => {
+    const event = createStepStartedEvent({ sequence: 0, stepIndex: 0, turnId: "turn_0" });
+
+    expect(stampMessageStreamEvent(event).meta.id).not.toBe(stampMessageStreamEvent(event).meta.id);
   });
 
   it("builds authorization.required with optional challenge and webhookUrl", () => {

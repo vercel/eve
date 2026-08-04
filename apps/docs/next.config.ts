@@ -15,9 +15,9 @@ const config: NextConfig = {
   },
 
   // The integrations gallery sources identity from the workspace package
-  // `@vercel/eve-catalog`; transpile it from source so dev and build compile
+  // `@eve/catalog`; transpile it from source so dev and build compile
   // its TypeScript without a separate prebuild step.
-  transpilePackages: ["@vercel/eve-catalog"],
+  transpilePackages: ["@eve/catalog"],
 
   experimental: {
     turbopackFileSystemCacheForDev: true,
@@ -56,12 +56,22 @@ const config: NextConfig = {
     return [
       {
         source: "/docs",
-        destination: "/docs/introduction",
+        destination: "/docs/getting-started",
         permanent: true,
       },
       {
         source: "/:lang/docs",
-        destination: "/:lang/docs/introduction",
+        destination: "/:lang/docs/getting-started",
+        permanent: true,
+      },
+      {
+        source: "/docs/introduction",
+        destination: "/docs/getting-started",
+        permanent: true,
+      },
+      {
+        source: "/:lang/docs/introduction",
+        destination: "/:lang/docs/getting-started",
         permanent: true,
       },
       // Evals moved from a single Advanced page to a top-level section.

@@ -152,6 +152,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Ctrl-C at the prompt restores the terminal inside the reader itself;
     // the runner's teardown-time shutdown() must still print the tag.
     input.ctrlC();
+    input.ctrlC();
     await expect(prompt).rejects.toThrow("Interrupted");
     renderer.shutdown();
 
@@ -173,6 +174,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.setSessionId("ses_0123456789");
     const prompt = renderer.readPrompt();
     input.ctrlC();
+    input.ctrlC();
     await expect(prompt).rejects.toThrow("Interrupted");
     renderer.shutdown();
 
@@ -185,6 +187,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     latest.renderer.setSessionId("ses_first");
     latest.renderer.setSessionId("ses_second");
     const latestPrompt = latest.renderer.readPrompt();
+    latest.input.ctrlC();
     latest.input.ctrlC();
     await expect(latestPrompt).rejects.toThrow("Interrupted");
     latest.renderer.shutdown();
@@ -207,6 +210,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     // A normal teardown removes the last-resort hook.
     input.ctrlC();
+    input.ctrlC();
     await expect(prompt).rejects.toThrow("Interrupted");
     expect(process.listeners("exit")).toEqual(before);
   });
@@ -217,13 +221,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
       info: agentInfoWithModel("gpt-5"),
-      tip: "Use /channels to add more ways to reach your agent.",
+      tip: "Use eve add to install integrations from the registry.",
     });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("eve Weather Agent");
-    expect(snapshot).toContain("Use /channels to add more ways to reach your agent.");
+    expect(snapshot).toContain("Use eve add to install integrations from the registry.");
     // The model lives on the status line, not the header; the old config
     // rows and key hints are gone.
     expect(snapshot).not.toContain("gpt-5");
@@ -715,13 +719,15 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("interrupts a running response and returns to the prompt without exiting", async () => {
+  it("cooperatively cancels a running response on Ctrl+C and preserves the prompt", async () => {
     const { screen, input, renderer } = makeRenderer();
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
     const abort = vi.fn();
+    const cancel = vi.fn();
     const rendering = renderer.renderStream(
       {
         abort,
+        cancel,
         events: new ReadableStream<AgentTUIStreamEvent>({
           start(controller) {
             streamController = controller;
@@ -740,14 +746,16 @@ describe("TerminalRenderer (inline scrollback)", () => {
       expect(screen.snapshot()).toContain("partial response");
     });
 
-    // The first Ctrl+C aborts the in-flight turn and unblocks the render
-    // loop even though the server stream never closes on its own. Draining
-    // instead would wait forever for an event that never arrives.
     input.ctrlC();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(abort).not.toHaveBeenCalled();
+    expect(screen.snapshot()).toContain("Cancelling turn…");
+
+    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.close();
     await expect(rendering).resolves.toBeUndefined();
 
-    expect(abort).toHaveBeenCalledTimes(1);
-    expect(screen.snapshot()).toContain("Interrupted");
+    expect(screen.snapshot()).toContain("Cancelled");
     expect(input.rawModes).toEqual([true]);
     expect(screen.rawOutput()).toContain("\x1b[?2004h");
 
@@ -783,22 +791,29 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("clears a non-empty prompt on Ctrl+C, and quits only when already empty", async () => {
-    const { input, renderer } = makeRenderer();
+  it("clears and arms on the first idle Ctrl+C, then exits on a second press", async () => {
+    const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
     input.type("draft message");
-    input.ctrlC(); // first Ctrl+C clears the buffer instead of quitting
+    input.ctrlC();
+    expect(renderer.exitRequested()).toBe(false);
+    expect(screen.snapshot()).toContain("Press Ctrl+C again to exit");
     input.type("real message");
+    expect(screen.snapshot()).not.toContain("Press Ctrl+C again to exit");
     input.enter();
 
     // The cleared draft is gone (otherwise this would be "draft messagereal message").
     expect(await prompt).toBe("real message");
 
-    // A Ctrl+C on the now-empty prompt quits.
+    // Consecutive Ctrl+C presses on the now-empty prompt quit.
     const second = renderer.readPrompt();
     input.ctrlC();
+    expect(renderer.exitRequested()).toBe(false);
+    expect(screen.snapshot()).toContain("Press Ctrl+C again to exit");
+    input.ctrlC();
     await expect(second).rejects.toThrow();
+    expect(renderer.exitRequested()).toBe(true);
 
     renderer.shutdown();
   });
@@ -1352,6 +1367,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const second = renderer.readPrompt();
     expect(countOccurrences(screen.snapshot(), "└ Done in")).toBe(1);
     input.ctrlC();
+    input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
   });
@@ -1446,6 +1462,32 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     expect(screen.snapshot()).toContain("\u23bf  /model dismissed.");
+  });
+
+  it("hangs a successful command outcome from an elbow into a full-intensity rail", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandResult(
+      "Registry items added: channel/photon-imessage.\n" +
+        "Text your agent: +15550000000\n" +
+        "Photon project: https://app.photon.codes/dashboard/project-id",
+      "success",
+    );
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("⎿  ✓ Registry items added: channel/photon-imessage.");
+    expect(snapshot).toContain("│ Text your agent: +15550000000");
+    expect(snapshot).toContain("└ Photon project: https://app.photon.codes/dashboard/project-id");
+    expect(screen.rawOutput()).toContain("\u001b[32m✓\u001b[39m");
+    expect(screen.rawOutput()).not.toContain("\u001b[2mText your agent");
+  });
+
+  it("keeps a single-line successful command result under the elbow", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandResult("Registry items added: connection/linear.", "success");
+    renderer.shutdown();
+
+    expect(screen.snapshot()).toContain("⎿  ✓ Registry items added: connection/linear.");
   });
 
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
@@ -1556,6 +1598,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // crossing the 20K input threshold is what earns the row.
     expect(screen.snapshot()).toContain("└ Done in 1s ── ↑ 20.5K ↓ 43");
     input.ctrlC();
+    input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
   });
@@ -1582,6 +1625,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Under 10s and under 20K turn input: no coda row.
     const second = renderer.readPrompt();
     expect(screen.snapshot()).not.toContain("\n└ ");
+    input.ctrlC();
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
@@ -1688,6 +1732,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       expect(screen.snapshot()).toContain("└ Done in 12s");
       expect(screen.snapshot()).not.toContain("Thought for");
       input.ctrlC();
+      input.ctrlC();
       await expect(second).rejects.toThrow();
       renderer.shutdown();
     } finally {
@@ -1728,6 +1773,44 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // The runner drains the queue as the next turn's prompt.
     expect(renderer.takeQueuedPrompt()).toBe("follow-up question");
     expect(renderer.takeQueuedPrompt()).toBeUndefined();
+    renderer.shutdown();
+  });
+
+  it("runs a mid-turn /cancel as a control instead of queueing it", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const cancel = vi.fn();
+    const rendering = renderer.renderStream(
+      {
+        cancel,
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("›");
+    });
+    input.type("/cancel");
+    input.enter();
+
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(screen.snapshot()).toContain("/cancel");
+      expect(screen.snapshot()).toContain("Turn cancellation requested.");
+      expect(screen.snapshot()).toContain("Cancelling turn…");
+    });
+
+    streamController?.enqueue({ type: "turn-cancelled" });
+    streamController?.close();
+    await rendering;
+
+    expect(renderer.takeQueuedPrompt()).toBeUndefined();
+    expect(screen.snapshot()).toContain("Cancelled");
     renderer.shutdown();
   });
 
@@ -1779,7 +1862,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("arms on the first empty-queue Esc and cancels the turn on the second", async () => {
+  it("cancels the turn on the first empty-queue Esc", async () => {
     const { screen, input, renderer } = makeRenderer();
     const escape = async () => {
       input.send("\x1b");
@@ -1801,16 +1884,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await vi.waitFor(() => {
       expect(screen.snapshot()).toContain("›");
     });
-
-    await escape();
-    expect(cancel).not.toHaveBeenCalled();
-    expect(screen.snapshot()).toContain("Press esc again to cancel the turn");
-
-    // Any other key backs out of the armed state.
-    input.left();
-    await escape();
-    expect(cancel).not.toHaveBeenCalled();
-    expect(screen.snapshot()).toContain("Press esc again to cancel the turn");
 
     await escape();
     expect(cancel).toHaveBeenCalledTimes(1);
@@ -2039,8 +2112,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
       expect(screen.snapshot()).toContain("Queue 2/5");
     });
 
-    // A client-side interrupt skips the runner's queue drain…
-    input.ctrlC();
+    // A lifecycle interruption skips the runner's queue drain…
+    renderer.requestInterrupt();
     await rendering;
     expect(abort).toHaveBeenCalledTimes(1);
     void streamController;
@@ -2081,6 +2154,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await rendering;
     const prompt = renderer.readPrompt();
     await screen.waitForIdlePrompt(1_000);
+    input.ctrlC();
     input.ctrlC();
     await expect(prompt).rejects.toThrow();
     renderer.shutdown();
@@ -2446,9 +2520,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
-    input.type("/channels");
+    input.type("/add");
     // The ANSI blue open (34) wraps the typed command in the painted row.
-    expect(screen.rawOutput()).toContain("[34m/channels");
+    expect(screen.rawOutput()).toContain("[34m/add");
     input.enter();
     await prompt;
     renderer.shutdown();
@@ -2459,7 +2533,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const prompt = renderer.readPrompt();
     // Never passes through a known command, even if painted per keystroke
-    // ("/li…" is not "/channels").
+    // ("/li…" is not a known command).
     input.type("/lin is not a command");
     expect(screen.rawOutput()).not.toContain("[34m");
     input.enter();
@@ -2471,15 +2545,15 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
-    input.type("/new");
+    input.type("/reset");
     input.enter();
-    expect(await prompt).toBe("/new");
+    expect(await prompt).toBe("/reset");
     renderer.shutdown();
 
     // The echo anchors in the user-message grammar (gutter bar), never the
     // prompt glyph: that one is the live-input rendezvous marker.
-    expect(screen.snapshot()).toContain("\u2502 /new");
-    expect(screen.snapshot()).not.toContain("\u276f /new");
+    expect(screen.snapshot()).toContain("\u2502 /reset");
+    expect(screen.snapshot()).not.toContain("\u276f /reset");
   });
 
   it("reassembles an arrow key split across reads", async () => {
@@ -3023,6 +3097,28 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Shutdown settles the status row into scrollback instead of wiping it.
     renderer.shutdown();
     expect(screen.snapshot()).toContain("tui/setup-panel.ts changed · rebuilt");
+  });
+
+  it("updates the rebuild status before the watcher writes a newline", () => {
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: true,
+      logs: "all",
+      unicode: true,
+    });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+
+    process.stdout.write(
+      formatChangeDetectedLogLine("/app", [{ event: "change", path: "/app/package.json" }]),
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("package.json changed · rebuilding…");
+    expect(snapshot).not.toContain("[eve:dev] change detected");
+    renderer.shutdown();
   });
 
   it("flips the status row to reloading on a structural change", () => {
@@ -3766,6 +3862,42 @@ describe("TerminalRenderer setup panel", () => {
 });
 
 describe("TerminalRenderer setup flow session", () => {
+  it("restores the terminal while a child process inherits stdio", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    renderer.renderNotice("anchor");
+    renderer.setupFlow.begin("Add integration", "pulse");
+    let inherited = false;
+    await renderer.setupFlow.withInheritedStdio(async () => {
+      inherited = true;
+      input.pause();
+    });
+
+    expect(inherited).toBe(true);
+    expect(input.resumeCalls).toBe(2);
+    expect(screen.snapshot()).toContain("Add integration");
+    renderer.setupFlow.end();
+    renderer.shutdown();
+  });
+
+  it("discards input without interrupting a non-interruptible flow", async () => {
+    const { input, renderer } = makeRenderer();
+    renderer.setupFlow.begin("Add to your agent", "pulse");
+    const interrupt = renderer.setupFlow.waitForInterrupt({ interruptible: false });
+    let interrupted = false;
+    void interrupt.promise.then(() => {
+      interrupted = true;
+    });
+
+    input.send("hello\x1b\r");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(interrupted).toBe(false);
+    interrupt.dispose();
+    renderer.setupFlow.end();
+    renderer.shutdown();
+  });
+
   it("uses the build-phase pulse for pulse setup flows", () => {
     vi.useFakeTimers();
     try {
@@ -3778,6 +3910,23 @@ describe("TerminalRenderer setup flow session", () => {
       vi.advanceTimersByTime(450);
       expect(screen.snapshot()).not.toContain("▪ Checking the project…");
       expect(screen.snapshot()).toContain("  Checking the project…");
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows elapsed time after a setup status has run for five seconds", () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+
+      renderer.setupFlow.begin("Add to your agent", "pulse");
+      renderer.setupFlow.setStatus("Installing Slack and dependencies…");
+      expect(screen.snapshot()).not.toContain("5s");
+
+      vi.advanceTimersByTime(5_100);
+      expect(screen.snapshot()).toContain("Installing Slack and dependencies… 5s");
       renderer.shutdown();
     } finally {
       vi.useRealTimers();
@@ -4278,14 +4427,14 @@ describe("TerminalRenderer command echo spacing", () => {
 
     renderer.renderNotice("assistant said something");
     const prompt = renderer.readPrompt();
-    input.type("/channels");
+    input.type("/connect");
     input.enter();
     await prompt;
     renderer.renderCommandResult("Project linked.");
     renderer.shutdown();
 
     const lines = screen.snapshot().split("\n");
-    const echoIndex = lines.findIndex((line) => line.includes("│ /channels"));
+    const echoIndex = lines.findIndex((line) => line.includes("│ /connect"));
     expect(echoIndex).toBeGreaterThan(0);
     expect(lines[echoIndex - 1]).toBe("");
     const resultIndex = lines.findIndex((line) => line.includes("⎿  Project linked."));
@@ -4348,13 +4497,13 @@ describe("TerminalRenderer command typeahead", () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
-    input.type("/chan");
+    input.type("/ad");
     input.enter();
-    expect(await prompt).toBe("/channels");
+    expect(await prompt).toBe("/add");
     renderer.shutdown();
 
-    expect(screen.snapshot()).toContain("│ /channels");
-    expect(screen.snapshot()).not.toContain("❯ /channels");
+    expect(screen.snapshot()).toContain("│ /add");
+    expect(screen.snapshot()).not.toContain("❯ /add");
   });
 
   it("submits an alias as typed instead of canonicalizing it", async () => {
@@ -4381,9 +4530,9 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/");
     input.down();
     input.enter();
-    // Down moved /help → /new; history recall would have submitted the
+    // Down moved /help → /reset; history recall would have submitted the
     // earlier prompt instead.
-    expect(await second).toBe("/new");
+    expect(await second).toBe("/reset");
     renderer.shutdown();
   });
 
@@ -4468,7 +4617,6 @@ describe("TerminalRenderer command typeahead", () => {
 describe("TerminalRenderer status line", () => {
   const vercelStatus = {
     identity: { projectName: "my-agent", teamName: "acme" },
-    pendingDeploy: false,
   };
 
   it("renders the local server, model, and Vercel link under the prompt row", async () => {
@@ -4515,16 +4663,6 @@ describe("TerminalRenderer status line", () => {
     input.type("done");
     input.enter();
     await prompt;
-    renderer.shutdown();
-  });
-
-  it("marks a pending deploy in yellow", () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderNotice("anchor");
-    renderer.setVercelStatus({ ...vercelStatus, pendingDeploy: true });
-
-    expect(screen.snapshot()).toContain("/deploy pending");
-    expect(screen.rawOutput()).toContain("[33m/deploy pending");
     renderer.shutdown();
   });
 
@@ -4674,7 +4812,7 @@ describe("TerminalRenderer status line", () => {
         credential: "oidc",
       }),
     });
-    renderer.setVercelStatus({ ...vercelStatus, pendingDeploy: true });
+    renderer.setVercelStatus({ ...vercelStatus });
     await renderer.renderStream(
       streamOf([
         { type: "step-start" },
@@ -4691,7 +4829,6 @@ describe("TerminalRenderer status line", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("anthropic/claude-sonnet-5");
     expect(snapshot).toContain("via ai-gateway(oidc:my-agent)");
-    expect(snapshot).toContain("/deploy pending");
     // A fresh conversation clears the token flow entirely (↑ 0 ↓ 0 is noise).
     expect(snapshot).not.toContain("↑ 0");
     expect(snapshot).not.toContain("↑ 500");

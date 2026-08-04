@@ -1,3 +1,3 @@
-# @vercel/eve-catalog
+# @eve/catalog
 
 ## 0.0.1

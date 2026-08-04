@@ -5,8 +5,15 @@ import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
+import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
+import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
+import {
+  registerAcpCommand,
+  type ResolveVerifiedRemoteDevelopmentClient,
+  type RunAcpServer,
+} from "#cli/acp/command.js";
 import {
   FORCED_EXIT_BACKSTOP_MS,
   installShutdownSignal,
@@ -14,14 +21,26 @@ import {
   waitForShutdownSignal,
 } from "#cli/shutdown.js";
 import { waitForServerOrStop, waitForUiOrServer } from "#cli/dev/wait-for-ui.js";
-import {
-  parseDevelopmentHeaderOption,
-  resolveDevelopmentUrlTarget,
-  type DevelopmentRequestHeaders,
-} from "#cli/dev/url-target.js";
+import { parseDevelopmentHeaderOption, resolveDevelopmentUrlTarget } from "#cli/dev/url-target.js";
+import type { DevelopmentCliOptions, ProductionCliOptions } from "#cli/dev/command-options.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
-import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
+import type { EvalCliOptions } from "#evals/cli/eval.js";
+import {
+  registerRuntimeInvokeCommand,
+  type InvokeCliRuntimeDependencies,
+} from "#cli/invoke/command.js";
+import {
+  parseContextSizeOption,
+  parseDisplayMode,
+  parseLogsMode,
+  parsePortOption,
+  parseStatsMode,
+} from "#cli/option-parsers.js";
 import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
+import {
+  resumeDevelopmentRuntimeArtifacts,
+  suspendDevelopmentRuntimeArtifacts,
+} from "#services/dev-client/runtime-artifacts.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
@@ -31,39 +50,12 @@ import type {
   DevelopmentServerOptions,
   ProductionServerHandle,
 } from "#internal/nitro/host/types.js";
-import type {
-  AssistantResponseStatsMode,
-  LogDisplayMode,
-  TerminalPartDisplayMode,
-} from "#cli/dev/tui/types.js";
 
 export { resolveDevUiMode, resolveTuiDisplayOptions };
 
 interface CliLogger {
   error(message: string): void;
   log(message: string): void;
-}
-
-interface DevelopmentCliOptions {
-  assistantResponseStats?: AssistantResponseStatsMode;
-  connectionAuth?: TerminalPartDisplayMode;
-  contextSize?: number;
-  header?: DevelopmentRequestHeaders;
-  host?: string;
-  input?: string;
-  logs?: LogDisplayMode;
-  name?: string;
-  port?: number;
-  reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
-  tools?: TerminalPartDisplayMode;
-  ui?: boolean;
-  url?: string;
-}
-
-interface ProductionCliOptions {
-  host?: string;
-  port?: number;
 }
 
 interface CliRuntimeDependencies {
@@ -73,12 +65,15 @@ interface CliRuntimeDependencies {
     readonly serverUrl: string;
   }): Promise<boolean>;
   buildHost: BuildHost;
+  resolveVerifiedRemoteDevelopmentClient: ResolveVerifiedRemoteDevelopmentClient;
+  runAcpServer: RunAcpServer;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
     options?: { json?: boolean },
   ): Promise<void>;
   runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
+  runInvoke: InvokeCliRuntimeDependencies["runInvoke"];
   runEvalCommand(
     evalIds: readonly string[],
     options: EvalCliOptions,
@@ -121,19 +116,6 @@ function createDevBootProgressReporter(
   };
 }
 
-interface EvalCliOptions {
-  json?: boolean;
-  junit?: string;
-  list?: boolean;
-  maxConcurrency?: string;
-  skipReport?: boolean;
-  strict?: boolean;
-  tag?: string[];
-  timeout?: string;
-  url?: string;
-  verbose?: boolean;
-}
-
 async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["printApplicationInfo"]> {
   return (await import("#cli/commands/info.js")).printApplicationInfo;
 }
@@ -157,72 +139,6 @@ async function loadStartProductionHost(): Promise<CliRuntimeDependencies["startP
   return (await import("#internal/nitro/host.js")).startProductionServer;
 }
 
-function shouldPrintCliBootBanner(actionCommand: Command): boolean {
-  return (
-    actionCommand.name() === "info" ||
-    actionCommand.name() === "dev" ||
-    actionCommand.name() === "init"
-  );
-}
-
-function parsePortOption(value: string): number {
-  if (!/^-?\d+$/.test(value)) {
-    throw new InvalidArgumentError(`Expected a numeric port, received "${value}".`);
-  }
-
-  const port = Number(value);
-
-  if (port < 0 || port > 65_535) {
-    throw new InvalidArgumentError(`Expected a port between 0 and 65535, received "${value}".`);
-  }
-
-  return port;
-}
-
-const DISPLAY_MODES = new Set(["full", "collapsed", "auto-collapsed", "hidden"]);
-const STATS_MODES = new Set(["tokens", "tokensPerSecond"]);
-
-function parseDisplayMode(value: string): TerminalPartDisplayMode {
-  if (!DISPLAY_MODES.has(value)) {
-    throw new InvalidArgumentError(
-      `Expected one of ${[...DISPLAY_MODES].join(", ")}, received "${value}".`,
-    );
-  }
-
-  return value as TerminalPartDisplayMode;
-}
-
-function parseStatsMode(value: string): AssistantResponseStatsMode {
-  if (!STATS_MODES.has(value)) {
-    throw new InvalidArgumentError(
-      `Expected one of ${[...STATS_MODES].join(", ")}, received "${value}".`,
-    );
-  }
-
-  return value as AssistantResponseStatsMode;
-}
-
-function parseLogsMode(value: string): LogDisplayMode {
-  const mode = parseLogDisplayMode(value);
-  if (mode === undefined) {
-    throw new InvalidArgumentError(
-      `Expected one of ${LOG_DISPLAY_MODES.join(", ")}, received "${value}".`,
-    );
-  }
-
-  return mode;
-}
-
-function parseContextSizeOption(value: string): number {
-  const size = Number(value);
-
-  if (!Number.isFinite(size) || size <= 0) {
-    throw new InvalidArgumentError(`Expected a positive number, received "${value}".`);
-  }
-
-  return size;
-}
-
 function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
@@ -240,7 +156,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .showHelpAfterError()
     .exitOverride()
     .hook("preAction", (_program, actionCommand) => {
-      if (shouldPrintCliBootBanner(actionCommand)) {
+      if (["info", "dev", "init"].includes(actionCommand.name())) {
         logger.log(eveCliBanner());
       }
     })
@@ -253,21 +169,9 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       },
     });
 
-  const channels = program
+  program
     .command("channels")
-    .description("Manage user-authored channels in the current project.");
-
-  channels
-    .command("add [kind]")
-    .description("Add channels interactively, or scaffold a channel kind (slack | web).")
-    .option("-f, --force", "Overwrite existing channel files")
-    .option("-y, --yes", "Assume yes for confirmations; requires an explicit channel kind")
-    .action(async (kind: string | undefined, options: { force?: boolean; yes?: boolean }) => {
-      const { runChannelsAddCommand } = await import("#cli/commands/channels.js");
-      await runChannelsAddCommand(logger, appRoot, { kind, options });
-    });
-
-  channels
+    .description("Manage user-authored channels in the current project.")
     .command("list")
     .description("List user-authored channels in the current project.")
     .option("--json", "Output as JSON")
@@ -275,6 +179,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       const { runChannelsListCommand } = await import("#cli/commands/channels.js");
       await runChannelsListCommand(logger, appRoot, options);
     });
+
+  registerIntegrationCommands({ program, logger, appRoot });
 
   const extension = program
     .command("extension")
@@ -305,6 +211,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       const { runExtensionBuildCommand } = await import("#cli/commands/extension-build.js");
       await runExtensionBuildCommand(logger, appRoot);
     });
+
+  registerRegistryCommands({ program, logger, appRoot });
 
   program
     // Optional: a missing target scaffolds or updates the current directory,
@@ -364,6 +272,17 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
       await waitForShutdownSignal({ close: () => server.close(), wait: () => server.wait() });
     });
+
+  registerRuntimeInvokeCommand({ appRoot, logger, program, runtime });
+
+  registerAcpCommand({
+    appRoot,
+    eveVersion: packageVersion,
+    program,
+    resolveVerifiedRemoteDevelopmentClient: runtime.resolveVerifiedRemoteDevelopmentClient,
+    runAcpServer: runtime.runAcpServer,
+    startHost: runtime.startHost,
+  });
 
   program
     .command("dev")
@@ -457,13 +376,31 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
             : { kind: "remote", serverUrl: input.serverUrl, workspaceRoot: appRoot };
         const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
-        const tuiInput = {
+        const tuiInput: RunDevelopmentTuiInput = {
           target,
           initialInput: options.input,
           onBootProgress: report,
           lifecycle,
           ...display,
-        } satisfies RunDevelopmentTuiInput;
+        };
+        if (target.kind === "local") {
+          tuiInput.withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
+            const run = async (): Promise<T> => {
+              if (!(await suspendDevelopmentRuntimeArtifacts({ serverUrl: input.serverUrl }))) {
+                throw new Error("Could not pause the development server for integration setup.");
+              }
+              try {
+                return await task();
+              } finally {
+                await resumeDevelopmentRuntimeArtifacts({
+                  serverUrl: input.serverUrl,
+                  silent: true,
+                });
+              }
+            };
+            return await run();
+          };
+        }
         if (remoteTarget?.headers !== undefined) {
           await runDevelopmentTui({ ...tuiInput, headers: remoteTarget.headers });
         } else {
@@ -600,6 +537,24 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       await runLogsListCommand(logger, appRoot, options);
     });
 
+  const traces = program
+    .command("traces [trace]")
+    .usage("[options] [trace]\n       eve traces ls [options]")
+    .description("Show a local `eve dev` trace (the most recent when trace is omitted).")
+    .action(async (reference: string | undefined) => {
+      const { runTraceShowCommand } = await import("#cli/commands/trace.js");
+      await runTraceShowCommand(logger, appRoot, reference);
+    });
+
+  traces
+    .command("ls")
+    .description("List local traces, most recent first.")
+    .option("--json", "Output as JSON")
+    .action(async (options: { json?: boolean }) => {
+      const { runTraceListCommand } = await import("#cli/commands/trace.js");
+      await runTraceListCommand(logger, appRoot, options);
+    });
+
   program
     .command("info")
     .description("Print resolved application information.")
@@ -619,6 +574,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     )
     .option("--url <url>", "Remote agent URL (skip local host startup)", parseDevelopmentServerUrl)
     .option("--tag <tag...>", "Run only evals carrying a tag")
+    .option("--exclude-tag <tag...>", "Skip evals carrying a tag")
     .option("--strict", "Fail the exit code when any score falls below its threshold")
     .option("--list", "Print discovered evals without running them")
     .option("--timeout <ms>", "Per-eval timeout in milliseconds")

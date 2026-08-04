@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   accumulateSessionUsage,
   accumulateTurnUsage,
-  extendSessionTokenBudget,
+  bumpSessionRuntimeTokenLimits,
+  getSessionRemainingTokenQuota,
+  getSessionRuntimeTokenLimits,
   getSessionTokenLimitViolation,
   getSessionTokenUsage,
   getTurnUsageState,
@@ -325,7 +327,7 @@ describe("session token limits", () => {
     );
   });
 
-  it("measures limits from the granted budget baseline after extendSessionTokenBudget", () => {
+  it("checks usage against the bumped runtime limit after a grant", () => {
     const usage = {
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
@@ -345,22 +347,84 @@ describe("session token limits", () => {
       usedTokens: 10,
     });
 
-    const extended = extendSessionTokenBudget(session);
+    const bumped = bumpSessionRuntimeTokenLimits(session);
 
-    // Both windows reset together so a session near two limits gets one prompt.
-    expect(getSessionTokenLimitViolation({ ...extended, limits: session.limits })).toBeNull();
+    // Both axes bump together so a session near two limits gets one prompt.
+    expect(getSessionRuntimeTokenLimits(bumped)).toEqual({ inputTokens: 20, outputTokens: 6 });
+    expect(getSessionTokenLimitViolation({ ...bumped, limits: session.limits })).toBeNull();
 
     const laterUsage = { ...usage, inputTokens: 20, outputTokens: 3 };
-    const later = setTurnUsageState(extended, {
+    const later = setTurnUsageState(bumped, {
       turnId: "turn_1",
       ...laterUsage,
       session: laterUsage,
     });
 
+    // `limit` reports the configured window size; `usedTokens` the lifetime total.
     expect(getSessionTokenLimitViolation({ ...later, limits: session.limits })).toEqual({
       kind: "input",
       limit: 10,
-      usedTokens: 10,
+      usedTokens: 20,
+    });
+  });
+
+  it("every grant moves the runtime limit, even after a large overshoot", () => {
+    const usage = {
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0,
+      inputTokens: 35,
+      outputTokens: 0,
+      sawCost: false,
+    };
+    // A single model call overshot the 10-token window by several windows.
+    const session = {
+      ...setTurnUsageState(makeSession(), { turnId: "turn_0", ...usage, session: usage }),
+      limits: { maxInputTokensPerSession: 10 },
+    };
+
+    expect(getSessionTokenLimitViolation(session)?.usedTokens).toBe(35);
+
+    // One approval always unblocks: the runtime limit re-anchors to
+    // usage + configured limit rather than incrementing by the limit.
+    const bumped = bumpSessionRuntimeTokenLimits(session);
+    expect(getSessionRuntimeTokenLimits(bumped)).toEqual({ inputTokens: 45 });
+    expect(getSessionTokenLimitViolation({ ...bumped, limits: session.limits })).toBeNull();
+
+    // A second grant cycle moves the ceiling again -- never idempotent.
+    const laterUsage = { ...usage, inputTokens: 45 };
+    const later = setTurnUsageState(bumped, {
+      turnId: "turn_1",
+      ...laterUsage,
+      session: laterUsage,
+    });
+    expect(getSessionTokenLimitViolation({ ...later, limits: session.limits })).not.toBeNull();
+    const bumpedAgain = bumpSessionRuntimeTokenLimits(later);
+    expect(getSessionRuntimeTokenLimits(bumpedAgain)).toEqual({ inputTokens: 55 });
+    expect(getSessionTokenLimitViolation({ ...bumpedAgain, limits: session.limits })).toBeNull();
+  });
+
+  it("reports remaining quota from the runtime limit", () => {
+    const usage = {
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0,
+      inputTokens: 4,
+      outputTokens: 9,
+      sawCost: false,
+    };
+    const session = {
+      ...setTurnUsageState(makeSession(), { turnId: "turn_0", ...usage, session: usage }),
+      limits: { maxInputTokensPerSession: 10 },
+    };
+
+    expect(getSessionRemainingTokenQuota(session)).toEqual({
+      inputTokens: 6,
+      outputTokens: false,
+    });
+    expect(getSessionRemainingTokenQuota(makeSession())).toEqual({
+      inputTokens: false,
+      outputTokens: false,
     });
   });
 });

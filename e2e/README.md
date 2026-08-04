@@ -3,6 +3,50 @@
 End-to-end coverage is fixture-owned `eve eval` runs. The suite only runs
 fixture eval files from the fixture directory.
 
+CI splits the coverage into two suites so live-model flake never gates
+world-infrastructure coverage (and vice versa):
+
+- **Model suite** (`e2e-local.yml`): every fixture runs against the local
+  workflow world with real matrix models. Fixtures whose behavior varies per
+  provider declare `"e2e": { "modelMatrix": "full" }` in `package.json` and
+  run on every matrix model; all other fixtures run once on the default
+  model.
+- **World suites** (`e2e-vercel.yml`, `e2e-postgres.yml`, and one workflow
+  per additional workflow world): every fixture builds, deploys, and runs
+  once with deterministic mock models (`EVE_E2E_MODEL=mock`), proving the
+  world's infrastructure — build, deploy, boot, streaming, durability —
+  without live models. Evals whose assertions need a real model carry the
+  `real-model` tag and are excluded there via `--exclude-tag real-model`.
+
+## Harness config (`@eve-e2e/config`)
+
+Fixture agents author their harness-owned configuration through the private
+`@eve-e2e/config` workspace package (`e2e/fixtures/e2e-config`):
+
+- `e2eAgentConfig({ mock? })` — spread into the root `defineAgent`: resolves
+  the matrix model from `EVE_E2E_MODEL`, and applies the workflow-world
+  override from `EVE_E2E_WORKFLOW_WORLD` when set.
+- `e2eSubagentConfig({ mock? })` — the same model resolution for subagents,
+  without root-only settings.
+- `e2eModel({ mock? })` — a bare model handle for nested slots such as
+  compaction models and dynamic fallbacks.
+- `e2eJudgeModel()` — the judge model for `evals.config.ts`.
+
+When `EVE_E2E_MODEL=mock`, all of these return a deterministic `mockModel()`
+instead of a gateway model id. The default responder echoes the last user
+message; fixtures whose evals need tool calls pass a scripted responder via
+the `mock` option (see `agent-tools-sandbox/agent/agent.ts`).
+
+### The `real-model` tag
+
+An eval tagged `real-model` asserts behavior only a live model produces
+(judge scoring, provider cache metrics, free-form tool planning). The world
+suites exclude it; it still runs in the model suite. Untagging an eval is the
+migration unit for world-suite coverage: script the fixture's mock responder
+until the eval passes under `EVE_E2E_MODEL=mock`, then remove the tag. Prefer
+untagging over new `real-model` tags — deterministic evals make every world
+suite stronger.
+
 ## Local
 
 Run evals from the fixture directory:
@@ -10,6 +54,13 @@ Run evals from the fixture directory:
 ```sh
 cd e2e/fixtures/agent-basic-runtime
 EVE_E2E_MODEL="openai/gpt-5.6-sol" pnpm exec eve eval --strict
+```
+
+Mock-model runs work anywhere with no provider credentials, which makes them
+the fastest way to validate world-suite behavior locally:
+
+```sh
+EVE_E2E_MODEL=mock pnpm exec eve eval --strict --exclude-tag real-model
 ```
 
 Every retained e2e eval is deterministic and self-contained. Coverage that
@@ -81,14 +132,13 @@ must run against the alias — the `e2e-vercel` workflow sets
 evals as a second `eve eval` invocation after the main suite. Without the
 alias env (local matrix, plain `eve eval --strict`) the eval skips.
 
-Most fixture agents and their configured judges use `EVE_E2E_MODEL`, defaulting
-to `openai/gpt-5.6-sol` for local runs. CI sets it from the model matrix, so
-adding a matrix entry runs every discovered fixture against that model.
+Most fixture agents and their configured judges resolve `EVE_E2E_MODEL`
+through `@eve-e2e/config`, defaulting to `openai/gpt-5.6-sol` for local runs.
 `agent-prompt-cache` is the one fixture that authors a direct
 `@ai-sdk/anthropic` model instance instead of a gateway model id: its eval
 asserts the harness's Anthropic cache-breakpoint placement, which only runs on
 that path. It uses the matrix model when it is an Anthropic model and otherwise
-falls back to `anthropic/claude-opus-4.8`. The instance points at the AI
+falls back to `anthropic/claude-opus-5`. The instance points at the AI
 Gateway's Anthropic-compatible Messages endpoint so it uses the same
 `AI_GATEWAY_API_KEY` credential as every other fixture.
 `agent-workflow-stress` uses eve's `mockModel` fixture helper so its 100-turn
@@ -112,21 +162,30 @@ When adding e2e coverage:
 
 ## CI
 
-`.github/workflows/e2e-local.yml` builds the eve package once per matrix leg,
-then runs one fixture directory. Its matrix crosses every discovered fixture
-with these model entries:
+The matrix models and worlds are registered in [`e2e/matrix.json`](./matrix.json)
+— edit that file to add either. `.github/scripts/discover-e2e-fixtures.mjs`
+discovers every fixture with an `evals/` directory and emits the suite
+matrices from the registry:
 
-- `openai-sol` → `openai/gpt-5.6-sol`
-- `anthropic-opus` → `anthropic/claude-opus-4.8`
+- `model_matrix` — fixture × model legs for `e2e-local.yml`. The first
+  registry model is the default that every fixture runs on; the rest run only
+  on fixtures with `"e2e": { "modelMatrix": "full" }` in package.json.
+- `world_matrix_<world>` — one leg per fixture for that world's suite
+  workflow. A registered world's `package` reaches the job as
+  `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the
+  deploy target's default).
 
-The short name is the stable Actions check identifier; the full id selects the
-provider model. Updating a model version does not rename required checks.
-Each workflow also publishes one stable aggregate check, `e2e-local` or
-`e2e-vercel`, which succeeds only when every fixture and model leg succeeds.
-Require those two checks in the repository ruleset so newly added fixtures and
-models become required automatically.
+The short model name is the stable Actions check identifier; the full id
+selects the provider model. Updating a model version does not rename required
+checks. Each workflow also publishes one stable aggregate check —
+`e2e-local`, `e2e-vercel`, or `e2e-postgres` — which succeeds only when every
+leg succeeds. Require those aggregate checks in the repository ruleset so
+newly added fixtures and models become required automatically. Add a new
+aggregate to the ruleset only after its workflow lands on `main`: a required
+check nothing reports blocks every PR as permanently "expected".
 
-Each leg exports the selected id as `EVE_E2E_MODEL` before it runs:
+`.github/workflows/e2e-local.yml` (the model suite) builds the eve package
+once per leg, then runs one fixture directory with the leg's real model:
 
 ```sh
 pnpm --filter eve run build
@@ -137,15 +196,33 @@ EVE_E2E_MODEL="$MODEL" pnpm exec eve eval --strict --junit "$JUNIT_PATH"
 Always build with the full `build` script (not `build:js`); only the full
 build stamps the package version into `dist`.
 
-`.github/workflows/e2e-vercel.yml` links each fixture directory to the shared
-Vercel project id, builds Vercel output locally, deploys that output, and runs:
+`.github/workflows/e2e-vercel.yml` (the Vercel world suite) links each
+fixture directory to the shared Vercel project id, builds Vercel output
+locally with `EVE_E2E_MODEL=mock`, deploys that output, and runs the
+mock-compatible evals:
 
 ```sh
 pnpm exec eve build
 DEPLOYMENT_URL="$(vc deploy --prebuilt --yes --target=preview \
-  --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" | tail -n 1)"
-npx eve eval --strict --url "$DEPLOYMENT_URL" --junit "$JUNIT_PATH"
+  --env "EVE_E2E_MODEL=mock" | tail -n 1)"
+npx eve eval --strict --exclude-tag real-model \
+  --url "$DEPLOYMENT_URL" --junit "$JUNIT_PATH"
 ```
+
+`.github/workflows/e2e-postgres.yml` (the Postgres world suite) starts a
+PostgreSQL service container, bootstraps the `@workflow/world-postgres`
+schema, builds each fixture with `EVE_E2E_WORKFLOW_WORLD=@workflow/world-postgres`,
+runs the mock-compatible evals against a local production server
+(`eve start`), and asserts the traffic produced Postgres-backed workflow
+runs. Every fixture carries `@workflow/world-postgres` as a dependency so
+the world module resolves at build time.
+
+A world suite for another workflow world follows the same shape: register
+the world in `e2e/matrix.json`, add an `e2e-<world>.yml` that consumes its
+`world_matrix_<world>` output (the registered `package` arrives as
+`matrix.world_package` for `EVE_E2E_WORKFLOW_WORLD`), set
+`EVE_E2E_MODEL=mock` (plus any backing services), and run with
+`--exclude-tag real-model`.
 
 TUI smoke scripts are not e2e. They live under
 `packages/eve/test/tui-client` and run through `pnpm test:tui`.

@@ -8,6 +8,7 @@ import { GUARDED_ECHO_TOKEN } from "./shared";
  * park/resume here is deterministic.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "HITL smoke: an approved once() grant persists for the session.",
   async test(t) {
     const parked = await t.send('Call the guarded-echo tool with note "first-call".');

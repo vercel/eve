@@ -6,8 +6,9 @@ import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createSessionWaitingEvent,
-  type HandleMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { stampTestEvents } from "#internal/testing/events.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -19,12 +20,12 @@ function createStartedMessageResponse(sessionId: string, continuationToken: stri
   });
 }
 
-function createEagerStreamResponse(events: readonly HandleMessageStreamEvent[]): Response {
+function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
-        for (const event of events) {
+        for (const event of stampTestEvents(events)) {
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         }
         controller.close();
@@ -41,7 +42,7 @@ afterEach(() => {
 describe("useEveAgent (Svelte rune binding)", () => {
   it("renders the initial projection through plain reactive properties", () => {
     const agent = useEveAgent({
-      initialEvents: [
+      initialEvents: stampTestEvents([
         createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
         createMessageCompletedEvent({
           message: "Hi there.",
@@ -49,7 +50,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
           stepIndex: 0,
           turnId: "turn_1",
         }),
-      ],
+      ]),
       initialSession: {
         continuationToken: "http:session_1",
         sessionId: "session_1",
@@ -68,9 +69,9 @@ describe("useEveAgent (Svelte rune binding)", () => {
 
   it("does not update the visible snapshot without browser reactivity", async () => {
     const agent = useEveAgent({
-      initialEvents: [
+      initialEvents: stampTestEvents([
         createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
-      ],
+      ]),
     });
     const dataBeforeSend = agent.data;
 
@@ -91,7 +92,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))
       .mockResolvedValueOnce(createEagerStreamResponse(events));
-    const seenEvents: HandleMessageStreamEvent[] = [];
+    const seenEvents: UnstampedMessageStreamEvent[] = [];
 
     const agent = useEveAgent({
       onEvent(event) {
@@ -101,6 +102,6 @@ describe("useEveAgent (Svelte rune binding)", () => {
 
     await agent.send({ message: "Hello" });
 
-    expect(seenEvents).toEqual(events);
+    expect(seenEvents).toEqual(stampTestEvents(events));
   });
 });

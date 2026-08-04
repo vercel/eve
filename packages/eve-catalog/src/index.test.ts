@@ -7,6 +7,7 @@ import {
   connectionProtocols,
   extensionEntries,
   getIntegrationEntry,
+  instrumentationEntries,
 } from "./index.js";
 
 describe("integration catalog", () => {
@@ -15,10 +16,13 @@ describe("integration catalog", () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  it("partitions cleanly into channels, connections, and extensions", () => {
-    expect(channelEntries().length + connectionEntries().length + extensionEntries().length).toBe(
-      INTEGRATIONS.length,
-    );
+  it("partitions cleanly into every integration kind", () => {
+    expect(
+      channelEntries().length +
+        connectionEntries().length +
+        extensionEntries().length +
+        instrumentationEntries().length,
+    ).toBe(INTEGRATIONS.length);
   });
 
   it("gives every connection a transport and description", () => {
@@ -37,6 +41,13 @@ describe("integration catalog", () => {
 
   it("keeps extensions free of connection identity", () => {
     for (const entry of extensionEntries()) {
+      expect(entry.connection).toBeUndefined();
+    }
+  });
+
+  it("keeps instrumentation providers free of connection identity", () => {
+    expect(instrumentationEntries().length).toBeGreaterThan(0);
+    for (const entry of instrumentationEntries()) {
       expect(entry.connection).toBeUndefined();
     }
   });
@@ -75,6 +86,11 @@ describe("integration catalog", () => {
   it("exposes Jetty as an extension", () => {
     expect(getIntegrationEntry("jetty")?.kind).toBe("extension");
     expect(getIntegrationEntry("jetty")?.connection).toBeUndefined();
+  });
+
+  it("exposes Upstash AgentKit as an extension", () => {
+    expect(getIntegrationEntry("upstash-agentkit")?.kind).toBe("extension");
+    expect(getIntegrationEntry("upstash-agentkit")?.connection).toBeUndefined();
   });
 
   it("exposes GitHub Tools as an extension distinct from the GitHub channel", () => {

@@ -20,6 +20,7 @@ import {
   type Session as RuntimeSession,
 } from "#context/keys.js";
 import { createMessageCompletedEvent } from "#protocol/message.js";
+import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
@@ -67,6 +68,9 @@ function createEveCreateHandler(input: EveChannelInput) {
     async getEventStream() {
       return new ReadableStream();
     },
+    async getStreamTailIndex() {
+      return -1;
+    },
   } satisfies ChannelSession);
 
   return {
@@ -76,6 +80,8 @@ function createEveCreateHandler(input: EveChannelInput) {
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        clear: vi.fn(),
+        compact: vi.fn(),
         reset: vi.fn(),
         getSession: vi.fn(),
         receive: vi.fn() as any,
@@ -108,6 +114,9 @@ function createEveContinueHandler(input: EveChannelInput) {
     async getEventStream() {
       return new ReadableStream();
     },
+    async getStreamTailIndex() {
+      return -1;
+    },
   };
 
   const mockSend = vi.fn<SendFn>().mockResolvedValue(mockSession);
@@ -120,6 +129,8 @@ function createEveContinueHandler(input: EveChannelInput) {
         send: mockSend,
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        clear: vi.fn(),
+        compact: vi.fn(),
         reset: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,
@@ -154,6 +165,8 @@ function createEveCancelHandler(input: EveChannelInput) {
           send: vi.fn(),
           resolveActiveSession: async () => undefined,
           cancel: vi.fn(),
+          clear: vi.fn(),
+          compact: vi.fn(),
           reset: vi.fn(),
           getSession: vi.fn(),
           receive: vi.fn() as any,
@@ -200,6 +213,8 @@ function createEveResetHandler(input: EveChannelInput) {
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        clear: vi.fn(),
+        compact: vi.fn(),
         reset,
         getSession: vi.fn(),
         receive: vi.fn() as any,
@@ -220,6 +235,82 @@ function resetRequest(body: unknown): Request {
   });
 }
 
+function clearRequest(body: unknown): Request {
+  return new Request("https://example.com/eve/v1/session/clear", {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+}
+
+/** Creates a POST handler test harness for the continuation-addressed clear route. */
+function createEveClearHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const clearRoute = channel.routes.find(
+    (route) => route.method === "POST" && route.path === "/eve/v1/session/clear",
+  );
+  if (!clearRoute) throw new Error("No session clear POST route found");
+
+  const clear = vi.fn().mockResolvedValue({
+    sessionId: "test-session-id",
+    status: "accepted",
+  });
+
+  return {
+    clear,
+    async fetch(req: Request) {
+      const args: RouteHandlerArgs = {
+        send: vi.fn(),
+        resolveActiveSession: async () => undefined,
+        cancel: vi.fn(),
+        clear,
+        compact: vi.fn(),
+        reset: vi.fn(),
+        getSession: vi.fn(),
+        receive: vi.fn() as any,
+        params: {},
+        waitUntil: () => undefined,
+        requestIp: "127.0.0.1",
+      };
+      return (clearRoute as any).handler(req, args);
+    },
+  };
+}
+
+/** Creates a POST handler test harness for the continuation-addressed compact route. */
+function createEveCompactHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const compactRoute = channel.routes.find(
+    (route) => route.method === "POST" && route.path === "/eve/v1/session/compact",
+  );
+  if (!compactRoute) throw new Error("No session compact POST route found");
+
+  const compact = vi.fn().mockResolvedValue({
+    sessionId: "test-session-id",
+    status: "accepted",
+  });
+
+  return {
+    compact,
+    async fetch(req: Request) {
+      const args: RouteHandlerArgs = {
+        send: vi.fn(),
+        resolveActiveSession: async () => undefined,
+        cancel: vi.fn(),
+        clear: vi.fn(),
+        compact,
+        reset: vi.fn(),
+        getSession: vi.fn(),
+        receive: vi.fn() as any,
+        params: {},
+        waitUntil: () => undefined,
+        requestIp: "127.0.0.1",
+      };
+      return (compactRoute as any).handler(req, args);
+    },
+  };
+}
+
 /** Creates a GET handler test harness for the durable session stream route. */
 function createEveStreamHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
@@ -229,20 +320,25 @@ function createEveStreamHandler(input: EveChannelInput) {
   if (!streamRoute) throw new Error("No session stream GET route found");
 
   const getEventStream = vi.fn().mockResolvedValue(new ReadableStream());
+  const getStreamTailIndex = vi.fn().mockResolvedValue(-1);
   const mockGetSession = vi.fn().mockReturnValue({
     cancel: vi.fn(),
     continuationToken: "eve:test",
     getEventStream,
+    getStreamTailIndex,
     id: "test-session-id",
   } satisfies ChannelSession);
 
   return {
     getEventStream,
+    getStreamTailIndex,
     async fetch(url: string) {
       const args: RouteHandlerArgs = {
         send: vi.fn(),
         resolveActiveSession: async () => undefined,
         cancel: vi.fn(),
+        clear: vi.fn(),
+        compact: vi.fn(),
         reset: vi.fn(),
         getSession: mockGetSession,
         receive: vi.fn() as any,
@@ -456,6 +552,28 @@ describe("eveChannel — stream cursor", () => {
       expect(handler.getEventStream).not.toHaveBeenCalled();
     },
   );
+
+  it("omits the tail index by default without paying for the lookup", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-eve-stream-tail-index")).toBeNull();
+    expect(handler.getStreamTailIndex).not.toHaveBeenCalled();
+  });
+
+  it("reports the durable tail index when the request opts in", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    handler.getStreamTailIndex.mockResolvedValueOnce(41);
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-eve-stream-tail-index")).toBe("41");
+  });
 });
 
 describe("eveChannel — onMessage", () => {
@@ -623,6 +741,78 @@ describe("eveChannel — onMessage", () => {
     const options = handler.send.mock.calls[0]?.[1] as SendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
   });
+
+  it("maps validated continuation callback metadata onto the turn caller", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        callback: {
+          callId: "call-2",
+          subagentName: "research",
+          token: "tok123",
+          url: "https://caller.example.com/eve/v1/callback/tok123",
+        },
+        continuationToken: "http:existing",
+        message: "follow up",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler.send).toHaveBeenCalledWith(
+      expect.not.objectContaining({ caller: expect.anything() }),
+      expect.objectContaining({
+        caller: {
+          callId: "call-2",
+          replyTo: {
+            kind: "callback",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          subagentName: "research",
+        },
+        intent: "resume",
+      }),
+    );
+  });
+
+  it("rejects invalid callback metadata on continuation requests", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        callback: {
+          callId: "call-2",
+          subagentName: "research",
+          token: "tok123",
+          url: "https://caller.example.com/eve/v1/callback/other",
+        },
+        continuationToken: "http:existing",
+        message: "follow up",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.send).not.toHaveBeenCalled();
+  });
+
+  it("returns SESSION_NOT_RESUMABLE instead of starting a replacement session", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+    handler.send.mockRejectedValueOnce(new RuntimeNoActiveSessionError("eve:http:existing"));
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        continuationToken: "http:existing",
+        message: "follow up",
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      code: "SESSION_NOT_RESUMABLE",
+      error: "Session is not active and cannot be resumed.",
+      ok: false,
+    });
+  });
 });
 
 describe("eveChannel — create session (text)", () => {
@@ -646,7 +836,21 @@ describe("eveChannel — create session (text)", () => {
     expect(handler.send.mock.calls[0]?.[1]).toMatchObject({ mode: "task" });
   });
 
-  it("accepts remote-agent callback metadata for task sessions", async () => {
+  it("accepts an explicit empty capability set for conversation sessions", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ capabilities: {}, message: "hi", mode: "conversation" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handler.send.mock.calls[0]?.[1]).toMatchObject({
+      capabilities: {},
+      mode: "conversation",
+    });
+  });
+
+  it("accepts remote-agent callback metadata for conversation sessions", async () => {
     const handler = createEveCreateHandler({ auth: none() });
 
     const response = await handler.fetch(
@@ -658,7 +862,7 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
         message: "hi",
-        mode: "task",
+        mode: "conversation",
       }),
     );
 
@@ -671,7 +875,7 @@ describe("eveChannel — create session (text)", () => {
         token: "tok123",
         url: "https://caller.example.com/eve/v1/callback/tok123",
       },
-      mode: "task",
+      mode: "conversation",
     });
   });
 
@@ -1502,6 +1706,283 @@ describe("eveChannel — reset session", () => {
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({
       error: "Failed to reset the session.",
+      ok: false,
+    });
+  });
+});
+
+describe("eveChannel — compact session", () => {
+  it("queues compaction for the supplied channel-local continuation token", async () => {
+    const handler = createEveCompactHandler({ auth: none() });
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "test-session-id",
+      status: "accepted",
+    });
+    expect(handler.compact).toHaveBeenCalledWith({ continuationToken: "eve:token" });
+  });
+
+  it("reports a token that no active session owns", async () => {
+    const handler = createEveCompactHandler({ auth: none() });
+    handler.compact.mockResolvedValue({ status: "no_active_session" });
+
+    const response = await handler.fetch(resetRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
+  });
+});
+
+describe("eveChannel — clear session context", () => {
+  it("queues a clear for the supplied channel-local continuation token", async () => {
+    const handler = createEveClearHandler({ auth: none() });
+
+    const response = await handler.fetch(clearRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "test-session-id",
+      status: "accepted",
+    });
+    expect(handler.clear).toHaveBeenCalledWith({ continuationToken: "eve:token" });
+  });
+
+  it("reports a token that no active session owns", async () => {
+    const handler = createEveClearHandler({ auth: none() });
+    handler.clear.mockResolvedValue({ status: "no_active_session" });
+
+    const response = await handler.fetch(clearRequest({ continuationToken: "eve:token" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_session" });
+  });
+});
+
+describe("eveChannel — forwarded principal", () => {
+  const ROUTER_CALLER: SessionAuthContext = {
+    attributes: {},
+    authenticator: "oidc",
+    issuer: "https://oidc.vercel.com/acme",
+    principalId: "https://oidc.vercel.com/acme:owner:acme:project:router:environment:production",
+    principalType: "service",
+    subject: "owner:acme:project:router:environment:production",
+  };
+
+  const FORWARDED_CURRENT: SessionAuthContext = {
+    attributes: { user_id: "U123" },
+    authenticator: "slack-webhook",
+    issuer: "slack",
+    principalId: "slack:U123",
+    principalType: "user",
+    subject: "U123",
+  };
+
+  const FORWARDED_INITIATOR: SessionAuthContext = {
+    attributes: {},
+    authenticator: "slack-webhook",
+    issuer: "slack",
+    principalId: "slack:U999",
+    principalType: "user",
+    subject: "U999",
+  };
+
+  function forwardedRequest(forwardedPrincipal: unknown): Request {
+    return createJsonMessageRequest({ forwardedPrincipal, message: "hi", mode: "task" });
+  }
+
+  it("rejects a forwarded body when the channel has no trustedForwarders", async () => {
+    const handler = createEveCreateHandler({ auth: () => ROUTER_CALLER });
+
+    const response = await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
+
+    expect(response.status).toBe(403);
+    expect(handler.send).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: "This deployment does not accept a forwarded principal.",
+      ok: false,
+    });
+  });
+
+  it("rejects a caller the predicate refuses", async () => {
+    const trustedForwarders = vi.fn(
+      (caller: SessionAuthContext) => caller.principalId === "someone-else",
+    );
+    const handler = createEveCreateHandler({
+      trustedForwarders,
+      auth: () => ROUTER_CALLER,
+    });
+
+    const response = await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
+
+    expect(response.status).toBe(403);
+    expect(trustedForwarders).toHaveBeenCalledWith(ROUTER_CALLER);
+    expect(handler.send).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Caller is not authorized to assert a forwarded principal.",
+      ok: false,
+    });
+  });
+
+  it("rejects a malformed forwarded payload with 400", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    const response = await handler.fetch(
+      forwardedRequest({ current: { ...FORWARDED_CURRENT, token: "secret" } }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.send).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("Invalid forwardedPrincipal metadata"),
+      ok: false,
+    });
+  });
+
+  it("returns 500 when the authored predicate throws", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => {
+        throw new Error("boom");
+      },
+      auth: () => ROUTER_CALLER,
+    });
+
+    const response = await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
+
+    expect(response.status).toBe(500);
+    expect(handler.send).not.toHaveBeenCalled();
+  });
+
+  it("replaces the session principal when the forwarder is accepted", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: (forwarder) => forwarder.principalId === ROUTER_CALLER.principalId,
+      auth: () => ROUTER_CALLER,
+    });
+
+    const response = await handler.fetch(
+      forwardedRequest({ current: FORWARDED_CURRENT, initiator: FORWARDED_INITIATOR }),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      sessionId: "test-session-id",
+    });
+
+    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    expect(options.auth).toEqual({
+      ...FORWARDED_CURRENT,
+      attributes: {
+        ...FORWARDED_CURRENT.attributes,
+        "eve:forwarded-by": ROUTER_CALLER.principalId,
+      },
+    });
+    expect(options.initiatorAuth).toEqual({
+      ...FORWARDED_INITIATOR,
+      attributes: {
+        ...FORWARDED_INITIATOR.attributes,
+        "eve:forwarded-by": ROUTER_CALLER.principalId,
+      },
+    });
+    expect(options.mode).toBe("task");
+  });
+
+  it("defaults the initiator to the forwarded current principal", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
+
+    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    expect(options.initiatorAuth).toEqual(options.auth);
+  });
+
+  it("overwrites a sender-supplied eve:forwarded-by attribute", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    await handler.fetch(
+      forwardedRequest({
+        current: {
+          ...FORWARDED_CURRENT,
+          attributes: { "eve:forwarded-by": "forged-value" },
+        },
+      }),
+    );
+
+    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    expect(options.auth?.attributes["eve:forwarded-by"]).toBe(ROUTER_CALLER.principalId);
+  });
+
+  it("exposes the stamped forwarded principal to onMessage as the caller", async () => {
+    const onMessage = vi.fn((ctx: Parameters<typeof defaultEveAuth>[0]) => {
+      expect(ctx.eve.caller?.principalId).toBe(FORWARDED_CURRENT.principalId);
+      expect(ctx.eve.caller?.attributes["eve:forwarded-by"]).toBe(ROUTER_CALLER.principalId);
+      return { auth: defaultEveAuth(ctx) };
+    });
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+      onMessage,
+    });
+
+    const response = await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
+
+    expect(response.status).toBe(202);
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    expect(options.auth?.principalId).toBe(FORWARDED_CURRENT.principalId);
+  });
+
+  it("keeps the transport principal and omits initiatorAuth without a forwarded body", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(202);
+    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    expect(options.auth).toEqual(ROUTER_CALLER);
+    expect(options).not.toHaveProperty("initiatorAuth");
+  });
+
+  it("rejects forwarded principal on the continue route", async () => {
+    const handler = createEveContinueHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    const response = await handler.fetch(
+      new Request("https://example.com/eve/v1/session/test-session-id", {
+        body: JSON.stringify({
+          continuationToken: "eve:test",
+          forwardedPrincipal: { current: FORWARDED_CURRENT },
+          message: "hi",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.send).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: "A forwarded principal is only accepted on session creation.",
       ok: false,
     });
   });

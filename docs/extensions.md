@@ -3,7 +3,9 @@ title: "Extensions"
 description: "Package reusable eve capabilities and mount them from npm or a monorepo workspace."
 ---
 
-Extensions package eve tools, connections, skills, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a registry or kept private inside a monorepo workspace.
+Extensions package eve tools, connections, skills, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
+
+Ready-made extensions can also be distributed through an eve integration registry. See [Install Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
 
 This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A memory extension could use hooks to capture context and tools to recall it. A self-improving extension could pair hooks with dynamic instructions.
 
@@ -321,6 +323,7 @@ At build time, eve checks the extension's generated capability metadata. If the 
 
 ## What to read next
 
+- [Extension integrations](/integrations?filter=extension): browse ready-to-install extensions
 - [Tools](/docs/tools): static tools, approval, and tool output
 - [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic tools, skills, and instructions
 - [Instructions](/docs/instructions): static and TypeScript instructions

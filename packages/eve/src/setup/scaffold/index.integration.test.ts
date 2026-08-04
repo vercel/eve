@@ -89,6 +89,55 @@ describe("ensureChannel", () => {
     );
   });
 
+  test("writes a portable Slack channel and merges its environment example", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(join(projectRoot, "package.json"), "{}\n", "utf8");
+    await writeFile(
+      join(projectRoot, ".env.example"),
+      "EXISTING=value\nSLACK_BOT_TOKEN=old\n",
+      "utf8",
+    );
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "slack",
+      slackCredentials: "environment",
+    });
+
+    await expect(readFile(join(projectRoot, "agent/channels/slack.ts"), "utf8")).resolves.toBe(
+      'import { slackChannel } from "eve/channels/slack";\n\nexport default slackChannel();\n',
+    );
+    await expect(readFile(join(projectRoot, ".env.example"), "utf8")).resolves.toBe(
+      "EXISTING=value\nSLACK_BOT_TOKEN=old\n\nSLACK_SIGNING_SECRET=\n",
+    );
+    await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toBe("{}\n");
+    expect(result.packageJsonUpdated).toEqual([]);
+    expect(result.filesWritten).toEqual([
+      join(projectRoot, "agent/channels/slack.ts"),
+      join(projectRoot, ".env.example"),
+    ]);
+  });
+
+  test("rolls back the environment example when portable Slack scaffolding fails", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent/channels/slack.ts"), { recursive: true });
+    await writeFile(join(projectRoot, ".env.example"), "EXISTING=value\n", "utf8");
+
+    await expect(
+      ensureChannel({
+        projectRoot,
+        kind: "slack",
+        slackCredentials: "environment",
+        force: true,
+      }),
+    ).rejects.toThrow();
+
+    await expect(readFile(join(projectRoot, ".env.example"), "utf8")).resolves.toBe(
+      "EXISTING=value\n",
+    );
+  });
+
   test("writes the exact Slack connector UID returned by Connect", async () => {
     const projectRoot = await createTempDir();
     await mkdir(join(projectRoot, "agent"), { recursive: true });
@@ -305,7 +354,10 @@ describe("ensureChannel", () => {
 
     const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
     const sourceChannel = await readFile(
-      new URL("../../../../../apps/templates/web-chat-next/agent/channels/eve.ts", import.meta.url),
+      new URL(
+        "../../../../../apps/docs/registry/channel/web/agent/channels/eve.ts",
+        import.meta.url,
+      ),
       "utf8",
     );
     // The template is LF; a Windows checkout may hand back the source app as
@@ -836,7 +888,7 @@ describe("scaffoldBaseProject", () => {
     expect(agentSource).not.toContain("modelOptions");
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).toContain('"eve": "^0.25.0"');
-    // Channels added later (`eve channels add slack`, possibly next to a
+    // Channels added later (`eve add channel/slack`, possibly next to a
     // running `eve dev`) import @vercel/connect; init ships it so a later
     // channel add never introduces a missing dependency.
     expect(packageJson).toContain('"@vercel/connect": "0.2.2"');
@@ -864,6 +916,10 @@ describe("scaffoldBaseProject", () => {
     expect(agentsMd).toContain("installed eve package docs");
     expect(agentsMd).toContain("node_modules/eve/docs/");
     expect(agentsMd).toContain("resolve the\ninstalled `eve` package location");
+    expect(agentsMd).toContain("`eve registry search <query>`");
+    expect(agentsMd).toContain("`eve registry list`");
+    expect(agentsMd).toContain("`eve registry view <item>`");
+    expect(agentsMd).toContain("`eve add <item>`");
     // `vercel deploy` uploads everything a .vercelignore doesn't exclude, and
     // the platform default-ignores only the .env.local variants — eve's dev
     // artifacts and a bare .env must be excluded here or a source deploy

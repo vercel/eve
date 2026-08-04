@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { stampTestEvents } from "#internal/testing/events.js";
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import type {
   EveEvalDerivedFacts,
@@ -12,7 +13,7 @@ import * as Run from "#evals/assertions/run.js";
 
 function makeResult(overrides: {
   status?: EveEvalTaskResult["status"];
-  events?: readonly HandleMessageStreamEvent[];
+  events?: readonly UnstampedMessageStreamEvent[];
   derived?: Partial<EveEvalDerivedFacts>;
   output?: unknown;
 }): EveEvalTaskResult {
@@ -20,7 +21,7 @@ function makeResult(overrides: {
     output: overrides.output ?? null,
     finalMessage: null,
     status: overrides.status ?? "completed",
-    events: overrides.events ?? [],
+    events: stampTestEvents(overrides.events ?? []),
     derived: { ...createEmptyDerivedFacts(), ...overrides.derived },
   };
 }
@@ -44,16 +45,16 @@ function subagentCall(name: string, status: EveEvalSubagentCall["status"]): EveE
   };
 }
 
-function message(text: string): HandleMessageStreamEvent {
+function message(text: string): UnstampedMessageStreamEvent {
   return {
     type: "message.completed",
     data: { finishReason: "stop", message: text, sequence: 1, stepIndex: 0, turnId: "t1" },
-  } as HandleMessageStreamEvent;
+  } as UnstampedMessageStreamEvent;
 }
 
 function actionsRequested(
   actions: readonly { readonly callId: string; readonly toolName: string }[],
-): HandleMessageStreamEvent {
+): UnstampedMessageStreamEvent {
   return {
     type: "actions.requested",
     data: {
@@ -65,7 +66,7 @@ function actionsRequested(
   };
 }
 
-function actionResult(callId: string, toolName: string): HandleMessageStreamEvent {
+function actionResult(callId: string, toolName: string): UnstampedMessageStreamEvent {
   return {
     type: "action.result",
     data: {
@@ -82,7 +83,7 @@ function failedSubagentResult(input: {
   callId: string;
   output: unknown;
   subagentName: string;
-}): HandleMessageStreamEvent {
+}): UnstampedMessageStreamEvent {
   return {
     type: "action.result",
     data: {
@@ -94,6 +95,7 @@ function failedSubagentResult(input: {
         callId: input.callId,
         isError: true,
         kind: "subagent-result",
+        origin: "dispatch",
         output: input.output as never,
         subagentName: input.subagentName,
       },
@@ -124,7 +126,7 @@ describe("run assertions", () => {
         stepIndex: 0,
         turnId: "t1",
       },
-    } as HandleMessageStreamEvent;
+    } as UnstampedMessageStreamEvent;
 
     expect(
       (await Run.succeeded().evaluate(makeResult({ status: "completed", events: [failedEvent] })))
@@ -323,11 +325,11 @@ describe("run assertions", () => {
         turnId: "t",
         workflowId: "w",
       },
-    } as HandleMessageStreamEvent;
+    } as UnstampedMessageStreamEvent;
     const completed = {
       type: "subagent.completed",
       data: { callId: "c", output: "ok", sequence: 2, subagentName: "child", turnId: "t" },
-    } as HandleMessageStreamEvent;
+    } as UnstampedMessageStreamEvent;
     const result = makeResult({ events: [called, called, completed] });
 
     expect(
@@ -396,11 +398,11 @@ describe("run assertions", () => {
         turnId: "t",
         workflowId: "w",
       },
-    } as HandleMessageStreamEvent;
+    } as UnstampedMessageStreamEvent;
     const completed = {
       type: "subagent.completed",
       data: { callId: "c", output: "ok", sequence: 2, subagentName: "child", turnId: "t" },
-    } as HandleMessageStreamEvent;
+    } as UnstampedMessageStreamEvent;
     const result = makeResult({ events: [called, completed, called] });
 
     expect(

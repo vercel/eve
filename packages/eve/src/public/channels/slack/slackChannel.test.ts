@@ -8,7 +8,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
 import {
   HITL_ACTION_PREFIX,
@@ -78,9 +78,9 @@ const stubAlsContext = (() => {
 
 function callEvent(
   adapter: ChannelAdapter,
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   ctx: any,
-): Promise<HandleMessageStreamEvent> {
+): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
@@ -115,11 +115,11 @@ function captureAccessor(initialContinuationToken: string): {
   };
 }
 
-function makeEvent<T extends HandleMessageStreamEvent["type"]>(
+function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
   type: T,
   data: unknown,
-): HandleMessageStreamEvent {
-  return { type, data } as HandleMessageStreamEvent;
+): UnstampedMessageStreamEvent {
+  return { type, data } as UnstampedMessageStreamEvent;
 }
 
 const THREAD_STATE = {
@@ -445,6 +445,7 @@ describe("slackChannel() default event handlers", () => {
               toolName: "mongodb-mutate",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },
@@ -553,6 +554,7 @@ describe("slackChannel() default event handlers", () => {
               toolName: "ask_question",
             },
             display: "text",
+            kind: "question",
             prompt: longPrompt,
             requestId: "call_long",
           },
@@ -594,6 +596,7 @@ describe("slackChannel() default event handlers", () => {
         toolName: "mongodb-mutate",
       },
       display: "confirmation" as const,
+      kind: "tool-approval" as const,
       options: [
         { id: "approve", label: "Yes" },
         { id: "deny", label: "No" },
@@ -2364,6 +2367,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
               toolName: "escalate_issue",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },
@@ -2379,6 +2383,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
               toolName: "escalate_issue",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },

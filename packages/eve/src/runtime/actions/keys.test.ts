@@ -28,6 +28,7 @@ describe("runtime action keys", () => {
       getRuntimeActionResultKey({
         callId: "call_2",
         kind: "subagent-result",
+        origin: "child",
         output: "done",
         subagentName: "reviewer",
       }),

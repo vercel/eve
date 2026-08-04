@@ -5,7 +5,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callTwilioApi,
   sendTwilioMessage,
@@ -42,6 +42,7 @@ import {
   type TwilioRoutes,
 } from "#public/channels/twilio/routing.js";
 import { type TwilioAuthToken, type TwilioWebhookUrl } from "#public/channels/twilio/verify.js";
+import { readNonEmptyString } from "#shared/guards.js";
 import {
   defineChannel,
   GET,
@@ -52,8 +53,8 @@ import {
 
 const log = createLogger("twilio.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Twilio context passed to the inbound text, voice, and voice-transcription hooks. */
 export interface TwilioContext {
@@ -144,7 +145,7 @@ export type TwilioVoiceResultOrPromise =
   | undefined
   | Promise<TwilioVoiceResult | null | undefined>;
 
-type TwilioEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type TwilioEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: TwilioEventContext,
   ctx: SessionContext,
@@ -328,11 +329,11 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
     ],
 
     async receive(input, { send }) {
-      const phoneNumber = readString(input.target.phoneNumber);
+      const phoneNumber = readNonEmptyString(input.target.phoneNumber);
       if (!phoneNumber) {
         throw new Error("twilioChannel().receive requires target.phoneNumber.");
       }
-      const from = readString(input.target.from) ?? config.messaging?.from ?? null;
+      const from = readNonEmptyString(input.target.from) ?? config.messaging?.from ?? null;
       return send(input.message, {
         auth: input.auth,
         continuationToken: twilioContinuationToken(phoneNumber, from ?? undefined),
@@ -660,8 +661,4 @@ async function isAllowed(from: string, allowFrom: TwilioAllowFrom): Promise<bool
   const resolved = typeof allowFrom === "function" ? await allowFrom() : allowFrom;
   if (resolved === "*") return true;
   return typeof resolved === "string" ? resolved === from : resolved.includes(from);
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

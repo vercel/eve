@@ -16,10 +16,10 @@
  *   rule 13 — No spread-ternary object composition
  *             (`...(c ? {} : { k: v })`). (Rationale: hard to read, easy
  *             to mistype; declare the object then assign optional keys.)
- *   rule 15 — No `@workflow/*` imports inside `src/channel/**` or
- *             `src/harness/**`. Channels and harnesses must stay
- *             workflow-agnostic — only runtime/execution code touches
- *             workflow primitives.
+ *   rule 15 — No `@workflow/*` imports inside `src/channel/**`,
+ *             `src/harness/**`, or `src/tracing/**`. Channels, harnesses,
+ *             and tracing must stay workflow-agnostic — only
+ *             runtime/execution code touches workflow primitives.
  *   rule 19 — No `new AsyncLocalStorage()` outside the two allowlisted
  *             files. All ambient runtime state flows through a single
  *             `EveContext`.
@@ -51,7 +51,7 @@
  *             durable state belongs on `ctx.eve`.
  *   rule 28 — Imports under `packages/eve/src/setup/scaffold/**` stay within
  *             their layer: node:* builtins, relative siblings, and the shared
- *             `@vercel/eve-catalog` data package. The scaffold stays free of
+ *             `@eve/catalog` data package. The scaffold stays free of
  *             framework runtime, compiler, terminal UI, and provider SDK
  *             dependencies.
  *   rule 29 — Changeset package keys must match workspace package names.
@@ -240,7 +240,9 @@ const WORKFLOW_IMPORT_RE = /from ["']@workflow\b/;
  */
 function isChannelOrHarness(posix) {
   return (
-    posix.startsWith("packages/eve/src/channel/") || posix.startsWith("packages/eve/src/harness/")
+    posix.startsWith("packages/eve/src/channel/") ||
+    posix.startsWith("packages/eve/src/harness/") ||
+    posix.startsWith("packages/eve/src/tracing/")
   );
 }
 
@@ -257,7 +259,7 @@ function checkRule15(posix, lines, violations) {
         rule: 15,
         file: posix,
         line: idx + 1,
-        message: `imports from "@workflow/*". Channel and harness code must stay workflow-agnostic. Move the workflow primitive call into src/runtime/ or src/execution/ and have the channel/harness call a thin runtime helper instead.`,
+        message: `imports from "@workflow/*". Channel, harness, and tracing code must stay workflow-agnostic. Move the workflow primitive call into src/runtime/ or src/execution/ and have the caller use a thin runtime helper instead.`,
       });
     }
   });
@@ -512,12 +514,12 @@ function checkRule27(posix, lines, violations) {
 const SCAFFOLD_PREFIX = "packages/eve/src/setup/scaffold/";
 
 // The curated connection and channel catalogs (and any future surface
-// overlays) read canonical identity from `@vercel/eve-catalog`, a
+// overlays) read canonical identity from `@eve/catalog`, a
 // dependency-free data package shared across the scaffolder and docs. It
 // carries no runtime, compiler, or provider-SDK weight, so the entire scaffold
 // layer may import it. The terminal UI adapters (which carry @clack/core and
 // picocolors) live outside the scaffold, in `packages/eve/src/setup/cli/`.
-const SCAFFOLD_ALLOWED_PACKAGES = new Set(["@vercel/eve-catalog"]);
+const SCAFFOLD_ALLOWED_PACKAGES = new Set(["@eve/catalog"]);
 
 const SCAFFOLD_ALLOWED_INTERNAL_IMPORTS = new Set([]);
 
@@ -558,7 +560,7 @@ function checkRule28(posix, lines, violations) {
             rule: 28,
             file: posix,
             line: idx + 1,
-            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and @vercel/eve-catalog. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
+            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and @eve/catalog. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
           });
         }
       }

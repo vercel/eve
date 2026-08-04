@@ -4,10 +4,19 @@
     "package.json",
     "packages/*/package.json",
     "apps/*/package.json",
+    "apps/*/*/package.json",
+    "e2e/fixtures/*/package.json",
     "!**/dist/**",
     "!**/templates/**"
   ],
   "versionGroups": [
+    {
+      "label": "Extension fixtures declare a broad eve peer range like published extensions",
+      "dependencies": ["eve"],
+      "packages": ["gadget-extension", "gizmo-extension", "js-only-extension", "toolkit-extension"],
+      "dependencyTypes": ["peer"],
+      "isIgnored": true
+    },
     {
       "label": "Workspace packages must use the workspace: protocol",
       "dependencies": ["eve-*", "eve"],
@@ -22,25 +31,41 @@
       "isIgnored": true
     },
     {
-      "label": "Next.js projects pin TypeScript 6 for its compiler API",
+      "label": "Projects that need the TypeScript compiler API pin TypeScript 6",
       "dependencies": ["typescript"],
-      "packages": ["eve-docs", "framework-next", "web-chat-next-template"],
+      "packages": [
+        "eve-docs",
+        "framework-next",
+        "framework-next-multi-agent",
+        "framework-nuxt",
+        "web-chat-next-template"
+      ],
       "dependencyTypes": ["dev"],
       "pinVersion": "6.0.3"
+    },
+    {
+      "label": "Extension fixtures consumed via file: cannot use the catalog protocol",
+      "dependencies": ["zod"],
+      "packages": ["gadget-extension", "gizmo-extension"],
+      "dependencyTypes": ["prod"],
+      "pinVersion": "4.4.3"
     },
     {
       "label": "Shared third-party deps must use the catalog: protocol",
       "policy": "catalog",
       "dependencies": [
+        "@opentelemetry/core",
+        "@opentelemetry/sdk-trace-base",
         "@types/node",
-        "typescript",
-        "next",
         "@types/react",
         "@types/react-dom",
+        "@vercel/otel",
+        "next",
         "picocolors",
         "react",
         "react-dom",
         "streamdown",
+        "typescript",
         "vitest",
         "zod"
       ],

@@ -397,6 +397,105 @@ describe("compactMessages: tool-result cap heuristic", () => {
     expect(shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
   });
 
+  it("stubs content-output file parts instead of truncating into their payloads", async () => {
+    const base64 = "iVBORw0KGgo".repeat(500);
+    const messages: ModelMessage[] = [
+      user("render the chart"),
+      {
+        content: [{ input: {}, toolCallId: "call-0", toolName: "render_chart", type: "tool-call" }],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: {
+              type: "content",
+              value: [
+                { text: "Chart summary: revenue up.", type: "text" },
+                {
+                  data: { data: base64, type: "data" },
+                  filename: "chart.png",
+                  mediaType: "image/png",
+                  type: "file",
+                },
+              ],
+            },
+            toolCallId: "call-0",
+            toolName: "render_chart",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      user("what does it show?"),
+    ];
+
+    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+
+    expect(summarizer).not.toHaveBeenCalled();
+    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
+    expect(cappedPart?.type).toBe("tool-result");
+    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
+    // Stubbing the file part is enough to fit: the output stays a structured
+    // content output, the sibling text survives whole, and no payload bytes
+    // (or truncation annotation) remain.
+    expect(output).toEqual({
+      type: "content",
+      value: [
+        { text: "Chart summary: revenue up.", type: "text" },
+        { text: "Attached file chart.png (image/png)", type: "text" },
+      ],
+    });
+  });
+
+  it("falls back to the annotated text cap when a content output is oversized after stubbing", async () => {
+    const longText = "finding line ".repeat(500);
+    const messages: ModelMessage[] = [
+      user("inspect everything"),
+      {
+        content: [{ input: {}, toolCallId: "call-0", toolName: "render_chart", type: "tool-call" }],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: {
+              type: "content",
+              value: [
+                { text: longText, type: "text" },
+                {
+                  data: { data: "iVBORw0KGgo".repeat(500), type: "data" },
+                  mediaType: "image/png",
+                  type: "file",
+                },
+              ],
+            },
+            toolCallId: "call-0",
+            toolName: "render_chart",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      user("what did you find?"),
+    ];
+
+    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+
+    expect(summarizer).not.toHaveBeenCalled();
+    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
+    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
+    const value =
+      typeof output === "object" && output !== null && "value" in output
+        ? String(output.value)
+        : "";
+    // The prefix cap now truncates stubbed content — readable text — never
+    // raw payload bytes.
+    expect(value).toContain("Truncated by eve");
+    expect(value).toContain("finding line");
+    expect(value).not.toContain("iVBORw0KGgo");
+  });
+
   it("keeps the recent tail verbatim, tool results included", async () => {
     const [olderCall, olderResult] = toolExchange({ callId: "call-0", payloadChars: 4_000 });
     const [recentCall, recentResult] = toolExchange({ callId: "call-1", payloadChars: 50 });
@@ -445,6 +544,30 @@ describe("compactMessages: tool-result cap heuristic", () => {
     expect(result).toContainEqual(call);
     expect(result).toContainEqual(resultMsg);
     expect(result.indexOf(call)).toBeLessThan(result.indexOf(resultMsg));
+  });
+});
+
+describe("compactMessages: forced summary", () => {
+  it("summarizes the full conversation even when it is already under the threshold", async () => {
+    const { generateText } = await import("ai");
+    vi.mocked(generateText).mockResolvedValue({
+      text: "forced checkpoint",
+    } as Awaited<ReturnType<typeof generateText>>);
+    const messages = [user("old message"), assistant("old reply")];
+
+    const result = await compactMessages(
+      messages,
+      {} as Parameters<typeof compactMessages>[1],
+      { recentWindowSize: 10, threshold: ROOMY },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+
+    expect(generateText).toHaveBeenCalledOnce();
+    expect(result).toContainEqual({ content: "forced checkpoint", role: "assistant" });
   });
 });
 

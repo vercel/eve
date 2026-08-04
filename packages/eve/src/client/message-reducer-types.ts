@@ -1,4 +1,4 @@
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { AuthorizationOutcome } from "#protocol/message.js";
 
 /**
@@ -231,12 +231,14 @@ export interface EveMessageToolMetadata {
  * is the question, `display` selects the control (`"confirmation"`, `"select"`,
  * or `"text"`), `options` lists selectable choices (each with a `label` and
  * optional `style`), and `allowFreeform` permits a typed response alongside the
- * options. `requestId` is the stable identifier the client returns in the
- * responding {@link InputResponse}.
+ * options. `kind` identifies the framework-owned request source. `requestId`
+ * is the stable identifier the client returns in the responding
+ * {@link InputResponse}.
  */
 export interface EveMessageInputRequest {
   readonly allowFreeform?: boolean;
   readonly display?: "confirmation" | "select" | "text";
+  readonly kind: InputRequest["kind"];
   readonly options?: readonly {
     readonly description?: string;
     readonly id: string;

@@ -1,5 +1,5 @@
 import { getAdapterKind } from "#channel/adapter.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
 import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -16,7 +16,7 @@ import { ContinuationTokenKey } from "./keys.js";
 export async function dispatchStreamEventHooks(input: {
   readonly ctx: ContextContainer;
   readonly registry: RuntimeHookRegistry;
-  readonly event: HandleMessageStreamEvent;
+  readonly event: MessageStreamEvent;
 }): Promise<void> {
   const typed = input.registry.streamEventsByType.get(input.event.type) ?? [];
   const wildcard = input.registry.streamEventsWildcard;

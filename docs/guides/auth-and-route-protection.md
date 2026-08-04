@@ -18,7 +18,7 @@ The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`
 - `POST /eve/v1/session/:sessionId`
 - `GET /eve/v1/session/:sessionId/stream`
 
-These routes are protected by the channel's auth policy. eve fails closed by default: production browser traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
+These routes are protected by the channel's auth policy. eve fails closed by default: production traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
 
 `GET /eve/v1/health` is always public and skips the walk entirely, so load balancers and uptime monitors can probe it without credentials.
 
@@ -86,15 +86,15 @@ Any other thrown error follows the normal channel failure path. When building a 
 
 `eve/channels/auth` ships these channel-auth helpers:
 
-| Helper           | Use when                                                                  |
-| ---------------- | ------------------------------------------------------------------------- |
-| `localDev()`     | Local development. Accepts requests addressed to a loopback hostname.     |
-| `vercelOidc()`   | The common Vercel deployment path. Verifies a Vercel OIDC bearer JWT.     |
-| `none()`         | You want to accept anonymous traffic explicitly (use as the final entry). |
-| `httpBasic(...)` | Operator or service access via a shared username/password.                |
-| `jwtHmac(...)`   | You control a shared-secret JWT signer.                                   |
-| `jwtEcdsa(...)`  | You verify asymmetric JWTs minted by another system.                      |
-| `oidc(...)`      | You want eve to verify OIDC-issued tokens from an arbitrary issuer.       |
+| Helper           | Use when                                                                                           |
+| ---------------- | -------------------------------------------------------------------------------------------------- |
+| `localDev()`     | Local development. Accepts requests only while the process is an `eve dev` or `vercel dev` server. |
+| `vercelOidc()`   | The common Vercel deployment path. Verifies a Vercel OIDC bearer JWT.                              |
+| `none()`         | You want to accept anonymous traffic explicitly (use as the final entry).                          |
+| `httpBasic(...)` | Operator or service access via a shared username/password.                                         |
+| `jwtHmac(...)`   | You control a shared-secret JWT signer.                                                            |
+| `jwtEcdsa(...)`  | You verify asymmetric JWTs minted by another system.                                               |
+| `oidc(...)`      | You want eve to verify OIDC-issued tokens from an arbitrary issuer.                                |
 
 `httpBasic(credentials, { realm })` accepts an optional `realm`, rendered on the `WWW-Authenticate: Basic` challenge (e.g. `Basic realm="agent", charset="UTF-8"`) so browsers label their native login prompt. It defaults to `"eve"`, ensuring every Basic challenge includes the required realm. Usernames and passwords are normalized to Unicode NFC before comparison, matching the advertised UTF-8 credential encoding.
 
@@ -102,9 +102,9 @@ Exercise caution for agents that process non-public, sensitive, regulated, or pr
 
 ### `localDev()`
 
-Authenticates a synthetic `local-dev` principal, but only when the inbound request is addressed to a loopback hostname (`localhost`, `*.localhost`, `127.0.0.0/8`, or `::1`). The check keys off the request URL's hostname rather than the bare `process.env.VERCEL` flag, and that's deliberate: a deployment outside Vercel leaves `VERCEL` unset, so sniffing that flag alone would wave through all public traffic. There's one process-level exception. `vercel dev`, detected by `VERCEL=1` and `VERCEL_ENV=development` together, opens the local dev server even when it serves over a non-loopback host. Every other non-loopback request returns `null` and falls through.
+Authenticates a synthetic `local-dev` principal, but only while the process is a local development server: `eve dev` (which sets `EVE_DEV=1`) or `vercel dev` (detected by `VERCEL=1` and `VERCEL_ENV=development` together). This is a property of the deployment, not the request, so no request header can flip it. A production deployment (`eve start`, a Vercel deployment, or any container host) sets neither flag, so `localDev()` authenticates nothing there and every request falls through to the next entry.
 
-`localDev()` trusts the advertised hostname, so an attacker who can inject a `Host` header (no normalizing proxy in front of your origin) can spoof it. Always layer a real authenticator on top; never run on `localDev()` alone.
+Because it never opens a production deployment, `localDev()` is safe to leave in the walk. Still put a real authenticator ahead of it so production traffic has something to match.
 
 ### `vercelOidc()`
 
@@ -214,11 +214,31 @@ export default eveChannel({
 });
 ```
 
-In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[vercelOidc(), localDev()]`, which also rejects production browser traffic.
+In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[vercelOidc(), localDev(), placeholderAuth()]`, which also rejects production traffic.
 
 You do not have to keep `vercelOidc()` in the final policy. For a self-hosted app, an app-embedded frontend, or any deployment that uses a non-Vercel identity system, use `httpBasic()`, `jwtHmac()`, `jwtEcdsa()`, generic `oidc()`, or a custom `AuthFn` that maps your verified user/session/API key into a `SessionAuthContext`.
 
 Keep secret values (`ROUTE_AUTH_BASIC_PASSWORD`, signing keys) in environment variables. Route-auth secrets never land in compiled artifacts. The runtime re-materializes them from the authored channel definition at boot.
+
+## Accepting forwarded identity from another deployment
+
+A `defineRemoteAgent({ forwardPrincipal: true })` caller (see [Remote agents](./remote-agents#forwarding-the-caller-identity)) asserts its end user's principal on the create-session request as a `forwardedPrincipal` body field. By default every such assertion is rejected with `403` — accepting someone else's word for who the user is requires naming exactly which forwarders you trust. Do that with `trustedForwarders` on `eveChannel`:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  // Only the router deployment may assert a forwarded principal.
+  trustedForwarders: (forwarder) =>
+    forwarder.subject === vercelSubject({ teamSlug: "acme", projectName: "router" }),
+});
+```
+
+The predicate authorizes the _forwarder_ (the verified route-auth principal — who is asserting), not the forwarded principal (what is asserted). Match it precisely: a permissive predicate like `() => true` lets any caller that passes route auth assert any principal, including preview deployments of your own project when `vercelOidc()` is in the walk. `trustedForwarders` exists only on your authored channel — the framework default channel never accepts a forwarded principal, so a receiving deployment must author `agent/channels/eve.ts`.
+
+When the predicate accepts, the forwarded principal replaces the session principal: `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly, so user-scoped connections, local subagents, and further `forwardPrincipal` hops all see that user. The forwarder is recorded on the accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Rejections fail loud: a forwarded body without `trustedForwarders` configured or with a forwarder the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
 
 ## What reaches `ctx.session.auth`
 

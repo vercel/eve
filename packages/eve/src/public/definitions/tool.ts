@@ -28,7 +28,7 @@ type DynamicEventMapResult<TEvents extends DynamicEvents> = Awaited<
   ReturnType<DynamicEventMapHandler<TEvents>>
 >;
 
-export type { ToolModelOutput } from "#shared/tool-definition.js";
+export type { ToolModelOutput, ToolModelOutputPart } from "#shared/tool-definition.js";
 
 /**
  * Authorization provider passed to {@link ToolContext.getToken} or
@@ -230,7 +230,7 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 
 /**
  * Defines a dynamic resolver evaluated at runtime from stream-event
- * handlers. It is shared across three slots, and the directory it is
+ * handlers. It is shared across four slots, and the directory it is
  * authored in (not this function) decides what each handler must return
  * and which events are honored. The file's path-derived slug names the
  * single-entry case; a `Record<string, ...>` return names entries
@@ -244,12 +244,15 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
  * - `agent/instructions/`: return a single `defineInstructions({ markdown })`,
  *   which lowers to one `{ role: "system", content: markdown }` message,
  *   or `null`. (Maps are not meaningful here.)
+ * - `agent/subagents/<name>/agent.ts`: return `defineAgent(...)` to configure
+ *   and expose the subagent, or `null` to omit it.
  *
  * Per-slot events: tools resolvers run at `session.started`,
  * `turn.started`, and `step.started`. Instructions and skills resolvers
  * contribute to the system prompt, so for cache stability they run only
  * at `session.started` and `turn.started`; the runtime never invokes a
  * handler keyed on `step.started` in those slots.
+ * Dynamic subagents run at `session.started` and `turn.started` only.
  *
  * ```ts
  * import { defineDynamic, defineTool } from "eve/tools";

@@ -1,7 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import { defineAgent } from "#public/definitions/agent.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
+import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth } from "#public/channels/eve.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
@@ -25,6 +26,7 @@ describe("definition helper exact inputs", () => {
       limits: {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
+        sessionTimeoutMs: 86_400_000,
       },
       model: "anthropic/claude-sonnet-5",
     });
@@ -37,16 +39,52 @@ describe("definition helper exact inputs", () => {
     expect(agent.description).toBe("type-test");
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
+    expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
     expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 
   it("keeps the public hook event map aligned with runtime stream events", () => {
-    expectTypeOf<keyof HookEventMap>().toEqualTypeOf<HandleMessageStreamEvent["type"]>();
+    expectTypeOf<keyof HookEventMap>().toEqualTypeOf<UnstampedMessageStreamEvent["type"]>();
   });
 });
 
 function typeOnlyFixtures(): void {
+  // @ts-expect-error Dynamic subagents require a parent-facing description.
+  defineDynamic({
+    events: {
+      "session.started": () =>
+        defineAgent({
+          model: "anthropic/claude-sonnet-5",
+        }),
+    },
+  });
+
+  defineDynamic({
+    events: {
+      "session.started": () =>
+        Math.random() > 0.5
+          ? defineAgent({
+              description: "Delegate local research tasks.",
+              model: "anthropic/claude-sonnet-5",
+            })
+          : defineRemoteAgent({
+              description: "Delegate remote research tasks.",
+              url: "https://research.example.com",
+            }),
+    },
+  });
+
+  defineDynamic({
+    events: {
+      "session.started": () =>
+        defineAgent({
+          description: "Delegate research tasks.",
+          model: "anthropic/claude-sonnet-5",
+        }),
+    },
+  });
+
   defineAgent({
     limits: {
       // @ts-expect-error Recursive delegation is root-only; this limit was removed.

@@ -6,8 +6,11 @@ import type { Runtime } from "#channel/types.js";
 function runtime(): Runtime {
   return {
     cancelTurn: vi.fn(),
+    clearSession: vi.fn(),
+    compactSession: vi.fn(),
     deliver: vi.fn(),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+    getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     resolveSession: vi.fn(),
     run: vi.fn(),
     terminateSession: vi.fn(),

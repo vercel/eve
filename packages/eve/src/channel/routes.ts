@@ -1,7 +1,15 @@
 import type { UserContent } from "ai";
 
 import type { CrossChannelReceiveFn } from "#channel/cross-channel-receive.js";
-import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
+import type {
+  CancelTurnResult,
+  ClearSessionResult,
+  CompactSessionResult,
+  SessionAuthContext,
+  SessionCallback,
+  SessionCapabilities,
+  TurnCaller,
+} from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { Session } from "#channel/session.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -13,11 +21,13 @@ type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Recor
 /**
  * Second argument passed to every route handler. `send` starts or continues a
  * session on this channel; `cancel` stops the active turn on a session
- * addressed by continuation token; `reset` retires a session so its
- * token can start a fresh session; `getSession` looks one up by id; `receive`
- * hands inbound work to a different channel; `params` contains the matched
- * path parameters; `waitUntil` keeps background work alive past the response;
- * `requestIp` is the client IP, or `null` when the host cannot provide it.
+ * addressed by continuation token; `clear` removes its model-message history;
+ * `compact` summarizes its context without sending model input; `reset` retires
+ * a session so its token can start a fresh session; `getSession` looks one up by
+ * id; `receive` hands inbound work to a different channel; `params` contains
+ * the matched path parameters; `waitUntil` keeps background work alive past
+ * the response; `requestIp` is the client IP, or `null` when the host cannot
+ * provide it.
  */
 export interface RouteHandlerArgs<TState = undefined> {
   send: SendFn<TState>;
@@ -27,6 +37,8 @@ export interface RouteHandlerArgs<TState = undefined> {
    */
   resolveActiveSession: ResolveActiveSessionFn;
   cancel: CancelFn;
+  clear: ClearFn;
+  compact: CompactFn;
   reset: ResetFn;
   getSession: GetSessionFn;
   /**
@@ -61,9 +73,8 @@ export interface SendPayload {
 
 /**
  * Starts or continues a session on this channel. Accepts a plain string,
- * `UserContent`, or a {@link SendPayload}, plus {@link SendOptions} (auth,
- * continuation token, run mode, and an optional seed `state` for stateful
- * channels). Resolves to the resulting {@link Session}.
+ * `UserContent`, or a {@link SendPayload}, plus {@link SendOptions}. Resolves
+ * to the resulting {@link Session}.
  */
 export type SendFn<TState = undefined> = (
   input: string | UserContent | SendPayload,
@@ -78,7 +89,22 @@ export type ResolveActiveSessionFn = (options: {
 type BaseSendOptions = {
   auth: SessionAuthContext | null;
   callback?: SessionCallback;
+  /** Framework-internal delegated caller waiting on this turn's settled result. */
+  caller?: TurnCaller;
+  capabilities?: SessionCapabilities;
   continuationToken: string;
+  /**
+   * `"resume"` requires an active session and propagates a typed no-active-session
+   * error. `"resume-or-start"` preserves the default channel behavior.
+   */
+  intent?: "resume" | "resume-or-start";
+  /**
+   * The original (top-level) caller's auth for a newly started session,
+   * becoming `session.auth.initiator`. Defaults to {@link auth} when omitted
+   * (root session behavior). Ignored when the send resolves to an existing
+   * session, whose initiator never changes after start.
+   */
+  initiatorAuth?: SessionAuthContext | null;
   mode?: RunMode;
   /**
    * Human-readable title for a newly started workflow session. Defaults to
@@ -124,6 +150,34 @@ export interface CancelOptions {
  * on the event stream.
  */
 export type CancelFn = (options: CancelOptions) => Promise<CancelTurnResult>;
+
+/** Options for {@link CompactFn}. */
+export interface CompactOptions {
+  /** Channel-local raw token, in the same format accepted by {@link SendFn}. */
+  readonly continuationToken: string;
+}
+
+/**
+ * Queues context compaction for the session owning a continuation token.
+ * Never sends model input or starts a new session. An accepted request returns
+ * to `session.waiting`; successful compaction emits `compaction.requested`
+ * followed by `compaction.completed` on the session stream.
+ */
+export type CompactFn = (options: CompactOptions) => Promise<CompactSessionResult>;
+
+/** Options for {@link ClearFn}. */
+export interface ClearOptions {
+  /** Channel-local raw token, in the same format accepted by {@link SendFn}. */
+  readonly continuationToken: string;
+}
+
+/**
+ * Queues removal of the model-message history for the session owning a
+ * continuation token. Preserves the session, agent configuration, durable
+ * state, limits, and sandbox. Completion is `context.cleared` followed by
+ * `session.waiting` on the session stream.
+ */
+export type ClearFn = (options: ClearOptions) => Promise<ClearSessionResult>;
 
 /** Options for {@link ResetFn}. */
 export interface ResetOptions {

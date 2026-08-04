@@ -58,9 +58,13 @@ export async function startAgentServer(input: {
 
   console.log(theme.muted(`[tui] starting "${input.appName}" ${mode} server on ${baseUrl} ...`));
 
+  // Built smoke servers run on the local machine. `eve start` does not set
+  // EVE_DEV, so set it here to let `localDev()` authenticate local requests.
+  const serverEnv = { ...(input.startEnv ?? process.env), EVE_DEV: "1" };
+
   const child = spawnServerProcess({
     args: plan.start.args,
-    env: input.startEnv ?? process.env,
+    env: serverEnv,
   });
 
   // Forward the server's stdout/stderr to ours while running. Once we

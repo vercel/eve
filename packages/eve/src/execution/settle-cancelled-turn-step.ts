@@ -11,7 +11,9 @@ import {
 } from "#execution/durable-session-store.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
+import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
 import {
   getHarnessEmissionState,
   isHarnessBetweenTurns,
@@ -19,16 +21,20 @@ import {
 } from "#harness/emission.js";
 import {
   clearAllProxyInputRequests,
+  getProxyInputRequests,
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
   encodeMessageStreamEvent,
-  type HandleMessageStreamEvent,
-  timestampHandleMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
+  stampMessageStreamEvent,
 } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 export interface CancelledTurnSettleResult {
   readonly serializedContext: Record<string, unknown>;
@@ -53,38 +59,54 @@ export async function settleCancelledTurnStep(input: {
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const bundle = ctx.require(BundleKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+  const instrumentation = getInstrumentationRuntime();
 
   let session = hydrateDurableSession({
     compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+      thresholdPercent: effectiveAgent.thresholdPercent,
     },
     durable: durableSession,
-    turnAgent: bundle.turnAgent,
+    turnAgent: effectiveAgent.turnAgent,
   });
 
   let emissionState = getHarnessEmissionState(durableSession.state);
   // A descendant HITL wait already streamed this turn's waiting boundary
   // (the proxy epilogue clears the turn id); re-emitting would fabricate
   // a turn id and duplicate the boundary.
+  const proxyRequests = getProxyInputRequests(durableSession.state);
+  const stoppedAtDescendantLimit = [...proxyRequests.values()].some(
+    (request) => request.kind === "session-limit",
+  );
   const alreadyEpilogued =
-    isHarnessBetweenTurns(session) && hasProxyInputRequests(durableSession.state);
+    isHarnessBetweenTurns(session) &&
+    hasProxyInputRequests(durableSession.state) &&
+    !stoppedAtDescendantLimit;
 
   if (!alreadyEpilogued) {
     const writer = input.parentWritable.getWriter();
     try {
       const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
-        const emit = async (event: HandleMessageStreamEvent): Promise<void> => {
+        const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
           const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
           setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-          await writer.write(
-            encodeMessageStreamEvent(timestampHandleMessageStreamEvent(transformed)),
-          );
+          // Stamp once: the persisted chunk and the hooks must agree on the id.
+          const stamped = stampMessageStreamEvent(transformed);
+          await writer.write(encodeMessageStreamEvent(stamped));
           await dispatchStreamEventHooks({
             ctx,
-            event: transformed,
+            event: stamped,
             registry: bundle.hookRegistry,
           });
         };
+        const emit =
+          createInstrumentationHandleEvent({
+            agentName: bundle.resolvedAgent.config.name,
+            handleEvent: baseEmit,
+            hooks: instrumentation?.hooks,
+            sessionId: session.sessionId,
+            turnId: activeTurnId(emissionState),
+          }) ?? baseEmit;
         return {
           result: await emitCancelledTurn(emit, emissionState, enrichedSession.continuationToken),
           session: enrichedSession,
@@ -93,15 +115,24 @@ export async function settleCancelledTurnStep(input: {
       emissionState = scoped.result;
       session = scoped.session;
     } finally {
+      await instrumentation?.forceFlush();
       writer.releaseLock();
     }
   }
 
+  // `clearPendingSessionLimitPrompt`: cancellation settles with the step's
+  // input snapshot, which can resurrect an already-answered session-limit
+  // prompt (the decline that cancelled this turn consumed the answer in the
+  // discarded turn state). The pre-model gate re-raises the prompt while the
+  // violation holds, so the next delivery gets a fresh prompt instead of
+  // queueing forever behind a stale one.
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
     setHarnessEmissionState(
-      clearAllProxyInputRequests(
-        clearPendingWorkflowInterrupt(clearPendingRuntimeActionBatch(session)),
+      clearPendingSessionLimitPrompt(
+        clearAllProxyInputRequests(
+          clearPendingWorkflowInterrupt(clearPendingRuntimeActionBatch(session)),
+        ),
       ),
       emissionState,
     ),

@@ -1,7 +1,7 @@
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { createLogger } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   createLinearAgentActivity,
   createLinearAgentSessionOnComment,
@@ -34,13 +34,13 @@ import {
   type ChannelSessionOps,
   type SendFn,
 } from "#public/definitions/channel.js";
-import { isObject } from "#shared/guards.js";
+import { isObject, readNonEmptyString } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 
 const log = createLogger("linear.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** JSON-serializable state for one Linear Agent Session conversation. */
 export interface LinearChannelState {
@@ -124,7 +124,7 @@ export interface LinearHandle {
   ): Promise<{ readonly success: boolean }>;
 }
 
-type LinearEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type LinearEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: LinearEventContext,
   ctx: SessionContext,
@@ -256,7 +256,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
       const target = input.target as Record<string, unknown>;
       const session = await resolveReceiveSession(target, config);
 
-      const initialActivity = readString(target.initialActivity);
+      const initialActivity = readNonEmptyString(target.initialActivity);
       if (initialActivity !== undefined) {
         await createLinearAgentActivity({
           api: config.api,
@@ -377,7 +377,7 @@ async function resolveReceiveSession(
     return createLinearAgentSessionOnIssue({
       api: config.api,
       credentials: config.credentials,
-      externalLink: readString(target.externalLink),
+      externalLink: readNonEmptyString(target.externalLink),
       externalUrls: readExternalUrls(target.externalUrls),
       issueId: target.issueId,
     });
@@ -387,7 +387,7 @@ async function resolveReceiveSession(
       api: config.api,
       credentials: config.credentials,
       commentId: target.commentId,
-      externalLink: readString(target.externalLink),
+      externalLink: readNonEmptyString(target.externalLink),
       externalUrls: readExternalUrls(target.externalUrls),
     });
   }
@@ -447,10 +447,6 @@ function hasString<T extends string>(
   key: T,
 ): value is Record<string, unknown> & Record<T, string> {
   return typeof value[key] === "string" && value[key].length > 0;
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function readExternalUrls(

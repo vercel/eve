@@ -37,6 +37,42 @@ describe("createMockAuthoredRuntimeModel", () => {
     expect(shouldMockAuthoredRuntimeModels()).toBe(true);
   });
 
+  it("emits a message-only input for delegated agent calls", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Delegate to a subagent: use the wait_for_cancel tool.",
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            additionalProperties: false,
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+            type: "object",
+          },
+          name: "agent",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      {
+        input: JSON.stringify({
+          message: "use the wait_for_cancel tool.",
+        }),
+        toolCallId: "call_agent",
+        toolName: "agent",
+        type: "tool-call",
+      },
+    ]);
+  });
+
   it("activates a matching skill when the available skill line includes a skill path", async () => {
     const result = await generateWithPrompt([
       {

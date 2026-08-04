@@ -150,6 +150,18 @@ export interface PublicAgentCompactionDefinition {
  */
 export interface AgentLimitsDefinition {
   /**
+   * Maximum lifetime of one durable session, in milliseconds.
+   *
+   * The deadline starts when the session is created and survives process
+   * restarts and redeployments. If it elapses during an active turn, eve lets
+   * that turn settle before completing the session normally.
+   *
+   * `false` disables the timeout.
+   *
+   * @default 2_592_000_000 (30 days)
+   */
+  readonly sessionTimeoutMs?: number | false;
+  /**
    * Maximum provider-reported input tokens accumulated by one durable session.
    *
    * eve checks this before starting each model call. The model call that crosses
@@ -184,6 +196,13 @@ export interface AgentLimitsDefinition {
  * These options are unstable and may change or be removed in any release.
  */
 export interface AgentExperimentalDefinition {
+  /**
+   * Keeps this agent's delegated subagent sessions alive after they answer.
+   * The model can pass `agentId` to a subagent tool to continue a previous
+   * delegation, and the system prompt documents the `<agents>` listing.
+   * When unset, delegated children run as one-shot tasks.
+   */
+  readonly subagentPersistentSessions?: boolean;
   /**
    * Durable Workflow runtime configuration. Root agents may use this to select
    * the Workflow world backing sessions and runs.

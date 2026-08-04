@@ -1,8 +1,11 @@
 {
   "pages": [
-    "introduction",
+    "---Getting Started---",
     "getting-started",
-    "---",
+    "installation",
+    "project-structure",
+    "install-integrations",
+    "---Build Your Agent---",
     "agent-config",
     "instructions",
     "tools",
@@ -14,12 +17,11 @@
     "subagents",
     "schedules",
     "evals",
-    "---",
+    "---Learn More---",
+    "tutorial",
     "guides",
     "concepts",
     "patterns",
-    "---",
-    "reference",
-    "tutorial"
+    "reference"
   ]
 }

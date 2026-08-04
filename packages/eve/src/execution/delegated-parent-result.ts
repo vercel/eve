@@ -5,19 +5,20 @@
  * step-proxy transform.
  */
 
-import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
+import { SUBAGENT_EXECUTION_FAILED } from "#harness/agent-handle-errors.js";
+import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 
 /**
- * Builds the success-shaped {@link RuntimeSubagentResultActionResult}.
+ * Builds the success-shaped {@link RuntimeSubagentChildResult}.
  * Returns `undefined` for root sessions (no parent to notify).
  */
 export function createDelegatedSubagentSuccessResult(
   serializedContext: Record<string, unknown>,
   output: unknown,
-): RuntimeSubagentResultActionResult | undefined {
+): RuntimeSubagentChildResult | undefined {
   const channel = serializedContext["eve.channel"] as
     | { kind?: string; state?: Record<string, unknown> }
     | undefined;
@@ -29,6 +30,7 @@ export function createDelegatedSubagentSuccessResult(
   return {
     callId: String(channel.state?.callId ?? ""),
     kind: "subagent-result",
+    origin: "child",
     output: output as JsonValue,
     subagentName: String(channel.state?.subagentName ?? ""),
   };
@@ -38,7 +40,7 @@ export function createDelegatedSubagentSuccessResult(
 export function createDelegatedSubagentErrorResult(
   serializedContext: Record<string, unknown>,
   error: unknown,
-): RuntimeSubagentResultActionResult | undefined {
+): RuntimeSubagentChildResult | undefined {
   const success = createDelegatedSubagentSuccessResult(serializedContext, "");
 
   if (success === undefined) {
@@ -49,7 +51,7 @@ export function createDelegatedSubagentErrorResult(
     ...success,
     isError: true,
     output: {
-      code: "SUBAGENT_EXECUTION_FAILED",
+      code: SUBAGENT_EXECUTION_FAILED,
       message: toErrorMessage(error),
     },
   };

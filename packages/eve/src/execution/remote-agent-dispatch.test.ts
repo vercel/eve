@@ -1,12 +1,72 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { SessionAuthContext } from "#channel/types.js";
 import {
   cancelRemoteAgentTurn,
   isRetryableRemoteAgentCancelError,
+  resolveRemoteAgentForAction,
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
+
+describe("resolveRemoteAgentForAction", () => {
+  it("overlays a selected dynamic remote config on the compiled delegation node", async () => {
+    const definition = {
+      dynamic: {
+        eventNames: ["session.started"],
+        events: { "session.started": () => null },
+        logicalPath: "subagents/research.ts",
+        sourceId: "subagents/research.ts",
+        sourceKind: "module",
+      },
+      kind: "subagent",
+      logicalPath: "subagents/research.ts",
+      name: "research",
+      nodeId: "subagents/research.ts",
+      sourceId: "subagents/research.ts",
+      sourceKind: "module",
+    } as const;
+
+    const credentialsStepId = "eve:dynamic-remote-agent//selected-research";
+    const registryKey = Symbol.for("@workflow/core//registeredSteps");
+    const globalRecord = globalThis as Record<symbol, Map<string, Function> | undefined>;
+    const stepRegistry = globalRecord[registryKey] ?? new Map<string, Function>();
+    globalRecord[registryKey] = stepRegistry;
+    stepRegistry.set(credentialsStepId, () => ({
+      auth: async () => ({ headers: { authorization: "Bearer selected" } }),
+      headers: { "x-selected": "yes" },
+    }));
+
+    const resolved = await resolveRemoteAgentForAction({
+      dynamicRemoteAgent: {
+        credentialsStepId,
+        description: "Selected remote research.",
+        path: "/custom/session",
+        url: "https://selected.example.com",
+      },
+      nodeId: definition.nodeId,
+      registry: new Map([[definition.nodeId, { definition }]]),
+      remoteAgentName: "research",
+    });
+
+    expect(resolved).toMatchObject({
+      description: "Selected remote research.",
+      headers: { "x-selected": "yes" },
+      kind: "remote",
+      logicalPath: "subagents/research.ts",
+      name: "research",
+      nodeId: "subagents/research.ts",
+      path: "/custom/session",
+      sourceId: "subagents/research.ts",
+      sourceKind: "module",
+      url: "https://selected.example.com",
+    });
+    await expect(resolved.auth?.()).resolves.toEqual({
+      headers: { authorization: "Bearer selected" },
+    });
+  });
+});
 
 describe("startRemoteAgentSession", () => {
   afterEach(() => {
@@ -16,10 +76,17 @@ describe("startRemoteAgentSession", () => {
 
   it("posts the formatted subagent message and callback metadata", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), {
-        headers: { "x-eve-session-id": "remote-session-header" },
-        status: 202,
-      }),
+      new Response(
+        JSON.stringify({
+          continuationToken: "remote-token",
+          ok: true,
+          sessionId: "remote-session",
+        }),
+        {
+          headers: { "x-eve-session-id": "remote-session-header" },
+          status: 202,
+        },
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -44,7 +111,10 @@ describe("startRemoteAgentSession", () => {
       },
     });
 
-    expect(childSessionId).toBe("remote-session-header");
+    expect(childSessionId).toEqual({
+      continuationToken: "remote-token",
+      sessionId: "remote-session-header",
+    });
     expect(fetchMock).toHaveBeenCalledWith("https://remote.example.com/eve/v1/session", {
       body: expect.any(String),
       headers: {
@@ -70,15 +140,81 @@ describe("startRemoteAgentSession", () => {
         "Caller message:",
         "find the marker",
       ].join("\n"),
+      capabilities: {},
       mode: "task",
     });
+  });
+
+  it("accepts a create-session response without a continuationToken from an older deployment", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const coordinates = await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      remote: createRemoteAgent(),
+      session: {
+        agent: {
+          modelReference: { id: "mock/test" },
+          system: "",
+          tools: [],
+        },
+        compaction: {
+          recentWindowSize: 10,
+          threshold: 100000,
+        },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+    });
+
+    expect(coordinates).toEqual({ sessionId: "remote-session" });
+  });
+
+  it("rejects a create-session response without any sessionId", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        callbackBaseUrl: "https://caller.example.com",
+        remote: createRemoteAgent(),
+        session: {
+          agent: {
+            modelReference: { id: "mock/test" },
+            system: "",
+            tools: [],
+          },
+          compaction: {
+            recentWindowSize: 10,
+            threshold: 100000,
+          },
+          continuationToken: "eve:parent-token",
+          history: [],
+          sessionId: "parent-session",
+          state: {},
+        },
+      }),
+    ).rejects.toThrow("create-session response did not include a sessionId");
   });
 
   it("preserves a prefixed remote base path on create-session requests", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
-        new Response(JSON.stringify({ sessionId: "remote-session" }), { status: 202 }),
+        new Response(
+          JSON.stringify({ continuationToken: "remote-token", sessionId: "remote-session" }),
+          { status: 202 },
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -106,10 +242,17 @@ describe("startRemoteAgentSession", () => {
 
   it("sends a declared outputSchema on the remote create-session request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), {
-        headers: { "x-eve-session-id": "remote-session-header" },
-        status: 202,
-      }),
+      new Response(
+        JSON.stringify({
+          continuationToken: "remote-token",
+          ok: true,
+          sessionId: "remote-session",
+        }),
+        {
+          headers: { "x-eve-session-id": "remote-session-header" },
+          status: 202,
+        },
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -136,13 +279,55 @@ describe("startRemoteAgentSession", () => {
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
     expect(body.outputSchema).toEqual(outputSchema);
     expect(body.mode).toBe("task");
+    expect(body.capabilities).toEqual({});
+  });
+
+  it("ignores an empty model-passed outputSchema instead of forwarding it", async () => {
+    // Models routinely pass `outputSchema: {}` despite the tool schema saying
+    // to omit it. An empty schema constrains nothing, but forwarding it flips
+    // the remote child into structured-output mode and discards its text
+    // reply — local subagent dispatch already drops it; remote must match.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          continuationToken: "remote-token",
+          ok: true,
+          sessionId: "remote-session",
+        }),
+        {
+          status: 202,
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const action = createAction();
+    await startRemoteAgentSession({
+      action: { ...action, input: { ...action.input, outputSchema: {} } },
+      callbackBaseUrl: "https://caller.example.com",
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body).not.toHaveProperty("outputSchema");
   });
 
   it("targets an active turn inbox when a callback token is supplied", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
-        new Response(JSON.stringify({ sessionId: "remote-session" }), { status: 202 }),
+        new Response(
+          JSON.stringify({ continuationToken: "remote-token", sessionId: "remote-session" }),
+          { status: 202 },
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -170,11 +355,16 @@ describe("startRemoteAgentSession", () => {
 
   it("adds the Vercel automation bypass secret to callback URLs", async () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "remote callback secret");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), { status: 202 }),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          continuationToken: "remote-token",
+          ok: true,
+          sessionId: "remote-session",
+        }),
+        { status: 202 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await startRemoteAgentSession({
@@ -204,6 +394,146 @@ describe("startRemoteAgentSession", () => {
           url: "https://caller.example.com/eve/v1/callback/eve%3Aparent-token?x-vercel-protection-bypass=remote+callback+secret",
         }),
       }),
+    );
+  });
+});
+
+describe("startRemoteAgentSession — forwarded principal", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const CURRENT_AUTH: SessionAuthContext = {
+    attributes: { user_id: "U123" },
+    authenticator: "slack-webhook",
+    issuer: "slack",
+    principalId: "slack:U123",
+    principalType: "user",
+    subject: "U123",
+  };
+
+  const INITIATOR_AUTH: SessionAuthContext = {
+    attributes: {},
+    authenticator: "slack-webhook",
+    issuer: "slack",
+    principalId: "slack:U999",
+    principalType: "user",
+    subject: "U999",
+  };
+
+  function createSessionResponse(): Response {
+    return new Response(
+      JSON.stringify({ continuationToken: "remote-token", ok: true, sessionId: "remote-session" }),
+      {
+        status: 202,
+      },
+    );
+  }
+
+  function createSession() {
+    return {
+      agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+      compaction: { recentWindowSize: 10, threshold: 100000 },
+      continuationToken: "eve:parent-token",
+      history: [],
+      sessionId: "parent-session",
+    };
+  }
+
+  it("forwards the current and initiator principals when forwardPrincipal is set", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        auth: CURRENT_AUTH,
+        callbackBaseUrl: "https://caller.example.com",
+        initiatorAuth: INITIATOR_AUTH,
+        remote: { ...createRemoteAgent(), forwardPrincipal: true },
+        session: createSession(),
+      }),
+    ).resolves.toEqual({ continuationToken: "remote-token", sessionId: "remote-session" });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedPrincipal).toEqual({
+      current: CURRENT_AUTH,
+      initiator: INITIATOR_AUTH,
+    });
+  });
+
+  it("omits the initiator when the dispatching turn has none", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      auth: CURRENT_AUTH,
+      callbackBaseUrl: "https://caller.example.com",
+      initiatorAuth: null,
+      remote: { ...createRemoteAgent(), forwardPrincipal: true },
+      session: createSession(),
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedPrincipal).toEqual({
+      current: CURRENT_AUTH,
+    });
+  });
+
+  it("omits the field when the turn has no auth", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          continuationToken: "remote-token",
+          ok: true,
+          sessionId: "remote-session",
+        }),
+        { status: 202 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        auth: null,
+        callbackBaseUrl: "https://caller.example.com",
+        initiatorAuth: null,
+        remote: { ...createRemoteAgent(), forwardPrincipal: true },
+        session: createSession(),
+      }),
+    ).resolves.toEqual({ continuationToken: "remote-token", sessionId: "remote-session" });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
+      "forwardedPrincipal",
+    );
+  });
+
+  it("does not forward when forwardPrincipal is unset even with auth in scope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          continuationToken: "remote-token",
+          ok: true,
+          sessionId: "remote-session",
+        }),
+        { status: 202 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        auth: CURRENT_AUTH,
+        callbackBaseUrl: "https://caller.example.com",
+        initiatorAuth: INITIATOR_AUTH,
+        remote: createRemoteAgent(),
+        session: createSession(),
+      }),
+    ).resolves.toEqual({ continuationToken: "remote-token", sessionId: "remote-session" });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
+      "forwardedPrincipal",
     );
   });
 });

@@ -14,6 +14,7 @@ import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
 } from "#public/connections/errors.js";
+import { defineDynamic, defineTool } from "#public/definitions/tool.js";
 import type { JsonValue } from "#public/types/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
@@ -29,9 +30,7 @@ import {
   type InteractiveAuthorizationDefinition,
   supportsInteractiveAuthorization,
 } from "#runtime/connections/types.js";
-import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
-import type { DynamicToolEvents, DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import { toError } from "#shared/errors.js";
 import type { ModelMessage } from "ai";
 
@@ -389,16 +388,10 @@ export function extractDiscoveredTools(
   return [...byQualifiedName.values()];
 }
 
-/**
- * Creates the connection search dynamic tool resolver events.
- *
- * The resolver subscribes to `step.started` so it re-derives the tool
- * set from conversation history on every step. After compaction, old
- * `connection_search` results disappear from messages and discovered
- * tools naturally drop from the toolset.
- */
-export function createConnectionSearchEvents(): DynamicToolEvents {
-  return {
+// The step-scoped definition re-derives its tools from conversation history.
+// After compaction removes old search results, those tools naturally disappear.
+const connectionSearchDynamicDefinition = defineDynamic({
+  events: {
     "step.started": async (_event, ctx) => {
       const registry = loadContext().get(ConnectionRegistryKey);
       if (!registry || registry.getConnections().length === 0) return null;
@@ -416,10 +409,9 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
       }
       const discovered = [...mergedMap.values()];
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tools: Record<string, DynamicToolEntry<any, any>> = {};
+      const tools: Record<string, object> = {};
 
-      tools["connection_search"] = {
+      tools["connection_search"] = defineTool({
         description:
           "Search for tools across your connections. " +
           "Discovered tools become directly callable by their qualified name " +
@@ -430,14 +422,14 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
           return executeConnectionSearch(input);
         },
         outputSchema: CONNECTION_SEARCH_OUTPUT_SCHEMA,
-      };
+      });
 
       for (const result of discovered) {
         const connectionName = result.connection;
         const toolName = result.tool!;
         const approval = registry.getConnectionApproval(connectionName);
 
-        tools[qualifiedConnectionToolName(connectionName, toolName)] = {
+        tools[qualifiedConnectionToolName(connectionName, toolName)] = defineTool({
           description: result.description,
           inputSchema: (result.inputSchema ?? {
             type: "object",
@@ -514,27 +506,12 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
               ]);
             }
           },
-        };
+        });
       }
 
       return tools;
     },
-  };
-}
+  },
+});
 
-/**
- * Creates a `ResolvedDynamicToolResolver` for the framework connection
- * search tool. Used by graph resolution to register alongside authored
- * dynamic tool resolvers.
- */
-export function createConnectionSearchResolver(): ResolvedDynamicToolResolver {
-  const events = createConnectionSearchEvents();
-  return {
-    slug: "connection",
-    eventNames: Object.keys(events),
-    events: events as ResolvedDynamicToolResolver["events"],
-    sourceId: "eve:connection-search-dynamic",
-    sourceKind: "module",
-    logicalPath: "eve:framework/connection-search-dynamic",
-  };
-}
+export default connectionSearchDynamicDefinition;

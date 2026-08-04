@@ -282,7 +282,8 @@ function createSubagentDelegationResult(
     return null;
   }
 
-  const toolInput = { message: directive[1].trim() };
+  const message = directive[1].trim();
+  const toolInput = { message };
 
   return createToolCallGenerateResult({
     input: toolInput,

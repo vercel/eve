@@ -3,7 +3,7 @@ import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { HeadersValue } from "#client/types.js";
 import type { DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ChannelRouteMethod, RouteContext } from "#public/definitions/channel.js";
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
@@ -210,7 +210,7 @@ export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
    * wildcard if declared. Unknown keys are accepted at resolve time
    * and ignored at dispatch time.
    */
-  readonly events: Readonly<Record<string, StreamEventHook<HandleMessageStreamEvent>>>;
+  readonly events: Readonly<Record<string, StreamEventHook<MessageStreamEvent>>>;
 }
 
 /**
@@ -268,10 +268,18 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
 export type ResolvedRuntimeSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
-      description: string;
       kind: "subagent";
       name: string;
-    }
+    } & (
+      | {
+          description: string;
+          dynamic?: never;
+        }
+      | {
+          description?: never;
+          dynamic: ResolvedDynamicSubagentDefinition;
+        }
+    )
 >;
 
 /**
@@ -283,6 +291,7 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
     Node & {
       auth?: OutboundAuthFn;
       description: string;
+      forwardPrincipal?: boolean;
       headers?: HeadersValue;
       kind: "remote";
       name: string;
@@ -298,6 +307,13 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
 export type ResolvedRuntimeDelegationNode =
   | ResolvedRuntimeRemoteAgentNode
   | ResolvedRuntimeSubagentNode;
+
+export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSourceRef> {
+  readonly eventNames: readonly string[];
+  readonly events: Readonly<
+    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
+  >;
+}
 
 /**
  * Runtime-owned additive agent configuration resolved from `agent.ts`.

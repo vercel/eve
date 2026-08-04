@@ -82,6 +82,10 @@ Turn start posts an ephemeral `thought`, tool calls post ephemeral `action` acti
 
 Human-in-the-loop (HITL) input requests render as Linear `elicitation` activities. When the user replies to the Agent Session, the channel resolves that prompt back to the pending eve input request and resumes with `inputResponses`.
 
+### Connection authorization
+
+When a user-scoped connection needs authorization, the default channel posts Linear's native `auth` elicitation with the provider's sign-in URL, targeted to the Linear user who started the session. URL-less device flows render their instructions and user code as a plain elicitation. After authorization finishes, the channel posts a thought with the outcome; successful authorization indicates that the parked turn is resuming.
+
 ### Proactive sessions
 
 Start a session without an inbound webhook with `receive(linear, { target })`. See [Proactive sessions](#proactive-sessions) below for the target shape and examples.

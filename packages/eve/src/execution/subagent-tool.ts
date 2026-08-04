@@ -1,14 +1,17 @@
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
-import { formatSubagentInput } from "#execution/subagent-invocation.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
+import {
+  formatSubagentInput,
+  normalizeRequestedOutputSchema,
+} from "#execution/subagent-invocation.js";
 import type {
   ChannelInstrumentationProjection,
   RunInput,
   RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
+  SessionTraceContext,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
-import { isJsonObjectValue } from "#shared/json.js";
 import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
@@ -67,6 +70,7 @@ export function buildSubagentRunInput(input: {
   readonly initiatorAuth: SessionAuthContext | null;
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
+  readonly parentTraceContext?: SessionTraceContext;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
@@ -97,11 +101,7 @@ export function buildSubagentRunInput(input: {
   const inheritedLimits: {
     -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
   } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
-  const outputSchema = action.input.outputSchema;
-  const requestedOutputSchema =
-    isJsonObjectValue(outputSchema) && Object.keys(outputSchema).length > 0
-      ? outputSchema
-      : undefined;
+  const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
 
   const runInput: {
     -readonly [K in keyof RunInput]: RunInput[K];
@@ -128,6 +128,9 @@ export function buildSubagentRunInput(input: {
       outputSchema: requestedOutputSchema,
     },
     limits: inheritedLimits,
+    // Delegated children always run one turn at a time in task mode; a
+    // parked persistent child is continued through its agent handle, not by
+    // holding a conversation session open.
     mode: "task",
     parent: {
       callId: action.callId,
@@ -138,6 +141,7 @@ export function buildSubagentRunInput(input: {
         sequence: batchEvent.sequence,
       },
     },
+    parentTraceContext: input.parentTraceContext,
     subagentDepth: subagentDepth.nextChildDepth,
   };
 

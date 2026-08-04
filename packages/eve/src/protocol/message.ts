@@ -6,6 +6,7 @@ import {
   isSerializedUrlFilePart,
 } from "#internal/attachments/url-refs.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
+import { createEventId } from "#protocol/event-id.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
@@ -14,10 +15,11 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 
 export const EVE_SESSION_ID_HEADER = "x-eve-session-id";
 export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
+export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "19";
+export const EVE_MESSAGE_STREAM_VERSION = "20";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -46,11 +48,21 @@ export interface StepCompletedProviderMetadata {
 /**
  * Durable metadata attached to one persisted session stream event.
  *
- * Runtime code stamps this immediately before writing the event to the
- * workflow-owned stream so replay preserves the original timing.
+ * Stamped once, immediately before the event is written to the workflow-owned
+ * stream, and stored with it. Re-reading the stream — reconnecting, rewinding,
+ * or replaying a finished session — yields the same values every time.
  */
-export interface HandleMessageStreamEventMeta {
+export interface MessageStreamEventMeta {
+  /** ISO-8601 emission time. */
   readonly at: string;
+  /**
+   * Unique, lexicographically sortable identifier for this event.
+   *
+   * Stamped from stream version 20 on: rewinding into a session that started
+   * before the upgrade yields events whose `id` is absent despite this type,
+   * and those cannot be deduplicated.
+   */
+  readonly id: string;
 }
 
 /**
@@ -281,7 +293,7 @@ export interface SubagentStartedStreamEvent {
 export interface SubagentChildEventStreamEvent {
   data: {
     callId: string;
-    event: HandleMessageStreamEvent;
+    event: UnstampedMessageStreamEvent;
     subagentName: string;
   };
   type: "subagent.event";
@@ -464,6 +476,19 @@ export interface TurnCancelledStreamEvent {
 }
 
 /**
+ * Stream event emitted after the durable model-message history is cleared.
+ * The session itself and its non-message state remain active.
+ */
+export interface ContextClearedStreamEvent {
+  data: {
+    sequence: number;
+    sessionId: string;
+    turnId: string;
+  };
+  type: "context.cleared";
+}
+
+/**
  * Stream event emitted when the workflow decides to compact the current
  * visible session history before the next model fragment runs.
  */
@@ -580,9 +605,13 @@ export interface SessionCompletedStreamEvent {
 }
 
 /**
- * Serializable stream event union for the durable message session flow.
+ * Serializable event before eve stamps the durable stream envelope.
+ *
+ * Internal emitters use this type while constructing events. Public stream
+ * consumers receive {@link MessageStreamEvent}.
  */
-export type HandleMessageStreamEvent = (
+export type UnstampedMessageStreamEvent =
+  | ContextClearedStreamEvent
   | CompactionCompletedStreamEvent
   | CompactionRequestedStreamEvent
   | AuthorizationCompletedStreamEvent
@@ -610,10 +639,7 @@ export type HandleMessageStreamEvent = (
   | TurnCancelledStreamEvent
   | TurnCompletedStreamEvent
   | TurnFailedStreamEvent
-  | TurnStartedStreamEvent
-) & {
-  readonly meta?: HandleMessageStreamEventMeta;
-};
+  | TurnStartedStreamEvent;
 
 /**
  * Stream events that represent an unrecovered turn/session failure.
@@ -624,14 +650,18 @@ export type TurnFailureStreamEvent =
   | TurnFailedStreamEvent;
 
 /**
- * One public session stream event after runtime metadata has been stamped.
+ * One event read from an eve session stream.
  *
- * Runtime/execution code owns this stamping boundary. Replays must preserve the
- * original `meta.at` value instead of recomputing it.
+ * eve stamps the durable identity and emission time before writing the event.
  */
-export type TimedHandleMessageStreamEvent = HandleMessageStreamEvent & {
-  readonly meta: HandleMessageStreamEventMeta;
+export type MessageStreamEvent = UnstampedMessageStreamEvent & {
+  readonly meta: MessageStreamEventMeta;
 };
+
+/**
+ * @deprecated Use {@link MessageStreamEvent}.
+ */
+export type HandleMessageStreamEvent = MessageStreamEvent;
 
 const textEncoder = new TextEncoder();
 
@@ -639,7 +669,7 @@ const textEncoder = new TextEncoder();
  * Returns true when the current stream has reached a turn boundary or terminal
  * session outcome.
  */
-export function isCurrentTurnBoundaryEvent(event: HandleMessageStreamEvent): boolean {
+export function isCurrentTurnBoundaryEvent(event: UnstampedMessageStreamEvent): boolean {
   return (
     event.type === "session.completed" ||
     event.type === "session.failed" ||
@@ -649,10 +679,13 @@ export function isCurrentTurnBoundaryEvent(event: HandleMessageStreamEvent): boo
 
 /**
  * Narrows a stream event to the failure events that terminate or poison a turn.
+ *
+ * Generic so narrowing keeps the input's stamping: a
+ * {@link MessageStreamEvent} narrows to a stamped failure event.
  */
-export function isTurnFailureEvent(
-  event: HandleMessageStreamEvent,
-): event is TurnFailureStreamEvent {
+export function isTurnFailureEvent<TEvent extends UnstampedMessageStreamEvent>(
+  event: TEvent,
+): event is TEvent & TurnFailureStreamEvent {
   return (
     event.type === "session.failed" || event.type === "step.failed" || event.type === "turn.failed"
   );
@@ -1318,6 +1351,22 @@ export function createTurnCancelledEvent(input: {
   };
 }
 
+/** Creates the `context.cleared` event for one manual history clear. */
+export function createContextClearedEvent(input: {
+  readonly sequence: number;
+  readonly sessionId: string;
+  readonly turnId: string;
+}): ContextClearedStreamEvent {
+  return {
+    data: {
+      sequence: input.sequence,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+    },
+    type: "context.cleared",
+  };
+}
+
 /**
  * Creates the `compaction.requested` event for one runtime compaction pass.
  */
@@ -1404,21 +1453,18 @@ export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
 }
 
 /**
- * Stamps one session event with durable timing metadata immediately before it
- * is written to the workflow-owned stream.
+ * Stamps one session event with its durable identity and emission time.
  *
- * Only runtime/execution code should call this. Keeping one stamping seam
- * ensures every persisted event shares the same clock contract and replay never
- * invents new timestamps.
+ * Runtime/execution code only, once per event, immediately before the write.
+ * One stamping seam is what makes the persisted stream and authored hooks
+ * observe the same `meta.id`.
  */
-export function timestampHandleMessageStreamEvent(
-  event: HandleMessageStreamEvent,
-  at = new Date().toISOString(),
-): TimedHandleMessageStreamEvent {
+export function stampMessageStreamEvent(event: UnstampedMessageStreamEvent): MessageStreamEvent {
   return {
     ...event,
     meta: {
-      at,
+      at: new Date().toISOString(),
+      id: createEventId(),
     },
   };
 }
@@ -1426,7 +1472,7 @@ export function timestampHandleMessageStreamEvent(
 /**
  * Encodes one message stream event as newline-delimited JSON.
  */
-export function encodeMessageStreamEvent(event: TimedHandleMessageStreamEvent): Uint8Array {
+export function encodeMessageStreamEvent(event: MessageStreamEvent): Uint8Array {
   return textEncoder.encode(`${JSON.stringify(event)}\n`);
 }
 

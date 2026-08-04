@@ -72,6 +72,12 @@ function createStreamResponse(events: readonly unknown[]) {
   );
 }
 
+function createBoundedStreamResponse(events: readonly unknown[]) {
+  const response = createStreamResponse(events);
+  response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+  return response;
+}
+
 describe("ClientSession", () => {
   it("cancels an accepted turn before its stream settles with freshly resolved auth", async () => {
     let headerResolution = 0;
@@ -119,6 +125,164 @@ describe("ClientSession", () => {
     await expect(createSession().cancel()).rejects.toThrow("Session has no session ID");
   });
 
+  it("snapshots the session from the start through one pinned durable tail", async () => {
+    const requests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      requests.push(url);
+      expect(init?.cache).toBe("no-store");
+      const events = [
+        { type: "turn.started", data: { turnId: "turn_1" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:current", wait: "next-user-message" },
+        },
+      ];
+      return createBoundedStreamResponse(events);
+    });
+    const initialState = {
+      continuationToken: "eve:stale",
+      sessionId: "session_1",
+      streamIndex: 9,
+    };
+    const session = createSession(initialState);
+
+    const snapshot = await session.snapshot();
+
+    const requestUrl = new URL(requests[0]!);
+    expect(requestUrl.searchParams.get("startIndex")).toBeNull();
+    expect(requestUrl.searchParams.get("includeTailIndex")).toBe("1");
+    expect(snapshot.events.map((event) => event.type)).toEqual(["turn.started", "session.waiting"]);
+    expect(snapshot.session).toEqual({
+      continuationToken: "eve:current",
+      sessionId: "session_1",
+      streamIndex: 2,
+    });
+    expect(session.state).toBe(initialState);
+  });
+
+  it("returns a completed stream cursor without resetting the handle", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      createBoundedStreamResponse([
+        {
+          type: "session.completed",
+          data: { reason: "completed" },
+        },
+      ]),
+    );
+    const initialState = { sessionId: "session_1", streamIndex: 0 };
+    const session = createSession(initialState);
+
+    const snapshot = await session.snapshot();
+
+    expect(snapshot.session).toEqual({ sessionId: "session_1", streamIndex: 1 });
+    expect(session.state).toBe(initialState);
+  });
+
+  it("returns a failed stream cursor without resetting the handle", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      createBoundedStreamResponse([
+        {
+          type: "session.failed",
+          data: { code: "failed", message: "The session failed." },
+        },
+      ]),
+    );
+    const initialState = {
+      continuationToken: "eve:stale",
+      sessionId: "session_1",
+      streamIndex: 4,
+    };
+    const session = createSession(initialState);
+
+    const snapshot = await session.snapshot();
+
+    expect(snapshot.session).toEqual({ sessionId: "session_1", streamIndex: 1 });
+    expect(session.state).toBe(initialState);
+  });
+
+  it("omits the continuation token while the snapshotted turn is active", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      createBoundedStreamResponse([{ type: "turn.started", data: { turnId: "turn_1" } }]),
+    );
+    const initialState = {
+      continuationToken: "eve:previous",
+      sessionId: "session_1",
+      streamIndex: 4,
+    };
+    const session = createSession(initialState);
+
+    const snapshot = await session.snapshot();
+
+    expect(snapshot.session).toEqual({ sessionId: "session_1", streamIndex: 1 });
+    expect(session.state).toBe(initialState);
+  });
+
+  it("preserves an empty session without mutating its handle", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(createBoundedStreamResponse([]));
+    const initialState = {
+      continuationToken: "eve:pending",
+      sessionId: "session_1",
+      streamIndex: 0,
+    };
+    const session = createSession(initialState);
+
+    const snapshot = await session.snapshot();
+
+    expect(snapshot).toEqual({
+      events: [],
+      session: { sessionId: "session_1", streamIndex: 0 },
+    });
+    expect(session.state).toBe(initialState);
+  });
+
+  it("does not mutate the handle when a snapshot is aborted", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if (init?.signal?.aborted) {
+        throw init.signal.reason;
+      }
+      return createBoundedStreamResponse([]);
+    });
+    const initialState = {
+      continuationToken: "eve:current",
+      sessionId: "session_1",
+      streamIndex: 3,
+    };
+    const session = createSession(initialState);
+    const controller = new AbortController();
+    controller.abort(new DOMException("Aborted", "AbortError"));
+
+    await expect(session.snapshot({ signal: controller.signal })).rejects.toThrow("Aborted");
+    expect(session.state).toBe(initialState);
+  });
+
+  it("preserves completed-session continuation when configured", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      createBoundedStreamResponse([
+        {
+          type: "session.completed",
+          data: { reason: "completed" },
+        },
+      ]),
+    );
+    const initialState = {
+      continuationToken: "eve:current",
+      sessionId: "session_1",
+      streamIndex: 3,
+    };
+    const session = createSession(initialState, { preserveCompletedSessions: true });
+
+    const snapshot = await session.snapshot();
+
+    expect(snapshot.session).toEqual({
+      continuationToken: "eve:current",
+      sessionId: "session_1",
+      streamIndex: 1,
+    });
+    expect(session.state).toBe(initialState);
+  });
+
   it("rejects a cancel response for a different session", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json(
@@ -129,6 +293,78 @@ describe("ClientSession", () => {
     const session = createSession({ sessionId: "session_1", streamIndex: 0 });
 
     await expect(session.cancel()).rejects.toThrow("Cancel route returned an invalid response");
+  });
+
+  it("queues a context clear without clearing the local session cursor", async () => {
+    const state = { continuationToken: "eve:test", sessionId: "session_1", streamIndex: 4 };
+    const requests: Array<{ body?: string; method: string; url: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      requests.push({
+        body: typeof init?.body === "string" ? init.body : undefined,
+        method: init?.method ?? "GET",
+        url,
+      });
+      return Response.json(
+        { ok: true, sessionId: "session_1", status: "accepted" },
+        { status: 202 },
+      );
+    });
+    const session = createSession(state);
+
+    await expect(session.clear()).resolves.toEqual({
+      sessionId: "session_1",
+      status: "accepted",
+    });
+
+    expect(session.state).toEqual(state);
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/clear");
+    expect(requests[0]!.method).toBe("POST");
+    expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({ continuationToken: "eve:test" });
+  });
+
+  it("treats clearing a never-started session as a successful no-op", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(createSession().clear()).resolves.toEqual({ status: "no_active_session" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("queues compaction without clearing the local session cursor", async () => {
+    const state = { continuationToken: "eve:test", sessionId: "session_1", streamIndex: 4 };
+    const requests: Array<{ body?: string; method: string; url: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      requests.push({
+        body: typeof init?.body === "string" ? init.body : undefined,
+        method: init?.method ?? "GET",
+        url,
+      });
+      return Response.json(
+        { ok: true, sessionId: "session_1", status: "accepted" },
+        { status: 202 },
+      );
+    });
+    const session = createSession(state);
+
+    await expect(session.compact()).resolves.toEqual({
+      sessionId: "session_1",
+      status: "accepted",
+    });
+
+    expect(session.state).toEqual(state);
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/compact");
+    expect(requests[0]!.method).toBe("POST");
+    expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({ continuationToken: "eve:test" });
+  });
+
+  it("treats compacting a never-started session as a successful no-op", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(createSession().compact()).resolves.toEqual({ status: "no_active_session" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("resets the continuation owner and clears the local session state", async () => {
@@ -457,6 +693,14 @@ describe("ClientSession", () => {
 
     expect(new URL(requests[0]!).searchParams.get("startIndex")).toBe("-1");
     expect(session.state).toEqual(initialState);
+  });
+
+  it("rejects a bounded stream from a tail-relative cursor", () => {
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    expect(() => session.stream({ follow: false, startIndex: -1 })).toThrow(
+      /nonnegative startIndex/,
+    );
   });
 
   it("does not reconnect a tail-relative stream after a disconnect", async () => {

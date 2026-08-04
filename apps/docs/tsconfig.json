@@ -32,5 +32,6 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  // Registry mount templates are typechecked independently by registry/tsconfig.json.
+  "exclude": ["node_modules", "registry"]
 }

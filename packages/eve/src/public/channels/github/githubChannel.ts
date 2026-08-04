@@ -4,7 +4,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   buildGitHubBinding,
   type GitHubHandle,
@@ -47,11 +47,12 @@ import {
 import type { GitHubPullRequestContextConfig } from "#public/channels/github/pr-context.js";
 import { verifyGitHubRequest } from "#public/channels/github/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import { readNonEmptyString } from "#shared/guards.js";
 
 const log = createLogger("github.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /**
  * Target accepted by `receive(github, { target })` for proactive sessions.
@@ -112,7 +113,7 @@ export type GitHubInboundResult = {
  */
 export type GitHubInboundResultOrPromise = GitHubInboundResult | Promise<GitHubInboundResult>;
 
-type GitHubEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type GitHubEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: GitHubEventContext,
   ctx: SessionContext,
@@ -451,10 +452,6 @@ async function verifyInbound(
     log.warn("github inbound verification failed", { error });
     return null;
   }
-}
-
-function readNonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function missingGitHubWebhookHeaders(headers: Headers): readonly string[] {

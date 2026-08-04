@@ -1,6 +1,7 @@
 import {
   SiAirtable,
   SiBitly,
+  SiBraintrust,
   SiBrex,
   SiClickhouse,
   SiCloudinary,
@@ -10,6 +11,7 @@ import {
   SiGooglechat,
   SiResend,
   SiHuggingface,
+  SiJaeger,
   SiMake,
   SiMessenger,
   SiMiro,
@@ -21,12 +23,14 @@ import {
   SiPosthog,
   SiPostman,
   SiRazorpay,
+  SiSanity,
   SiSentry,
   SiSimilarweb,
   SiStripe,
   SiSupabase,
   SiTicktick,
   SiTodoist,
+  SiUpstash,
   SiWebflow,
   SiWhatsapp,
   SiWix,
@@ -171,6 +175,8 @@ export const linearLogo = (props: LogoProps) => (
 
 export const notionLogo = (props: LogoProps) => <SiNotion {...props} />;
 
+export const upstashLogo = (props: LogoProps) => <SiUpstash color="default" {...props} />;
+
 export const datadogLogo = (props: LogoProps) => <SiDatadog color="default" {...props} />;
 
 export const honeycombLogo = (props: LogoProps) => (
@@ -226,6 +232,8 @@ export const posthogLogo = (props: LogoProps) => <SiPosthog {...props} />;
 export const postmanLogo = (props: LogoProps) => <SiPostman color="default" {...props} />;
 
 export const razorpayLogo = (props: LogoProps) => <SiRazorpay {...props} />;
+
+export const sanityLogo = (props: LogoProps) => <SiSanity {...props} />;
 
 export const sentryLogo = (props: LogoProps) => <SiSentry {...props} />;
 
@@ -392,9 +400,9 @@ export const kapsoLogo = (props: LogoProps) => (
 );
 
 export const photonLogo = (props: LogoProps) => (
-  <svg fill="none" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" {...props}>
+  <svg fill="none" viewBox="66 66 124 124" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
-      d="m34 13-4 16h9l4-16h-9Zm-17 13-4 16h9l4-16h-9Zm16 10-4 16h9l4-16h-9Z"
+      d="M166.88 135.896H180.416C182.864 135.896 184.592 138.2 184.016 140.36L173.648 181.544C173.36 183.128 171.92 184.28 170.192 184.28H156.512C154.352 184.28 152.624 181.976 153.056 179.816L163.424 138.632C163.856 137.048 165.152 135.896 166.88 135.896ZM139.52 71.96H153.056C155.504 71.96 157.232 74.264 156.512 76.424L146.432 117.608C145.856 119.192 144.416 120.344 142.688 120.344H129.296C126.848 120.344 125.12 118.04 125.84 115.88L136.064 74.696C136.352 73.112 137.936 71.96 139.52 71.96ZM85.376 101.624H98.912C101.216 101.624 102.944 103.928 102.368 106.232L92.144 147.272C91.712 148.856 90.272 150.008 88.688 150.008H75.008C72.704 150.008 70.832 147.848 71.552 145.544L81.776 104.504C82.208 102.776 83.648 101.624 85.376 101.624Z"
       fill="currentColor"
     />
   </svg>
@@ -459,6 +467,21 @@ export const beeperLogo = (props: LogoProps) => (
 );
 
 export const resendLogo = (props: LogoProps) => <SiResend {...props} />;
+
+export const typefullyLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="47 47 130 130" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M0 0 C0.74507813 0.00451172 1.49015625 0.00902344 2.2578125 0.01367188 C4.0885764 0.02540754 5.91929873 0.0433415 7.75 0.0625 C7.14395591 4.14584626 4.84730736 7.0612421 2.5625 10.375 C-2.19352263 17.53440191 -5.32057264 24.9903426 -8.25 33.0625 C-17.16154975 57.46763889 -17.16154975 57.46763889 -26.984375 63.03515625 C-34.07971612 66.25252645 -41.54415248 67.43087315 -49.25 68.0625 C-49.25 68.3925 -49.25 68.7225 -49.25 69.0625 C-40.52369392 69.15994014 -31.91996704 69.22961095 -23.25 68.0625 C-23.41531336 74.50972095 -26.91529318 78.6325249 -31.25 83.0625 C-38.42086001 88.95740627 -46.28954743 90.49598731 -55.25 92.0625 C-61.3099593 93.33277308 -61.3099593 93.33277308 -67.25 95.0625 C-68.2992872 96.78705409 -68.2992872 96.78705409 -69.25 99.0625 C-78.68670886 116.85047468 -78.68670886 116.85047468 -85.25 122.0625 C-86.57 122.0625 -87.89 122.0625 -89.25 122.0625 C-88.66875831 117.39360339 -87.36989252 113.68082637 -85.3984375 109.41796875 C-85.10769852 108.78353851 -84.81695953 108.14910828 -84.51741028 107.49545288 C-83.56009428 105.41041702 -82.59274339 103.33021408 -81.625 101.25 C-80.94894978 99.78473548 -80.27358667 98.31915375 -79.59887695 96.85327148 C-78.54863388 94.57166096 -77.49785805 92.29031377 -76.4443512 90.01020813 C-74.01583684 84.74952764 -71.63026619 79.47109428 -69.26953125 74.1796875 C-52.12436128 35.80891207 -52.12436128 35.80891207 -40.25 21.0625 C-39.61578125 20.26457031 -38.9815625 19.46664062 -38.328125 18.64453125 C-28.35248511 6.73361722 -15.57355722 -0.17884827 0 0 Z "
+      fill="currentColor"
+      transform="translate(153.25,50.9375)"
+    />
+    <path
+      d="M0 0 C2.70461031 1.95547181 4.45314814 4.04691917 6 7 C6.60726036 10.91345565 6.3659283 13.10550859 4.875 16.75 C1.65652764 20.61216684 -1.58840395 21.79834342 -6.5 22.5 C-11.20343225 21.82808111 -12.70404748 20.37442758 -16 17 C-17.23829052 13.28512845 -17.5503822 9.86021488 -17 6 C-12.86869485 -0.78714418 -7.42056477 -2.39662454 0 0 Z "
+      fill="currentColor"
+      transform="translate(149,151)"
+    />
+  </svg>
+);
 
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
@@ -546,6 +569,32 @@ export const agentBrowserLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const braintrustLogo = (props: LogoProps) => <SiBraintrust {...props} />;
+
+export const jaegerLogo = (props: LogoProps) => <SiJaeger color="default" {...props} />;
+
+export const arizeLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 50 54.1" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M25.01 5.71c1.37-.05 2.65.64 3.37 1.81 6.87 9.89 13.73 19.79 20.56 29.69 1.35 1.79 1 4.33-.78 5.69l-.22.15c-1.92 1.29-4.53.77-5.81-1.15l-.09-.14c-4.73-6.8-9.43-13.61-14.1-20.42l-.28-.34c-1.88-2.67-3.74-2.67-5.57 0-4.77 6.84-9.53 13.7-14.29 20.57-.67 1.16-1.84 1.94-3.16 2.13-1.61.25-3.2-.52-4-1.94-.91-1.41-.84-3.24.17-4.58 2.28-3.31 4.59-6.61 6.89-9.92 4.54-6.51 9.07-13.03 13.6-19.55.78-1.29 2.2-2.05 3.71-2Z"
+      fill="#FF008C"
+    />
+    <path
+      d="M24.84 44.06c2.76-.06 5.04 2.14 5.1 4.9v.04c.02 2.78-2.22 5.05-5 5.06-2.78.02-5.05-2.22-5.07-4.99-.04-2.72 2.13-4.97 4.85-5.01h.12Z"
+      fill="#FF008C"
+    />
+  </svg>
+);
+
+export const raindropLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M12 2.25c3.93 4.92 6.55 8.58 6.55 11.7a6.55 6.55 0 1 1-13.1 0c0-3.12 2.62-6.78 6.55-11.7Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 export const logos = {
   eve: eveLogo,
   web: webLogo,
@@ -561,7 +610,12 @@ export const logos = {
   notion: notionLogo,
   datadog: datadogLogo,
   honeycomb: honeycombLogo,
+  arize: arizeLogo,
+  braintrust: braintrustLogo,
+  jaeger: jaegerLogo,
+  raindrop: raindropLogo,
   kernel: kernelLogo,
+  upstash: upstashLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,
   brex: brexLogo,
@@ -584,6 +638,7 @@ export const logos = {
   posthog: posthogLogo,
   postman: postmanLogo,
   razorpay: razorpayLogo,
+  sanity: sanityLogo,
   sentry: sentryLogo,
   similarweb: similarwebLogo,
   stripe: stripeLogo,

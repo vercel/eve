@@ -88,7 +88,7 @@ const agent = useEveAgent({
 });
 ```
 
-The default eve channel is fail-closed. With no `agent/channels/eve.ts` authored, eve registers `eveChannel({ auth: [vercelOidc(), localDev()] })`: `vercelOidc()` gets the first chance to resolve a Vercel caller, `localDev()` opens the remaining localhost requests, and everything else gets a `401`. To run your app's own auth policy, add `agent/channels/eve.ts`:
+The default eve channel is fail-closed. With no `agent/channels/eve.ts` authored, eve registers `eveChannel({ auth: [vercelOidc(), localDev(), placeholderAuth()] })`: `vercelOidc()` gets the first chance to resolve a Vercel caller, `localDev()` authenticates while the process is an `eve dev` or `vercel dev` server, and everything else gets a `401`. To run your app's own auth policy, add `agent/channels/eve.ts`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -102,7 +102,7 @@ For a public demo, use `none()` (also from `eve/channels/auth`) to skip authenti
 ## Dev vs deploy topology
 
 - **Local dev.** `npm run dev` boots the eve dev server next to `next dev` and rewrites the eve routes over to it. The browser only ever talks to the Next.js origin.
-- **Vercel.** The web app and the eve runtime deploy as a single project. `withEve()` writes Build Output `services` for eve and `routes` that send `/eve/v1/**` to that service before filesystem routing; the Next.js app itself remains the default app. By default, generated services run the installed eve binary from the agent root, so the agent directory does not need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
+- **Vercel.** The web app and the eve runtime deploy as a single project. `withEve()` writes Build Output `services` for eve and `routes` that send `/eve/v1/**` to that service before filesystem routing; the Next.js app itself remains the default app. Vercel assembles authored [schedules](../../schedules) into the project config as Vercel Cron Jobs, including correctly prefixed jobs for named agents, while cron entries owned by the Next.js app are preserved. By default, generated services run the installed eve binary from the agent root, so the agent directory does not need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
 
   ```ts
   export default withEve(nextConfig, {

@@ -204,6 +204,8 @@ function createTestNode(
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
     sandboxRegistry: createStubSandboxRegistry(),
     subagentRegistry: {
+      dynamicNodeIds: new Set(),
+      dynamicResolvers: [],
       preparedTools: [],
       subagentsByName: new Map(),
       subagentsByNodeId: new Map(),
@@ -217,12 +219,17 @@ function createTestNode(
 function createNoopRuntime(): Runtime {
   return {
     cancelTurn: vi.fn(),
+    clearSession: vi.fn(),
+    compactSession: vi.fn(),
     deliver: vi.fn(),
     resolveSession: vi.fn(),
     run: vi.fn().mockRejectedValue(new Error("runtime.run should not be called in this test")),
     getEventStream: vi
       .fn()
       .mockRejectedValue(new Error("runtime.getEventStream should not be called in this test")),
+    getStreamTailIndex: vi
+      .fn()
+      .mockRejectedValue(new Error("runtime.getStreamTailIndex should not be called in this test")),
     terminateSession: vi.fn(),
   };
 }

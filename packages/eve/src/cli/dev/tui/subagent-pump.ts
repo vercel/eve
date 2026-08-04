@@ -7,10 +7,11 @@
  */
 
 import type { Client } from "#client/index.js";
+import { createEventDeduper, type EventDeduper } from "#protocol/event-dedupe.js";
 import {
   isCurrentTurnBoundaryEvent,
   type ActionResultStreamEvent,
-  type HandleMessageStreamEvent,
+  type MessageStreamEvent,
   type SubagentCalledStreamEvent,
 } from "#protocol/message.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -87,6 +88,11 @@ export type SubagentRun = {
   /** Monotonic counter for new section keys. */
   nextSectionKey: number;
   tools: Map<string, SubagentToolState>;
+  /**
+   * Child events already folded into this run. A restarted pump replays the
+   * child stream from `streamIndex: 0` while this run's state survives.
+   */
+  seenChildEvents: EventDeduper;
 };
 
 export type SubagentStepUpdate = {
@@ -134,8 +140,8 @@ export class SubagentPump {
    * placeholder — subagent dispatches never upgrade one, since their
    * actions are not tool-call kind). Without this the placeholder is
    * swept at the step boundary and nothing shows until the child's first
-   * content arrives. Idempotent for SSE-resume re-entries, which only
-   * refresh the name.
+   * content arrives. A later parent-stream translator may replay the call;
+   * re-entry only refreshes the name.
    */
   begin(called: SubagentCalledStreamEvent): void {
     const callId = called.data.callId;
@@ -148,6 +154,7 @@ export class SubagentPump {
         currentSectionKey: null,
         nextSectionKey: 0,
         tools: new Map(),
+        seenChildEvents: createEventDeduper(),
       });
     } else {
       existing.name = called.data.name;
@@ -180,11 +187,11 @@ export class SubagentPump {
 
   /**
    * Settles every live run and stops its child stream. Called when the
-   * parent turn is cancelled (an Esc steer or Esc Esc): the server cancels
-   * the pending descendants, so their sections must close now — a child
-   * still flushing reasoning would otherwise keep painting stale sections
-   * into the next (steered) turn's transcript. Runs stay registered so a
-   * late parent `subagent.completed` settles as a no-op.
+   * parent turn is cancelled (`/cancel`, a key-driven steer, or an empty-queue
+   * cancel): the server cancels the pending descendants, so their sections must
+   * close now. A child still flushing reasoning would otherwise keep painting
+   * stale sections into the next (steered) turn's transcript. Runs stay
+   * registered so a late parent `subagent.completed` settles as a no-op.
    */
   settleAll(): void {
     for (const callId of this.#runs.keys()) {
@@ -358,9 +365,10 @@ export class SubagentPump {
     }
   }
 
-  #applyChildEvent(callId: string, event: HandleMessageStreamEvent) {
+  #applyChildEvent(callId: string, event: MessageStreamEvent) {
     const run = this.#runs.get(callId);
     if (!run) return;
+    if (!run.seenChildEvents.admit(event)) return;
     // A child event after settle is a HITL-parked turn resuming: reopen the
     // run explicitly (begin clears the header's Done mark) instead of
     // mutating a completed section by accident.

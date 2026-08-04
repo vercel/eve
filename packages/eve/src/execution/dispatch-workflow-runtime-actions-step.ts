@@ -18,8 +18,10 @@ import { createLogger } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   RuntimeActionRequest,
-  RuntimeSubagentResultActionResult,
+  RuntimeSubagentDispatchFailure,
+  RuntimeSubagentResult,
 } from "#runtime/actions/types.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 const log = createLogger("execution.dispatch-workflow-runtime-actions");
 
@@ -31,7 +33,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<{
-  readonly results: readonly RuntimeSubagentResultActionResult[];
+  readonly results: readonly RuntimeSubagentResult[];
   readonly sessionState: DurableSessionState;
 }> {
   "use step";
@@ -45,6 +47,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
 
   const plan = planWorkflowSubagentDispatch({
     actions,
@@ -70,10 +73,10 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   const session = hydrateDurableSession({
     compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+      thresholdPercent: effectiveAgent.thresholdPercent,
     },
     durable: durableSession,
-    turnAgent: bundle.turnAgent,
+    turnAgent: effectiveAgent.turnAgent,
   });
 
   const sessionWithBatch = setPendingRuntimeActionBatch({
@@ -104,7 +107,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 function createWorkflowSubagentLimitResult(input: {
   readonly action: RuntimeActionRequest;
   readonly plan: WorkflowSubagentDispatchPlan;
-}): RuntimeSubagentResultActionResult {
+}): RuntimeSubagentDispatchFailure {
   const subagentName = isSubagentDelegationAction(input.action)
     ? getSubagentDelegationName(input.action)
     : input.action.kind;
@@ -113,6 +116,7 @@ function createWorkflowSubagentLimitResult(input: {
     callId: input.action.callId,
     isError: true,
     kind: "subagent-result",
+    origin: "dispatch",
     output: {
       code: "WORKFLOW_SUBAGENT_LIMIT_REACHED",
       maxSubagents: input.plan.maxSubagents,

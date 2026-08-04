@@ -1,25 +1,39 @@
 import { type FilePart, type TextPart, type UserContent } from "ai";
 
-import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
+import type {
+  CancelTurnResult,
+  SessionAuthContext,
+  SessionCallback,
+  SessionCapabilities,
+} from "#channel/types.js";
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
+import type { ClearResponse } from "#protocol/clear-session.js";
+import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
+import type { SendOptions } from "#channel/routes.js";
+import { resolveForwardedPrincipal, type TrustedForwarders } from "#channel/forwarded-principal.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
+import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   readAgentInfoRouteResponse,
   readRouteAgent,
 } from "#internal/nitro/routes/channel-route-context.js";
+import { AgentHandleError } from "#protocol/agent-handle-error.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
   EVE_STREAM_FORMAT_HEADER,
+  EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
 import {
   EVE_CANCEL_TURN_ROUTE_PATTERN,
+  EVE_CLEAR_SESSION_ROUTE_PATH,
+  EVE_COMPACT_SESSION_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
   EVE_RESET_SESSION_ROUTE_PATH,
 } from "#protocol/routes.js";
@@ -128,6 +142,25 @@ export interface EveChannelInput {
    */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
+   * The trusted-forwarders policy: which transport-authenticated callers may
+   * assert a forwarded principal on the create-session route (the
+   * `forwardedPrincipal` body field a `defineRemoteAgent({ forwardPrincipal:
+   * true })` sender emits). The predicate receives the *verified* route-auth
+   * principal of the forwarder — who is asserting, never what is asserted —
+   * and must match it precisely (for example
+   * `(forwarder) => forwarder.subject === vercelSubject({ teamSlug, projectName })`).
+   * A permissive predicate lets any authenticated forwarder assert any
+   * principal.
+   *
+   * When a trusted forwarder's assertion is accepted, the forwarded
+   * principal replaces the session principal (`session.auth.current` /
+   * `session.auth.initiator`) exactly as if that user had called this
+   * deployment directly, and the forwarder is recorded on the accepted
+   * contexts as the `eve:forwarded-by` attribute. Omit the option to reject
+   * every forwarded assertion with 403.
+   */
+  readonly trustedForwarders?: TrustedForwarders;
+  /**
    * Attachment policy for inbound file parts. Omit for the framework default (25 MB cap, all media
    * types); `"disabled"` rejects every attachment; a partial config is merged onto the default. Violations reject with 413 (too large) or 415 (bad type).
    */
@@ -206,6 +239,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
         }
 
+        const forwarded = await resolveForwardedPrincipal({
+          trustedForwarders: input.trustedForwarders,
+          forwarder: sessionAuth,
+          payload: payload as Record<string, unknown>,
+        });
+        if (forwarded instanceof Response) return forwarded;
+
         const body = parseCreateBody(payload as Record<string, unknown>);
         if (body instanceof Response) return body;
 
@@ -213,7 +253,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (policyRejection !== null) return policyRejection;
 
         const messageResult = await resolveOnMessage({
-          auth: sessionAuth,
+          auth: forwarded.auth,
           config: input,
           message: body.message,
           request: req,
@@ -224,12 +264,17 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const token = `eve:${crypto.randomUUID()}`;
         const context = mergeContext(body.context, messageResult.context);
 
-        const session = await send(createSendPayload(body, context), {
+        const sendOptions: SendOptions = {
           auth: messageResult.auth,
           callback: body.callback,
+          capabilities: body.capabilities,
           continuationToken: token,
           mode: body.mode,
-        });
+        };
+        if (forwarded.accepted) {
+          sendOptions.initiatorAuth = forwarded.initiatorAuth;
+        }
+        const session = await send(createSendPayload(body, context), sendOptions);
 
         return Response.json(
           {
@@ -251,7 +296,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
 
-        const body = await parseResetSessionBody(req);
+        const body = await parseContinuationTokenBody(req);
         if (body instanceof Response) return body;
 
         let result: Awaited<ReturnType<typeof reset>>;
@@ -274,6 +319,62 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             : { ok: true, status: "no_active_session" };
         return Response.json(response, {
           headers: { "cache-control": "no-store" },
+        });
+      }),
+
+      POST(EVE_CLEAR_SESSION_ROUTE_PATH, async (req, { clear }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const body = await parseContinuationTokenBody(req);
+        if (body instanceof Response) return body;
+
+        let result: Awaited<ReturnType<typeof clear>>;
+        try {
+          result = await clear({ continuationToken: body.continuationToken });
+        } catch (error) {
+          const errorId = logError(log, "session-clear request failed", error);
+          return Response.json(
+            { error: "Failed to clear the session context.", errorId, ok: false },
+            { status: 500 },
+          );
+        }
+
+        const response: ClearResponse =
+          result.status === "accepted"
+            ? { ok: true, sessionId: result.sessionId, status: "accepted" }
+            : { ok: true, status: "no_active_session" };
+        return Response.json(response, {
+          headers: { "cache-control": "no-store" },
+          status: result.status === "accepted" ? 202 : 200,
+        });
+      }),
+
+      POST(EVE_COMPACT_SESSION_ROUTE_PATH, async (req, { compact }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const body = await parseContinuationTokenBody(req);
+        if (body instanceof Response) return body;
+
+        let result: Awaited<ReturnType<typeof compact>>;
+        try {
+          result = await compact({ continuationToken: body.continuationToken });
+        } catch (error) {
+          const errorId = logError(log, "session-compaction request failed", error);
+          return Response.json(
+            { error: "Failed to compact the session.", errorId, ok: false },
+            { status: 500 },
+          );
+        }
+
+        const response: CompactResponse =
+          result.status === "accepted"
+            ? { ok: true, sessionId: result.sessionId, status: "accepted" }
+            : { ok: true, status: "no_active_session" };
+        return Response.json(response, {
+          headers: { "cache-control": "no-store" },
+          status: result.status === "accepted" ? 202 : 200,
         });
       }),
 
@@ -326,18 +427,39 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           dispatchAuth = messageResult.auth;
         }
 
-        const session = await send(
-          {
-            inputResponses: body.inputResponses,
-            message: body.message,
-            context,
-            outputSchema: body.outputSchema,
-          },
-          {
-            auth: dispatchAuth,
-            continuationToken: body.continuationToken,
-          },
-        );
+        const sendOptions: SendOptions = {
+          auth: dispatchAuth,
+          continuationToken: body.continuationToken,
+          // This route addresses the session in the URL. If its continuation
+          // token no longer resolves, starting a new session would silently
+          // change that identity, so surface SESSION_NOT_RESUMABLE instead.
+          intent: "resume",
+        };
+        if (body.callback !== undefined) {
+          sendOptions.caller = {
+            callId: body.callback.callId,
+            replyTo: { kind: "callback", url: body.callback.url },
+            subagentName: body.callback.subagentName,
+          };
+        }
+
+        let session;
+        try {
+          session = await send(
+            {
+              inputResponses: body.inputResponses,
+              message: body.message,
+              context,
+              outputSchema: body.outputSchema,
+            },
+            sendOptions,
+          );
+        } catch (error) {
+          if (!isRuntimeNoActiveSessionError(error)) {
+            throw error;
+          }
+          return Response.json(AgentHandleError.SessionNotResumable.toJson(), { status: 404 });
+        }
 
         return Response.json(
           {
@@ -405,9 +527,15 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const startIndex = parseStartIndex(req);
         if (startIndex instanceof Response) return startIndex;
 
+        const includeTailIndex = parseIncludeTailIndex(req);
+
         try {
           const session = getSession(sessionId);
+
+          // The tail lookup is opt-in: only requests that bound a read pay for it.
+          const tailIndex = includeTailIndex ? await session.getStreamTailIndex() : undefined;
           const events = await session.getEventStream({ startIndex });
+
           const ndjson = serializeAsNdjson(events);
           return new Response(ndjson, {
             headers: {
@@ -420,6 +548,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               "x-accel-buffering": "no",
               [EVE_SESSION_ID_HEADER]: sessionId,
               [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
+              ...(tailIndex === undefined
+                ? {}
+                : { [EVE_STREAM_TAIL_INDEX_HEADER]: String(tailIndex) }),
               [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
             },
           });
@@ -548,6 +679,7 @@ function droppedMessageResponse(): Response {
 
 interface ParsedCreateBody {
   callback?: SessionCallback;
+  capabilities?: SessionCapabilities;
   message: string | UserContent;
   mode?: RunMode;
   context?: readonly string[];
@@ -564,6 +696,9 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
 
+  const capabilities = parseCapabilitiesField(payload.capabilities);
+  if (capabilities instanceof Response) return capabilities;
+
   const mode = parseModeField(payload.mode);
   if (mode instanceof Response) return mode;
 
@@ -577,10 +712,11 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
     );
   }
 
-  return { callback, message, mode, context, outputSchema };
+  return { callback, capabilities, message, mode, context, outputSchema };
 }
 
 interface ParsedContinueBody {
+  callback?: SessionCallback;
   message?: string | UserContent;
   continuationToken: string;
   inputResponses?: readonly InputResponse[];
@@ -589,6 +725,15 @@ interface ParsedContinueBody {
 }
 
 function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody | Response {
+  // Fail loud instead of silently running the delivery as the transport
+  // principal: principal forwarding is create-only today.
+  if (payload.forwardedPrincipal !== undefined) {
+    return Response.json(
+      { error: "A forwarded principal is only accepted on session creation.", ok: false },
+      { status: 400 },
+    );
+  }
+
   const continuationToken =
     typeof payload.continuationToken === "string" && payload.continuationToken.length > 0
       ? payload.continuationToken
@@ -603,6 +748,9 @@ function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody
 
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
+
+  const callback = parseCallbackField(payload.callback);
+  if (callback instanceof Response) return callback;
 
   const inputResponses = parseInputResponses(payload.inputResponses);
   if (inputResponses instanceof Response) return inputResponses;
@@ -623,18 +771,20 @@ function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody
     );
   }
 
-  return { message, continuationToken, inputResponses, context, outputSchema };
+  return { callback, message, continuationToken, inputResponses, context, outputSchema };
 }
 
 interface ParsedCancelTurnBody {
   turnId?: string;
 }
 
-interface ParsedResetSessionBody {
+interface ParsedContinuationTokenBody {
   readonly continuationToken: string;
 }
 
-async function parseResetSessionBody(req: Request): Promise<ParsedResetSessionBody | Response> {
+async function parseContinuationTokenBody(
+  req: Request,
+): Promise<ParsedContinuationTokenBody | Response> {
   let payload: unknown;
   try {
     payload = await req.json();
@@ -738,6 +888,30 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   if (parsed.ok) return parsed.callback;
 
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
+}
+
+function parseCapabilitiesField(value: unknown): SessionCapabilities | Response | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return Response.json(
+      { error: "Expected 'capabilities' to be an object.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  const keys = Object.keys(value);
+  const requestInput = Reflect.get(value, "requestInput");
+  if (
+    keys.some((key) => key !== "requestInput") ||
+    (requestInput !== undefined && typeof requestInput !== "boolean")
+  ) {
+    return Response.json(
+      { error: "Expected 'capabilities.requestInput' to be a boolean when provided.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  return requestInput === undefined ? {} : { requestInput };
 }
 
 function parseModeField(value: unknown): RunMode | Response | undefined {
@@ -940,6 +1114,11 @@ function parseClientContextField(value: unknown): string[] | Response | undefine
 
 function toClientContextMessage(content: string): string {
   return `${CLIENT_CONTEXT_PREFIX}${content}`;
+}
+
+function parseIncludeTailIndex(request: Request): boolean {
+  const raw = new URL(request.url).searchParams.get("includeTailIndex");
+  return raw === "1" || raw === "true";
 }
 
 function parseStartIndex(request: Request): number | undefined | Response {

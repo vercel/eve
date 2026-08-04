@@ -1,5 +1,4 @@
-// Public setup primitives remain available for programmatic onboarding flows,
-// even though eve currently exposes no setup wizard command.
+// Public setup primitives shared by CLI flows and external setup tooling.
 export { type OutputSink, type SetupBox, WizardCancelledError } from "./step.js";
 export { InteractionRequired } from "./ask.js";
 export {
@@ -46,7 +45,6 @@ export {
   type HeadlessNextStep,
   HeadlessPromptError,
 } from "./headless.js";
-export { composeOnboardingBoxes, type OnboardingBoxesOptions } from "./onboarding.js";
 export { createPromptCommandOutput, type PromptCommandLog } from "./cli/index.js";
 export {
   getPackageManagerStrategy,
@@ -70,6 +68,7 @@ export {
 } from "./project-resolution.js";
 export { runVercelEnvPull } from "./run-vercel-link.js";
 export { provisionSlackbot, reconcileSlackUid, type ProvisionSlackbotResult } from "./slackbot.js";
+export { runRemoteAuthFlow } from "../cli/dev/tui/remote-auth.js";
 export {
   setupConnectionConnector,
   type SetupConnectionConnectorOptions,

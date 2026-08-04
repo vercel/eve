@@ -82,6 +82,35 @@ toModelOutput(output) {
 
 Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, numbers, booleans, or `null`; convert values like `Date`, `Map`, `Set`, `NaN`, and cyclic objects before returning them from `execute` or from a `{ type: "json" }` `toModelOutput`.
 
+### Send images to the model with content parts
+
+A tool that produces an image — a screenshot, a rendered chart — can hand the pixels to a vision-capable model by returning a `content` output from `toModelOutput`. Build outputs with the `toolOutput` helpers and parts with the `toolOutputPart` helpers, both from `eve/tools`:
+
+```ts
+import { defineTool, toolOutput, toolOutputPart } from "eve/tools";
+
+export default defineTool({
+  description: "Capture a screenshot of the current page",
+  inputSchema: z.object({ url: z.string() }),
+  async execute(input) {
+    const png = await captureScreenshot(input.url);
+    return { path: png.path, screenshotBase64: png.base64 };
+  },
+  toModelOutput(output) {
+    return toolOutput.content([
+      toolOutputPart.text(`Screenshot of ${output.path}:`),
+      toolOutputPart.file(output.screenshotBase64, { mediaType: "image/png" }),
+    ]);
+  },
+});
+```
+
+The `toolOutput.text` and `toolOutput.json` builders construct the other two output shapes; hand-written literals remain valid everywhere.
+
+File payloads must be base64 strings — raw bytes (`Uint8Array`, `Buffer`) are rejected because they do not survive eve's durable JSON boundary. Keep payloads small: a content-part image is persisted in session history and re-sent on every subsequent model call, and eve warns above 3 MiB. Sending image parts to a model without vision support fails with that provider's error, the same as image parts in user messages.
+
+When older turns are compacted, file payloads are dropped from the summary and replaced with a text stub naming the file and media type — the model cannot re-see a compacted image. Content parts are for "look at this now"; if the agent may need an artifact again later, write it to the [sandbox](/docs/sandbox) and return its path.
+
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before returning them.
 
 ## What to read next

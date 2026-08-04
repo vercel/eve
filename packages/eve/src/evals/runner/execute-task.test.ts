@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { stampTestEvents } from "#internal/testing/events.js";
 import { executeTask } from "#evals/runner/execute-task.js";
 import type { EveEval, EveEvalContext } from "#evals/types.js";
 import { createEvalTargetHandle } from "#evals/target.js";
@@ -25,6 +26,23 @@ function createTestEval(test: (t: EveEvalContext) => unknown, id = "test-eval"):
 }
 
 describe("executeTask", () => {
+  it("settles when an eval ignores its timeout signal", async () => {
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(
+        async () =>
+          await new Promise<void>(() => {
+            // Deliberately never settles.
+          }),
+        "timeout",
+      ),
+      timeoutMs: 1,
+    });
+
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+  });
+
   it("exposes a sleep helper with a one-second default", async () => {
     vi.useFakeTimers();
     let settled = false;
@@ -596,17 +614,17 @@ describe("executeTask", () => {
 });
 
 function createScriptedServer(
-  turns: readonly { events: readonly HandleMessageStreamEvent[]; sessionId: string }[],
+  turns: readonly { events: readonly UnstampedMessageStreamEvent[]; sessionId: string }[],
   options: {
     readonly cancelStatus?: "accepted" | "no_active_turn";
     readonly streams?: readonly {
-      readonly events: readonly HandleMessageStreamEvent[];
+      readonly events: readonly UnstampedMessageStreamEvent[];
       readonly sessionId: string;
     }[];
   } = {},
 ) {
   const pendingTurns = [...turns];
-  const streamQueues = new Map<string, HandleMessageStreamEvent[][]>();
+  const streamQueues = new Map<string, UnstampedMessageStreamEvent[][]>();
   const posts: Array<{ body: unknown; method: string; url: string }> = [];
   const cancels: string[] = [];
 
@@ -666,12 +684,12 @@ function createScriptedServer(
   };
 }
 
-function streamResponse(events: readonly HandleMessageStreamEvent[]): Response {
+function streamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
-        for (const event of events) {
+        for (const event of stampTestEvents(events)) {
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         }
         controller.close();
@@ -680,26 +698,26 @@ function streamResponse(events: readonly HandleMessageStreamEvent[]): Response {
   );
 }
 
-function turnStarted(turnId: string): HandleMessageStreamEvent {
+function turnStarted(turnId: string): UnstampedMessageStreamEvent {
   return { data: { sequence: 0, turnId }, type: "turn.started" };
 }
 
-function turnCompleted(turnId: string): HandleMessageStreamEvent {
+function turnCompleted(turnId: string): UnstampedMessageStreamEvent {
   return { data: { sequence: 3, turnId }, type: "turn.completed" };
 }
 
-function sessionWaiting(continuationToken = "eve:session_1"): HandleMessageStreamEvent {
+function sessionWaiting(continuationToken = "eve:session_1"): UnstampedMessageStreamEvent {
   return {
     data: { continuationToken, wait: "next-user-message" },
     type: "session.waiting",
   };
 }
 
-function sessionCompleted(): HandleMessageStreamEvent {
+function sessionCompleted(): UnstampedMessageStreamEvent {
   return { type: "session.completed" };
 }
 
-function messageCompleted(message: string, turnId: string): HandleMessageStreamEvent {
+function messageCompleted(message: string, turnId: string): UnstampedMessageStreamEvent {
   return {
     data: { finishReason: "stop", message, sequence: 1, stepIndex: 0, turnId },
     type: "message.completed",
@@ -710,7 +728,7 @@ function inputRequested(
   turnId: string,
   requestId: string,
   toolName: string,
-): HandleMessageStreamEvent {
+): UnstampedMessageStreamEvent {
   return {
     data: {
       requests: [
@@ -718,6 +736,7 @@ function inputRequested(
           action: { callId: "call_1", input: { command: "pwd" }, kind: "tool-call", toolName },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Approve" },
             { id: "deny", label: "Deny" },
@@ -734,7 +753,11 @@ function inputRequested(
   };
 }
 
-function actionResult(turnId: string, toolName: string, output: string): HandleMessageStreamEvent {
+function actionResult(
+  turnId: string,
+  toolName: string,
+  output: string,
+): UnstampedMessageStreamEvent {
   return {
     data: {
       result: { callId: "call_1", kind: "tool-result", output, toolName },
@@ -751,7 +774,7 @@ function actionsRequested(
   turnId: string,
   toolName: string,
   callId = "call_weather",
-): HandleMessageStreamEvent {
+): UnstampedMessageStreamEvent {
   return {
     data: {
       actions: [{ callId, input: { city: "Lisbon" }, kind: "tool-call", toolName }],
@@ -767,7 +790,7 @@ function subagentCalled(
   turnId: string,
   childSessionId: string,
   name: string,
-): HandleMessageStreamEvent {
+): UnstampedMessageStreamEvent {
   return {
     data: {
       callId: "call_subagent",

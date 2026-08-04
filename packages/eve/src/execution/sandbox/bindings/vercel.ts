@@ -9,6 +9,7 @@ import type {
   SandboxProcess,
   SandboxReadFileOptions,
   SandboxRemovePathOptions,
+  SandboxSession,
   SandboxSpawnOptions,
   SandboxWriteFileOptions,
 } from "#shared/sandbox-session.js";
@@ -42,7 +43,7 @@ import {
 } from "#execution/sandbox/bindings/vercel-errors.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
 import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
-import { writeSandboxSeedFiles } from "#execution/sandbox/bindings/local-backend-utils.js";
+import { resolveSandboxModelPath } from "#shared/skill-paths.js";
 import type {
   VercelCreateOptions,
   VercelModule,
@@ -320,7 +321,11 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
     createVercelNetworkPolicySetter(sandbox),
   );
 
-  await writeSandboxSeedFiles(templateSession, input.seedFiles);
+  await writeVercelSandboxSeedFiles({
+    sandbox,
+    seedFiles: input.seedFiles,
+    session: templateSession,
+  });
 
   if (input.bootstrap !== undefined) {
     input.log?.("running sandbox bootstrap");
@@ -519,6 +524,28 @@ function createVercelInternalSandboxSession(
       });
     },
   };
+}
+
+async function writeVercelSandboxSeedFiles(input: {
+  readonly sandbox: VercelSandbox;
+  readonly seedFiles: ReadonlyArray<SandboxSeedFile>;
+  readonly session: SandboxSession;
+}): Promise<void> {
+  if (input.seedFiles.length === 0) {
+    return;
+  }
+
+  const files = await Promise.all(
+    input.seedFiles.map(async (file) => ({
+      content: typeof file.content === "string" ? Buffer.from(file.content) : file.content,
+      path: await resolveSandboxModelPath({
+        path: file.path,
+        sandbox: input.session,
+      }),
+    })),
+  );
+
+  await input.sandbox.writeFiles(files);
 }
 
 function resolveVercelSandboxPath(path: string): string {

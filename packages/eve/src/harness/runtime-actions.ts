@@ -1,9 +1,13 @@
 import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
-import { createActionResultEvent, type HandleMessageStreamEvent } from "#protocol/message.js";
-import { getRuntimeActionRequestKey, getRuntimeActionResultKey } from "#runtime/actions/keys.js";
+import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
+import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
+import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#harness/handles/query.js";
+import { settleAgentTurn } from "#harness/handles/transitions.js";
 import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
 import {
   accumulateSessionUsage,
@@ -22,6 +26,24 @@ const PENDING_RUNTIME_ACTION_BATCH_KEY = "eve.runtime.pendingActionBatch";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
+const ZERO_TOKEN_USAGE: TokenUsage = {
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+};
+
+/**
+ * Usage from a subagent result. Only `child`-origin results carry usage;
+ * parent-synthesized dispatch failures never do, and their type omits the
+ * field entirely.
+ */
+function readSubagentResultUsage(
+  result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
+): TokenUsage | undefined {
+  return result.origin === "child" ? result.usage : undefined;
+}
+
 /**
  * Serializable event coordinates for one pending runtime-action batch.
  *
@@ -37,14 +59,12 @@ interface PendingRuntimeActionEventMetadata {
 /**
  * Serializable pending runtime-action batch stored on `session.state`.
  *
- * `childContinuationTokens` lets the harness clear local proxy-input entries
- * on result resolution. `childSessionIds` lets the turn workflow cancel every
- * successfully adopted local or remote child before dropping the batch.
+ * Child ownership does not live here: the agent handle store records every
+ * dispatched child (from before its start side effect) and is the sole
+ * authority for continuing, settling, and cancelling children.
  */
 export interface PendingRuntimeActionBatch {
   readonly actions: readonly RuntimeActionRequest[];
-  readonly childContinuationTokens?: Readonly<Record<string, string>>;
-  readonly childSessionIds?: Readonly<Record<string, string>>;
   readonly event: PendingRuntimeActionEventMetadata;
   readonly responseMessages: readonly ModelMessage[];
 }
@@ -117,49 +137,6 @@ export function setPendingRuntimeActionBatch(input: {
   return { ...input.session, state };
 }
 
-type PendingSubagentChildIdentity =
-  | {
-      readonly continuationToken: string;
-      readonly kind: "local";
-      readonly sessionId: string;
-    }
-  | {
-      readonly kind: "remote";
-      readonly sessionId: string;
-    };
-
-/** Records one successfully dispatched child's durable identities. */
-export function recordPendingSubagentChild(input: {
-  readonly callId: string;
-  readonly child: PendingSubagentChildIdentity;
-  readonly session: HarnessSession;
-}): HarnessSession {
-  const batch = getPendingRuntimeActionBatch(input.session.state);
-
-  if (batch === undefined) {
-    return input.session;
-  }
-
-  const state = { ...input.session.state };
-  state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
-    ...batch,
-    ...(input.child.kind === "local"
-      ? {
-          childContinuationTokens: {
-            ...batch.childContinuationTokens,
-            [input.callId]: input.child.continuationToken,
-          },
-        }
-      : {}),
-    childSessionIds: {
-      ...batch.childSessionIds,
-      [input.callId]: input.child.sessionId,
-    },
-  } satisfies PendingRuntimeActionBatch;
-
-  return { ...input.session, state };
-}
-
 /**
  * Returns the stable ordered runtime-action results for the current pending
  * batch when every action has a matching result. Unknown and duplicate results
@@ -175,50 +152,22 @@ function resolveReadyRuntimeActionResults(input: {
     return undefined;
   }
 
-  return resolveRuntimeActionResultsForBatch({ batch, results: input.results });
+  return resolveRuntimeActionResultsForBatch({
+    batch,
+    results: input.results,
+    state: input.session.state,
+  });
 }
 
 function resolveRuntimeActionResultsForBatch(input: {
   readonly batch: PendingRuntimeActionBatch;
   readonly results: readonly RuntimeActionResult[];
+  readonly state: SessionStateMap | undefined;
 }): RuntimeActionResult[] | undefined {
   return resolveRuntimeActionResultsForKeys({
     pendingKeys: input.batch.actions.map((action) => getRuntimeActionRequestKey(action)),
-    results: input.results,
+    results: input.results.filter((result) => isResultBoundToRunningHandle(input.state, result)),
   });
-}
-
-/** Returns results in pending-key order once every requested action has completed. */
-export function resolveRuntimeActionResultsForKeys(input: {
-  readonly pendingKeys: readonly string[];
-  readonly results: readonly RuntimeActionResult[];
-}): RuntimeActionResult[] | undefined {
-  const pendingKeySet = new Set(input.pendingKeys);
-  const resultsByKey = new Map<string, RuntimeActionResult>();
-
-  for (const result of input.results) {
-    const key = getRuntimeActionResultKey(result);
-
-    if (!pendingKeySet.has(key)) {
-      continue;
-    }
-
-    resultsByKey.set(key, result);
-  }
-
-  const orderedResults: RuntimeActionResult[] = [];
-
-  for (const key of input.pendingKeys) {
-    const result = resultsByKey.get(key);
-
-    if (result === undefined) {
-      return undefined;
-    }
-
-    orderedResults.push(result);
-  }
-
-  return orderedResults;
 }
 
 /**
@@ -268,7 +217,7 @@ export async function resolvePendingRuntimeActions(input: {
             subagentName: result.subagentName,
           },
           type: "subagent.completed",
-        } satisfies Extract<HandleMessageStreamEvent, { type: "subagent.completed" }>);
+        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
       }
 
       await input.emit(
@@ -282,42 +231,66 @@ export async function resolvePendingRuntimeActions(input: {
     }
   }
 
-  const state = { ...input.session.state };
-  delete state[PENDING_RUNTIME_ACTION_BATCH_KEY];
-
-  let nextSession: HarnessSession = {
-    ...input.session,
-    state: Object.keys(state).length > 0 ? state : undefined,
-  };
-
-  // Clear proxy-input entries for completed children so future
+  // Settle each bound child result against its running handle. Task-mode
+  // children are always terminal, so every settled handle is deleted; the
+  // proxy-input entry keyed by the child's continuation token is cleared
+  // first (the handle is the only record of that token) so future
   // deliveries don't route responses to a dead child.
-  const childTokens = batch.childContinuationTokens;
-  if (childTokens !== undefined) {
-    for (const result of readyResults) {
-      if (result.kind !== "subagent-result") {
-        continue;
-      }
-
-      const childToken = childTokens[result.callId];
-      if (childToken !== undefined) {
-        nextSession = clearProxyInputRequestsForChild(nextSession, childToken);
-      }
+  let nextSession: HarnessSession = input.session;
+  for (const result of readyResults) {
+    // Dispatch failures never settle handles: the dispatch step already
+    // rejected (deleted) the handle when it synthesized the failure.
+    if (result.kind !== "subagent-result" || result.origin !== "child") {
+      continue;
+    }
+    const handle = findRunningAgentHandle(nextSession.state, { callId: result.callId });
+    if (handle === undefined) {
+      continue;
+    }
+    if (handle.address.continuationToken !== undefined) {
+      nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
+    }
+    const settled = settleAgentTurn(nextSession, {
+      operationId: handle.operation.id,
+      outcome: {
+        kind: "terminal",
+        result:
+          result.isError === true
+            ? { error: result.output, kind: "failed" }
+            : { kind: "succeeded", output: result.output },
+        usageDelta: result.usage ?? ZERO_TOKEN_USAGE,
+      },
+    });
+    if (settled.kind === "settled") {
+      nextSession = settled.session;
     }
   }
 
+  const state = { ...nextSession.state };
+  delete state[PENDING_RUNTIME_ACTION_BATCH_KEY];
+  nextSession = {
+    ...nextSession,
+    state: Object.keys(state).length > 0 ? state : undefined,
+  };
+
   // Draw completed child spend down against the parent's session totals so
   // the session token limits and the remaining-quota budget granted to later
-  // delegations account for what the tree has already spent.
+  // delegations account for what the tree has already spent. Only
+  // child-produced results carry usage; parent-side dispatch failures
+  // never do.
   for (const result of readyResults) {
-    if (result.kind !== "subagent-result" || result.usage === undefined) {
+    if (result.kind !== "subagent-result") {
+      continue;
+    }
+    const usage = readSubagentResultUsage(result);
+    if (usage === undefined) {
       continue;
     }
     nextSession = setTurnUsageState(
       nextSession,
       accumulateSessionUsage({
         previous: getTurnUsageState(nextSession.state),
-        usage: result.usage,
+        usage,
       }),
     );
   }
@@ -358,7 +331,6 @@ export async function resolvePendingRuntimeActions(input: {
       role: "tool",
     });
   }
-
   return {
     messages,
     outcome: "resolved",
@@ -420,6 +392,10 @@ export function createRuntimeActionRequestFromToolCall(input: {
  * Coerces an AI SDK tool-call `input` into the runtime-action `JsonObject`
  * contract, throwing a `TypeError` (with the original as `cause`) that names
  * the offending tool when the payload is not a JSON object.
+ *
+ * String inputs are parsed as JSON first: the model protocol carries tool
+ * arguments as text, and provider-executed tool calls can surface that raw
+ * string — or an empty string when the model sends no arguments.
  */
 export function resolveToolCallInputObject(
   value: unknown,
@@ -429,8 +405,12 @@ export function resolveToolCallInputObject(
     return {};
   }
 
+  if (typeof value === "string" && value.trim() === "") {
+    return {};
+  }
+
   try {
-    return parseJsonObject(value);
+    return parseJsonObject(typeof value === "string" ? parseJsonStringInput(value) : value);
   } catch (error) {
     // This module is bundled into the workflow driver body, which cannot
     // import the logger, so enrich the error (and keep the original as
@@ -441,6 +421,10 @@ export function resolveToolCallInputObject(
       { cause: error },
     );
   }
+}
+
+function parseJsonStringInput(value: string): unknown {
+  return JSON.parse(value);
 }
 
 function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output"] {

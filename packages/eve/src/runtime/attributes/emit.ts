@@ -1,6 +1,6 @@
 // Force the `__builtin_set_attributes` step to register itself when the
 // emit helper is loaded. The workflow-body shim's
-// `experimental_setAttributes` dispatches `__builtin_set_attributes` via
+// `setAttributes` dispatches `__builtin_set_attributes` via
 // the runtime step registry; if no module ever imports the builtins file
 // (e.g. in integration tests that bypass the Nitro entry), the dispatch
 // fails with "Step '__builtin_set_attributes' is not registered". Side
@@ -20,7 +20,7 @@ export {
  * stop warning to avoid drowning logs when the workflow runtime is
  * misconfigured or the world adapter is missing
  * `experimentalSetAttributes`. Mirrors the SDK's own one-shot warning
- * for unsupported worlds in `experimental_setAttributes`.
+ * for unsupported worlds in `setAttributes`.
  */
 let WARNED_ABOUT_TAG_FAILURE = false;
 
@@ -65,8 +65,8 @@ export async function setEveAttributes(attrs: Record<string, EveAttributeValue>)
     // compiled core into emit.js's static graph and defeat the dynamic
     // chunking those modules rely on — the build emits an
     // `INEFFECTIVE_DYNAMIC_IMPORT` warning and `bin-build-output` fails.
-    const { experimental_setAttributes } = await import("#compiled/@workflow/core/index.js");
-    await experimental_setAttributes(normalized, { allowReservedAttributes: true });
+    const { setAttributes } = await import("#compiled/@workflow/core/index.js");
+    await setAttributes(normalized, { allowReservedAttributes: true });
   } catch (error) {
     if (!WARNED_ABOUT_TAG_FAILURE) {
       WARNED_ABOUT_TAG_FAILURE = true;

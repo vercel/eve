@@ -1,6 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Braintrust, type BraintrustReporterConfig } from "#evals/reporters/index.js";
-import type { EveEvalResult, EveEvalTarget } from "#evals/types.js";
+import type { EveEval, EveEvalResult, EveEvalTarget } from "#evals/types.js";
+
+const braintrustMocks = vi.hoisted(() => ({
+  close: vi.fn(),
+  flush: vi.fn(),
+  init: vi.fn(),
+  log: vi.fn(),
+  summarize: vi.fn(),
+}));
+
+vi.mock("braintrust", () => ({
+  flush: braintrustMocks.flush,
+  init: braintrustMocks.init,
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,11 +75,28 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
   };
 }
 
+function makeEval(): EveEval {
+  return {
+    _tag: "EveEval",
+    id: "eval-1",
+    test: async () => {},
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("Braintrust", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    braintrustMocks.init.mockResolvedValue({
+      close: braintrustMocks.close,
+      log: braintrustMocks.log,
+      summarize: braintrustMocks.summarize,
+    });
+  });
+
   it("creates a reporter", () => {
     const reporter = Braintrust(makeConfig());
     expect(reporter).toBeDefined();
@@ -97,5 +127,76 @@ describe("Braintrust", () => {
       skipped: 0,
       errored: 0,
     });
+  });
+
+  it("uploads complete failed assertion diagnostics", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    reporter.onEvalComplete(
+      makeEvalResult({
+        assertions: [
+          {
+            message: 'prompt: "Name the source."',
+            metadata: {
+              criteria: "cites a source",
+              input: "Name the source.",
+              rationale: "No source was cited.",
+            },
+            name: "judge.autoevals.closedQA",
+            passed: false,
+            score: 0,
+            severity: "soft",
+            threshold: 0.8,
+          },
+        ],
+        verdict: "scored",
+      }),
+    );
+
+    expect(braintrustMocks.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          eveFailedAssertions: [
+            {
+              message: 'prompt: "Name the source."',
+              metadata: {
+                criteria: "cites a source",
+                input: "Name the source.",
+                rationale: "No source was cited.",
+              },
+              name: "judge.autoevals.closedQA",
+              passed: false,
+              score: 0,
+              severity: "soft",
+              threshold: 0.8,
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("keeps duplicate assertion scores under stable keys", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    reporter.onEvalComplete(
+      makeEvalResult({
+        assertions: [
+          { name: "similarity", passed: true, score: 0.8, severity: "soft" },
+          { name: "similarity", passed: true, score: 0.6, severity: "soft" },
+        ],
+      }),
+    );
+
+    expect(braintrustMocks.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scores: {
+          similarity: 0.8,
+          "similarity#2": 0.6,
+        },
+      }),
+    );
   });
 });

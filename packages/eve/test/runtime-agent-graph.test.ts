@@ -6,6 +6,7 @@ import {
 } from "../src/compiler/manifest.js";
 import type { CompiledModuleMap } from "../src/compiler/module-map.js";
 import { defineAgent } from "../src/public/definitions/agent.js";
+import { defineDynamic } from "../src/public/definitions/tool.js";
 import { createNodeHarnessTools } from "../src/execution/node-step.js";
 import { TEST_DEFAULT_MODEL_ID } from "../src/internal/testing/app-harness.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "../src/runtime/graph.js";
@@ -114,6 +115,88 @@ describe("resolveRuntimeAgentGraph", () => {
       graph.nodesByNodeId.get("subagents/researcher")?.sandboxRegistry.sandbox?.definition.backend
         .name,
     ).toBe("vercel");
+  });
+
+  it("keeps dynamic subagents out of the static toolset and resolves their handlers", async () => {
+    const dynamic = defineDynamic({
+      events: {
+        "session.started": () =>
+          defineAgent({
+            description: "Research the request.",
+            model: TEST_DEFAULT_MODEL_ID,
+          }),
+      },
+    });
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "root",
+      },
+      subagentEdges: [
+        {
+          childNodeId: "subagents/researcher",
+          parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
+        },
+      ],
+      subagents: [
+        {
+          agent: createCompiledAgentNodeManifest({
+            agentRoot: "/app/agent/subagents/researcher",
+            appRoot: "/app",
+            config: {
+              model: {
+                id: TEST_DEFAULT_MODEL_ID,
+                routing: { kind: "gateway", target: "openai" },
+              },
+              name: "researcher",
+              source: {
+                logicalPath: "agent.ts",
+                sourceId: "agent-config",
+                sourceKind: "module",
+              },
+            },
+          }),
+          dynamic: { eventNames: ["session.started"] },
+          entryPath: "/app/agent/subagents/researcher/agent.ts",
+          logicalPath: "subagents/researcher",
+          name: "researcher",
+          nodeId: "subagents/researcher",
+          rootPath: "/app/agent/subagents/researcher",
+          sourceId: "subagents/researcher",
+          sourceKind: "module",
+        },
+      ],
+    });
+
+    const graph = await resolveRuntimeAgentGraph({
+      manifest,
+      moduleMap: {
+        nodes: {
+          [ROOT_COMPILED_AGENT_NODE_ID]: { modules: {} },
+          "subagents/researcher": {
+            modules: {
+              "agent-config": { default: dynamic },
+            },
+          },
+        },
+      },
+    });
+
+    expect(graph.root.turnAgent.tools.some((tool) => tool.name === "researcher")).toBe(false);
+    expect(graph.root.subagentRegistry.dynamicNodeIds).toContain("subagents/researcher");
+    expect(graph.root.subagentRegistry.dynamicResolvers).toMatchObject([
+      {
+        eventNames: ["session.started"],
+        name: "researcher",
+        nodeId: "subagents/researcher",
+      },
+    ]);
+    expect(graph.nodesByNodeId.has("subagents/researcher")).toBe(true);
   });
 
   it("resolves recursive local subagents into a cached runtime graph bundle", async () => {
@@ -320,7 +403,7 @@ describe("resolveRuntimeAgentGraph", () => {
           "Fetch a webpage and return its content in the requested format. Use this to retrieve and analyze content from URLs.",
           "",
           "Usage notes:",
-          "- The URL must be a fully-formed valid URL starting with http:// or https://",
+          "- The URL must be a fully-formed valid URL starting with https://",
           "- HTML responses are automatically converted to markdown or plain text based on the requested format",
           '- Format options: "markdown" (default), "text", or "html"',
           "- Default timeout is 30 seconds (max 120 seconds)",
@@ -407,7 +490,7 @@ describe("resolveRuntimeAgentGraph", () => {
           "Fetch a webpage and return its content in the requested format. Use this to retrieve and analyze content from URLs.",
           "",
           "Usage notes:",
-          "- The URL must be a fully-formed valid URL starting with http:// or https://",
+          "- The URL must be a fully-formed valid URL starting with https://",
           "- HTML responses are automatically converted to markdown or plain text based on the requested format",
           '- Format options: "markdown" (default), "text", or "html"',
           "- Default timeout is 30 seconds (max 120 seconds)",

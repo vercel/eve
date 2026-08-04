@@ -31,19 +31,25 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 export async function compileAgentConfig(
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
+  options: {
+    readonly definition?: unknown;
+  } = {},
 ): Promise<CompiledAgentDefinition> {
   const configModule = manifest.configModule;
   const configModulePath =
     configModule === undefined ? undefined : formatAgentConfigModulePath(manifest, configModule);
+  const hasInjectedDefinition = Object.hasOwn(options, "definition");
   const definition = normalizeAgentDefinition(
-    configModule === undefined
-      ? { model: DEFAULT_AGENT_MODEL_ID }
-      : await loadModuleBackedDefinition({
-          agentRoot: manifest.agentRoot,
-          displayPath: configModulePath!,
-          kind: "agent config",
-          source: configModule,
-        }),
+    hasInjectedDefinition
+      ? options.definition
+      : configModule === undefined
+        ? { model: DEFAULT_AGENT_MODEL_ID }
+        : await loadModuleBackedDefinition({
+            agentRoot: manifest.agentRoot,
+            displayPath: configModulePath!,
+            kind: "agent config",
+            source: configModule,
+          }),
     configModule === undefined
       ? `Expected the default agent config to match the public eve shape.`
       : `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
@@ -129,6 +135,7 @@ export async function compileAgentConfig(
     compiledConfig.limits = {
       maxInputTokensPerSession: definition.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
+      sessionTimeoutMs: definition.limits.sessionTimeoutMs,
     };
   }
 
@@ -168,6 +175,10 @@ function normalizeExperimentalDefinition(
   }
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
+
+  if (experimental.subagentPersistentSessions !== undefined) {
+    compiledExperimental.subagentPersistentSessions = experimental.subagentPersistentSessions;
+  }
 
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {

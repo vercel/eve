@@ -3,6 +3,7 @@
  * the orchestrator passes to `runVendor`. Adding a new vendored package
  * means writing a new per-package file and importing it here.
  */
+import acpSdk from "./@agentclientprotocol/sdk.mjs";
 import anthropic from "./@ai-sdk/anthropic.mjs";
 import google from "./@ai-sdk/google.mjs";
 import mcp from "./@ai-sdk/mcp.mjs";
@@ -14,11 +15,14 @@ import providerUtils from "./@ai-sdk/provider-utils.mjs";
 import chatAdapterSlack from "./@chat-adapter/slack.mjs";
 import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
 import chatAdapterTwilio from "./@chat-adapter/twilio.mjs";
+import photonChatAdapterIMessage from "./@photon-ai/chat-adapter-imessage.mjs";
 
 import opentelemetryApi from "./@opentelemetry/api.mjs";
+import opentelemetryOtlpTransformer from "./@opentelemetry/otlp-transformer.mjs";
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
 import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
+import vercelOtel from "./@vercel/otel.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
 import workflowCore from "./@workflow/core.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
@@ -40,11 +44,13 @@ import jsonSchema from "./json-schema.mjs";
 import marked from "./marked.mjs";
 import picocolors from "./picocolors.mjs";
 import semver from "./semver.mjs";
+import shadcnRegistry from "./shadcn-registry.mjs";
 import turndown from "./turndown.mjs";
 import zod from "./zod.mjs";
 import zodValidationError from "./zod-validation-error.mjs";
 
 export const MODULES = [
+  acpSdk,
   anthropic,
   chat,
   chatAdapterSlack,
@@ -64,15 +70,19 @@ export const MODULES = [
   mcp,
   openai,
   opentelemetryApi,
+  opentelemetryOtlpTransformer,
   otel,
+  photonChatAdapterIMessage,
   picocolors,
   provider,
   providerUtils,
   semver,
+  shadcnRegistry,
   standardSchemaSpec,
   turndown,
   vercelDetectAgent,
   vercelOidc,
+  vercelOtel,
   vercelSandbox,
   workflowCore,
   workflowErrors,

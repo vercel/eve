@@ -7,11 +7,6 @@ import type { DevelopmentGeneration } from "#internal/nitro/development-generati
 import type { DevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import type { DevelopmentWorkspaceExtension } from "#internal/nitro/host/dev-workspace-extensions.js";
 
-/**
- * Route surface included in one programmatic Nitro host build.
- */
-export type NitroBuildSurface = "all" | "app" | "flow";
-
 /** Options for one production application build. */
 export interface ApplicationBuildOptions {
   /** Absolute path for an optional machine-readable profile of a successful build. */
@@ -68,6 +63,8 @@ export interface DevelopmentServerOptions {
   readonly existing?: "attach-if-unconfigured" | "reject";
   readonly host?: string;
   readonly onBootProgress?: DevBootProgressReporter;
+  /** Parent stream that receives a supervised development child's stdout. */
+  readonly output?: "stderr" | "stdout";
   readonly port?: number;
 }
 

@@ -23,6 +23,7 @@ const typeLabel = {
   channel: "Channel",
   connection: "Connection",
   extension: "Extension",
+  instrumentation: "Instrumentation",
 } as const;
 
 const languages = Object.keys(translations);
@@ -48,7 +49,7 @@ export const generateMetadata = async ({
 
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <section className="flex flex-col gap-2 border-t py-8 first:border-t-0 first:pt-0">
-    <h2 className="font-semibold text-gray-1000 text-xl tracking-tight">{title}</h2>
+    <h2 className="text-gray-1000 text-heading-20">{title}</h2>
     {children}
   </section>
 );
@@ -86,9 +87,7 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
         </span>
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3">
-            <h1 className="font-bold text-4xl text-gray-1000 tracking-tighter">
-              {integration.name}
-            </h1>
+            <h1 className="text-gray-1000 text-heading-32">{integration.name}</h1>
             <span className="rounded-full border px-2.5 py-0.5 text-gray-900 text-xs">
               {typeLabel[integration.type]}
             </span>

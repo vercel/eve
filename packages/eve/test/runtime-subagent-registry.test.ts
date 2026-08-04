@@ -18,7 +18,7 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
 } as const;
 
 describe("createRuntimeSubagentRegistry", () => {
-  it("lowers local subagent inputs into serializable model-visible tools with a uniform message schema", () => {
+  it("lowers local subagent inputs into serializable model-visible tools with a uniform messaging schema", () => {
     const registry = createRuntimeSubagentRegistry({
       subagents: [
         createResolvedRuntimeSubagentNode({

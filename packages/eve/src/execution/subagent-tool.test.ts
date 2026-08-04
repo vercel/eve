@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
 import { buildSubagentRunInput } from "#execution/subagent-tool.js";
@@ -206,6 +206,28 @@ describe("buildSubagentRunInput", () => {
     });
 
     expect(runInput.input.outputSchema).toEqual(schema);
+  });
+
+  it("hands the parent's trace window down to the child, and omits it when absent", () => {
+    const traceContext = { spanId: "2".repeat(16), traceFlags: 1, traceId: "1".repeat(32) };
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      parentTraceContext: traceContext,
+      session: makeSession(),
+    });
+    expect(runInput.parentTraceContext).toEqual(traceContext);
+
+    const untraced = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+    });
+    expect(untraced.runInput.parentTraceContext).toBeUndefined();
   });
 
   it("passes a resolved local subagent description into the child message", () => {

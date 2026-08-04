@@ -13,14 +13,15 @@ import {
   getAllFrameworkChannelNames,
   getFrameworkChannelDefinitions,
 } from "#runtime/framework-channels/index.js";
-import { createConnectionSearchResolver } from "#runtime/framework-tools/connection-search-dynamic.js";
 import {
   getAllFrameworkToolNames,
+  getFrameworkDynamicToolResolvers,
   getFrameworkToolDefinitions,
 } from "#runtime/framework-tools/index.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
+import { resolveDynamicSubagentDefinition } from "#runtime/resolve-dynamic-subagent.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
@@ -29,6 +30,7 @@ import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import type {
   ResolvedChannelDefinition,
+  ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
   ResolvedRuntimeRemoteAgentNode,
   ResolvedRuntimeSubagentNode,
@@ -134,10 +136,8 @@ async function resolveRuntimeAgentNode(
     moduleMap: input.moduleMap,
     nodeId: input.nodeId,
   });
-  const hasConnections = agent.connections.length > 0;
   const frameworkTools = getFrameworkToolDefinitions({
     authoredSkills: agent.skills,
-    hasConnections,
   });
   const frameworkToolNames = new Set(frameworkTools.map((t) => t.name));
   const allFrameworkToolNames = getAllFrameworkToolNames();
@@ -228,12 +228,10 @@ async function resolveRuntimeAgentNode(
       subagentNodesById: input.subagentNodesById,
     }),
   });
-  const resolvedAgent = hasConnections
-    ? {
-        ...agent,
-        dynamicToolResolvers: [...agent.dynamicToolResolvers, createConnectionSearchResolver()],
-      }
-    : agent;
+  const resolvedAgent = {
+    ...agent,
+    dynamicToolResolvers: [...agent.dynamicToolResolvers, ...getFrameworkDynamicToolResolvers()],
+  };
 
   const node: ResolvedAgentGraphBundle["root"] = {
     agent: resolvedAgent,
@@ -311,8 +309,33 @@ async function resolveRuntimeSubagent(input: {
   readonly sourceRef: CompiledSubagentNode;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<ResolvedRuntimeSubagentNode> {
+  const dynamicSource = input.sourceRef.agent.config.source;
+  if (input.sourceRef.dynamic !== undefined && dynamicSource === undefined) {
+    throw new ResolveRuntimeAgentGraphError(
+      `Dynamic subagent "${input.sourceRef.logicalPath}" is missing its agent config source.`,
+      {
+        nodeId: toRuntimeNodeId(input.sourceRef.nodeId),
+        sourceId: input.sourceRef.sourceId,
+      },
+    );
+  }
+  const variant:
+    | { readonly description: string; readonly dynamic?: never }
+    | { readonly description?: never; readonly dynamic: ResolvedDynamicSubagentDefinition } =
+    input.sourceRef.dynamic === undefined
+      ? { description: input.sourceRef.description }
+      : {
+          dynamic: await resolveDynamicSubagentDefinition({
+            definition: {
+              ...dynamicSource!,
+              ...input.sourceRef.dynamic,
+            },
+            moduleMap: input.moduleMap,
+            nodeId: input.sourceRef.nodeId,
+          }),
+        };
   const resolvedSubagent: ResolvedRuntimeSubagentNode = {
-    description: input.sourceRef.description,
+    ...variant,
     kind: "subagent",
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,
@@ -352,6 +375,7 @@ async function resolveRuntimeRemoteAgent(input: {
   const resolvedRemoteAgent: {
     auth?: ResolvedRuntimeRemoteAgentNode["auth"];
     description: string;
+    forwardPrincipal?: boolean;
     headers?: HeadersValue;
     kind: "remote";
     logicalPath: string;
@@ -381,6 +405,10 @@ async function resolveRuntimeRemoteAgent(input: {
 
   if (typeof resolvedRecord.auth === "function") {
     resolvedRemoteAgent.auth = resolvedRecord.auth as ResolvedRuntimeRemoteAgentNode["auth"];
+  }
+
+  if (resolvedRecord.forwardPrincipal === true) {
+    resolvedRemoteAgent.forwardPrincipal = true;
   }
 
   const headers = resolveRemoteAgentHeaders(resolvedRecord.headers);

@@ -2,6 +2,11 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#setup/scaffold/index.js";
+import {
+  CONNECT_MUTATION_TIMEOUT_MS,
+  replaceConnectTrigger,
+  type ConnectTriggerAttachmentResult,
+} from "#setup/connect-provisioning.js";
 import { createPromptCommandOutput, type ChannelSetupLog } from "#setup/cli/index.js";
 import { captureVercel, runVercel } from "#setup/primitives/run-vercel.js";
 import { z } from "zod";
@@ -9,7 +14,6 @@ import { z } from "zod";
 import {
   parseSlackConnectorDetails,
   parseSlackConnectors,
-  pickSlackConnector,
   type RawSlackConnector,
   type SlackConnectorDetails,
   type SlackConnectorRef,
@@ -18,7 +22,6 @@ import {
 } from "./slack-connect.js";
 
 export const CONNECT_LOOKUP_TIMEOUT_MS = 60_000;
-export const CONNECT_MUTATION_TIMEOUT_MS = 2 * 60_000;
 
 const VercelProjectLinkSchema = z.object({
   projectId: z.string().min(1),
@@ -94,11 +97,16 @@ export async function readProjectLink(projectRoot: string): Promise<VercelProjec
 }
 
 export type SlackConnectorLookup =
-  | { state: "found"; connector: SlackConnectorRef; connectorUids: ReadonlySet<string> }
+  | {
+      state: "found";
+      connectors: readonly SlackConnectorRef[];
+      preferred?: SlackConnectorRef;
+      connectorUids: ReadonlySet<string>;
+    }
   | { state: "not-found"; connectorUids: ReadonlySet<string> }
   | { state: "failed"; message: string };
 
-/** Resolves the expected (or newest project-attached) Slack connector from the inventory. */
+/** Lists Slack connectors attached to the linked project and identifies the expected UID. */
 export async function findSlackConnector(
   deps: SlackConnectLifecycleDeps,
   projectRoot: string,
@@ -110,10 +118,19 @@ export async function findSlackConnector(
   const list = await listSlackConnectors(deps, projectRoot, onOutput, signal);
   if (list.state === "failed") return list;
   const connectorUids = new Set(list.connectors.map((connector) => connector.uid));
-  const connector = pickSlackConnector(list.body, projectId, expectedUid);
-  return connector === undefined
-    ? { state: "not-found", connectorUids }
-    : { state: "found", connector, connectorUids };
+  if (projectId === undefined) return { state: "not-found", connectorUids };
+  const connectors = list.connectors
+    .filter(
+      (connector): connector is RawSlackConnector & { id: string } =>
+        connector.id !== undefined && connector.projectIds.includes(projectId),
+    )
+    .sort((left, right) => right.createdAt - left.createdAt)
+    .map(({ uid, id }) => ({ uid, id }));
+  if (connectors.length === 0) return { state: "not-found", connectorUids };
+  const preferred = connectors.find((connector) => connector.uid === expectedUid);
+  return preferred === undefined
+    ? { state: "found", connectors, connectorUids }
+    : { state: "found", connectors, preferred, connectorUids };
 }
 
 /**
@@ -122,10 +139,7 @@ export async function findSlackConnector(
  * while an old trigger destination may still exist. A `detach-failed` connector
  * is left in a known-stale state the caller surfaces with manual recovery steps.
  */
-export type SlackConnectorAttachmentResult =
-  | { state: "attached" }
-  | { state: "detach-failed" }
-  | { state: "attach-failed" };
+export type SlackConnectorAttachmentResult = ConnectTriggerAttachmentResult;
 
 /**
  * Replaces the connector's default trigger destination with the eve route:
@@ -140,33 +154,14 @@ export async function attachSlackConnector(
   onOutput: CommandOutput,
   signal?: AbortSignal,
 ): Promise<SlackConnectorAttachmentResult> {
-  const detached = await deps.runVercel(["connect", "detach", ref.uid, "--yes"], {
-    cwd: projectRoot,
+  return replaceConnectTrigger({
+    connectorUid: ref.uid,
+    projectRoot,
+    triggerPath: SLACK_CHANNEL_DEFAULT_ROUTE,
     onOutput,
-    nonInteractive: true,
-    timeoutMs: CONNECT_MUTATION_TIMEOUT_MS,
     signal,
+    deps,
   });
-  if (!detached) return { state: "detach-failed" };
-  const attached = await deps.runVercel(
-    [
-      "connect",
-      "attach",
-      ref.uid,
-      "--triggers",
-      "--trigger-path",
-      SLACK_CHANNEL_DEFAULT_ROUTE,
-      "--yes",
-    ],
-    {
-      cwd: projectRoot,
-      onOutput,
-      nonInteractive: true,
-      timeoutMs: CONNECT_MUTATION_TIMEOUT_MS,
-      signal,
-    },
-  );
-  return attached ? { state: "attached" } : { state: "attach-failed" };
 }
 
 export type SlackWorkspaceLookup =

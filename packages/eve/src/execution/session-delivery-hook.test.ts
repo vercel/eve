@@ -66,6 +66,67 @@ describe("createSessionDeliveryHook", () => {
     ]);
   });
 
+  it("latches a timeout consumed while an active turn owns delivery reads", async () => {
+    const hook = createMockHook({
+      reads: [Promise.resolve(sessionTimeout())],
+      token: "active",
+    });
+    installHooks(hook);
+    const deliveryHook = createSessionDeliveryHook([]);
+
+    await deliveryHook.rekey("active");
+    await expect(deliveryHook.next()).resolves.toEqual(sessionTimeout());
+    deliveryHook.consumeNext();
+
+    expect(deliveryHook.consumeSessionTimeout()).toBe(true);
+    expect(deliveryHook.consumeSessionTimeout()).toBe(false);
+    await deliveryHook.dispose();
+  });
+
+  it("latches a timeout drained from a retired hook during rekey", async () => {
+    const oldHook = createMockHook({
+      reads: [Promise.resolve(sessionTimeout())],
+      token: "old",
+    });
+    const replacementHook = createMockHook({ token: "replacement" });
+    installHooks(oldHook, replacementHook);
+    const deliveryHook = createSessionDeliveryHook([]);
+
+    await deliveryHook.rekey("old");
+    await deliveryHook.rekey("replacement");
+
+    expect(deliveryHook.consumeSessionTimeout()).toBe(true);
+    await deliveryHook.dispose();
+  });
+
+  it("latches compaction requests consumed while a turn owns delivery reads", async () => {
+    const hook = createMockHook({ reads: [Promise.resolve(compact())], token: "active" });
+    installHooks(hook);
+    const deliveryHook = createSessionDeliveryHook([]);
+
+    await deliveryHook.rekey("active");
+    await expect(deliveryHook.next()).resolves.toEqual(compact());
+    deliveryHook.consumeNext();
+
+    expect(deliveryHook.consumeSessionControl()).toBe("compact");
+    expect(deliveryHook.consumeSessionControl()).toBeUndefined();
+    await deliveryHook.dispose();
+  });
+
+  it("latches clear requests consumed while a turn owns delivery reads", async () => {
+    const hook = createMockHook({ reads: [Promise.resolve(clear())], token: "active" });
+    installHooks(hook);
+    const deliveryHook = createSessionDeliveryHook([]);
+
+    await deliveryHook.rekey("active");
+    await expect(deliveryHook.next()).resolves.toEqual(clear());
+    deliveryHook.consumeNext();
+
+    expect(deliveryHook.consumeSessionControl()).toBe("clear");
+    expect(deliveryHook.consumeSessionControl()).toBeUndefined();
+    await deliveryHook.dispose();
+  });
+
   it("disposes a conflicting candidate without releasing the active hook", async () => {
     const oldHook = createMockHook({ token: "old" });
     const candidateHook = createMockHook({
@@ -233,6 +294,18 @@ function delivery(message: string): IteratorResult<HookPayload> {
 
 function deliveryPayload(message: string): DeliverHookPayload {
   return { kind: "deliver", payloads: [{ message }] };
+}
+
+function sessionTimeout(): IteratorResult<HookPayload> {
+  return { done: false, value: { kind: "session-timeout" } };
+}
+
+function compact(): IteratorResult<HookPayload> {
+  return { done: false, value: { kind: "compact" } };
+}
+
+function clear(): IteratorResult<HookPayload> {
+  return { done: false, value: { kind: "clear" } };
 }
 
 function createDeferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void } {

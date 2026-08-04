@@ -28,6 +28,18 @@ export const EVE_CREATE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;
 export const EVE_RESET_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session/reset`;
 
 /**
+ * Stable framework-owned route for compacting the session that owns a client
+ * continuation token. The request body supplies the channel-local token.
+ */
+export const EVE_COMPACT_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session/compact`;
+
+/**
+ * Stable framework-owned route for clearing the model history of the session
+ * that owns a client continuation token.
+ */
+export const EVE_CLEAR_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session/clear`;
+
+/**
  * Stable framework-owned route pattern for sending a message to an existing
  * session.
  */
@@ -75,6 +87,12 @@ export const EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/dev/run
  * returning the current revision.
  */
 export const EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/rebuild`;
+
+/** Dev-only route that pauses authored-source rebuilding while a setup subprocess owns the terminal. */
+export const EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/suspend`;
+
+/** Dev-only route that resumes authored-source rebuilding after setup subprocess completion. */
+export const EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/resume`;
 
 /**
  * Builds the dev-only schedule dispatch URL for one named authored

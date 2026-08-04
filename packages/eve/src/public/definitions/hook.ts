@@ -1,9 +1,10 @@
-import type { HandleMessageStreamEvent } from "../../protocol/message.js";
+import type { MessageStreamEvent } from "../../protocol/message.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
 
-type ProtocolEvent<TType extends HandleMessageStreamEvent["type"]> = Extract<
-  HandleMessageStreamEvent,
+// Stamped, so a hook can read `event.meta` unguarded.
+type ProtocolEvent<TType extends MessageStreamEvent["type"]> = Extract<
+  MessageStreamEvent,
   { type: TType }
 >;
 
@@ -21,6 +22,7 @@ export interface HookEventMap {
   readonly "authorization.required": ProtocolEvent<"authorization.required">;
   readonly "compaction.completed": ProtocolEvent<"compaction.completed">;
   readonly "compaction.requested": ProtocolEvent<"compaction.requested">;
+  readonly "context.cleared": ProtocolEvent<"context.cleared">;
   readonly "input.requested": ProtocolEvent<"input.requested">;
   readonly "message.appended": ProtocolEvent<"message.appended">;
   readonly "message.completed": ProtocolEvent<"message.completed">;

@@ -5,7 +5,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callDiscordApi,
   createDiscordFollowupMessage,
@@ -47,13 +47,14 @@ import {
 } from "#public/channels/discord/responses.js";
 import { type DiscordWebhookVerifier } from "#public/channels/discord/verify.js";
 import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js";
+import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel, type SendFn } from "#public/definitions/channel.js";
 
 const log = createLogger("discord.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Discord context passed to inbound command hooks. */
 export interface DiscordContext {
@@ -113,7 +114,7 @@ export type DiscordCommandResult = {
 /** Sync or async {@link DiscordCommandResult}. */
 export type DiscordCommandResultOrPromise = DiscordCommandResult | Promise<DiscordCommandResult>;
 
-type DiscordEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type DiscordEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: DiscordEventContext,
   ctx: SessionContext,
@@ -260,11 +261,11 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
 
     async receive(input, { send }) {
       const receiveTarget = input.target as Partial<DiscordReceiveTarget>;
-      const channelId = readString(receiveTarget.channelId);
+      const channelId = readNonEmptyString(receiveTarget.channelId);
       if (!channelId) {
         throw new Error("discordChannel().receive requires target.channelId.");
       }
-      const requestedConversationId = readString(receiveTarget.conversationId);
+      const requestedConversationId = readNonEmptyString(receiveTarget.conversationId);
       const initialMessage = receiveTarget.initialMessage;
       if (initialMessage !== undefined && requestedConversationId !== undefined) {
         throw new Error(
@@ -700,8 +701,4 @@ function expandPostBodies(body: DiscordMessageBody): readonly DiscordMessageBody
       content,
     };
   });
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

@@ -6,8 +6,9 @@ import type {
 } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
-import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { classifyInputRequest, isApprovalRequest } from "#harness/input-request-class.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
+import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
 import {
   isSessionLimitContinuationRequest,
   resolveSessionLimitContinuation,
@@ -121,13 +122,13 @@ export function hasDeferredStepInput(session: HarnessSession): boolean {
 /**
  * Resolves pending input at the start of a harness step.
  *
- * When the pending batch contains tool-approval requests and the step input
- * also carries a follow-up user message, the message is deferred to the next
- * internal harness step rather than appended to the current turn. This is
- * necessary because AI SDK cannot process tool-approval responses and a new
- * user message in the same request -- the approval must be resolved in
- * isolation first, and the user message replayed on the subsequent step via
- * {@link consumeDeferredStepInput}.
+ * Each pending request is either `"required"` or `"dismissable"` — see
+ * {@link classifyInputRequest}. While a required request is unanswered,
+ * follow-up input is deferred instead of dismissing and recreating the
+ * request; {@link consumeDeferredStepInput} replays it on the subsequent
+ * step. Tool approval responses additionally resolve in isolation because
+ * AI SDK cannot process an approval response and a new user message in the
+ * same request.
  */
 export function resolvePendingInput(input: {
   readonly history?: readonly ModelMessage[];
@@ -155,15 +156,15 @@ export function resolvePendingInput(input: {
     return { outcome: "unresolved", messages: baseHistory, session };
   }
 
-  if (resolvesApprovalBatch && hasUnansweredApproval({ pendingBatch, responses })) {
+  if (hasUnansweredRequiredRequest({ pendingBatch, responses })) {
     session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
     return { deferredMessage: true, outcome: "unresolved", messages: baseHistory, session };
   }
 
   if (responses.length === 0 && resolvedStepInput?.message !== undefined) {
-    // A follow-up message arrived for question-only input with no explicit
-    // responses. Keep the existing question semantics: mark unanswered
-    // question requests ignored so the model can continue with the message.
+    // A follow-up message arrived and every pending request is dismissable
+    // (a required one would have deferred above): mark the unanswered
+    // requests ignored so the model can continue with the message.
     const toolParts = buildToolResponseParts(pendingBatch, []);
     const messages: ModelMessage[] = [...baseHistory, ...pendingBatch.responseMessages];
     if (toolParts.length > 0) {
@@ -302,13 +303,37 @@ function compactStepInput(
   return result;
 }
 
-function hasUnansweredApproval(input: {
+/**
+ * Drops a pending session-limit continuation prompt from a parked session.
+ *
+ * A cancelled turn settles with the step's input snapshot, which can
+ * resurrect a continuation prompt the user already answered — the decline
+ * that cancelled the turn consumed the answer inside the discarded turn
+ * state. Left in place, the stale prompt would queue every follow-up
+ * message behind an answer that will never come. Harness-authored prompts
+ * are deterministically re-raised by the pre-model gate, so dropping is
+ * always safe; model-anchored batches (tool approvals, questions) are kept
+ * because their tool calls still require resolution.
+ */
+export function clearPendingSessionLimitPrompt(session: HarnessSession): HarnessSession {
+  const pendingBatch = getPendingInputBatch(session.state);
+  if (pendingBatch === undefined || pendingBatch.requests.length === 0) {
+    return session;
+  }
+  if (!pendingBatch.requests.every((request) => isSessionLimitContinuationRequest(request))) {
+    return session;
+  }
+  return clearPendingInputBatch(session);
+}
+
+function hasUnansweredRequiredRequest(input: {
   readonly pendingBatch: PendingInputBatch;
   readonly responses: readonly InputResponse[];
 }): boolean {
   const responseIds = new Set(input.responses.map((response) => response.requestId));
   return input.pendingBatch.requests.some(
-    (request) => isApprovalRequest(request) && !responseIds.has(request.requestId),
+    (request) =>
+      classifyInputRequest(request) === "required" && !responseIds.has(request.requestId),
   );
 }
 
@@ -643,15 +668,6 @@ function buildToolResponsePartsForRequest(
   ];
 }
 
-/** Shared approval predicate: a request whose options are exactly `approve` / `deny`. */
-export function isApprovalRequest(request: InputRequest): boolean {
-  return (
-    request.options?.length === 2 &&
-    request.options[0]?.id === "approve" &&
-    request.options[1]?.id === "deny"
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Tool call helpers
 // ---------------------------------------------------------------------------
@@ -675,23 +691,4 @@ export function createRuntimeToolCallActionFromToolCall(input: {
     kind: "tool-call",
     toolName: input.toolCall.toolName,
   };
-}
-
-function resolveToolCallInputObject(
-  value: unknown,
-  context: { readonly callId: string; readonly toolName: string },
-): JsonObject {
-  if (value === undefined || value === null) {
-    return {};
-  }
-
-  try {
-    return parseJsonObject(value);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new TypeError(
-      `Failed to parse tool-call arguments for "${context.toolName}" (${context.callId}): ${detail}`,
-      { cause: error },
-    );
-  }
 }

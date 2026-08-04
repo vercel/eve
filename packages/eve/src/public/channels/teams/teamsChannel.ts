@@ -5,7 +5,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   buildTeamsTurnMessage,
   collectTeamsFileParts,
@@ -54,13 +54,14 @@ import {
   type TeamsMessageActivity,
 } from "#public/channels/teams/inbound.js";
 import { verifyTeamsRequest, type TeamsWebhookVerifier } from "#public/channels/teams/verify.js";
+import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel, type SendFn } from "#public/definitions/channel.js";
 
 const log = createLogger("teams.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Teams context passed to invoke hooks. */
 export interface TeamsContext {
@@ -149,7 +150,7 @@ export type TeamsInvokeResult = Record<string, unknown> | Response | null | unde
 /** Sync or async {@link TeamsInvokeResult}. */
 export type TeamsInvokeResultOrPromise = TeamsInvokeResult | Promise<TeamsInvokeResult>;
 
-type TeamsEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type TeamsEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: TeamsEventContext,
   ctx: SessionContext,
@@ -343,16 +344,16 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 
     async receive(input, { send }) {
       const receiveTarget = input.target as Partial<TeamsReceiveTarget>;
-      const serviceUrl = readString(receiveTarget.serviceUrl);
-      const conversationId = readString(receiveTarget.conversationId);
+      const serviceUrl = readNonEmptyString(receiveTarget.serviceUrl);
+      const conversationId = readNonEmptyString(receiveTarget.conversationId);
       if (!serviceUrl || !conversationId) {
         throw new Error(
           "teamsChannel().receive requires target.serviceUrl and target.conversationId.",
         );
       }
 
-      const conversationType = readString(receiveTarget.conversationType) ?? null;
-      let replyToActivityId = readString(receiveTarget.replyToActivityId) ?? null;
+      const conversationType = readNonEmptyString(receiveTarget.conversationType) ?? null;
+      let replyToActivityId = readNonEmptyString(receiveTarget.replyToActivityId) ?? null;
       const initialMessage = receiveTarget.initialMessage;
       if (initialMessage !== undefined && replyToActivityId !== null) {
         throw new Error(
@@ -362,13 +363,13 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 
       const state: TeamsChannelState = {
         ...initialTeamsState(),
-        channelId: readString(receiveTarget.channelId) ?? null,
+        channelId: readNonEmptyString(receiveTarget.channelId) ?? null,
         conversationId,
         conversationType,
         replyToActivityId,
         serviceUrl,
-        teamId: readString(receiveTarget.teamId) ?? null,
-        tenantId: readString(receiveTarget.tenantId) ?? null,
+        teamId: readNonEmptyString(receiveTarget.teamId) ?? null,
+        tenantId: readNonEmptyString(receiveTarget.tenantId) ?? null,
       };
 
       if (initialMessage !== undefined) {
@@ -785,8 +786,4 @@ function mergeChannelData(
 
 function teamsOk(): Response {
   return new Response("ok", { status: 200 });
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

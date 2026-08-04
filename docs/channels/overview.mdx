@@ -9,7 +9,9 @@ A channel is the edge adapter between a platform and your agent. It does three t
 - Owns the `continuationToken`, the resume handle for a conversation on that surface.
 - Decides delivery, meaning how, where, and whether a response goes back.
 
-eve ships a base HTTP channel plus first-class platform channels, and you can author your own. Browse the full set in the [Integrations](/integrations) gallery.
+eve ships a base HTTP channel plus first-class platform channels, and you can author your own. Browse the full set in the [Integrations](/integrations?filter=channel) gallery.
+
+After a channel normalizes input, eve runs the same agent runtime regardless of where the message came from. Tools and instructions do not need channel-specific logic.
 
 Each channel has its own provider terms, data flow, auth model, and user-consent expectations. Before sending non-public, sensitive, regulated, or production data through a channel, confirm that the channel provider and your configured scopes, signature checks, route auth, and delivery behavior are appropriate for your use case.
 
@@ -26,7 +28,7 @@ agent/
     intake.ts
 ```
 
-Scaffold a channel file with `eve channels add` (interactive), or pass a kind: `eve channels add slack` or `eve channels add web`. You can also author the file by hand.
+Install a channel from the registry with `eve add channel/photon-imessage`, `eve add channel/slack`, or `eve add channel/web`. You can also author the file by hand.
 
 ## The eve HTTP channel (default)
 
@@ -68,4 +70,4 @@ Where an eve agent communicates with people, you may be required to disclose tha
 - [Slack](./slack): the most common platform channel, end to end
 - [Custom channels](./custom): build a channel for any surface with `defineChannel`
 - [Frontend](../guides/frontend/overview): browser chat on the eve channel with `useEveAgent`
-- [Integrations](/integrations): browse every built-in channel and connection in one gallery
+- [Integrations](/integrations?filter=channel): browse every built-in channel in one gallery

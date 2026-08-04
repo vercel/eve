@@ -3,40 +3,49 @@
 import { Input } from "@vercel/geistdocs/components/input";
 import { InputGroup, InputGroupAddon } from "@vercel/geistdocs/components/input-group";
 import { SearchIcon } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { Integration, IntegrationType } from "@/lib/integrations/data";
 import { cn } from "@/lib/utils";
 import { IntegrationCard } from "./integration-card";
 
-type Filter = "all" | IntegrationType;
+export type GalleryFilter = "all" | IntegrationType | "memory";
 
-const FILTERS: { value: Filter; label: string }[] = [
+const FILTERS: { value: GalleryFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "channel", label: "Channels" },
   { value: "connection", label: "Connections" },
   { value: "extension", label: "Extensions" },
+  { value: "memory", label: "Memory" },
+  { value: "instrumentation", label: "Observability" },
 ];
 
-const TYPE_DESCRIPTIONS: Record<IntegrationType, string> = {
+const FILTER_DESCRIPTIONS: Record<Exclude<GalleryFilter, "all">, string> = {
   channel:
     "Channels are the surfaces where users talk to your agent: Slack, Discord, web chat, and more.",
   connection:
     "Connections are the tools your agent calls during a run: services reached over MCP or OpenAPI.",
   extension: "Extensions are packages that add reusable tools, skills, connections, and hooks.",
+  instrumentation:
+    "Observability providers are OpenTelemetry backends that receive your agent's traces: every model call, tool execution, and turn.",
+  memory: "Memory integrations let your agent store and recall information across sessions.",
 };
 
 interface GalleryProps {
+  filter: GalleryFilter;
   integrations: Integration[];
 }
 
-export const Gallery = ({ integrations }: GalleryProps) => {
-  const [filter, setFilter] = useState<Filter>("all");
+export const Gallery = ({ filter, integrations }: GalleryProps) => {
   const [query, setQuery] = useState("");
 
   const results = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return integrations.filter((integration) => {
-      if (filter !== "all" && integration.type !== filter) {
+      if (filter === "memory" && !integration.keywords?.includes("memory")) {
+        return false;
+      }
+      if (filter !== "all" && filter !== "memory" && integration.type !== filter) {
         return false;
       }
       if (!normalized) {
@@ -53,24 +62,25 @@ export const Gallery = ({ integrations }: GalleryProps) => {
     <div className="flex min-w-0 flex-col gap-6">
       <div className="flex min-w-0 flex-col gap-3 min-[1024px]:flex-row min-[1024px]:items-center min-[1024px]:justify-between">
         <div
-          aria-label="Integration type"
+          aria-label="Integration filter"
           className="flex w-full gap-0.5 overflow-x-auto rounded-md border bg-background-100 p-1 [scrollbar-width:none] min-[1024px]:w-fit [&::-webkit-scrollbar]:hidden"
           role="group"
         >
           {FILTERS.map(({ value, label }) => (
-            <button
+            <Link
+              aria-current={filter === value ? "page" : undefined}
               className={cn(
-                "shrink-0 whitespace-nowrap rounded px-3 py-1 font-medium text-sm transition-colors",
+                "shrink-0 whitespace-nowrap rounded px-3 py-1 font-medium text-sm no-underline transition-colors",
                 filter === value
                   ? "bg-gray-100 text-gray-1000"
                   : "text-gray-900 hover:bg-gray-100/40 hover:text-gray-1000",
               )}
+              href={value === "all" ? "/integrations" : `/integrations?filter=${value}`}
               key={value}
-              onClick={() => setFilter(value)}
-              type="button"
+              scroll={false}
             >
               {label}
-            </button>
+            </Link>
           ))}
         </div>
         <InputGroup className="h-9 w-full bg-background min-[1024px]:w-64">
@@ -87,9 +97,7 @@ export const Gallery = ({ integrations }: GalleryProps) => {
         </InputGroup>
       </div>
 
-      {filter !== "all" && (
-        <p className="text-gray-800 text-sm">{TYPE_DESCRIPTIONS[filter as IntegrationType]}</p>
-      )}
+      {filter !== "all" && <p className="text-gray-800 text-sm">{FILTER_DESCRIPTIONS[filter]}</p>}
 
       {results.length > 0 ? (
         <div className="grid min-w-0 grid-cols-1 gap-4 min-[1024px]:grid-cols-2 min-[1200px]:grid-cols-3">

@@ -238,6 +238,7 @@ describe("development runtime artifact snapshots", () => {
     await mkdir(join(appRoot, "node_modules", "heavy-package"), { recursive: true });
     await mkdir(join(appRoot, ".next", "cache"), { recursive: true });
     await mkdir(join(appRoot, ".generated", "compiled"), { recursive: true });
+    await mkdir(join(appRoot, ".workflow-data", "streams"), { recursive: true });
     await mkdir(join(appRoot, "build"), { recursive: true });
     await mkdir(join(appRoot, "dist"), { recursive: true });
     await mkdir(compileDirectoryPath, { recursive: true });
@@ -249,6 +250,7 @@ describe("development runtime artifact snapshots", () => {
     await writeFile(join(appRoot, "node_modules", "heavy-package", "index.js"), "export {}\n");
     await writeFile(join(appRoot, ".next", "cache", "webpack.bin"), "cache\n");
     await writeFile(join(appRoot, ".generated", "compiled", "bundle.js"), "generated\n");
+    await writeFile(join(appRoot, ".workflow-data", "streams", "events.bin"), "events\n");
     await writeFile(join(appRoot, "build", "server.js"), "build\n");
     await writeFile(join(appRoot, "dist", "index.js"), "dist\n");
     await writeFile(manifestPath, `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`);
@@ -265,6 +267,7 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(join(snapshot.runtimeAppRoot, ".env.example"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, ".next"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, ".generated"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".workflow-data"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, "build"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, "dist"))).toBe(false);
   });

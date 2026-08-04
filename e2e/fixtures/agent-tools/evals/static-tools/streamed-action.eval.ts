@@ -1,12 +1,10 @@
-import type { ActionResultStreamEvent, HandleMessageStreamEvent } from "eve/client";
+import type { ActionResultStreamEvent, MessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "streamed-action";
 const LABEL = "streaming-e2e";
 
-function streamedBeforeLocalExecutionCompletes(
-  events: readonly HandleMessageStreamEvent[],
-): boolean {
+function streamedBeforeLocalExecutionCompletes(events: readonly MessageStreamEvent[]): boolean {
   const matchingRequests = events.flatMap((event) => {
     if (event.type !== "actions.requested") return [];
 
@@ -24,7 +22,7 @@ function streamedBeforeLocalExecutionCompletes(
   }
 
   const result = events.find(
-    (event): event is ActionResultStreamEvent =>
+    (event): event is ActionResultStreamEvent & MessageStreamEvent =>
       event.type === "action.result" &&
       event.data.result.kind === "tool-result" &&
       event.data.result.callId === request.action.callId,
@@ -33,7 +31,7 @@ function streamedBeforeLocalExecutionCompletes(
     return false;
   }
 
-  const requestAt = parseTimestamp(request.event.meta?.at);
+  const requestAt = parseTimestamp(request.event.meta.at);
   const executionCompletedAt = readExecutionCompletedAt(result.data.result.output);
   return (
     requestAt !== undefined &&
@@ -42,9 +40,7 @@ function streamedBeforeLocalExecutionCompletes(
   );
 }
 
-function parseTimestamp(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined;
-
+function parseTimestamp(value: string): number | undefined {
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? timestamp : undefined;
 }
@@ -69,6 +65,7 @@ function readExecutionCompletedAt(output: unknown): number | undefined {
 // consumed. The tool waits before completing, so post-execution batch emission
 // still cannot satisfy this relation.
 export default defineEval({
+  tags: ["real-model"],
   description: "Static tools smoke: a local action request streams while execution is pending.",
   async test(t) {
     const turn = await t.send(

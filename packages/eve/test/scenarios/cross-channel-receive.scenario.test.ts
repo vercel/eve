@@ -83,6 +83,12 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     async cancelTurn() {
       throw new Error("cancelTurn should not be called in this scenario");
     },
+    async clearSession() {
+      throw new Error("clearSession should not be called in this scenario");
+    },
+    async compactSession() {
+      throw new Error("compactSession should not be called in this scenario");
+    },
     async resolveSession() {
       throw new Error("resolveSession should not be called in this scenario");
     },
@@ -104,6 +110,9 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     },
     async getEventStream() {
       return new ReadableStream();
+    },
+    async getStreamTailIndex() {
+      return -1;
     },
     async terminateSession() {
       throw new Error("terminateSession should not be called in this scenario");
@@ -181,6 +190,12 @@ describe("cross-channel receive end-to-end", () => {
           },
           cancel: async () => {
             throw new Error("webhook should not cancel turns");
+          },
+          clear: async () => {
+            throw new Error("webhook should not clear session context");
+          },
+          compact: async () => {
+            throw new Error("webhook should not compact sessions");
           },
           reset: async () => {
             throw new Error("webhook should not reset sessions");

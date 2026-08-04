@@ -14,7 +14,7 @@ import { sessionCancelHookToken } from "#execution/turn-cancellation-token.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createEveCancelTurnRoutePath } from "#protocol/routes.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createCancelFn } from "#channel/cancel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createSession } from "#channel/session.js";
@@ -197,7 +197,7 @@ async function expectNoStepRetries(runId: string): Promise<void> {
   expect([...completions.entries()].filter(([, count]) => count > 1)).toEqual([]);
 }
 
-function expectNoFailureEvents(events: readonly HandleMessageStreamEvent[]): void {
+function expectNoFailureEvents(events: readonly UnstampedMessageStreamEvent[]): void {
   const types = events.map((event) => event.type);
   for (const failureType of FAILURE_EVENT_TYPES) {
     expect(types).not.toContain(failureType);
@@ -251,6 +251,12 @@ function createCancelRouteCaller(): (
         resolveActiveSession: async () => undefined,
         cancel: () => {
           throw new Error("cancel route must not use the channel cancel helper");
+        },
+        clear: () => {
+          throw new Error("cancel route must not clear session context");
+        },
+        compact: () => {
+          throw new Error("cancel route must not compact a session");
         },
         reset: () => {
           throw new Error("cancel route must not reset a session");
@@ -489,7 +495,10 @@ describe("turn cancellation integration", () => {
         // settled and its cancel hook swept, it reports the benign status.
         await waitForHookSweep(sessionCancelHookToken(run.runId));
         const session = createSession(run.runId, rawToken, workflowRuntime);
-        await expect(session.cancel()).resolves.toEqual({ status: "no_active_turn" });
+        await expect(session.cancel()).resolves.toEqual({
+          reason: "HookNotFoundError",
+          status: "no_active_turn",
+        });
 
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {

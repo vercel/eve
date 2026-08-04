@@ -1,5 +1,6 @@
 import type { H3Event } from "nitro";
 import type { Agent, RouteContext } from "#public/definitions/channel.js";
+import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import {
   createCrossChannelReceiveFn,
   toCrossChannelTargets,
@@ -7,6 +8,8 @@ import {
 import type { DeliverInput, RunInput, Runtime } from "#channel/types.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import { createCancelFn } from "#channel/cancel.js";
+import { createClearFn } from "#channel/clear-session.js";
+import { createCompactFn } from "#channel/compact-session.js";
 import { createResetFn } from "#channel/reset-session.js";
 import { createSendFn } from "#channel/send.js";
 import { createResolveActiveSessionFn } from "#channel/resolve-active-session.js";
@@ -19,6 +22,7 @@ import {
   attachRouteAgent,
 } from "#internal/nitro/routes/channel-route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
+import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
@@ -53,54 +57,74 @@ export async function dispatchChannelRequest(
   routeKey: string,
   config: NitroArtifactsConfig,
 ): Promise<Response> {
-  const bundle = await resolveNitroChannelRuntimeBundle(config);
+  return await traceChannelRequest({ request: event.req, routeKey }, async (span) => {
+    const bundle = await resolveNitroChannelRuntimeBundle(config);
 
-  const matchedChannel = bundle.channels.find(
-    (channel) => `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
-  );
-
-  if (matchedChannel === undefined) {
-    return Response.json(
-      { error: "No matching channel for this request.", ok: false },
-      { status: 404 },
+    const matchedChannel = bundle.channels.find(
+      (channel) => `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
     );
-  }
 
-  const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name, config);
+    if (matchedChannel === undefined) {
+      return Response.json(
+        { error: "No matching channel for this request.", ok: false },
+        { status: 404 },
+      );
+    }
 
-  let response: Response;
+    // Channel identity is known only after resolution; a 404 span carries
+    // just the route. `span` is undefined when instrumentation opted out of
+    // channel-request tracing. Prefer the stamped instrumentation kind
+    // (`channel:<name>`) over the raw adapter kind — behaviorless authored
+    // channels keep adapter kind `"http"`, so the adapter alone would report
+    // `"http"` where the rest of the trace reports `channel:<name>`.
+    span?.setAttribute("eve.channel.name", matchedChannel.name);
+    const channelKind =
+      getChannelInstrumentationKind(matchedChannel.definition) ?? matchedChannel.adapter?.kind;
+    if (channelKind !== undefined) {
+      span?.setAttribute("eve.channel.kind", channelKind);
+    }
 
-  try {
-    response = await withDevelopmentVercelOidcContext(config, event.req, async () => {
-      if (matchedChannel.handler) {
-        // Authored CompiledChannel route — build RouteHandlerArgs.
-        return await matchedChannel.handler(event.req, routeArgs.args);
-      }
+    const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name, config);
 
-      // Framework-internal fetch-only channel (e.g. the connection
-      // callback route). Build a RouteContext with the agent handle.
-      const ctx: RouteContext = {
-        agent: routeArgs.agent,
-        waitUntil: routeArgs.args.waitUntil,
-        params: routeArgs.args.params,
-        requestIp: routeArgs.args.requestIp,
-      };
+    let response: Response;
 
-      return await matchedChannel.fetch(event.req, ctx);
-    });
-  } catch (error) {
-    // Without this a handler throw is only Nitro's default 5xx, with no eve log.
-    const errorId = logError(log, "channel handler threw", error, {
-      routeKey,
-      channel: matchedChannel.name,
-    });
+    try {
+      response = await withDevelopmentVercelOidcContext(config, event.req, async () => {
+        if (matchedChannel.handler) {
+          // Authored CompiledChannel route — build RouteHandlerArgs.
+          return await matchedChannel.handler(event.req, routeArgs.args);
+        }
+
+        // Framework-internal fetch-only channel (e.g. the connection
+        // callback route). Build a RouteContext with the agent handle.
+        const ctx: RouteContext = {
+          agent: routeArgs.agent,
+          waitUntil: routeArgs.args.waitUntil,
+          params: routeArgs.args.params,
+          requestIp: routeArgs.args.requestIp,
+        };
+
+        return await matchedChannel.fetch(event.req, ctx);
+      });
+    } catch (error) {
+      // Without this a handler throw is only Nitro's default 5xx, with no eve
+      // log. logError records the exception against the active request span,
+      // so traceChannelRequest must not record the returned 500 again.
+      const errorId = logError(log, "channel handler threw", error, {
+        routeKey,
+        channel: matchedChannel.name,
+      });
+      flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
+      return Response.json(
+        { error: "Channel handler failed.", errorId, ok: false },
+        { status: 500 },
+      );
+    }
+
     flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
-    return Response.json({ error: "Channel handler failed.", errorId, ok: false }, { status: 500 });
-  }
 
-  flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
-
-  return response;
+    return response;
+  });
 }
 
 export async function dispatchChannelWebSocketRequest(
@@ -192,6 +216,8 @@ function buildRouteArgs(
   const send = createSendFn(bundle.runtime, adapter, channelName, { requestId });
   const resolveActiveSession = createResolveActiveSessionFn(bundle.runtime, channelName);
   const cancel = createCancelFn(bundle.runtime, channelName);
+  const clear = createClearFn(bundle.runtime, channelName);
+  const compact = createCompactFn(bundle.runtime, channelName);
   const reset = createResetFn(bundle.runtime, channelName);
   const getSession = createGetSessionFn(bundle.runtime);
   const receive = createCrossChannelReceiveFn(
@@ -205,6 +231,8 @@ function buildRouteArgs(
         send,
         resolveActiveSession,
         cancel,
+        clear,
+        compact,
         reset,
         getSession,
         receive,
