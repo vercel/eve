@@ -1497,7 +1497,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
 
 For **App** auth without per-user OAuth:
 
-1. Create a Vercel token that can access the team and projects the agent needs.
+1. Create a [Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token) scoped to the team and projects the agent needs.
 2. From the eve project directory, create an **API Key** connector and enter the Vercel token when prompted:
 
    \`\`\`bash
