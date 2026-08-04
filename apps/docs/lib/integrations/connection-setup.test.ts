@@ -54,8 +54,6 @@ describe("Vercel MCP connection setup", () => {
     expect(appQuickStart).toContain(
       'auth: connect({ connector: "vercel/your-connector", principalType: "app" })',
     );
-    expect(appQuickStart).toContain('"list_deployments"');
-    expect(appQuickStart).toContain('"get_runtime_logs"');
     const userConfigure = setup.configureVariants["mcp:user"];
     const appConfigure = setup.configureVariants["mcp:app"];
 

@@ -74,16 +74,6 @@ const buildSnippet = (
     );
   }
 
-  if (protocol === "mcp" && spec.toolAllow !== undefined) {
-    fields.push(
-      `  tools: {`,
-      `    allow: [`,
-      ...spec.toolAllow.map((tool) => `      "${tool}",`),
-      `    ],`,
-      `  },`,
-    );
-  }
-
   const headerLines: string[] = [];
   if (auth === "apiKey" && spec.apiKey) {
     headerLines.push(`    "${spec.apiKey.header}": process.env.${spec.apiKey.env}!,`);

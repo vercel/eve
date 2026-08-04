@@ -56,8 +56,6 @@ export interface ConnectionSpec {
   authModes: AuthMode[];
   /** API-key wiring when `authModes` includes `apiKey`. */
   apiKey?: ApiKeySpec;
-  /** Optional MCP tool allow-list included in generated examples. */
-  toolAllow?: string[];
   /** Model-facing description; defaults to the integration tagline. */
   description?: string;
   mcp?: ConnectionIdentity["mcp"];
@@ -123,7 +121,6 @@ interface ExtensionPresentation extends Presentation {
 interface ConnectionPresentation extends Presentation {
   authModes: AuthMode[];
   apiKey?: ApiKeySpec;
-  toolAllow?: string[];
   connector?: string;
   connectors?: Partial<Record<AuthMode, string>>;
   connectorService?: string;
@@ -1490,16 +1487,6 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     connectors: { app: "vercel/your-connector" },
     connectorService: "vercel",
     connectorServices: { app: "api-key" },
-    toolAllow: [
-      "search_documentation",
-      "list_teams",
-      "list_projects",
-      "get_project",
-      "list_deployments",
-      "get_deployment",
-      "get_deployment_build_logs",
-      "get_runtime_logs",
-    ],
     configureNotes: {
       user: "Select None when prompted for a token authentication method. Each user completes OAuth when needed.",
       app: "Enter a team-scoped [Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token) when prompted, then copy the returned connector UID into the App example. This avoids per-user OAuth, though the Vercel token still belongs to the user who created it.",
@@ -2020,7 +2007,6 @@ function buildConnection(entry: IntegrationEntry): Integration {
     description: identity.description,
   };
   if (presentation.apiKey !== undefined) spec.apiKey = presentation.apiKey;
-  if (presentation.toolAllow !== undefined) spec.toolAllow = presentation.toolAllow;
   if (presentation.connector !== undefined) spec.connector = presentation.connector;
   if (presentation.connectors !== undefined) spec.connectors = presentation.connectors;
   if (presentation.connectorService !== undefined) {
