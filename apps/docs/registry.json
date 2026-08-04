@@ -1157,6 +1157,24 @@
       ]
     },
     {
+      "name": "channel/blooio",
+      "type": "registry:item",
+      "title": "Blooio",
+      "description": "Send and receive iMessage, RCS, and SMS through Blooio, with reactions, typing indicators, read receipts, polls, groups, capability checks, and history.",
+      "dependencies": ["eve-channel-blooio"],
+      "envVars": {
+        "BLOOIO_API_KEY": "",
+        "BLOOIO_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/blooio.ts",
+          "type": "registry:file",
+          "target": "agent/channels/blooio.ts"
+        }
+      ]
+    },
+    {
       "name": "channel/github",
       "type": "registry:item",
       "title": "GitHub",

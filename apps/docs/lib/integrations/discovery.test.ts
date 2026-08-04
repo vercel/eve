@@ -80,6 +80,18 @@ describe("integration discovery", () => {
     expect(integrationSearchText(githubTools!)).toContain("code review");
   });
 
+  it("renders the Blooio channel setup", () => {
+    const blooio = getIntegration("blooio");
+    expect(blooio).toBeDefined();
+
+    const markdown = integrationMarkdown(blooio!);
+    expect(markdown).toContain("eve add channel/blooio");
+    expect(markdown).toContain('import { blooioChannel } from "eve-channel-blooio"');
+    expect(markdown).toContain("BLOOIO_API_KEY");
+    expect(markdown).toContain("BLOOIO_WEBHOOK_SECRET");
+    expect(integrationSearchText(blooio!)).toContain("iMessage");
+  });
+
   it("renders every connection setup variant", () => {
     const notion = getIntegration("notion");
     expect(notion).toBeDefined();
