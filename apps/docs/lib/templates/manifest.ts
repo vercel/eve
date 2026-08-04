@@ -5,10 +5,12 @@
 export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing";
 
 export type TemplateIntegration =
+  | "GitHub"
   | "HTTP API"
   | "Linear"
   | "Notion"
   | "Resend"
+  | "Sanity"
   | "Sentry"
   | "Slack"
   | "Typefully"
@@ -115,6 +117,33 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
+    slug: "kody-eve-template",
+    title: "GitHub maintainer",
+    setupPrompt:
+      "I want to build a GitHub maintainer agent with the eve framework, using the Kody template. Read the setup instructions at https://agent-resources.dev/kody-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
+    description:
+      "Kody, a personal GitHub maintainer agent that emails you a weekly digest of open issues, acts on your email replies, summarizes new pull requests, answers @mentions, and works delegated Linear issues.",
+    sourceHref: "https://github.com/vercel-labs/kody-eve-template/tree/main",
+    category: "Collaboration",
+    model: "anthropic/claude-fable-5",
+    integrations: ["GitHub", "Linear", "Resend"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "kody-eve-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/github.ts",
+      "agent/channels/linear.ts",
+      "agent/channels/resend.ts",
+      "agent/connections/linear.ts",
+      "agent/connections/resend.ts",
+      "agent/instructions.ts",
+      "agent/schedules/weekly-digest.ts",
+      "agent/skills/triaging-issues/SKILL.md",
+      "agent/subagents/researcher/agent.ts",
+      "agent/tools/github.ts",
+    ],
+  },
+  {
     slug: "marketing-team-eve-template",
     title: "Marketing team",
     setupPrompt:
@@ -137,6 +166,59 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/subagents/product-marketer/agent.ts",
       "agent/subagents/seo/agent.ts",
       "agent/subagents/social-media-coordinator/agent.ts",
+    ],
+  },
+  {
+    slug: "sanity-copilot-eve-template",
+    title: "Sanity copilot",
+    setupPrompt:
+      "I want to build a Slack agent with the eve framework, using the Sanity copilot template. Read the setup instructions at https://agent-resources.dev/sanity-copilot-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
+    description:
+      "A Slack-based Sanity copilot that queries and edits content with GROQ, inspects and shapes schemas, manages drafts and releases, and drafts long-form pieces into Notion.",
+    sourceHref: "https://github.com/vercel-labs/sanity-copilot-eve-template/tree/main",
+    category: "Collaboration",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Slack", "Sanity", "Notion"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "sanity-copilot-eve-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/connections/notion.ts",
+      "agent/connections/sanity.ts",
+      "agent/instructions.md",
+      "agent/sandbox.ts",
+      "agent/skills/sanity-best-practices/SKILL.md",
+      "agent/subagents/researcher/agent.ts",
+      "agent/subagents/reviewer/agent.ts",
+      "agent/tools/upload_asset.ts",
+    ],
+  },
+  {
+    slug: "typefully-eve-template",
+    title: "Social media",
+    setupPrompt:
+      "I want to build a Slack agent with the eve framework, using the Typefully social media agent template. Read the setup instructions at https://agent-resources.dev/typefully-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
+    description:
+      "A Slack-based social media agent that drafts posts and threads for X, LinkedIn, Threads, Bluesky, and Mastodon through Typefully, manages the publishing queue, and pulls briefs from Notion.",
+    sourceHref: "https://github.com/vercel-labs/typefully-eve-template/tree/main",
+    category: "Marketing",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Slack", "Typefully", "Notion"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "typefully-eve-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/connections/notion.ts",
+      "agent/connections/typefully.ts",
+      "agent/instructions.md",
+      "agent/sandbox.ts",
+      "agent/schedules/weekly-analytics.ts",
+      "agent/skills/x-style/SKILL.md",
+      "agent/subagents/researcher/agent.ts",
+      "agent/subagents/reviewer/agent.ts",
+      "agent/tools/lint_against_style.ts",
     ],
   },
   {

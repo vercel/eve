@@ -23,6 +23,7 @@ import {
   SiPosthog,
   SiPostman,
   SiRazorpay,
+  SiSanity,
   SiSentry,
   SiSimilarweb,
   SiStripe,
@@ -231,6 +232,8 @@ export const posthogLogo = (props: LogoProps) => <SiPosthog {...props} />;
 export const postmanLogo = (props: LogoProps) => <SiPostman color="default" {...props} />;
 
 export const razorpayLogo = (props: LogoProps) => <SiRazorpay {...props} />;
+
+export const sanityLogo = (props: LogoProps) => <SiSanity {...props} />;
 
 export const sentryLogo = (props: LogoProps) => <SiSentry {...props} />;
 
@@ -635,6 +638,7 @@ export const logos = {
   posthog: posthogLogo,
   postman: postmanLogo,
   razorpay: razorpayLogo,
+  sanity: sanityLogo,
   sentry: sentryLogo,
   similarweb: similarwebLogo,
   stripe: stripeLogo,
