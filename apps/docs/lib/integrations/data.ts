@@ -1498,7 +1498,12 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
 For **App** auth without per-user OAuth:
 
 1. Create a Vercel token that can access the team and projects the agent needs.
-2. In Vercel Connect, create an **API Key** connector and enter the Vercel token as its API key.
+2. From the eve project directory, create an **API Key** connector and enter the Vercel token when prompted:
+
+   \`\`\`bash
+   vercel connect create api-key --name vercel
+   \`\`\`
+
 3. Attach the connector to the Vercel project that runs the eve agent.
 4. Copy its connector UID (for example, \`vercel/coffee-bridge\`) and replace \`vercel/your-connector\` in the App example.
 

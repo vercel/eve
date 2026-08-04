@@ -64,6 +64,7 @@ describe("Vercel MCP connection setup", () => {
     );
     expect(configure).toContain("select None");
     expect(configure).toContain("create an **API Key** connector");
+    expect(configure).toContain("vercel connect create api-key --name vercel");
     expect(configure).toContain("Vercel tokens are always owned by a user");
     expect(configure).toContain("vercel/coffee-bridge");
   });
