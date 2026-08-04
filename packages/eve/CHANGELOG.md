@@ -1,5 +1,14 @@
 # eve
 
+## 0.30.4
+
+### Patch Changes
+
+- fc87d23: Dev runtime snapshots no longer copy the `.workflow-vitest` test cache. In
+  workspaces that had run integration tests, this directory was duplicated into
+  every generation under `.eve/dev-runtime/snapshots` — tens of megabytes per
+  rebuild that nothing at dev runtime reads.
+
 ## 0.30.3
 
 ### Patch Changes
