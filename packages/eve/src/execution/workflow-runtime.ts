@@ -34,6 +34,7 @@ import {
   cancelRun,
   getHookByToken,
   getRun,
+  getHookByToken,
   getWorld,
   resumeHook,
   start,
@@ -47,6 +48,7 @@ import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { isHookConflictError } from "#execution/hook-ownership.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
@@ -173,25 +175,16 @@ export function createWorkflowRuntime(config: {
           attributes: normalizeEveAttributes(attributes),
         });
       } catch (error) {
+        const forwarded = await forwardInitialDeliveryToHookOwner(error, input);
+        if (forwarded !== null) return forwarded;
+
         logError(log, "failed to start workflow run", error, {
           continuationToken: input.continuationToken,
         });
         throw error;
       }
 
-      let events: ReadableStream<MessageStreamEvent> | undefined;
-      const getEvents = () => {
-        events ??= parseNdjsonStream<MessageStreamEvent>(() => getRun(run.runId).getReadable());
-        return events;
-      };
-
-      return {
-        continuationToken: input.continuationToken ?? run.runId,
-        get events() {
-          return getEvents();
-        },
-        sessionId: run.runId,
-      };
+      return createRunHandle(run.runId, input.continuationToken ?? run.runId);
     },
 
     async cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult> {
@@ -332,6 +325,63 @@ function isAlreadyTerminalSessionError(error: unknown): boolean {
     }
   }
   return false;
+}
+
+async function forwardInitialDeliveryToHookOwner(
+  error: unknown,
+  input: RunInput,
+): Promise<RunHandle | null> {
+  if (!input.continuationToken || !isHookConflictError(error)) return null;
+  if (error.token !== input.continuationToken) return null;
+
+  const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
+    auth: input.auth,
+    kind: "deliver",
+    payloads: [
+      {
+        message: input.input.message,
+        context: input.input.context,
+        outputSchema: input.input.outputSchema,
+      },
+    ],
+    requestId: input.requestId,
+  };
+
+  try {
+    const ownerHook = await getHookByToken(input.continuationToken);
+    if (
+      typeof error.conflictingRunId === "string" &&
+      ownerHook.runId !== error.conflictingRunId
+    ) {
+      throw new Error(
+        `Hook owner changed from "${error.conflictingRunId}" to "${ownerHook.runId}" before delivery could be forwarded.`,
+      );
+    }
+    const resumedHook = normalizeWorkflowHook(await resumeHook(ownerHook, hookPayload));
+    return createRunHandle(resumedHook.runId, input.continuationToken);
+  } catch (forwardError) {
+    logError(log, "failed to forward initial delivery to hook owner", forwardError, {
+      continuationToken: input.continuationToken,
+    });
+    throw forwardError;
+  }
+}
+
+function createRunHandle(runId: string, continuationToken: string): RunHandle {
+  let events: ReadableStream<HandleMessageStreamEvent> | undefined;
+  const getEvents = () => {
+    events ??= parseNdjsonStream<HandleMessageStreamEvent>(() => getRun(runId).getReadable());
+    return events;
+  };
+
+  return {
+    continuationToken,
+    get events() {
+      return getEvents();
+    },
+    sessionId: runId,
+  };
+}
 }
 
 /**

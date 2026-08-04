@@ -556,6 +556,140 @@ describe("createWorkflowRuntime#run", () => {
     });
   });
 
+  it("forwards a duplicate initial delivery to the hook owner when session creation races", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    const conflict = Object.assign(
+      new Error('Hook token "github:repo:123:pull:7" is already in use'),
+      {
+        conflictingRunId: "owner-session",
+        name: "HookConflictError",
+        token: "github:repo:123:pull:7",
+      },
+    );
+    startMock.mockRejectedValue(conflict);
+    const ownerHook = { runId: "owner-session", token: "github:repo:123:pull:7" };
+    getHookByTokenMock.mockResolvedValue(ownerHook);
+    resumeHookMock.mockResolvedValue(ownerHook);
+
+    const handle = await buildRuntime(compiledArtifactsSource).run({
+      adapter,
+      auth: {
+        attributes: {},
+        authenticator: "github",
+        principalId: "octocat",
+        principalType: "user",
+      },
+      continuationToken: "github:repo:123:pull:7",
+      input: {
+        context: ["pull request context"],
+        message: "Pull request labeled: #7",
+        outputSchema: { type: "object" },
+      },
+      mode: "conversation",
+      requestId: "delivery-2",
+    });
+
+    expect(handle.sessionId).toBe("owner-session");
+    expect(handle.continuationToken).toBe("github:repo:123:pull:7");
+    expect(resumeHookMock).toHaveBeenCalledWith(ownerHook, {
+      auth: {
+        attributes: {},
+        authenticator: "github",
+        principalId: "octocat",
+        principalType: "user",
+      },
+      kind: "deliver",
+      payloads: [
+        {
+          context: ["pull request context"],
+          message: "Pull request labeled: #7",
+          outputSchema: { type: "object" },
+        },
+      ],
+      requestId: "delivery-2",
+    });
+  });
+
+  it("does not forward when hook ownership changes after the start conflict", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockRejectedValue(
+      Object.assign(new Error("hook conflict"), {
+        conflictingRunId: "original-owner",
+        name: "HookConflictError",
+        token: "github:repo:123:pull:7",
+      }),
+    );
+    getHookByTokenMock.mockResolvedValue({
+      runId: "replacement-owner",
+      token: "github:repo:123:pull:7",
+    });
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).run({
+        adapter,
+        auth: null,
+        continuationToken: "github:repo:123:pull:7",
+        input: { message: "do not misdeliver" },
+        mode: "conversation",
+      }),
+    ).rejects.toThrow(/owner changed.*original-owner.*replacement-owner/);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces the forwarding failure instead of the stale start conflict", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockRejectedValue(
+      Object.assign(new Error("hook conflict"), {
+        conflictingRunId: "owner-session",
+        name: "HookConflictError",
+        token: "github:repo:123:pull:7",
+      }),
+    );
+    const ownerHook = { runId: "owner-session", token: "github:repo:123:pull:7" };
+    const forwardingFailure = new Error("hook transport unavailable");
+    getHookByTokenMock.mockResolvedValue(ownerHook);
+    resumeHookMock.mockRejectedValue(forwardingFailure);
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).run({
+        adapter,
+        auth: null,
+        continuationToken: "github:repo:123:pull:7",
+        input: { message: "retry me" },
+        mode: "conversation",
+      }),
+    ).rejects.toBe(forwardingFailure);
+  });
+
+  it("does not forward unrelated workflow start hook conflicts", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    const conflict = Object.assign(
+      new Error('Hook token "github:repo:123:pull:9" is already in use'),
+      {
+        conflictingRunId: "owner-session",
+        name: "HookConflictError",
+        token: "github:repo:123:pull:9",
+      },
+    );
+    startMock.mockRejectedValue(conflict);
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).run({
+        adapter,
+        auth: null,
+        continuationToken: "github:repo:123:pull:7",
+        input: { message: "Pull request opened: #7" },
+        mode: "conversation",
+      }),
+    ).rejects.toBe(conflict);
+
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("falls back to the current deployment when latest is unsupported", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
