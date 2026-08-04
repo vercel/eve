@@ -25,11 +25,10 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 
 const mocks = vi.hoisted(() => ({
   createDurableSessionState: vi.fn(),
-  deliver: vi.fn(),
   deserializeContext: vi.fn(),
   hydrateDurableSession: vi.fn(),
   readDurableSession: vi.fn(),
-  run: vi.fn(),
+  createSession: vi.fn(),
   startRemoteAgentSession: vi.fn(),
 }));
 
@@ -49,8 +48,7 @@ vi.mock("#execution/session.js", () => ({
 
 vi.mock("#execution/workflow-runtime.js", () => ({
   createWorkflowRuntime: () => ({
-    deliver: mocks.deliver,
-    run: mocks.run,
+    createSession: mocks.createSession,
   }),
   workflowEntryReference: { workflowId: "workflow//eve//workflowEntry" },
 }));
@@ -84,8 +82,7 @@ const REMOTE_REGISTRY_DEFINITION = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.deliver.mockResolvedValue({ sessionId: CHILD_SESSION_ID });
-  mocks.run.mockResolvedValue({ sessionId: CHILD_SESSION_ID });
+  mocks.createSession.mockResolvedValue({ sessionId: CHILD_SESSION_ID });
   mocks.startRemoteAgentSession.mockResolvedValue({
     continuationToken: "remote-child-token",
     sessionId: "remote-session-123456789012",
@@ -120,7 +117,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
 
     expect(result.results).toEqual([]);
-    expect(mocks.run).toHaveBeenCalledTimes(1);
+    expect(mocks.createSession).toHaveBeenCalledTimes(1);
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [
         {
@@ -153,7 +150,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       definition: { description: "Research", kind: "subagent" },
       nodeId: "subagents/research",
     });
-    mocks.run.mockRejectedValue(new Error("runtime unavailable"));
+    mocks.createSession.mockRejectedValue(new Error("runtime unavailable"));
 
     const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
