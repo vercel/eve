@@ -28,15 +28,27 @@ describe("GitHub Connect provisioning", () => {
   });
 
   it("creates the connector and replaces its trigger", async () => {
-    const runVercelCaptureStdout = vi.fn(async () => ({
-      ok: true as const,
-      stdout: JSON.stringify({
-        id: "scl_github",
-        uid: "github/agent",
-        supportedSubjectTypes: ["app"],
-      }),
-      stderr: "",
-    }));
+    const runVercelCaptureStdout = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true as const,
+        stdout: JSON.stringify({
+          id: "scl_github",
+          uid: "github/agent",
+          supportedSubjectTypes: ["app"],
+        }),
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        stdout: JSON.stringify({
+          data: { appSlug: "agent" },
+          id: "scl_github",
+          type: "github",
+          uid: "github/agent",
+        }),
+        stderr: "",
+      });
     const runVercel = vi.fn(async () => true);
 
     await expect(
@@ -48,7 +60,7 @@ describe("GitHub Connect provisioning", () => {
         slug: "agent",
         deps: { runVercel, runVercelCaptureStdout },
       }),
-    ).resolves.toEqual({ id: "scl_github", uid: "github/agent" });
+    ).resolves.toEqual({ appSlug: "agent", id: "scl_github", uid: "github/agent" });
 
     expect(runVercelCaptureStdout).toHaveBeenCalledWith(
       [
@@ -67,6 +79,11 @@ describe("GitHub Connect provisioning", () => {
         "--scope",
         "team_123",
       ],
+      expect.objectContaining({ cwd: "/project", nonInteractive: true }),
+    );
+    expect(runVercelCaptureStdout).toHaveBeenNthCalledWith(
+      2,
+      ["api", "/v1/connect/connectors/scl_github", "--scope", "team_123", "--raw"],
       expect.objectContaining({ cwd: "/project", nonInteractive: true }),
     );
     expect(runVercel).toHaveBeenNthCalledWith(

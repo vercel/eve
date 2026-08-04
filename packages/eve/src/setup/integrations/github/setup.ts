@@ -30,45 +30,45 @@ const defaultDeps: GitHubSetupDeps = {
 const GITHUB_EVENT_OPTIONS = [
   {
     id: "issue_comment",
-    label: "Issue and pull request comments",
+    label: "New issue and pull request comments",
     value: "issue_comment",
-    hint: "Respond when someone mentions the app in an issue or pull request comment.",
+    hint: "Start a turn when a new timeline comment @mentions the app.",
   },
   {
     id: "pull_request_review_comment",
-    label: "Pull request review comments",
+    label: "New inline pull request review comments",
     value: "pull_request_review_comment",
-    hint: "Respond when someone mentions the app in an inline review comment.",
+    hint: "Start a turn when a new inline review comment @mentions the app.",
   },
   {
     id: "issues",
-    label: "Issues",
+    label: "New issues",
     value: "issues",
-    hint: "Start a turn when an issue changes.",
+    hint: "Start a turn when an issue is opened. Other issue changes are ignored.",
   },
   {
     id: "pull_request",
-    label: "Pull requests",
+    label: "New pull requests",
     value: "pull_request",
-    hint: "Start a turn when a pull request changes.",
+    hint: "Start a turn when a pull request is opened. Other pull request changes are ignored.",
   },
   {
     id: "check_suite",
-    label: "Check suites",
+    label: "Completed check suites",
     value: "check_suite",
-    hint: "Start a turn when a check suite changes.",
+    hint: "Start a turn when a check suite completes for a pull request, including successful and failed suites.",
   },
   {
     id: "check_run",
-    label: "Check runs",
+    label: "Completed check runs",
     value: "check_run",
-    hint: "Start a turn when a check run changes.",
+    hint: "Start a turn when a check run completes for a pull request, including successful and failed runs.",
   },
   {
     id: "workflow_run",
-    label: "Workflow runs",
+    label: "Completed GitHub Actions workflow runs",
     value: "workflow_run",
-    hint: "Start a turn when a workflow run changes.",
+    hint: "Start a turn when a GitHub Actions workflow run completes for a pull request, including successful and failed runs.",
   },
 ] as const;
 
@@ -81,13 +81,18 @@ const DEFAULT_GITHUB_EVENTS: readonly GitHubWebhookEvent[] = [
 
 const githubEventsQuestion: MultiSelectQuestion<GitHubWebhookEvent> = {
   key: "github-events",
-  message: "Which GitHub events should this app receive?",
+  message:
+    "Which GitHub webhook events should this app subscribe to? The generated channel starts turns only for the conditions described below.",
   options: GITHUB_EVENT_OPTIONS,
   recommended: DEFAULT_GITHUB_EVENTS,
   requireSelection: true,
 };
 
-function connectTemplate(uid: string, events: readonly GitHubWebhookEvent[]): string {
+function connectTemplate(
+  uid: string,
+  appSlug: string,
+  events: readonly GitHubWebhookEvent[],
+): string {
   const handlers = [
     events.includes("issues")
       ? `  onIssue(ctx, issue) {
@@ -127,6 +132,7 @@ function connectTemplate(uid: string, events: readonly GitHubWebhookEvent[]): st
 import { githubChannel${defaultAuthImport} } from "eve/channels/github";
 
 export default githubChannel({
+  botName: ${JSON.stringify(appSlug)},
   credentials: connectGitHubCredentials(${JSON.stringify(uid)}),${handlerBlock}
 });
 `;
@@ -163,13 +169,13 @@ export async function setupGitHub(
     });
     await deps.writeTextFile(
       join(context.appRoot, "agent/channels/github.ts"),
-      connectTemplate(connector.uid, events),
+      connectTemplate(connector.uid, connector.appSlug, events),
       { force: context.force },
     );
     const dashboardUrl = "https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Open+Vercel+Connect";
     context.ui.nextSteps([
       "Deploy the agent, then open the GitHub App in Vercel Connect and install it in the organization or account where you want to use it.",
-      "Mention the app in an issue, pull request, or review comment to start a conversation.",
+      `Mention @${connector.appSlug} in an issue, pull request, or review comment to start a conversation.`,
     ]);
     return {
       kind: "done",

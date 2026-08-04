@@ -11,7 +11,11 @@ function deps(): GitHubSetupDeps {
   return {
     deriveConnectorSlug: vi.fn(async () => "agent" as never),
     ensureVercelProject: vi.fn(async () => ({ orgId: "team-id", projectId: "project-id" })),
-    provisionConnector: vi.fn(async () => ({ id: "scl_github", uid: "github/agent" })),
+    provisionConnector: vi.fn(async () => ({
+      appSlug: "agent",
+      id: "scl_github",
+      uid: "github/agent",
+    })),
     writeTextFile: vi.fn(async () => {}),
   };
 }
@@ -49,6 +53,7 @@ describe("GitHub setup", () => {
       { force: undefined },
     );
     const scaffold = vi.mocked(effects.writeTextFile).mock.calls[0]?.[1] ?? "";
+    expect(scaffold).toContain('botName: "agent"');
     expect(scaffold).toContain("onIssue(ctx, issue)");
     expect(scaffold).toContain("onWorkflowRun(ctx, workflowRun)");
     expect(scaffold).not.toContain("onPullRequest(ctx, pullRequest)");
