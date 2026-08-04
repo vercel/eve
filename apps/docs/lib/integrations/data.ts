@@ -310,14 +310,26 @@ export default linearChannel({
   eve: {
     logo: "eve",
     docsHref: "/docs/channels/eve",
-    keywords: ["web", "chat", "ui", "embed", "frontend"],
+    keywords: [
+      "web",
+      "chat",
+      "ui",
+      "embed",
+      "frontend",
+      "next.js",
+      "svelte",
+      "sveltekit",
+      "nuxt",
+      "vue",
+      "react",
+    ],
     install: `The eve CLI scaffolds the full Next.js web chat app alongside \`agent/channels/eve.ts\`:
 
 \`\`\`bash
 eve add channel/web
 \`\`\`
 
-To wire it up by hand instead, install the framework:
+To wire it up by hand instead — including into a Svelte or Nuxt app you already have — install the framework:
 
 \`\`\`bash
 npm install eve@latest
@@ -331,8 +343,14 @@ import { eveChannel } from "eve/channels/eve";
 export default eveChannel();
 \`\`\`
 
-Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and stream responses with the eve web client.`,
-    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed. See the [eve channel docs](/docs/channels/eve) and the [Frontend guide](/docs/guides/frontend/overview).`,
+Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and stream responses with the eve web client. Next.js, Nuxt, and Svelte each have an integration that mounts those routes on your app's own origin, so there's no CORS to configure and no URL env var to keep in sync:
+
+- **Next.js.** Wrap \`next.config.ts\` with \`withEve()\` from \`eve/next\`, then call \`useEveAgent()\` from \`eve/react\`. See the [Next.js guide](/docs/guides/frontend/nextjs).
+- **Nuxt.** Add \`"eve/nuxt"\` to \`modules\` in \`nuxt.config.ts\`; the \`useEveAgent()\` composable from \`eve/vue\` is auto-imported. See the [Nuxt guide](/docs/guides/frontend/nuxt).
+- **Svelte.** Add the \`eveSvelteKit()\` Vite plugin before \`sveltekit()\` in \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/svelte\`. See the [SvelteKit guide](/docs/guides/frontend/sveltekit).
+
+On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`host\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
+    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend/overview), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), and [SvelteKit](/docs/guides/frontend/sveltekit).`,
   },
   "chat-sdk-gchat": {
     logo: "googlechat",
