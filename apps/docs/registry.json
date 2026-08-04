@@ -1204,7 +1204,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "web"]
           },
-          "requires": ">=0.27.8"
+          "requires": ">=0.28.1"
         }
       },
       "dependencies": [
@@ -1218,6 +1218,7 @@
         "@streamdown/mermaid@1.0.2",
         "@tailwindcss/postcss@4.3.0",
         "ai@^7.0.38",
+        "better-auth@1.6.25",
         "class-variance-authority@0.7.1",
         "clsx@2.1.1",
         "cmdk@1.1.1",
@@ -1253,9 +1254,29 @@
           "target": "app/_components/agent-chat.tsx"
         },
         {
+          "path": "registry/channel/web/app/_components/access-form.tsx",
+          "type": "registry:file",
+          "target": "app/_components/access-form.tsx"
+        },
+        {
           "path": "registry/channel/web/app/_components/agent-message.tsx",
           "type": "registry:file",
           "target": "app/_components/agent-message.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/_components/auth-setup.tsx",
+          "type": "registry:file",
+          "target": "app/_components/auth-setup.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/_components/sign-out-button.tsx",
+          "type": "registry:file",
+          "target": "app/_components/sign-out-button.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/api/auth/[...all]/route.ts",
+          "type": "registry:file",
+          "target": "app/api/auth/[...all]/route.ts"
         },
         {
           "path": "registry/channel/web/app/globals.css",
@@ -1396,6 +1417,26 @@
           "path": "registry/channel/web/css.d.ts",
           "type": "registry:file",
           "target": "css.d.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/auth-client.ts",
+          "type": "registry:file",
+          "target": "lib/auth-client.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/auth.ts",
+          "type": "registry:file",
+          "target": "lib/auth.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/better-auth/eve.ts",
+          "type": "registry:file",
+          "target": "lib/better-auth/eve.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/better-auth/static-credentials.ts",
+          "type": "registry:file",
+          "target": "lib/better-auth/static-credentials.ts"
         },
         {
           "path": "registry/channel/web/lib/utils.ts",

@@ -29,7 +29,7 @@ export const WEB_SETUP: SetupIntegration = {
       packageManager: (await detectPackageManager(context.appRoot)).kind,
       configureVercelServices: context.environment.vercel.kind === "available",
       force: context.force,
-      skipDependencyMutation: true,
+      registryItemInstalled: true,
     };
     const result = await ensureChannel(options);
     reportOverwrittenFiles(context.ui.prompter.log, result.filesOverwritten);

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "vitest";
@@ -16,6 +16,7 @@ import {
   type WebPackageVersions,
 } from "./index.js";
 import { PNPM_WORKSPACE_CONTENT } from "../primitives/pm/pnpm.js";
+import { DEFAULT_EVE_CHANNEL_TEMPLATE, DEFAULT_TSCONFIG_TEMPLATE } from "./create/project.js";
 import { WEB_APP_TEMPLATE_FILES } from "./create/web-template.js";
 import { pathExists } from "../path-exists.js";
 
@@ -200,6 +201,10 @@ describe("ensureChannel", () => {
     expect(result.action).toBe("created");
     expect(result).not.toHaveProperty("nodeEngineOverride");
     expect(result.filesWritten).toContain(join(projectRoot, "app/page.tsx"));
+    expect(result.filesWritten).toContain(join(projectRoot, "app/api/auth/[...all]/route.ts"));
+    expect(result.filesWritten).toContain(
+      join(projectRoot, "lib/better-auth/static-credentials.ts"),
+    );
     expect(result.filesWritten).toContain(join(projectRoot, "next.config.ts"));
     expect(result.filesWritten).toContain(join(projectRoot, "pnpm-workspace.yaml"));
     expect(result.filesWritten).toContain(join(projectRoot, "vercel.json"));
@@ -207,7 +212,7 @@ describe("ensureChannel", () => {
     expect(result.packageJsonUpdated).toEqual([
       expect.objectContaining({
         path: join(projectRoot, "package.json"),
-        dependencies: expect.arrayContaining(["eve", "next", "react", "react-dom"]),
+        dependencies: expect.arrayContaining(["better-auth", "eve", "next", "react", "react-dom"]),
         devDependencies: expect.arrayContaining(["typescript", "@types/react"]),
         scripts: expect.arrayContaining([
           "build",
@@ -228,7 +233,7 @@ describe("ensureChannel", () => {
     ) as { devDependencies: Record<string, string> };
     expect(patchedPackageJson.devDependencies.typescript).toBe("6.0.3");
     await expect(readFile(join(projectRoot, "app/page.tsx"), "utf8")).resolves.toContain(
-      "AgentChat",
+      "auth.api.getSession",
     );
     await expect(
       readFile(join(projectRoot, "agent/tools/randomize.ts"), "utf8"),
@@ -248,6 +253,7 @@ describe("ensureChannel", () => {
     );
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).toContain('"next": "16.2.6"');
+    expect(packageJson).toContain('"better-auth": "1.6.25"');
     expect(packageJson).toContain('"build:eve": "eve build"');
     expect(packageJson).toContain('"dev": "next dev"');
     expect(packageJson).toContain('"dev:eve": "eve dev"');
@@ -272,6 +278,177 @@ describe("ensureChannel", () => {
         2,
       )}\n`,
     );
+  });
+
+  test("replaces the untouched base channel with the Web Chat session adapter", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent/channels"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "agent/channels/eve.ts"),
+      DEFAULT_EVE_CHANNEL_TEMPLATE,
+      "utf8",
+    );
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    expect(result.action).toBe("created");
+    expect(result.filesOverwritten).toContain(join(projectRoot, "agent/channels/eve.ts"));
+    const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
+    expect(channelSource).toContain('from "@/lib/better-auth/eve"');
+    await expect(readFile(join(projectRoot, "lib/better-auth/eve.ts"), "utf8")).resolves.toContain(
+      "fromBetterAuth",
+    );
+  });
+
+  test("reconciles an untouched base project after the Web Chat registry item is installed", async () => {
+    const targetDirectory = await createTempDir();
+    const projectRoot = await scaffoldBaseProject({
+      projectName: "demo",
+      model: "openai/gpt-5-mini",
+      targetDirectory,
+      evePackage: TEST_EVE_PACKAGE,
+      aiPackageVersion: "7.0.0",
+      zodPackageVersion: "4.4.3",
+      typescriptPackageVersion: "7.0.2",
+    });
+    await mkdir(join(projectRoot, "app"), { recursive: true });
+    await writeFile(join(projectRoot, "app/page.tsx"), "export default function Page() {}\n");
+    const packageJsonPath = join(projectRoot, "package.json");
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      dependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    await expect(readFile(join(projectRoot, "tsconfig.json"), "utf8")).resolves.toBe(
+      DEFAULT_TSCONFIG_TEMPLATE,
+    );
+    packageJson.dependencies.next = "16.3.0";
+    await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "web",
+      configureVercelServices: false,
+      registryItemInstalled: true,
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    const channelPath = join(projectRoot, "agent/channels/eve.ts");
+    const tsconfigPath = join(projectRoot, "tsconfig.json");
+    expect(result.action).toBe("overwritten");
+    expect(result.filesOverwritten).toContain(channelPath);
+    expect(result.filesOverwritten).toContain(tsconfigPath);
+    await expect(readFile(channelPath, "utf8")).resolves.toContain('from "@/lib/better-auth/eve"');
+    await expect(readFile(tsconfigPath, "utf8")).resolves.toBe(
+      WEB_APP_TEMPLATE_FILES["tsconfig.json"],
+    );
+    const reconciledPackageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    expect(reconciledPackageJson.scripts).toMatchObject({
+      dev: "next dev",
+      "dev:eve": "eve dev",
+    });
+  });
+
+  test("creates a missing TypeScript configuration after registry installation", async () => {
+    const targetDirectory = await createTempDir();
+    const projectRoot = await scaffoldBaseProject({
+      projectName: "demo",
+      model: "openai/gpt-5-mini",
+      targetDirectory,
+      evePackage: TEST_EVE_PACKAGE,
+      aiPackageVersion: "7.0.0",
+      zodPackageVersion: "4.4.3",
+      typescriptPackageVersion: "7.0.2",
+    });
+    await rm(join(projectRoot, "tsconfig.json"));
+    await mkdir(join(projectRoot, "app"), { recursive: true });
+    await writeFile(join(projectRoot, "app/page.tsx"), "export default function Page() {}\n");
+    const packageJsonPath = join(projectRoot, "package.json");
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    packageJson.dependencies.next = "16.3.0";
+    await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "web",
+      configureVercelServices: false,
+      registryItemInstalled: true,
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    const tsconfigPath = join(projectRoot, "tsconfig.json");
+    expect(result.filesWritten).toContain(tsconfigPath);
+    expect(result.filesOverwritten ?? []).not.toContain(tsconfigPath);
+    await expect(readFile(tsconfigPath, "utf8")).resolves.toBe(
+      WEB_APP_TEMPLATE_FILES["tsconfig.json"],
+    );
+  });
+
+  test("preserves customized channel and TypeScript configuration after registry installation", async () => {
+    const projectRoot = await createTempDir();
+    const channelPath = join(projectRoot, "agent/channels/eve.ts");
+    const tsconfigPath = join(projectRoot, "tsconfig.json");
+    const customChannel = `import { eveChannel } from "eve/channels/eve";
+
+export default eveChannel({ auth: [] });
+`;
+    const customTsconfig = `${JSON.stringify(
+      {
+        compilerOptions: {
+          paths: {
+            "@custom/*": ["./custom/*"],
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`;
+    await mkdir(join(projectRoot, "agent/channels"), { recursive: true });
+    await mkdir(join(projectRoot, "app"), { recursive: true });
+    await writeFile(channelPath, customChannel, "utf8");
+    await writeFile(tsconfigPath, customTsconfig, "utf8");
+    await writeFile(join(projectRoot, "app/page.tsx"), "export default function Page() {}\n");
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "demo",
+          type: "module",
+          dependencies: { next: "16.3.0" },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "web",
+      configureVercelServices: false,
+      registryItemInstalled: true,
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    expect(result.action).toBe("overwritten");
+    expect(result.filesSkipped).toContain(channelPath);
+    expect(result.filesSkipped).toContain(tsconfigPath);
+    expect(result.filesOverwritten ?? []).not.toContain(channelPath);
+    expect(result.filesOverwritten ?? []).not.toContain(tsconfigPath);
+    await expect(readFile(channelPath, "utf8")).resolves.toBe(customChannel);
+    await expect(readFile(tsconfigPath, "utf8")).resolves.toBe(customTsconfig);
   });
 
   test("overrides an incompatible node engine when adding Web Chat", async () => {
@@ -1252,7 +1429,7 @@ describe("scaffoldBaseProject", () => {
     );
   });
 
-  test("scaffolds the default eve channel from the Web Chat channel template", async () => {
+  test("scaffolds a fail-closed eve channel without app-only dependencies", async () => {
     const targetDirectory = await createTempDir();
     const projectRoot = await scaffoldBaseProject({
       projectName: "demo-agent",
@@ -1267,7 +1444,9 @@ describe("scaffoldBaseProject", () => {
     const channelPath = join(projectRoot, "agent/channels/eve.ts");
     const channelSource = await readFile(channelPath, "utf8");
 
-    expect(channelSource).toBe(WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"]);
+    expect(channelSource).toBe(DEFAULT_EVE_CHANNEL_TEMPLATE);
+    expect(channelSource).toContain("placeholderAuth()");
+    expect(channelSource).not.toContain("@/lib/better-auth/eve");
   });
 
   test("overwrites existing in-place scaffold files only when explicitly allowed", async () => {

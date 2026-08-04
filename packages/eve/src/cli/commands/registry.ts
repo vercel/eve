@@ -126,7 +126,10 @@ export async function installOfficialRegistryItem(
   options: AddCommandOptions = {},
 ): Promise<void> {
   const config = await readRegistryConfig(appRoot);
-  await addRegistryItems([itemAddress(item)], {
+  const address = itemAddress(item);
+  const [registryItem] = await getRegistryItems([address], { config });
+  assertCompatibleEveVersion(eveMetadataFromRegistryItem(registryItem)?.requires);
+  await addRegistryItems([address], {
     config,
     cwd: appRoot,
     overwrite: options.overwrite,

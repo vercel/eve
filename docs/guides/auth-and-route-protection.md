@@ -201,9 +201,36 @@ export default defineChannel({
 
 `eve/channels/auth` exports `createIpAllowList(...)` and `isIpAllowed(...)` for cutting off requests before any model work starts. A request that fails the network policy is dropped ahead of both auth and runtime execution.
 
-## Replace `placeholderAuth` before production
+## Configure browser authentication before production
 
-`eve init` scaffolds `agent/channels/eve.ts` with a `placeholderAuth()` guardrail:
+### Apps with Web Chat
+
+The Next.js Web Chat starter includes a shared-password sign-in powered by
+Better Auth. The channel accepts the app's Better Auth session:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, vercelOidc } from "eve/channels/auth";
+import { auth } from "@/lib/auth";
+import { fromBetterAuth } from "@/lib/better-auth/eve";
+
+export default eveChannel({
+  auth: [...(auth ? [fromBetterAuth(auth)] : []), vercelOidc(), localDev()],
+});
+```
+
+To keep the default sign-in, set `EVE_ACCESS_PASSWORD` and
+`BETTER_AUTH_SECRET` in production. Rotate `BETTER_AUTH_SECRET` to revoke
+existing sessions. Local development skips sign-in unless
+`EVE_REQUIRE_LOCAL_AUTH=1`.
+
+You can instead replace the default setup in `lib/auth.ts` with your own Better
+Auth configuration without changing the channel. If you use another auth
+library, replace `fromBetterAuth(auth)` with that provider's `AuthFn`.
+
+### Apps without Web Chat
+
+An app without Web Chat uses `placeholderAuth()`:
 
 ```ts
 import { eveChannel } from "eve/channels/eve";
@@ -214,7 +241,11 @@ export default eveChannel({
 });
 ```
 
-In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[vercelOidc(), localDev(), placeholderAuth()]`, which also rejects production traffic.
+In production, `placeholderAuth()` returns a structured `401` until you swap in
+your app's `AuthFn` or one of the shipped helpers. Delete the authored channel
+file entirely and eve falls back to the framework default
+`[vercelOidc(), localDev(), placeholderAuth()]`, which also rejects production
+traffic.
 
 You do not have to keep `vercelOidc()` in the final policy. For a self-hosted app, an app-embedded frontend, or any deployment that uses a non-Vercel identity system, use `httpBasic()`, `jwtHmac()`, `jwtEcdsa()`, generic `oidc()`, or a custom `AuthFn` that maps your verified user/session/API key into a `SessionAuthContext`.
 

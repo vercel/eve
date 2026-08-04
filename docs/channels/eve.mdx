@@ -113,6 +113,8 @@ The `auth` option decides who can call `/eve/v1/info` and the session routes. Th
 
 Neither admits browser users or external clients in production. For a public app, wire the channel to your own auth (Clerk, Auth.js, your own OIDC/JWT verification, an API-key verifier, or any custom `AuthFn`). Vercel OIDC is optional; use it only when Vercel-issued deployment tokens are part of your trust model.
 
+The Next.js Web Chat starter includes a shared-password sign-in powered by Better Auth. To keep the default, set `EVE_ACCESS_PASSWORD` and `BETTER_AUTH_SECRET`; local development skips sign-in unless `EVE_REQUIRE_LOCAL_AUTH=1`. The starter includes a local `fromBetterAuth(auth)` adapter, so you can configure your own Better Auth provider in the app without adding Better Auth support to eve core. If you use another auth library, replace that channel entry with the provider's `AuthFn`.
+
 `eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel checks Vercel OIDC before falling back to localhost access, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and eve falls back to `[vercelOidc(), localDev(), placeholderAuth()]`, which rejects all production traffic.
 
 For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).

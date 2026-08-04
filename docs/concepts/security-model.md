@@ -76,15 +76,18 @@ A custom channel that accepts dashboard-style webhooks should follow the same sh
 
 ## Auth fails closed
 
-Routes reject unauthenticated traffic by default. If no `AuthFn` in the walk accepts the request, it gets a `401`, and admitting anonymous callers takes an explicit `none()`. The scaffold's `placeholderAuth()` keeps a half-configured app closed in production until you replace it. See [Auth & route protection](../guides/auth-and-route-protection) for the full walk and verifiers.
+Routes reject unauthenticated traffic by default. If no `AuthFn` in the walk accepts the request, it gets a `401`, and admitting anonymous callers takes an explicit `none()`. The Next.js Web Chat starter includes a shared-password sign-in powered by Better Auth; apps without Web Chat use `placeholderAuth()` until you replace it. See [Auth & route protection](../guides/auth-and-route-protection) for the full walk and verifiers.
 
 ## Pre-production checklist
 
 Before exposing an agent to real traffic:
 
-- [ ] Replace `placeholderAuth()` in `agent/channels/eve.ts` with a real
-      `AuthFn` (`vercelOidc()`, `httpBasic()`, `oidc()`, or your own). Verify an
-      unauthenticated production request gets `401`.
+- [ ] If your app includes Web Chat, configure its default
+      `EVE_ACCESS_PASSWORD` and `BETTER_AUTH_SECRET`, or replace the app's
+      default sign-in with your own provider and wire that provider into the
+      channel. Verify an unauthenticated eve channel request gets `401`.
+- [ ] If your app does not include Web Chat, replace `placeholderAuth()` with a real
+      `AuthFn`. Verify an unauthenticated production request gets `401`.
 - [ ] Verify channel signatures. Each platform channel needs its signing
       secret set; custom channels must verify signatures in constant time and never
       trust body-supplied identity.

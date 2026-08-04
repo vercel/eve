@@ -23,7 +23,7 @@ vercel link --project your_project_name --yes --non-interactive
 
 A string model ID routes requests through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). The deployment authenticates through project OpenID Connect (OIDC), so you don’t need a provider API key for that path.
 
-Add credentials for direct model providers, tools, and connections to the Vercel project environment. Add any signing keys or passwords required by your [route authentication policy](../auth-and-route-protection). Replace `placeholderAuth()` before a browser sends a production request.
+Add credentials for direct model providers, tools, and connections to the Vercel project environment. If your app includes Web Chat, either set `EVE_ACCESS_PASSWORD` and a random `BETTER_AUTH_SECRET` of at least 32 characters for the default shared-password sign-in, or replace the app's auth and wire your provider into the channel. If your app does not include Web Chat, replace `placeholderAuth()` with a real `AuthFn` before a browser sends a production request. See [route authentication](../auth-and-route-protection) for the available policies.
 
 ## Select the sandbox backend
 

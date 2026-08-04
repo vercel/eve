@@ -22,7 +22,9 @@ Every production deployment must satisfy the same runtime requirements:
 
 1. Run `eve build` to compile the agent and create host output.
 2. Provide a model credential and any secrets required by tools, connections, and route authentication.
-3. Replace `placeholderAuth()` with a production route policy before accepting browser traffic.
+3. Configure production route authentication:
+   - If your app includes Web Chat, set `EVE_ACCESS_PASSWORD` and `BETTER_AUTH_SECRET` for the default shared-password sign-in, or replace the app's default auth and wire your provider into the channel.
+   - If your app does not include Web Chat, replace `placeholderAuth()` with a real `AuthFn`.
 4. Select workflow and sandbox implementations that match the host.
 5. Verify the health route and complete a real agent turn.
 

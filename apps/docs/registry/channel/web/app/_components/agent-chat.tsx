@@ -131,7 +131,7 @@ export function AgentChat() {
 
   const composer = (
     <PromptInput onSubmit={handleSubmit}>
-      <PromptInputTextarea placeholder="Send a message…" />
+      <PromptInputTextarea autoFocus placeholder="Send a message…" />
       <PromptInputSubmit onStop={requestCancellation} status={submitStatus} />
     </PromptInput>
   );

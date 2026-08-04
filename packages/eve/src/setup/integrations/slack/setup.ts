@@ -183,7 +183,7 @@ export async function setupSlack(
       slackConnectorSlug: slug,
       slackCredentials: "environment",
       force: context.force,
-      skipDependencyMutation: true,
+      registryItemInstalled: true,
     });
     reportOverwrittenFiles(context.ui.prompter.log, result.filesOverwritten);
     context.ui.prompter.log.success("Scaffolded channel: slack");
@@ -207,7 +207,7 @@ export async function setupSlack(
     slackConnectorUid: slackbot.connectorUid,
     slackConnectorSlug: slug,
     force: context.force,
-    skipDependencyMutation: true,
+    registryItemInstalled: true,
   });
   reportOverwrittenFiles(context.ui.prompter.log, result.filesOverwritten);
   if (result.action === "skipped") {

@@ -13,14 +13,30 @@ import {
   patchWorkspaceRootPackageJson,
   type WorkspaceRootMutation,
 } from "../workspace-root.js";
-import { WEB_APP_TEMPLATE_FILES } from "./web-template.js";
-
 export const CURRENT_DIRECTORY_PROJECT_NAME = ".";
 
 export const DEFAULT_AI_PACKAGE_VERSION = "__AI_SDK_VERSION__";
 export const DEFAULT_CONNECT_PACKAGE_VERSION = "__VERCEL_CONNECT_VERSION__";
 export const DEFAULT_ZOD_PACKAGE_VERSION = "__ZOD_VERSION__";
 const DEFAULT_TYPESCRIPT_PACKAGE_VERSION = "__TYPESCRIPT_VERSION__";
+
+/** Fail-closed eve channel used until an app-specific browser login is added. */
+export const DEFAULT_EVE_CHANNEL_TEMPLATE = `import { eveChannel } from "eve/channels/eve";
+import { localDev, placeholderAuth, vercelOidc } from "eve/channels/auth";
+
+export default eveChannel({
+  auth: [
+    // Lets the eve TUI and your Vercel deployments reach the deployed agent.
+    vercelOidc(),
+    // Open on localhost for \`eve dev\` and the REPL; ignored in production.
+    localDev(),
+    // This placeholder will not allow browser requests in production.
+    // Replace it with your app's auth provider, like Auth.js or Clerk,
+    // or use none() for a public demo.
+    placeholderAuth(),
+  ],
+});
+`;
 
 /**
  * The eve package metadata that generated projects consume together. Keeping
@@ -96,7 +112,7 @@ export function byokProviderEnvVar(modelId: string): string {
 export function agentTemplateFiles(model: string): Record<string, string> {
   return {
     "agent/agent.ts": BASE_AGENT_TEMPLATE.replaceAll("__EVE_INIT_MODEL__", model),
-    "agent/channels/eve.ts": WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"],
+    "agent/channels/eve.ts": DEFAULT_EVE_CHANNEL_TEMPLATE,
     "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
   };
 }
@@ -223,10 +239,7 @@ const AGENT_INSTRUCTIONS_TEMPLATE = `# Identity
 You are a helpful assistant.
 `;
 
-const SHARED_TEMPLATE_FILES: Record<string, string> = {
-  "agent/channels/eve.ts": WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"],
-  "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
-  "tsconfig.json": `{
+export const DEFAULT_TSCONFIG_TEMPLATE = `{
   "compilerOptions": {
     "target": "ES2022",
     "module": "esnext",
@@ -239,7 +252,12 @@ const SHARED_TEMPLATE_FILES: Record<string, string> = {
   },
   "include": ["agent/**/*.ts", "evals/**/*.ts"]
 }
-`,
+`;
+
+const SHARED_TEMPLATE_FILES: Record<string, string> = {
+  "agent/channels/eve.ts": DEFAULT_EVE_CHANNEL_TEMPLATE,
+  "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
+  "tsconfig.json": DEFAULT_TSCONFIG_TEMPLATE,
   ".gitignore": `node_modules
 .env*
 .eve

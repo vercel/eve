@@ -865,7 +865,7 @@ export const PromptInput = ({
         <InputGroup
           className={cn(
             "overflow-hidden rounded-2xl bg-card shadow-sm",
-            "focus-within:border-foreground has-[[data-slot=input-group-control]:focus-visible]:border-foreground",
+            "has-[[data-slot=input-group-control]:focus-visible]:border-foreground!",
             className,
           )}
         >

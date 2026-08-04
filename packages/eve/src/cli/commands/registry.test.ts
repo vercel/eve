@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import {
   browseRegistryCatalog,
+  installOfficialRegistryItem,
   runAddCommand,
   runRegistryAddCommand,
   runRegistryListCommand,
@@ -113,6 +114,51 @@ describe("registry commands", () => {
       silent: undefined,
     });
     expect(logger.errors).toEqual([]);
+  });
+
+  it("checks compatibility when setup flows install official registry items", async () => {
+    resolveInstalledPackageInfo.mockReturnValueOnce({ name: "eve", version: "0.28.0" });
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/web",
+        type: "registry:item",
+        meta: {
+          eve: {
+            requires: ">=0.28.1",
+          },
+        },
+      },
+    ]);
+
+    await expect(installOfficialRegistryItem("/project", "channel/web")).rejects.toThrow(
+      "This registry item requires eve >=0.28.1, but this project is using eve 0.28.0.",
+    );
+    expect(addRegistryItems).not.toHaveBeenCalled();
+  });
+
+  it("installs official registry items when setup is compatible", async () => {
+    resolveInstalledPackageInfo.mockReturnValueOnce({ name: "eve", version: "0.28.1" });
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/web",
+        type: "registry:item",
+        meta: {
+          eve: {
+            requires: ">=0.28.1",
+          },
+        },
+      },
+    ]);
+
+    await installOfficialRegistryItem("/project", "channel/web");
+
+    expect(addRegistryItems).toHaveBeenCalledWith(["https://eve.dev/r/channel/web.json"], {
+      config: {
+        registries: { "@acme": "https://example.com/r/{name}.json" },
+      },
+      cwd: "/project",
+      overwrite: undefined,
+    });
   });
 
   it.each(["web", "slack"] as const)(
