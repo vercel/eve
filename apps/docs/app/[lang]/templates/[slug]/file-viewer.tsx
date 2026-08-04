@@ -149,9 +149,9 @@ export const FileViewer = ({ files }: FileViewerProps) => {
     <div className="grid overflow-hidden rounded-lg border border-gray-alpha-400 bg-background-100 md:grid-cols-[200px_minmax(0,1fr)]">
       <nav
         aria-label="Template files"
-        className="border-gray-alpha-400 border-b p-2 sm:p-3 md:border-r md:border-b-0"
+        className="border-gray-alpha-400 border-b p-1 sm:p-3 md:border-r md:border-b-0"
       >
-        <p className="px-1 pb-1 text-gray-800 text-label-13-mono sm:px-2 sm:pb-2">agent/</p>
+        <p className="px-1 pb-0.5 text-gray-800 text-label-13-mono sm:px-2 sm:pb-2">agent/</p>
         <ul className="space-y-0.5">
           {tree.map((node) => {
             const Icon = node.style.icon;
@@ -162,7 +162,7 @@ export const FileViewer = ({ files }: FileViewerProps) => {
                   <button
                     aria-pressed={isSelected}
                     className={cn(
-                      "flex min-h-10 w-full touch-manipulation items-center gap-2 rounded-sm px-1 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none sm:min-h-11 sm:px-2 md:min-h-7",
+                      "flex min-h-8 w-full touch-manipulation items-center gap-2 rounded-sm px-1 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none sm:min-h-11 sm:px-2 md:min-h-7",
                       isSelected
                         ? "font-medium text-gray-1000"
                         : "text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000",
@@ -186,7 +186,7 @@ export const FileViewer = ({ files }: FileViewerProps) => {
                 <button
                   aria-expanded={isOpen}
                   className={cn(
-                    "flex min-h-10 w-full touch-manipulation items-center gap-2 rounded-sm px-1 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none sm:min-h-11 sm:px-2 md:min-h-7",
+                    "flex min-h-8 w-full touch-manipulation items-center gap-2 rounded-sm px-1 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none sm:min-h-11 sm:px-2 md:min-h-7",
                     containsSelected
                       ? "text-gray-1000"
                       : "text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000",
@@ -213,7 +213,7 @@ export const FileViewer = ({ files }: FileViewerProps) => {
                           <button
                             aria-pressed={isSelected}
                             className={cn(
-                              "min-h-10 w-full touch-manipulation truncate rounded-sm px-1 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none sm:min-h-11 sm:px-2 md:min-h-7",
+                              "min-h-8 w-full touch-manipulation truncate rounded-sm px-1 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none sm:min-h-11 sm:px-2 md:min-h-7",
                               isSelected
                                 ? "font-medium text-gray-1000"
                                 : "text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000",
