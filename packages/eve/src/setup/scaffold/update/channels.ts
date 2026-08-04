@@ -6,6 +6,7 @@ import { appendEnv } from "../../append-env.js";
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor, type NodeEngineOverride } from "../../node-engine.js";
 import { pathExists, writeTextFile } from "../files.js";
+import { renderSourceTemplate } from "../template.js";
 import { resolveVersionToken } from "../version-tokens.js";
 import {
   applyPackageManagerWorkspaceConfiguration,
@@ -386,19 +387,10 @@ function buildSlackConnectTemplate(connectorUid: string): string {
   if (!connectorUid.startsWith("slack/") || connectorUid.length === "slack/".length) {
     throw new Error(`Invalid Slack connector UID "${connectorUid}".`);
   }
-  return `import { connectSlackCredentials } from "@vercel/connect/eve";
-import { slackChannel } from "eve/channels/slack";
-
-export default slackChannel({
-  credentials: connectSlackCredentials(${JSON.stringify(connectorUid)}),
-});
-`;
+  return renderSourceTemplate("channels/slack/connect", { __EVE_CONNECTOR_UID__: connectorUid });
 }
 
-const SLACK_ENV_TEMPLATE = `import { slackChannel } from "eve/channels/slack";
-
-export default slackChannel();
-`;
+const SLACK_ENV_TEMPLATE = renderSourceTemplate("channels/slack/environment");
 
 const SLACK_ENV_EXAMPLE_VALUES = {
   SLACK_BOT_TOKEN: "",
@@ -406,9 +398,7 @@ const SLACK_ENV_EXAMPLE_VALUES = {
 } as const;
 
 function renderWebAppTemplate(content: string, appName: string): string {
-  return content
-    .replaceAll("__EVE_INIT_APP_NAME__", appName)
-    .replaceAll("__EVE_INIT_WITH_EVE_OPTIONS__", "");
+  return content.replaceAll("__EVE_INIT_APP_NAME__", appName);
 }
 
 /**

@@ -10,11 +10,15 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import * as ts from "typescript";
+
 const SETUP_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SETUP_ROOT, "../../../..");
 const SOURCE_ROOT = join(REPO_ROOT, "apps/docs/registry/channel/web");
 const REGISTRY_PATH = join(REPO_ROOT, "apps/docs/registry.json");
 const OUTPUT_PATH = join(SETUP_ROOT, "scaffold/create/web-template.ts");
+const TEMPLATE_SOURCE_ROOT = join(SETUP_ROOT, "scaffold/templates/source");
+const TEMPLATE_OUTPUT_PATH = join(SETUP_ROOT, "scaffold/templates.ts");
 
 const SOURCE_ONLY_ROOT_ENTRIES = new Set([
   "README.md",
@@ -29,32 +33,80 @@ const SOURCE_ONLY_ROOT_ENTRIES = new Set([
 ]);
 const WEB_CHANNEL_SOURCE_PATH = "agent/channels/eve.ts";
 
-const FILE_TRANSFORMS: Record<string, ReadonlyArray<readonly [string, string]>> = {
-  "app/_components/agent-chat.tsx": [
-    ['const AGENT_NAME = "eve-agent";', 'const AGENT_NAME = "__EVE_INIT_APP_NAME__";'],
-  ],
-  "app/layout.tsx": [['  title: "eve Next.js Starter",', '  title: "__EVE_INIT_APP_NAME__",']],
-  "next.config.ts": [
-    [
-      "export default withEve(nextConfig);",
-      "export default withEve(nextConfig__EVE_INIT_WITH_EVE_OPTIONS__);",
-    ],
-  ],
-};
+const WEB_TEMPLATE_APP_NAME = "__EVE_INIT_APP_NAME__";
+
+/**
+ * Locates the source expression to replace through TypeScript's AST, then
+ * preserves all surrounding source text. This makes source-template updates
+ * resilient to formatting changes without asking the printer to rewrite the
+ * registry-owned file.
+ */
+function replaceExpression(source: string, node: ts.Expression, replacement: string): string {
+  return `${source.slice(0, node.getStart())}${replacement}${source.slice(node.getEnd())}`;
+}
+
+function sourceFile(relativePath: string, source: string): ts.SourceFile {
+  return ts.createSourceFile(relativePath, source, ts.ScriptTarget.Latest, true);
+}
+
+function appNameDeclarationInitializer(file: ts.SourceFile): ts.Expression {
+  let initializer: ts.Expression | undefined;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === "AGENT_NAME" &&
+      node.initializer !== undefined
+    ) {
+      if (initializer !== undefined) throw new Error("Expected one AGENT_NAME declaration.");
+      initializer = node.initializer;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  if (initializer === undefined || !ts.isStringLiteral(initializer)) {
+    throw new Error("Expected AGENT_NAME to have a string initializer.");
+  }
+  return initializer;
+}
+
+function metadataTitleInitializer(file: ts.SourceFile): ts.Expression {
+  let initializer: ts.Expression | undefined;
+  const visit = (node: ts.Node): void => {
+    if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === "title") {
+      if (initializer !== undefined) throw new Error("Expected one metadata title property.");
+      initializer = node.initializer;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  if (initializer === undefined || !ts.isStringLiteral(initializer)) {
+    throw new Error("Expected metadata title to have a string initializer.");
+  }
+  return initializer;
+}
 
 function applyDeclaredTransforms(relativePath: string, source: string): string {
-  let content = source;
-  for (const [before, after] of FILE_TRANSFORMS[relativePath] ?? []) {
-    const firstIndex = content.indexOf(before);
-    const lastIndex = content.lastIndexOf(before);
-    if (firstIndex < 0 || firstIndex !== lastIndex) {
-      throw new Error(
-        `Expected one occurrence of ${JSON.stringify(before)} in ${relativePath}; update the declared scaffold transform.`,
+  switch (relativePath) {
+    case "app/_components/agent-chat.tsx": {
+      const file = sourceFile(relativePath, source);
+      return replaceExpression(
+        source,
+        appNameDeclarationInitializer(file),
+        JSON.stringify(WEB_TEMPLATE_APP_NAME),
       );
     }
-    content = content.replace(before, after);
+    case "app/layout.tsx": {
+      const file = sourceFile(relativePath, source);
+      return replaceExpression(
+        source,
+        metadataTitleInitializer(file),
+        JSON.stringify(WEB_TEMPLATE_APP_NAME),
+      );
+    }
+    default:
+      return source;
   }
-  return content;
 }
 
 function shouldCopySourcePath(relativePath: string): boolean {
@@ -156,6 +208,46 @@ function parsePackageTemplate(source: string): PackageTemplate {
   };
 }
 
+async function discoverTemplateSourceFiles(relativeDirectory = ""): Promise<string[]> {
+  const entries = await readdir(join(TEMPLATE_SOURCE_ROOT, relativeDirectory), {
+    withFileTypes: true,
+  });
+  const files: string[] = [];
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) files.push(...(await discoverTemplateSourceFiles(relativePath)));
+    else if (entry.isFile() && /\.[cm]?tsx?$/.test(entry.name)) files.push(relativePath);
+  }
+  return files;
+}
+
+function templateId(relativePath: string): string {
+  return relativePath.replace(/\.[cm]?tsx?$/, "").replaceAll("/", "/");
+}
+
+async function renderScaffoldTemplatesModule(): Promise<string> {
+  const files = (await discoverTemplateSourceFiles()).filter(
+    (relativePath) => !relativePath.endsWith(".d.ts"),
+  );
+  const entries = await Promise.all(
+    files.map(async (relativePath) => {
+      const source = await readFile(join(TEMPLATE_SOURCE_ROOT, relativePath), "utf8");
+      return renderFileEntry(templateId(relativePath), source);
+    }),
+  );
+  return [
+    "// Generated from src/setup/scaffold/templates/source by eve's setup build (src/setup/build.ts).",
+    "// Do not edit directly. Run `pnpm --filter eve generate:web-template`.",
+    "",
+    "export const SCAFFOLD_TEMPLATE_SOURCES = {",
+    ...entries,
+    "} as const;",
+    "",
+    "export type ScaffoldTemplateId = keyof typeof SCAFFOLD_TEMPLATE_SOURCES;",
+    "",
+  ].join("\n");
+}
+
 async function renderGeneratedModule(): Promise<string> {
   const sourceFiles = await discoverSourceFiles();
   const entries = await Promise.all(
@@ -189,13 +281,20 @@ if (mode !== "--write" && mode !== "--check") {
 }
 
 const generated = await renderGeneratedModule();
+const generatedTemplates = await renderScaffoldTemplatesModule();
 if (mode === "--write") {
-  await writeFile(OUTPUT_PATH, generated, "utf8");
+  await Promise.all([
+    writeFile(OUTPUT_PATH, generated, "utf8"),
+    writeFile(TEMPLATE_OUTPUT_PATH, generatedTemplates, "utf8"),
+  ]);
 } else {
-  const current = await readFile(OUTPUT_PATH, "utf8");
-  if (current !== generated) {
+  const [current, currentTemplates] = await Promise.all([
+    readFile(OUTPUT_PATH, "utf8"),
+    readFile(TEMPLATE_OUTPUT_PATH, "utf8"),
+  ]);
+  if (current !== generated || currentTemplates !== generatedTemplates) {
     process.stderr.write(
-      "packages/eve/src/setup/scaffold/create/web-template.ts is stale. Run `pnpm --filter eve generate:web-template`.\n",
+      "Scaffold templates are stale. Run `pnpm --filter eve generate:web-template`.\n",
     );
     process.exitCode = 1;
   }

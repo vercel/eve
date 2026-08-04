@@ -12,6 +12,7 @@ import {
 import { openUrl } from "../../primitives/open-url.js";
 import { deriveSlackConnectorSlug } from "../../scaffold/index.js";
 import { writeTextFile } from "../../scaffold/files.js";
+import { renderSourceTemplate } from "../../scaffold/template.js";
 import { WizardCancelledError } from "../../step.js";
 import type { IntegrationSetupEnvironment } from "../shared/environment.js";
 import type { IntegrationSetupUi } from "../shared/ui.js";
@@ -61,29 +62,10 @@ const defaultDeps: PhotonSetupDeps = {
   writeTextFile,
 };
 
-const PORTABLE_TEMPLATE = `import { photonIMessageChannel } from "eve/channels/photon";
-
-async function photonCredentials() {
-  const projectId = process.env.IMESSAGE_PROJECT_ID;
-  const projectSecret = process.env.IMESSAGE_PROJECT_SECRET;
-  if (!projectId || !projectSecret) throw new Error("Photon project credentials are required.");
-  return { projectId, projectSecret };
-}
-
-export default photonIMessageChannel({
-  credentials: photonCredentials,
-  webhookSecret: process.env.IMESSAGE_WEBHOOK_SECRET,
-});
-`;
+const PORTABLE_TEMPLATE = renderSourceTemplate("channels/photon/environment");
 
 function connectTemplate(connectorUid: string): string {
-  return `import { connectPhotonCredentials } from "@vercel/connect/eve";
-import { photonIMessageChannel } from "eve/channels/photon";
-
-export default photonIMessageChannel({
-  credentials: connectPhotonCredentials(${JSON.stringify(connectorUid)}),
-});
-`;
+  return renderSourceTemplate("channels/photon/connect", { __EVE_CONNECTOR_UID__: connectorUid });
 }
 
 async function choosePhotonProject(

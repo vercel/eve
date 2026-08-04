@@ -11,6 +11,7 @@ import {
   type OpenApiEndpoint,
 } from "../connections/catalog.js";
 import { pathExists, writeTextFile } from "../files.js";
+import { renderSourceTemplate, sourceTemplateExpression } from "../template.js";
 import { resolveVersionToken } from "../version-tokens.js";
 import { getSupportedModuleBaseName, matchesSupportedModuleBaseName } from "./module-files.js";
 import { patchPackageJson } from "./package-json.js";
@@ -74,52 +75,27 @@ function envKeysForAuth(auth: ConnectionAuthSpec): string[] {
   }
 }
 
-function authBlock(auth: ConnectionAuthSpec): string {
+function templateAuthKind(auth: ConnectionAuthSpec): "connect" | "bearer-env" | "headers" | "none" {
+  return auth.kind === "header" ? "headers" : auth.kind;
+}
+
+function authTemplateValues(auth: ConnectionAuthSpec) {
   switch (auth.kind) {
     case "connect":
-      return `  auth: connect("${auth.connector}"),\n`;
+      return { __EVE_CONNECTOR_UID__: auth.connector };
     case "bearer-env":
-      return `  auth: { getToken: async () => ({ token: process.env.${auth.envVar}! }) },\n`;
-    case "header": {
-      const lines = auth.headers
-        .map((header) => `    "${header.header}": process.env.${header.envVar}!,`)
-        .join("\n");
-      return `  headers: () => ({\n${lines}\n  }),\n`;
-    }
+      return {
+        __EVE_BEARER_TOKEN__: sourceTemplateExpression(`process.env.${auth.envVar}!`),
+      };
+    case "header":
+      return {
+        __EVE_HEADERS__: sourceTemplateExpression(
+          `{ ${auth.headers.map((header) => `${JSON.stringify(header.header)}: process.env.${header.envVar}!`).join(", ")} }`,
+        ),
+      };
     case "none":
-      return "";
+      return {};
   }
-}
-
-function renderMcpTemplate(endpoint: McpEndpoint, description: string, auth: ConnectionAuthSpec) {
-  const imports =
-    auth.kind === "connect"
-      ? `import { connect } from "@vercel/connect/eve";\nimport { defineMcpClientConnection } from "eve/connections";\n`
-      : `import { defineMcpClientConnection } from "eve/connections";\n`;
-  return `${imports}
-export default defineMcpClientConnection({
-  url: "${endpoint.url}",
-  description: "${description}",
-${authBlock(auth)}});
-`;
-}
-
-function renderOpenApiTemplate(
-  endpoint: OpenApiEndpoint,
-  description: string,
-  auth: ConnectionAuthSpec,
-) {
-  const imports =
-    auth.kind === "connect"
-      ? `import { connect } from "@vercel/connect/eve";\nimport { defineOpenAPIConnection } from "eve/connections";\n`
-      : `import { defineOpenAPIConnection } from "eve/connections";\n`;
-  const baseUrlLine = endpoint.baseUrl ? `  baseUrl: "${endpoint.baseUrl}",\n` : "";
-  return `${imports}
-export default defineOpenAPIConnection({
-  spec: "${endpoint.spec}",
-${baseUrlLine}  description: "${description}",
-${authBlock(auth)}});
-`;
 }
 
 function renderTemplate(
@@ -128,10 +104,20 @@ function renderTemplate(
   description: string,
   auth: ConnectionAuthSpec,
 ): string {
-  if (protocol === "mcp") {
-    return renderMcpTemplate(endpoint as McpEndpoint, description, auth);
-  }
-  return renderOpenApiTemplate(endpoint as OpenApiEndpoint, description, auth);
+  const template = `connections/${protocol}/${templateAuthKind(auth)}` as const;
+  const values = {
+    __EVE_CONNECTION_DESCRIPTION__: description,
+    ...authTemplateValues(auth),
+    ...(protocol === "mcp"
+      ? { __EVE_CONNECTION_URL__: (endpoint as McpEndpoint).url }
+      : {
+          __EVE_OPENAPI_BASE_URL__: sourceTemplateExpression(
+            JSON.stringify((endpoint as OpenApiEndpoint).baseUrl),
+          ),
+          __EVE_OPENAPI_SPEC__: (endpoint as OpenApiEndpoint).spec,
+        }),
+  };
+  return renderSourceTemplate(template, values);
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
