@@ -12,7 +12,7 @@ import { createCanonicalSitemap, type SitemapSourceEntry } from "@/lib/geistdocs
 import { geistdocsSource } from "@/lib/geistdocs/source";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
 import { integrations } from "@/lib/integrations/data";
-import { templateEntries } from "@/lib/templates/data";
+import { templateManifest } from "@/lib/templates/manifest";
 
 const getLastModified = (data: unknown): Date | undefined => {
   if (!data || typeof data !== "object" || !("lastModified" in data)) return;
@@ -43,7 +43,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       { pathname: canonicalRoutes.integrations },
       ...integrations.map(({ slug }) => ({ pathname: integrationPath(slug) })),
       { pathname: canonicalRoutes.templates },
-      ...templateEntries.map(({ slug }) => ({ pathname: templatePath(slug) })),
+      ...templateManifest.map(({ slug }) => ({ pathname: templatePath(slug) })),
     ],
   });
 }

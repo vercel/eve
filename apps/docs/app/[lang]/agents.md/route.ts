@@ -1,7 +1,7 @@
 import { createAgentsRoute } from "@vercel/geistdocs/routes/agents";
 import { transformAgentsMarkdown } from "@/lib/geistdocs/agents-transform";
 import { config } from "@/lib/geistdocs/config";
-import { templateEntries } from "@/lib/templates/data";
+import { templateManifest } from "@/lib/templates/manifest";
 
 // Static, CDN-cacheable. /agents.md surfaces the agent instructions from the
 // Geistdocs config and points agents at the machine-readable documentation
@@ -14,7 +14,7 @@ const agentsRoute = createAgentsRoute({
   transform: (markdown, { request }) =>
     transformAgentsMarkdown(markdown, {
       origin: request.nextUrl.origin,
-      templates: templateEntries,
+      templates: templateManifest,
     }),
 });
 
