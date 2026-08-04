@@ -41,17 +41,17 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
 ```
 
-`adapters` is a map of adapter name to adapter instance; each entry mounts its own webhook (see below). `state` takes any Chat SDK state adapter: `createMemoryState()` is fine for local development, but use a durable adapter (Redis, Upstash, etc.) in production so thread subscriptions and inbound deduplication survive restarts. `send` accepts a plain string, an AI SDK `UserContent` array, or a `SendPayload`, and must be called from inside a Chat SDK handler — it dispatches the turn on the webhook that is currently running.
+`adapters` is a map of adapter name to adapter instance; each entry mounts its own webhook (see below). `state` takes any Chat SDK state adapter: `createMemoryState()` is fine for local development, but use a durable adapter (Redis, Upstash, etc.) in production so thread subscriptions and inbound deduplication survive restarts. `send` takes one object containing `message`, `thread`, and any turn options, and must be called from inside a Chat SDK handler — it dispatches the turn on the webhook that is currently running.
 
 Deploy once the channel file is in place:
 
@@ -89,15 +89,15 @@ You choose which Chat SDK events start a turn by registering handlers on `bot` a
 - `bot.onSubscribedMessage(thread, message)` fires on subsequent messages in a subscribed thread.
 - `bot.onAction`, `bot.onReaction`, and `bot.onSlashCommand` are available for adapters that emit them.
 
-`send(input, options)` starts or resumes the eve session. The `thread` you pass determines the continuation token and the persisted channel state, so replies land back on the originating thread:
+`send({ message, thread, ... })` starts or resumes the eve session. The `thread` determines the continuation token and persisted channel state, so replies land back on the originating thread:
 
 ```ts
 bot.onNewMention(async (thread, message) => {
-  await send(message.text, { thread, title: "Support request" });
+  await send({ message: message.text, thread, title: "Support request" });
 });
 ```
 
-`options` accepts `{ thread, auth?, title?, mode?, callback?, adapterName?, turnPolicy? }`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn.
+The input accepts `{ message?, inputResponses?, context?, outputSchema?, thread, auth?, title?, mode?, callback?, adapterName?, turnPolicy? }`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn.
 
 ### Experimental steering
 
@@ -105,7 +105,8 @@ By default, a message sent while an eve turn is active waits for the next turn. 
 
 ```ts
 bot.onSubscribedMessage(async (thread, message) => {
-  await send(message.text, {
+  await send({
+    message: message.text,
     thread,
     turnPolicy: "experimental-steer",
   });
@@ -189,13 +190,13 @@ await channel.receive({
 
 ### Attachments
 
-`send` takes plain text or an AI SDK `UserContent` array. To forward a Chat SDK message's attachments, convert it with `messageToUserContent`, which returns `message.text` when there are no attachments and a `UserContent` array (text plus one file part per attachment URL) when there are:
+The `message` field takes plain text or an AI SDK `UserContent` array. To forward a Chat SDK message's attachments, convert it with `messageToUserContent`, which returns `message.text` when there are no attachments and a `UserContent` array (text plus one file part per attachment URL) when there are:
 
 ```ts
 import { messageToUserContent } from "eve/channels/chat-sdk";
 
 bot.onNewMention(async (thread, message) => {
-  await send(messageToUserContent(message), { thread });
+  await send({ message: messageToUserContent(message), thread });
 });
 ```
 

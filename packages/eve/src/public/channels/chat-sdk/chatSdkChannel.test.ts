@@ -178,7 +178,7 @@ describe("chatSdkChannel", () => {
     expect(await response.json()).toEqual({ response_token: "sha256=abc123" });
   });
 
-  it("hands Chat SDK mentions to Eve through bridge.send", async () => {
+  it("hands Chat SDK mentions to eve through bridge.send", async () => {
     const adapter = testAdapter();
     const bridge = chatSdkChannel({
       adapters: { test: adapter },
@@ -188,7 +188,7 @@ describe("chatSdkChannel", () => {
     });
 
     bridge.bot.onNewMention(async (thread: Thread, message: Message) => {
-      await bridge.send(message.text, { auth: AUTH, thread, title: "mention" });
+      await bridge.send({ auth: AUTH, message: message.text, thread, title: "mention" });
     });
 
     const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
@@ -223,8 +223,9 @@ describe("chatSdkChannel", () => {
     });
 
     bridge.bot.onNewMention(async (thread: Thread, message: Message) => {
-      await bridge.send(message.text, {
+      await bridge.send({
         auth: AUTH,
+        message: message.text,
         thread,
         turnPolicy: "experimental-steer",
       });
@@ -258,10 +259,11 @@ describe("chatSdkChannel", () => {
     });
 
     bridge.bot.onNewMention(async (thread: Thread) => {
-      await bridge.send(
-        { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
-        { thread, turnPolicy: "experimental-steer" },
-      );
+      await bridge.send({
+        inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+        thread,
+        turnPolicy: "experimental-steer",
+      });
     });
 
     const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
@@ -286,9 +288,10 @@ describe("chatSdkChannel", () => {
     });
 
     await expect(
-      bridge.send("hello", {
+      bridge.send({
         auth: null,
         adapterName: "test",
+        message: "hello",
         thread: THREAD_ID,
       }),
     ).rejects.toThrow("chatSdkChannel().send can only run during a Chat SDK webhook handler");
@@ -327,7 +330,7 @@ describe("chatSdkChannel", () => {
     });
   });
 
-  it("posts completed Eve messages as markdown through the stored Chat SDK thread", async () => {
+  it("posts completed eve messages as markdown through the stored Chat SDK thread", async () => {
     const adapter = testAdapter();
     const bridge = chatSdkChannel({
       adapters: { test: adapter },

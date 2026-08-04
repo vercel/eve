@@ -1,7 +1,4 @@
-import type { UserContent } from "ai";
-
 import type { ChannelOperations, ChannelSendInput } from "#channel/channel-operations.js";
-import { normalizeSendInput } from "#channel/send-input.js";
 import type { SendPayload } from "#channel/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -46,7 +43,6 @@ const DEFAULT_STREAMING_EDIT_INTERVAL_MS = 1_000;
 const MAX_TYPING_STATUS = 80;
 
 type ChatSdkAdapters = Record<string, Adapter>;
-type ChatSdkSendInput = string | UserContent | SendPayload;
 type MutableChannelSendInput<TState> = {
   -readonly [Key in keyof ChannelSendInput<TState>]: ChannelSendInput<TState>[Key];
 };
@@ -62,7 +58,7 @@ const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-w
 
 /**
  * Durable channel state used by `chatSdkChannel`. Stores the last Chat SDK
- * thread for the Eve session so event handlers can post replies without
+ * thread for the eve session so event handlers can post replies without
  * depending on hidden Chat SDK subscription state, plus the bookkeeping the
  * default handlers use to stream assistant output and surface typing status.
  */
@@ -96,7 +92,7 @@ export interface ChatSdkReceiveTarget {
 }
 
 /**
- * Channel-owned metadata exposed to Eve instrumentation.
+ * Channel-owned metadata exposed to eve instrumentation.
  */
 export interface ChatSdkInstrumentationMetadata extends Record<string, unknown> {
   readonly adapterName: string | null;
@@ -120,7 +116,7 @@ export interface ChatSdkChannelContext<TAdapters extends ChatSdkAdapters = ChatS
   readonly streamingEditIntervalMs: number;
 }
 
-/** Event-handler context for `chatSdkChannel`, including Eve session helpers. */
+/** Event-handler context for `chatSdkChannel`, including eve session helpers. */
 export interface ChatSdkEventContext<TAdapters extends ChatSdkAdapters = ChatSdkAdapters>
   extends ChatSdkChannelContext<TAdapters>, ChannelSessionOps {}
 
@@ -132,10 +128,10 @@ export type ChatSdkChannelEvents<TAdapters extends ChatSdkAdapters = ChatSdkAdap
   ChannelEvents<ChatSdkChannelContext<TAdapters>>;
 
 /**
- * Options for `bridge.send(...)` inside Chat SDK handlers. The `thread`
- * determines the Eve continuation token and the persisted channel state.
+ * Input for `bridge.send(...)` inside Chat SDK handlers. The `thread`
+ * determines the eve continuation token and persisted channel state.
  */
-export interface ChatSdkSendOptions {
+export interface ChatSdkSendInput extends SendPayload {
   readonly auth?: SessionAuthContext | null;
   readonly callback?: ChannelSendInput<ChatSdkChannelState>["callback"];
   readonly mode?: ChannelSendInput<ChatSdkChannelState>["mode"];
@@ -158,7 +154,7 @@ export interface ChatSdkSendOptions {
 
 /**
  * Configuration for {@link chatSdkChannel}. It accepts normal Chat SDK
- * `ChatConfig` fields, plus Eve route and event settings.
+ * `ChatConfig` fields, plus eve route and event settings.
  */
 export interface ChatSdkChannelConfig<
   TAdapters extends ChatSdkAdapters = ChatSdkAdapters,
@@ -176,12 +172,12 @@ export interface ChatSdkChannelConfig<
    * settings.
    */
   readonly routes?: Partial<Record<Extract<keyof TAdapters, string>, string>>;
-  /** Extra Chat SDK webhook options. Eve owns `waitUntil`. */
+  /** Extra Chat SDK webhook options. eve owns `waitUntil`. */
   readonly webhook?: Omit<WebhookOptions, "waitUntil">;
-  /** Optional Eve event handlers. Supplied handlers replace built-in defaults. */
+  /** Optional eve event handlers. Supplied handlers replace built-in defaults. */
   readonly events?: ChatSdkChannelEvents<TAdapters>;
   /**
-   * Prefix for default Eve HITL button action ids. Change this if your Chat SDK
+   * Prefix for default eve HITL button action ids. Change this if your Chat SDK
    * app already uses the `eve_input:` prefix.
    */
   readonly inputActionPrefix?: string;
@@ -216,21 +212,21 @@ export interface ChatSdkChannel extends Channel<
 /**
  * Return value of {@link chatSdkChannel}. Export `channel` from
  * `agent/channels/<name>.ts`, then register handlers on `bot` and call `send`
- * from those handlers to hand work to Eve.
+ * from those handlers to hand work to eve.
  */
 export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSdkAdapters> {
   readonly bot: Chat<TAdapters>;
   readonly channel: ChatSdkChannel;
   /**
-   * Starts or resumes an Eve session from inside a Chat SDK webhook handler.
+   * Starts or resumes an eve session from inside a Chat SDK webhook handler.
    * Use `channel.receive(...)` for proactive sends that are not handling an
    * inbound Chat SDK webhook.
    */
-  send(input: ChatSdkSendInput, options: ChatSdkSendOptions): Promise<Session>;
+  send(input: ChatSdkSendInput): Promise<Session>;
 }
 
 /**
- * Creates an Eve channel backed by one Chat SDK runtime and its adapters.
+ * Creates an eve channel backed by one Chat SDK runtime and its adapters.
  *
  * @example
  * ```ts
@@ -245,7 +241,7 @@ export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSd
  * });
  *
  * bot.onNewMention(async (thread, message) => {
- *   await send(message.text, { thread });
+ *   await send({ message: message.text, thread });
  * });
  * ```
  */
@@ -270,14 +266,11 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         "chatSdkChannel input actions require a thread on the Chat SDK action event.",
       );
     }
-    await bridgeSend(
-      bot,
-      { inputResponses: [response] },
-      {
-        auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
-        thread: event.thread,
-      },
-    );
+    await bridgeSend(bot, {
+      auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
+      inputResponses: [response],
+      thread: event.thread,
+    });
   });
 
   const channel = defineChannel<
@@ -335,8 +328,8 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   return {
     bot,
     channel,
-    send(input, options) {
-      return bridgeSend(bot, input, options);
+    send(input) {
+      return bridgeSend(bot, input);
     },
   };
 }
@@ -525,7 +518,7 @@ function renderInputRequest(request: InputRequest, inputActionPrefix: string) {
     return children;
   }
   children.push(
-    CardText("This request needs a freeform answer. Continue from the Eve session UI."),
+    CardText("This request needs a freeform answer. Continue from the eve session UI."),
   );
   return children;
 }
@@ -550,7 +543,6 @@ async function postFailure(
 async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
   input: ChatSdkSendInput,
-  options: ChatSdkSendOptions,
 ): Promise<Session> {
   const active = contextStorage.getStore()?.get(ActiveWebhookKey);
   if (!active) {
@@ -558,23 +550,22 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
       "chatSdkChannel().send can only run during a Chat SDK webhook handler for this bridge.",
     );
   }
-  const thread = serializeThread(bot, options.thread, options.adapterName);
+  const thread = serializeThread(bot, input.thread, input.adapterName);
   const sendInput: MutableChannelSendInput<ChatSdkChannelState> = {
-    ...normalizeSendInput(input),
-    auth: options.auth ?? null,
+    context: input.context,
+    inputResponses: input.inputResponses,
+    message: input.message,
+    outputSchema: input.outputSchema,
+    auth: input.auth ?? null,
     state: { thread },
   };
-  if (options.callback !== undefined) sendInput.callback = options.callback;
-  if (options.mode !== undefined) sendInput.mode = options.mode;
-  if (options.title !== undefined) sendInput.title = options.title;
-  if (options.turnPolicy === "experimental-steer" && hasMessageInput(input)) {
+  if (input.callback !== undefined) sendInput.callback = input.callback;
+  if (input.mode !== undefined) sendInput.mode = input.mode;
+  if (input.title !== undefined) sendInput.title = input.title;
+  if (input.turnPolicy === "experimental-steer" && input.message !== undefined) {
     await active.cancel(thread.id);
   }
   return active.send(thread.id, sendInput);
-}
-
-function hasMessageInput(input: ChatSdkSendInput): boolean {
-  return typeof input === "string" || Array.isArray(input) || input.message !== undefined;
 }
 
 function initialState(): ChatSdkChannelState {

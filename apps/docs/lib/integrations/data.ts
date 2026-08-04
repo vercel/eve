@@ -383,11 +383,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -423,11 +423,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -463,11 +463,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -503,11 +503,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -556,11 +556,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -612,11 +612,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -654,11 +654,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -705,11 +705,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -760,11 +760,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -805,11 +805,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -851,11 +851,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -920,11 +920,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -966,11 +966,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
@@ -1008,11 +1008,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 await bot.initialize();
@@ -1052,11 +1052,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 await bot.initialize();
@@ -1106,11 +1106,11 @@ export const { bot, channel, send } = chatSdkChannel({
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send({ message: message.text, thread });
 });
 
 export default channel;
