@@ -21,7 +21,7 @@ Fill in the repository template. Write for a reviewer:
 - link the prior issue with `Closes #N`, `Related to #N`, or equivalent
 - keep the detail proportional to the change
 
-Under testing, list exact checks actually run and useful manual coverage. State
+Under validation, list exact checks actually run and useful manual coverage. State
 limitations honestly. Do not infer results or claim checks that only CI will
 run.
 

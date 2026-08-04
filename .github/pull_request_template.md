@@ -7,7 +7,7 @@ meaningful behavior or decisions—not changed files or commits. Call out breaki
 changes, preserved behavior, scope boundaries, or stacked PRs when relevant.
 -->
 
-### Testing
+### Validation
 
 <!--
 List the exact commands you ran and useful manual coverage. Include relevant
