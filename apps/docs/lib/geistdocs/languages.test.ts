@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isSupportedLanguage, supportedLanguages } from "./languages";
+import { defaultLanguage, isSupportedLanguage, supportedLanguages } from "./languages";
 
 describe("supported languages", () => {
   it("accepts configured locales", () => {
+    expect(defaultLanguage).toBe("en");
     expect(supportedLanguages).toEqual(["en"]);
     expect(isSupportedLanguage("en")).toBe(true);
   });

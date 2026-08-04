@@ -323,7 +323,7 @@ At build time, eve checks the extension's generated capability metadata. If the 
 
 ## What to read next
 
-- [Extension integrations](/integrations?filter=extension): browse ready-to-install extensions
+- [Integrations](/integrations): browse ready-to-install extensions using the Extensions filter
 - [Tools](/docs/tools): static tools, approval, and tool output
 - [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic tools, skills, and instructions
 - [Instructions](/docs/instructions): static and TypeScript instructions

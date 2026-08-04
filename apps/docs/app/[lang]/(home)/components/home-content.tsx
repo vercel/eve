@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
 import { staticOgImage } from "@/lib/geistdocs/og";
 import { ArchitectureDiagram } from "./architecture";
 import { CTA } from "./cta";
@@ -13,7 +14,7 @@ const tagline = "Like Next.js for agents. Build durable agents with one folder."
 export const homeMetadata: Metadata = {
   title,
   description: tagline,
-  alternates: { canonical: "/" },
+  alternates: canonicalAlternates(canonicalRoutes.home),
   openGraph: {
     title,
     description: tagline,

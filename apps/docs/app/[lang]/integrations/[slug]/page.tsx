@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { canonicalAlternates, integrationPath } from "@/lib/geistdocs/canonical";
 import {
   buildConnectionConfigure,
   buildConnectionInstall,
@@ -44,7 +45,7 @@ export const generateMetadata = async ({
   return {
     title: `${integration.name} Integration`,
     description: integration.tagline,
-    alternates: { canonical: `/integrations/${integration.slug}` },
+    alternates: canonicalAlternates(integrationPath(integration.slug)),
   };
 };
 

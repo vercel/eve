@@ -7,6 +7,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ComponentProps } from "react";
 import { translations } from "@/geistdocs";
+import { canonicalAlternates, templatePath } from "@/lib/geistdocs/canonical";
 import {
   getTemplateEntry,
   templateEntries,
@@ -41,7 +42,7 @@ export const generateMetadata = async ({
     ? {
         title: `${entry.title} template - eve`,
         description: entry.description,
-        alternates: { canonical: `/templates/${entry.slug}` },
+        alternates: canonicalAlternates(templatePath(entry.slug)),
       }
     : { title: "Template not found" };
 };

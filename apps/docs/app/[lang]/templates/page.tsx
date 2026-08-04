@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
 import { translations } from "@/geistdocs";
 import { templateEntries } from "@/lib/templates/data";
 import { TemplateGallery } from "./template-gallery";
@@ -10,7 +11,7 @@ const description =
 export const metadata: Metadata = {
   title,
   description,
-  alternates: { canonical: "/templates" },
+  alternates: canonicalAlternates(canonicalRoutes.templates),
 };
 
 export const generateStaticParams = () => Object.keys(translations).map((lang) => ({ lang }));

@@ -12,6 +12,7 @@ import { Input } from "@vercel/geistdocs/components/input";
 import { ChevronDownIcon, SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { templatePath } from "@/lib/geistdocs/canonical";
 import type { TemplateCategory, TemplateEntry, TemplateIntegration } from "@/lib/templates/data";
 import { integrationIcons } from "./integration-icons";
 
@@ -73,7 +74,7 @@ const TemplateCard = ({ entry }: { entry: TemplateEntry }) => (
   <li>
     <Link
       className="flex min-h-36 flex-col rounded-lg border border-gray-alpha-400 bg-background-100 p-4 no-underline outline-none transition-colors hover:border-gray-alpha-500 hover:bg-gray-alpha-100 focus-visible:border-gray-alpha-600 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
-      href={`/templates/${entry.slug}`}
+      href={templatePath(entry.slug)}
     >
       <h2 className="text-gray-1000 text-heading-16">{entry.title}</h2>
       <p className="mt-2 line-clamp-2 max-w-[90%] text-balance text-[14px] leading-[1.3] text-gray-800">

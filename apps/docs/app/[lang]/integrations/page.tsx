@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
 import { integrations } from "@/lib/integrations/data";
 import { translations } from "@/geistdocs";
 import { Gallery, type GalleryFilter } from "./components/gallery";
@@ -10,7 +11,7 @@ const description =
 export const metadata: Metadata = {
   title,
   description,
-  alternates: { canonical: "/integrations" },
+  alternates: canonicalAlternates(canonicalRoutes.integrations),
 };
 
 export const generateStaticParams = () => Object.keys(translations).map((lang) => ({ lang }));

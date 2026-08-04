@@ -4,6 +4,7 @@ import { createDocsPage, createPageActions } from "@vercel/geistdocs/pages/docs"
 import type { MDXComponents } from "mdx/types";
 import { EditOnGithubAction } from "@/components/geistdocs/edit-on-github";
 import { getMDXComponents } from "@/components/geistdocs/mdx-components";
+import { canonicalAlternates } from "@/lib/geistdocs/canonical";
 import { config } from "@/lib/geistdocs/config";
 import { staticOgImage } from "@/lib/geistdocs/og";
 import { resolveDocsPageTitle } from "@/lib/geistdocs/page-title";
@@ -30,10 +31,10 @@ const docsPage = createDocsPage({
         tree: geistdocsSource.source.getPageTree(params.lang),
       }),
       metadataBase: new URL(getSiteOrigin()),
-      alternates: {
-        ...metadata.alternates,
-        canonical: getPublicPath(page.url, config.basePath),
-      },
+      alternates: canonicalAlternates(
+        getPublicPath(page.url, config.basePath),
+        metadata.alternates,
+      ),
       openGraph: {
         ...metadata.openGraph,
         // Override with the static OG image for now. To restore dynamic per-page

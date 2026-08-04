@@ -22,7 +22,7 @@
  * README.md in each root) are skipped via isExcluded().
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOTS = [
@@ -271,8 +271,55 @@ function checkMetaReferences(rootDir) {
   visit(rootDir);
 }
 
+function checkRepositoryMarkdownLinks(absPath) {
+  const source = readFileSync(absPath, "utf8");
+  const linkRe = /\]\((\s*[^)]+?)\s*\)/g;
+  let match;
+
+  while ((match = linkRe.exec(source)) !== null) {
+    const target = match[1].trim().split("#")[0].split("?")[0];
+    if (!target || target.startsWith("/") || /^[a-z]+:/i.test(target)) continue;
+    if (existsSync(resolve(dirname(absPath), target))) continue;
+
+    failures.push({
+      root: "docs",
+      file: relative(ROOTS[0].dir, absPath),
+      issue: `broken repository link → \`${match[1].trim()}\``,
+    });
+  }
+}
+
+function checkChannelHubLinks(rootDir) {
+  const hubPath = resolve(rootDir, "channels/overview.mdx");
+  const source = readFileSync(hubPath, "utf8");
+  const linkedRoutes = new Set();
+  const linkRe = /\]\((\s*[^)]+?)\s*\)/g;
+  let match;
+
+  while ((match = linkRe.exec(source)) !== null) {
+    const target = match[1].trim().split("#")[0].split("?")[0];
+    if (!target || (!target.startsWith("./") && !target.startsWith("/docs/"))) continue;
+    linkedRoutes.add(new URL(target, "https://eve.dev/docs/channels/overview").pathname);
+  }
+
+  const meta = loadMetaJson(resolve(rootDir, "channels"));
+  for (const slug of meta?.pages ?? []) {
+    if (typeof slug !== "string" || slug === "overview") continue;
+    const expected = `/docs/channels/${slug}`;
+    if (linkedRoutes.has(expected)) continue;
+
+    failures.push({
+      root: "docs",
+      file: "channels/overview.mdx",
+      issue: `channel hub does not link to canonical child route \`${expected}\``,
+    });
+  }
+}
+
 checkLinks(ROOTS[0].dir);
 checkMetaReferences(ROOTS[0].dir);
+checkRepositoryMarkdownLinks(resolve(ROOTS[0].dir, "README.md"));
+checkChannelHubLinks(ROOTS[0].dir);
 
 if (failures.length === 0) {
   process.stdout.write(

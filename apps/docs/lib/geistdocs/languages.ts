@@ -1,5 +1,7 @@
+export const defaultLanguage = "en" as const;
+
 export const translations = {
-  en: {
+  [defaultLanguage]: {
     displayName: "English",
   },
 };

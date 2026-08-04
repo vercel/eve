@@ -47,12 +47,12 @@ Read in this order:
 12. [Channels](./channels/overview.mdx)
 13. [Session Context](./reference/typescript-api.md)
 14. [Sessions And Streaming](./concepts/sessions-runs-and-streaming.md)
-15. [TypeScript SDK](./clients/typescript-sdk/overview.mdx)
+15. [TypeScript SDK](./guides/client/overview.mdx)
 16. [Subagents](./subagents.mdx)
 17. [Schedules](./schedules.mdx)
 18. [Evals](./evals/overview.mdx)
-19. [Auth And Route Protection](./develop/auth-and-route-protection.md)
-20. [Vercel Deployment](./develop/deployment.md)
+19. [Auth And Route Protection](./guides/auth-and-route-protection.md)
+20. [Vercel Deployment](./guides/deployment/overview.md)
 21. [CLI, Build, And Debugging](./reference/cli.md)
 
 ## The public mental model
@@ -105,5 +105,5 @@ That is why eve exposes two identifiers:
 
 ## Good companions in this repo
 
-- Weather-focused smoke/dev fixture: [`../../apps/fixtures/weather-fixture`](../../apps/fixtures/weather-fixture)
-- Public API source of truth: [`../../packages/eve/src/public/index.ts`](../../packages/eve/src/public/index.ts)
+- Weather-focused smoke/dev fixture: [`../apps/fixtures/weather-agent`](../apps/fixtures/weather-agent)
+- Public API source of truth: [`../packages/eve/src/public/index.ts`](../packages/eve/src/public/index.ts)

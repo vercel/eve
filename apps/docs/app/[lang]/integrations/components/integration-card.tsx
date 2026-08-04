@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { integrationPath } from "@/lib/geistdocs/canonical";
 import { type Integration, protocolBadgeClassName, protocolLabel } from "@/lib/integrations/data";
 import { logos } from "@/lib/integrations/logos";
 
@@ -19,7 +20,7 @@ export const IntegrationCard = ({ integration }: IntegrationCardProps) => {
   return (
     <Link
       className="group flex flex-col gap-4 rounded-lg border bg-background-100 p-5 transition-colors hover:border-gray-400 hover:bg-gray-100"
-      href={`/integrations/${integration.slug}`}
+      href={integrationPath(integration.slug)}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background text-gray-1000">

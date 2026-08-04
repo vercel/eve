@@ -12,11 +12,12 @@ import {
   title,
   translations,
 } from "@/geistdocs";
+import { defaultLanguage } from "./languages";
 
 export const config = defineConfig({
   title,
   agent,
-  defaultLanguage: "en",
+  defaultLanguage,
   logo: <Logo />,
   github,
   nav,
