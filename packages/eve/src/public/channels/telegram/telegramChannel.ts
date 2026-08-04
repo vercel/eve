@@ -4,7 +4,7 @@ import type { ChannelOperations } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/channel.js";
+import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -71,8 +71,8 @@ export interface TelegramChannelContext extends TelegramContext {
   state: TelegramChannelState;
 }
 
-/** Event-handler Telegram context, including session operations. */
-export interface TelegramEventContext extends TelegramChannelContext, ChannelSessionOps {}
+/** Event-handler Telegram context, including continuation routing. */
+export interface TelegramEventContext extends TelegramChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable Telegram channel state. */
 export interface TelegramChannelState extends TelegramHitlState {
@@ -125,7 +125,7 @@ type TelegramSessionFailedHandler = (
   channel: TelegramEventContext,
 ) => void | Promise<void>;
 
-/** Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default (handlers merge over {@link defaultEvents}). `session.failed` receives `(data, channel)`; all others also receive the {@link SessionContext}. */
+/** Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default (handlers merge over {@link defaultEvents}). `session.failed` receives `(data, channel)` and exposes the ID as `data.sessionId`; all others also receive the {@link SessionContext}. */
 export interface TelegramChannelEvents {
   readonly "turn.started"?: TelegramEventHandler<"turn.started">;
   readonly "actions.requested"?: TelegramEventHandler<"actions.requested">;

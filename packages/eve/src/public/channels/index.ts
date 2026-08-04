@@ -17,7 +17,7 @@ export {
   type ChannelCors,
   type ChannelCorsOptions,
   type ChannelDefinition,
-  type ChannelSessionOps,
+  type ChannelContinuationOps,
   type ChannelEvents,
   type InferChannelMetadata,
   type Session,

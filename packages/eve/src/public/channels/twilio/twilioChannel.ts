@@ -3,7 +3,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { RouteHandler } from "#channel/routes.js";
 import type { ChannelOperations } from "#channel/channel-operations.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/channel.js";
+import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -61,8 +61,8 @@ export interface TwilioChannelContext extends TwilioContext {
   state: TwilioChannelState;
 }
 
-/** Event-handler Twilio context, including session operations. */
-export interface TwilioEventContext extends TwilioChannelContext, ChannelSessionOps {}
+/** Event-handler Twilio context, including continuation routing. */
+export interface TwilioEventContext extends TwilioChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable state for the phone-number conversation. */
 export interface TwilioChannelState {

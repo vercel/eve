@@ -32,7 +32,7 @@ import {
   defineChannel,
   POST,
   type Channel,
-  type ChannelSessionOps,
+  type ChannelContinuationOps,
 } from "#public/definitions/channel.js";
 import { isObject, readNonEmptyString } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
@@ -102,8 +102,8 @@ export interface LinearChannelContext {
   state: LinearChannelState;
 }
 
-/** Event-handler Linear context, including session operations. */
-export interface LinearEventContext extends LinearChannelContext, ChannelSessionOps {}
+/** Event-handler Linear context, including continuation routing. */
+export interface LinearEventContext extends LinearChannelContext, ChannelContinuationOps {}
 
 /** Low-level Linear handle exposed to hooks and event handlers. */
 export interface LinearHandle {

@@ -1,7 +1,7 @@
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/channel.js";
+import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -94,8 +94,8 @@ export interface GitHubChannelContext {
   state: GitHubChannelState;
 }
 
-/** Event-handler GitHub context, including session operations. */
-export interface GitHubEventContext extends GitHubChannelContext, ChannelSessionOps {}
+/** Event-handler GitHub context, including continuation routing. */
+export interface GitHubEventContext extends GitHubChannelContext, ChannelContinuationOps {}
 
 /**
  * Result of a GitHub inbound hook. Return `null` to acknowledge without

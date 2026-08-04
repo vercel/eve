@@ -53,7 +53,7 @@ import {
   type Channel,
   type ChannelCors,
   type ChannelEvents,
-  type ChannelSessionOps,
+  type ChannelContinuationOps,
 } from "#public/definitions/channel.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -63,10 +63,10 @@ const log = createLogger("eve.channel");
 
 /**
  * Event-handler channel context exposed by `eveChannel({ events })`. The default eve HTTP channel
- * has no platform-specific state, so handlers receive session identity and optional channel-address
- * metadata plus the `SessionContext` third arg from {@link ChannelEvents}.
+ * has no platform-specific state, so handlers receive optional continuation routing here and the
+ * `SessionContext` third argument from {@link ChannelEvents}.
  */
-export type EveEventContext = ChannelSessionOps;
+export type EveEventContext = ChannelContinuationOps;
 
 /** Runtime stream-event handlers supported by `eveChannel({ events })`. */
 export type EveChannelEvents = ChannelEvents<EveEventContext>;

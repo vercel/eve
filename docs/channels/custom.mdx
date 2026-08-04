@@ -50,8 +50,8 @@ export default defineChannel({
   ],
 
   events: {
-    "message.completed"(event, channel) {
-      console.log(channel.session.id, event.message);
+    "message.completed"(event, _channel, ctx) {
+      console.log(ctx.session.id, event.message);
     },
   },
 });
@@ -64,10 +64,11 @@ Each route receives these operation surfaces:
 - `receive(channel, options)` hands work to another authored channel.
 - `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
 
-Event handlers receive `(eventData, channel, ctx)`. `channel.session.id` identifies
+Event handlers receive `(eventData, channel, ctx)`. `ctx.session.id` identifies
 the exact session, while `channel.continuation` exposes the current address and
 `rekey()` when this channel needs to move it. `session.failed` receives only
-`(eventData, channel)`.
+`(eventData, channel)` because it runs outside session context; its event data
+contains `sessionId` directly.
 
 ## Channel operations and session handles
 
@@ -279,7 +280,7 @@ When the identity that should address a session is not known until later, re-key
 
 Re-keying changes the address of the current session. `reset` is different: it terminally retires the current session and makes its existing address available to a later `send()`. `cancel` is narrower still: it stops only the active turn and leaves the session, history, and continuation-token ownership intact.
 
-The `context(state, session)` config option builds the per-step `channel` argument handed to every event handler. It receives the channel's live adapter `state` and a `SessionHandle`, and returns the channel-owned context (thread handles, API clients, late-bound callbacks). The framework injects [`ChannelSessionOps`](#define-a-channel) and passes the result as the second positional argument to each handler. Closing over `session` lets the factory register callbacks that re-key the address later. State mutations made through the returned context are written back to adapter state.
+The `context(state, session)` config option builds the per-step `channel` argument handed to every event handler. It receives the channel's live adapter `state` and a `SessionHandle`, and returns the channel-owned context (thread handles, API clients, late-bound callbacks). The framework injects [`ChannelContinuationOps`](#define-a-channel) and passes the result as the second positional argument to each handler. Closing over `session` lets the factory register callbacks that re-key the address later. State mutations made through the returned context are written back to adapter state.
 
 ```ts
 import { defineChannel } from "eve/channels";

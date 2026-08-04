@@ -418,7 +418,7 @@ describe("defineChannel", () => {
     expect(typeof capturedCtx.getSkill).toBe("function");
     expect(capturedCtx.session.id).toBe("sess-channel-test");
     expect(capturedCtx.session.turn).toEqual({ id: "turn-1", sequence: 0 });
-    expect(capturedChannel.session.id).toBe("sess-channel-test");
+    expect(capturedChannel.session).toBeUndefined();
     expect(capturedChannel.continuation).toBeUndefined();
   });
 
@@ -499,20 +499,24 @@ describe("defineChannel", () => {
       reasoning: "Need to inspect the repo.",
       turnId: "turn-1",
     });
-    expect(capturedChannel.session.id).toBe("sess-channel-test");
+    expect(capturedChannel.session).toBeUndefined();
     expect(capturedChannel.continuation).toBeUndefined();
     expect(capturedCtx.session.id).toBe("sess-channel-test");
   });
 
-  it("session.failed handler receives no ctx parameter", async () => {
+  it("session.failed exposes its session id in event data without a ctx parameter", async () => {
     let called = false;
     let argCount = 0;
+    let observedSessionId: string | undefined;
+    let capturedChannel: any;
     const channel = defineChannel({
       routes: [POST("/x", async () => new Response("ok"))],
       events: {
         "session.failed": (...args) => {
           called = true;
           argCount = args.length;
+          observedSessionId = args[0].sessionId;
+          capturedChannel = args[1];
         },
       },
     });
@@ -542,6 +546,8 @@ describe("defineChannel", () => {
 
     expect(called).toBe(true);
     expect(argCount).toBe(2);
+    expect(observedSessionId).toBe("sess-1");
+    expect(capturedChannel.session).toBeUndefined();
   });
 
   it("advertises typed cross-channel receive targets from raw defineChannel", () => {

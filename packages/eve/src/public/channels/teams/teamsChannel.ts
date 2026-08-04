@@ -3,7 +3,7 @@ import type { ChannelOperations } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/channel.js";
+import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -82,8 +82,8 @@ export interface TeamsChannelContext extends TeamsContext {
   state: TeamsChannelState;
 }
 
-/** Event-handler Teams context, including session operations. */
-export interface TeamsEventContext extends TeamsChannelContext, ChannelSessionOps {}
+/** Event-handler Teams context, including continuation routing. */
+export interface TeamsEventContext extends TeamsChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable Teams channel state. */
 export interface TeamsChannelState {

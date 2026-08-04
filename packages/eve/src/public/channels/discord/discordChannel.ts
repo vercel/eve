@@ -3,7 +3,7 @@ import type { ChannelOperations } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/channel.js";
+import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -65,8 +65,8 @@ export interface DiscordContext {
 /** Channel-owned Discord context returned by `context()`. */
 export type DiscordChannelContext = DiscordContext & { state: DiscordChannelState };
 
-/** Event-handler Discord context, including session operations. */
-export interface DiscordEventContext extends DiscordChannelContext, ChannelSessionOps {}
+/** Event-handler Discord context, including continuation routing. */
+export interface DiscordEventContext extends DiscordChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable Discord channel state. */
 export interface DiscordChannelState {
@@ -126,7 +126,7 @@ type DiscordSessionFailedHandler = (
   channel: DiscordEventContext,
 ) => void | Promise<void>;
 
-/** Per-event handlers for `discordChannel({ events })`. Supplied handlers override built-in defaults per key; unspecified events keep their defaults. `session.failed` receives only `(data, channel)`; every other handler also gets the session `ctx`. */
+/** Per-event handlers for `discordChannel({ events })`. Supplied handlers override built-in defaults per key; unspecified events keep their defaults. `session.failed` receives only `(data, channel)` and exposes the ID as `data.sessionId`; every other handler also gets the session `ctx`. */
 export interface DiscordChannelEvents {
   readonly "turn.started"?: DiscordEventHandler<"turn.started">;
   readonly "actions.requested"?: DiscordEventHandler<"actions.requested">;

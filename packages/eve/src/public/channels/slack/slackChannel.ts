@@ -6,7 +6,7 @@ import type { Session, SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/channel.js";
+import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -100,10 +100,10 @@ export interface SlackChannelContext extends SlackContext {
 /**
  * Slack context handed to `events[type]` handlers. Extends
  * {@link SlackChannelContext} (`thread`, `slack`, hydrated `state`) with
- * session operations ({@link ChannelSessionOps}). Unlike the pre-dispatch
+ * continuation routing ({@link ChannelContinuationOps}). Unlike the pre-dispatch
  * {@link SlackContext}, `state` is hydrated here.
  */
-export interface SlackEventContext extends SlackChannelContext, ChannelSessionOps {}
+export interface SlackEventContext extends SlackChannelContext, ChannelContinuationOps {}
 
 export type {
   SlackApiResponse,
@@ -412,7 +412,8 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
  * `slackChannel({ events })`. Each key is optional; supplying one replaces
  * only that event's built-in default (see {@link defaultEvents}). Handlers
  * receive the event data, the {@link SlackEventContext}, and the session
- * {@link SessionContext}; `session.failed` receives only data and context.
+ * {@link SessionContext}; `session.failed` receives only data and channel
+ * context and exposes the ID as `data.sessionId`.
  */
 export interface SlackChannelEvents {
   readonly "turn.started"?: SlackEventHandler<"turn.started">;

@@ -10,7 +10,7 @@ import { type AuthFn, none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth, type EveChannelInput } from "#public/channels/eve.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import type { RouteHandlerArgs, SendPayload } from "#channel/routes.js";
-import type { Session } from "#channel/session.js";
+import type { Session, SessionSendInput } from "#channel/session.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
@@ -685,14 +685,13 @@ describe("eveChannel — onMessage", () => {
 
     expect(response.status).toBe(202);
     expect(onMessage).toHaveBeenCalledTimes(1);
-    const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload.context).toEqual([
+    const sendInput = handler.send.mock.calls[0]?.[0] as SessionSendInput;
+    expect(sendInput.context).toEqual([
       "Client context:\napproval modal open",
       "Authenticated continuation context",
     ]);
-    expect(payload.inputResponses).toEqual([{ requestId: "req-1", optionId: "approve" }]);
-    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
-    expect(options.auth).toEqual(ACCEPTED_AUTH);
+    expect(sendInput.inputResponses).toEqual([{ requestId: "req-1", optionId: "approve" }]);
+    expect(sendInput.auth).toEqual(ACCEPTED_AUTH);
   });
 
   it("does not run onMessage for inputResponses-only continue requests", async () => {
@@ -711,10 +710,9 @@ describe("eveChannel — onMessage", () => {
     expect(response.status).toBe(202);
     expect(onMessage).not.toHaveBeenCalled();
     expect(handler.send).toHaveBeenCalledTimes(1);
-    const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload.context).toBeUndefined();
-    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
-    expect(options.auth).toEqual(ACCEPTED_AUTH);
+    const sendInput = handler.send.mock.calls[0]?.[0] as SessionSendInput;
+    expect(sendInput.context).toBeUndefined();
+    expect(sendInput.auth).toEqual(ACCEPTED_AUTH);
   });
 
   it("maps validated continuation callback metadata onto the turn caller", async () => {
@@ -1426,8 +1424,12 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
 
     expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
-    const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload).toEqual({ message: "Summarize", outputSchema });
+    const sendInput = handler.send.mock.calls[0]?.[0] as SessionSendInput;
+    expect(sendInput).toMatchObject({
+      auth: expect.objectContaining({ authenticator: "none" }),
+      message: "Summarize",
+      outputSchema,
+    });
   });
 
   it("rejects invalid continue-session clientContext", async () => {
@@ -1540,8 +1542,8 @@ describe("eveChannel — auth array shape", () => {
     );
 
     expect(response.status).toBe(202);
-    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
-    expect(options.auth).toEqual(ACCEPTED);
+    const sendInput = handler.send.mock.calls[0]?.[0] as SessionSendInput;
+    expect(sendInput.auth).toEqual(ACCEPTED);
   });
 });
 

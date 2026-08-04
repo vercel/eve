@@ -34,7 +34,7 @@ import {
   POST,
   type Channel,
   type ChannelEvents,
-  type ChannelSessionOps,
+  type ChannelContinuationOps,
   type RouteHandlerArgs,
   type Session,
 } from "#public/definitions/channel.js";
@@ -120,9 +120,9 @@ export interface ChatSdkChannelContext<TAdapters extends ChatSdkAdapters = ChatS
   readonly streamingEditIntervalMs: number;
 }
 
-/** Event-handler context for `chatSdkChannel`, including eve session helpers. */
+/** Event-handler context for `chatSdkChannel`, including continuation routing. */
 export interface ChatSdkEventContext<TAdapters extends ChatSdkAdapters = ChatSdkAdapters>
-  extends ChatSdkChannelContext<TAdapters>, ChannelSessionOps {}
+  extends ChatSdkChannelContext<TAdapters>, ChannelContinuationOps {}
 
 /**
  * Per-event handlers for `chatSdkChannel({ events })`. Each supplied handler

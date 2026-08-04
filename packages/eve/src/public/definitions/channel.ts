@@ -132,11 +132,8 @@ export function isDisabledRouteSentinel(value: unknown): value is DisabledRouteS
 type EventData<T extends UnstampedMessageStreamEvent["type"]> =
   Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
-/**
- * Session operations on the `channel` argument of every channel event handler.
- */
-export interface ChannelSessionOps {
-  readonly session: { readonly id: string };
+/** Continuation routing on the `channel` argument of every channel event handler. */
+export interface ChannelContinuationOps {
   readonly continuation?: {
     readonly token: string;
     rekey(token: string): void;
@@ -145,9 +142,9 @@ export interface ChannelSessionOps {
 
 /**
  * Channel context passed to event handlers: `TCtx` intersected with
- * {@link ChannelSessionOps}.
+ * {@link ChannelContinuationOps}.
  */
-export type ChannelContext<TCtx> = TCtx & ChannelSessionOps;
+export type ChannelContext<TCtx> = TCtx & ChannelContinuationOps;
 
 type ChannelEventHandler<T extends UnstampedMessageStreamEvent["type"], TCtx> = (
   data: EventData<T>,
@@ -164,7 +161,7 @@ type ChannelSessionFailedHandler<TCtx> = (
  * Optional handlers keyed by session lifecycle event name. Each handler receives
  * the event `data`, the {@link ChannelContext}, and a {@link SessionContext}
  * `ctx`. The `session.failed` handler is the exception: it receives only `data`
- * and the channel context, with no `ctx`.
+ * and the channel context, with no `ctx`; its data includes `sessionId`.
  */
 export interface ChannelEvents<TCtx = void> {
   readonly "context.cleared"?: ChannelEventHandler<"context.cleared", TCtx>;
@@ -317,16 +314,16 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     if (userHandler) {
       hasEventHandlers = true;
       eventHandlers[eventType] = (data: unknown, adapterCtx: any) => {
+        const { session, ...platformContext } = adapterCtx;
         const channel = {
-          ...adapterCtx,
+          ...platformContext,
           continuation:
-            adapterCtx.session?.continuation === undefined
+            session?.continuation === undefined
               ? undefined
               : {
-                  token: adapterCtx.session.continuation.token,
-                  rekey: (token: string) => adapterCtx.session.continuation?.rekey(token),
+                  token: session.continuation.token,
+                  rekey: (token: string) => session.continuation?.rekey(token),
                 },
-          session: { id: adapterCtx.session?.id ?? "" },
         };
         if (eventType === "session.failed") {
           return (userHandler as (data: unknown, channel: any) => void | Promise<void>)(

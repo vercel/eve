@@ -65,8 +65,8 @@ export interface GenericChannelDefinition<
    *
    * Return the channel-owned context (thread handles, API clients, etc.). The
    * framework passes it as the `channel` argument to event handlers (with
-   * {@link ChannelSessionOps} injected) and passes {@link SessionContext} as a
-   * separate `ctx` argument.
+   * {@link ChannelContinuationOps} injected) and passes {@link SessionContext}
+   * as a separate `ctx` argument.
    */
   context?(state: NonNullable<TState>, session: SessionHandle): TCtx;
 
