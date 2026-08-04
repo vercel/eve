@@ -210,7 +210,7 @@ describe("fireSessionCallbackStep", () => {
         callId: "call-1",
         subagentName: "research",
         token: "tok123",
-        url: "https://caller.example.com/eve/v1/sessions/tok123",
+        url: "https://caller.example.com/eve/v1/session/tok123",
       },
     ],
     [

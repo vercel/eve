@@ -49,7 +49,7 @@ const OVERRIDE_AUTH: SessionAuthContext = {
 type MockSendOptions = Pick<RunInput, "auth" | "callback" | "initiatorAuth" | "mode" | "title">;
 
 function createJsonMessageRequest(body: unknown): Request {
-  return new Request("https://example.com/eve/v1/sessions", {
+  return new Request("https://example.com/eve/v1/session", {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
@@ -89,14 +89,14 @@ function createRouteArgs(): RouteHandlerArgs {
 }
 
 /**
- * Creates a POST handler test harness for the create route (POST /eve/v1/sessions).
+ * Creates a POST handler test harness for the create route (POST /eve/v1/session).
  * Returns a `fetch(req)` function and a `send` mock so tests can inspect
  * what the handler passed through.
  */
 function createEveCreateHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const createRoute = channel.routes.find(
-    (r) => r.method === "POST" && r.path === "/eve/v1/sessions",
+    (r) => r.method === "POST" && r.path === "/eve/v1/session",
   );
   if (!createRoute) throw new Error("No create POST route found");
 
@@ -130,12 +130,12 @@ function createEveCreateHandler(input: EveChannelInput) {
 
 /**
  * Creates a POST handler test harness for the continue route
- * (POST /eve/v1/sessions/:sessionId/messages).
+ * (POST /eve/v1/session/:sessionId).
  */
 function createEveContinueHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const continueRoute = channel.routes.find(
-    (r) => r.method === "POST" && r.path === "/eve/v1/sessions/:sessionId/messages",
+    (r) => r.method === "POST" && r.path === "/eve/v1/session/:sessionId",
   );
   if (!continueRoute) throw new Error("No continue POST route found");
 
@@ -157,12 +157,12 @@ function createEveContinueHandler(input: EveChannelInput) {
 
 /**
  * Creates a POST handler test harness for the cancel-turn route
- * (POST /eve/v1/sessions/:sessionId/cancel).
+ * (POST /eve/v1/session/:sessionId/cancel).
  */
 function createEveCancelHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const cancelRoute = channel.routes.find(
-    (r) => r.method === "POST" && r.path === "/eve/v1/sessions/:sessionId/cancel",
+    (r) => r.method === "POST" && r.path === "/eve/v1/session/:sessionId/cancel",
   );
   if (!cancelRoute) throw new Error("No cancel POST route found");
 
@@ -185,7 +185,7 @@ function createEveCancelHandler(input: EveChannelInput) {
 }
 
 function cancelRequest(body?: unknown): Request {
-  return new Request("https://example.com/eve/v1/sessions/test-session-id/cancel", {
+  return new Request("https://example.com/eve/v1/session/test-session-id/cancel", {
     ...(body === undefined
       ? {}
       : {
@@ -200,7 +200,7 @@ function cancelRequest(body?: unknown): Request {
 function createEveResetHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const resetRoute = channel.routes.find(
-    (r) => r.method === "POST" && r.path === "/eve/v1/sessions/:sessionId/reset",
+    (r) => r.method === "POST" && r.path === "/eve/v1/session/:sessionId/reset",
   );
   if (!resetRoute) throw new Error("No session reset POST route found");
 
@@ -223,7 +223,7 @@ function createEveResetHandler(input: EveChannelInput) {
 }
 
 function resetRequest(body: unknown): Request {
-  return new Request("https://example.com/eve/v1/sessions/test-session-id/reset", {
+  return new Request("https://example.com/eve/v1/session/test-session-id/reset", {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
@@ -231,7 +231,7 @@ function resetRequest(body: unknown): Request {
 }
 
 function clearRequest(body: unknown): Request {
-  return new Request("https://example.com/eve/v1/sessions/test-session-id/clear", {
+  return new Request("https://example.com/eve/v1/session/test-session-id/clear", {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
@@ -239,7 +239,7 @@ function clearRequest(body: unknown): Request {
 }
 
 function compactRequest(body: unknown): Request {
-  return new Request("https://example.com/eve/v1/sessions/test-session-id/compact", {
+  return new Request("https://example.com/eve/v1/session/test-session-id/compact", {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
@@ -250,7 +250,7 @@ function compactRequest(body: unknown): Request {
 function createEveClearHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const clearRoute = channel.routes.find(
-    (route) => route.method === "POST" && route.path === "/eve/v1/sessions/:sessionId/clear",
+    (route) => route.method === "POST" && route.path === "/eve/v1/session/:sessionId/clear",
   );
   if (!clearRoute) throw new Error("No session clear POST route found");
 
@@ -276,7 +276,7 @@ function createEveClearHandler(input: EveChannelInput) {
 function createEveCompactHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const compactRoute = channel.routes.find(
-    (route) => route.method === "POST" && route.path === "/eve/v1/sessions/:sessionId/compact",
+    (route) => route.method === "POST" && route.path === "/eve/v1/session/:sessionId/compact",
   );
   if (!compactRoute) throw new Error("No session compact POST route found");
 
@@ -302,7 +302,7 @@ function createEveCompactHandler(input: EveChannelInput) {
 function createEveStreamHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const streamRoute = channel.routes.find(
-    (route) => route.method === "GET" && route.path === "/eve/v1/sessions/:sessionId/stream",
+    (route) => route.method === "GET" && route.path === "/eve/v1/session/:sessionId/stream",
   );
   if (!streamRoute) throw new Error("No session stream GET route found");
 
@@ -491,7 +491,7 @@ describe("eveChannel — events", () => {
 describe("eveChannel — stream cursor", () => {
   it("establishes the NDJSON body before the first durable event", async () => {
     const handler = createEveStreamHandler({ auth: none() });
-    const response = await handler.fetch("https://eve.test/eve/v1/sessions/test-session-id/stream");
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
     const reader = response.body!.getReader();
 
     const firstChunk = await Promise.race([
@@ -509,7 +509,7 @@ describe("eveChannel — stream cursor", () => {
     const handler = createEveStreamHandler({ auth: none() });
 
     const response = await handler.fetch(
-      "https://eve.test/eve/v1/sessions/test-session-id/stream?startIndex=-1",
+      "https://eve.test/eve/v1/session/test-session-id/stream?startIndex=-1",
     );
 
     expect(response.status).toBe(200);
@@ -521,7 +521,7 @@ describe("eveChannel — stream cursor", () => {
     async (startIndex) => {
       const handler = createEveStreamHandler({ auth: none() });
       const response = await handler.fetch(
-        `https://eve.test/eve/v1/sessions/test-session-id/stream?startIndex=${encodeURIComponent(startIndex)}`,
+        `https://eve.test/eve/v1/session/test-session-id/stream?startIndex=${encodeURIComponent(startIndex)}`,
       );
 
       expect(response.status).toBe(400);
@@ -532,7 +532,7 @@ describe("eveChannel — stream cursor", () => {
   it("omits the tail index by default without paying for the lookup", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 
-    const response = await handler.fetch("https://eve.test/eve/v1/sessions/test-session-id/stream");
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-eve-stream-tail-index")).toBeNull();
@@ -544,7 +544,7 @@ describe("eveChannel — stream cursor", () => {
     handler.getStreamTailIndex.mockResolvedValueOnce(41);
 
     const response = await handler.fetch(
-      "https://eve.test/eve/v1/sessions/test-session-id/stream?includeTailIndex=1",
+      "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1",
     );
 
     expect(response.status).toBe(200);
@@ -558,7 +558,7 @@ describe("eveChannel — onMessage", () => {
       expect(ctx.eve.caller).toEqual(ACCEPTED_AUTH);
       expect(defaultEveAuth(ctx)).toEqual(ACCEPTED_AUTH);
       expect(ctx.eve.sessionId).toBeUndefined();
-      expect(ctx.eve.request.url).toBe("https://example.com/eve/v1/sessions");
+      expect(ctx.eve.request.url).toBe("https://example.com/eve/v1/session");
       expect(message).toBe("What word is selected?");
       return { auth: defaultEveAuth(ctx), context: ["Authenticated caller profile: enterprise"] };
     });
@@ -1075,7 +1075,7 @@ describe("eveChannel — create session (text)", () => {
     const handler = createEveCreateHandler({ auth: none() });
 
     const response = await handler.fetch(
-      new Request("https://example.com/eve/v1/sessions", {
+      new Request("https://example.com/eve/v1/session", {
         body: "not-json",
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -1957,7 +1957,7 @@ describe("eveChannel — forwarded principal", () => {
     });
 
     const response = await handler.fetch(
-      new Request("https://example.com/eve/v1/sessions/test-session-id/messages", {
+      new Request("https://example.com/eve/v1/session/test-session-id", {
         body: JSON.stringify({
           forwardedPrincipal: { current: FORWARDED_CURRENT },
           message: "hi",

@@ -50,7 +50,7 @@ const FORWARDED_INITIATOR: SessionAuthContext = {
 function createEveCreateHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
   const createRoute = channel.routes.find(
-    (route) => route.method === "POST" && route.path === "/eve/v1/sessions",
+    (route) => route.method === "POST" && route.path === "/eve/v1/session",
   );
   if (!createRoute) throw new Error("No create POST route found");
 
@@ -88,7 +88,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     });
 
     const response = await handler.fetch(
-      new Request("https://receiver.example.com/eve/v1/sessions", {
+      new Request("https://receiver.example.com/eve/v1/session", {
         body: JSON.stringify({
           forwardedPrincipal: { current: FORWARDED_CURRENT, initiator: FORWARDED_INITIATOR },
           message: "check my dashboards",
@@ -150,7 +150,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     });
 
     await handler.fetch(
-      new Request("https://receiver.example.com/eve/v1/sessions", {
+      new Request("https://receiver.example.com/eve/v1/session", {
         body: JSON.stringify({ message: "check my dashboards", mode: "task" }),
         headers: { "content-type": "application/json" },
         method: "POST",

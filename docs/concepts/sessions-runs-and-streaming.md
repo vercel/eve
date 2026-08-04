@@ -27,7 +27,7 @@ React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overv
 ## Start a session
 
 ```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/sessions \
+curl -X POST http://127.0.0.1:2000/eve/v1/session \
   -H 'content-type: application/json' \
   -d '{"message":"Summarize the latest forecast."}'
 ```
@@ -38,7 +38,7 @@ eve responds right away with the durable `sessionId` in the JSON body and
 ## Stream a session
 
 ```bash
-curl http://127.0.0.1:2000/eve/v1/sessions/<sessionId>/stream
+curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
 ```
 
 The stream is newline-delimited JSON (NDJSON), one event per line:
@@ -143,7 +143,7 @@ Authored [hooks](../guides/hooks) receive the same envelope, but observe each ev
 Once the session is waiting (you'll see `session.waiting`), POST your follow-up to its ID-addressed messages endpoint:
 
 ```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/sessions/<sessionId>/messages \
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
   -H 'content-type: application/json' \
   -d '{"message":"Now send the short version."}'
 ```
@@ -165,7 +165,7 @@ For deterministic ordering, send one follow-up at a time and wait for the next `
 POST to the session's cancel endpoint to stop the turn that is currently running. The body is optional; pass `turnId` (stamped on every turn-scoped stream event) to scope the cancel to the turn you observed:
 
 ```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/sessions/<sessionId>/cancel
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 # {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
 ```
 
@@ -180,9 +180,9 @@ Custom channel routes request the same cancellation through
 All session controls are ID-addressed and accept no continuation token:
 
 ```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/sessions/<sessionId>/compact
-curl -X POST http://127.0.0.1:2000/eve/v1/sessions/<sessionId>/clear
-curl -X POST http://127.0.0.1:2000/eve/v1/sessions/<sessionId>/reset \
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/compact
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/clear
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/reset \
   -H 'content-type: application/json' \
   -d '{"reason":"Start over"}'
 ```
@@ -198,13 +198,13 @@ The stream is durable. Every event is recorded before a step completes, so consu
 If a reconnect overlaps events you already handled, [`meta.id`](#the-event-envelope) identifies the duplicates: it is unchanged across reconnects and rewinds, so a consumer keyed on it can replay safely.
 
 ```bash
-curl "http://127.0.0.1:2000/eve/v1/sessions/<sessionId>/stream?startIndex=<count>"
+curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
 ```
 
 A negative `startIndex` reads relative to the stream's current tail. For example, `-1` reads the latest event, which is normally `session.waiting` for a resumable session:
 
 ```bash
-curl "http://127.0.0.1:2000/eve/v1/sessions/<sessionId>/stream?startIndex=-1"
+curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=-1"
 ```
 
 Because a tail-relative position does not resolve to an absolute consumed-event
@@ -214,7 +214,7 @@ cursor.
 For a catch-up read that stops instead of following the live stream, pass `includeTailIndex=1`. The response then carries the `x-eve-stream-tail-index` header: the zero-based index of the last durably recorded event, or `-1` before the first. Read from your cursor until it passes that tail, then disconnect — reconnecting from the updated cursor if the connection drops first:
 
 ```bash
-curl -i "http://127.0.0.1:2000/eve/v1/sessions/<sessionId>/stream?startIndex=<count>&includeTailIndex=1"
+curl -i "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<count>&includeTailIndex=1"
 # x-eve-stream-tail-index: <tail>
 ```
 

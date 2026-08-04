@@ -18,7 +18,7 @@ export default defineEval({
 
     const deliverWhileActive = async (message: string): Promise<void> => {
       const response = await t.target.fetch(
-        `/eve/v1/sessions/${encodeURIComponent(active.sessionId)}/messages`,
+        `/eve/v1/session/${encodeURIComponent(active.sessionId)}`,
         {
           body: JSON.stringify({ message }),
           headers: { "content-type": "application/json" },

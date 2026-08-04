@@ -1,6 +1,6 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
-import { EVE_SESSIONS_ROUTE_PATH, createEveSessionMessagesRoutePath } from "#protocol/routes.js";
+import { EVE_SESSION_ROUTE_PATH, createEveSessionRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
 import { followStreamIterable } from "#client/open-stream.js";
@@ -52,7 +52,7 @@ export class ClientSession {
     input: SendTurnInput<TOutput>,
   ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
     const payload = normalizeSendTurnInput(input);
-    const response = await postTurn(context, EVE_SESSIONS_ROUTE_PATH, payload, true);
+    const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, payload, true);
     const sessionId = await readSessionId(response);
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
 
@@ -93,7 +93,7 @@ export class ClientSession {
     const initialStreamIndex = this.#state.streamIndex;
     const response = await postTurn(
       this.#context,
-      createEveSessionMessagesRoutePath(this.#state.sessionId),
+      createEveSessionRoutePath(this.#state.sessionId),
       payload,
       false,
     );

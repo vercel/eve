@@ -211,7 +211,7 @@ function createCancelRouteCaller(): (
   const channel = eveChannel({ auth: none() });
   const cancelRoute = (
     channel.routes as readonly { method: string; path: string; handler?: unknown }[]
-  ).find((route) => route.method === "POST" && route.path === "/eve/v1/sessions/:sessionId/cancel");
+  ).find((route) => route.method === "POST" && route.path === "/eve/v1/session/:sessionId/cancel");
   if (cancelRoute?.handler === undefined) {
     throw new Error("Expected eveChannel() to register the cancel-turn route.");
   }

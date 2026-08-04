@@ -16,28 +16,28 @@ describe("registerChannelVirtualHandlers", () => {
       artifactsConfig: createDevelopmentNitroArtifactsConfig({
         appRoot: "/app",
       }),
-      registrations: [{ cors: {}, method: "POST", route: "/eve/v1/sessions" }],
+      registrations: [{ cors: {}, method: "POST", route: "/eve/v1/session" }],
     });
 
     expect(nitro.options.handlers).toEqual([
       {
-        handler: "#nitro/virtual/eve-channel/POST /eve/v1/sessions",
+        handler: "#nitro/virtual/eve-channel/POST /eve/v1/session",
         method: "POST",
-        route: "/eve/v1/sessions",
+        route: "/eve/v1/session",
       },
       {
-        handler: "#nitro/virtual/eve-channel/OPTIONS /eve/v1/sessions",
+        handler: "#nitro/virtual/eve-channel/OPTIONS /eve/v1/session",
         method: "OPTIONS",
-        route: "/eve/v1/sessions",
+        route: "/eve/v1/session",
       },
     ]);
-    expect(nitro.options.virtual["#nitro/virtual/eve-channel/POST /eve/v1/sessions"]).toContain(
+    expect(nitro.options.virtual["#nitro/virtual/eve-channel/POST /eve/v1/session"]).toContain(
       "handleCors",
     );
-    expect(nitro.options.virtual["#nitro/virtual/eve-channel/POST /eve/v1/sessions"]).toContain(
+    expect(nitro.options.virtual["#nitro/virtual/eve-channel/POST /eve/v1/session"]).toContain(
       "dispatchChannelRequest",
     );
-    expect(nitro.options.virtual["#nitro/virtual/eve-channel/OPTIONS /eve/v1/sessions"]).toContain(
+    expect(nitro.options.virtual["#nitro/virtual/eve-channel/OPTIONS /eve/v1/session"]).toContain(
       "return new Response(null, { status: 204 });",
     );
   });
@@ -55,15 +55,15 @@ describe("registerChannelVirtualHandlers", () => {
         appRoot: "/app",
       }),
       registrations: [
-        { cors: {}, method: "GET", route: "/eve/v1/sessions/:sessionId/events" },
-        { cors: {}, method: "POST", route: "/eve/v1/sessions/:sessionId/events" },
+        { cors: {}, method: "GET", route: "/eve/v1/session/:sessionId/events" },
+        { cors: {}, method: "POST", route: "/eve/v1/session/:sessionId/events" },
       ],
     });
 
     expect(
       nitro.options.handlers.filter(
         (handler) =>
-          handler.method === "OPTIONS" && handler.route === "/eve/v1/sessions/:sessionId/events",
+          handler.method === "OPTIONS" && handler.route === "/eve/v1/session/:sessionId/events",
       ),
     ).toHaveLength(1);
   });

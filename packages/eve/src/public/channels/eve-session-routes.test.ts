@@ -47,8 +47,8 @@ describe("eve ID-addressed session routes", () => {
     });
     const args = attachRouteSessionCreator(createArgs(), createSession);
 
-    const response = await route("POST", "/eve/v1/sessions")(
-      new Request("https://eve.test/eve/v1/sessions", {
+    const response = await route("POST", "/eve/v1/session")(
+      new Request("https://eve.test/eve/v1/session", {
         body: JSON.stringify({ message: "hello" }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -66,8 +66,8 @@ describe("eve ID-addressed session routes", () => {
       expect.not.objectContaining({ continuationToken: expect.anything() }),
     );
 
-    const rejected = await route("POST", "/eve/v1/sessions")(
-      new Request("https://eve.test/eve/v1/sessions", {
+    const rejected = await route("POST", "/eve/v1/session")(
+      new Request("https://eve.test/eve/v1/session", {
         body: JSON.stringify({ continuationToken: "wrun_B", message: "redirect" }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -80,9 +80,9 @@ describe("eve ID-addressed session routes", () => {
 
   it("sends directly to the path session ID and rejects token-bearing bodies", async () => {
     const session = createFixedSession();
-    const handler = route("POST", "/eve/v1/sessions/:sessionId/messages");
+    const handler = route("POST", "/eve/v1/session/:sessionId");
     const response = await handler(
-      new Request("https://eve.test/eve/v1/sessions/wrun_A/messages", {
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
         body: JSON.stringify({ message: "follow-up" }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -100,7 +100,7 @@ describe("eve ID-addressed session routes", () => {
     });
 
     const rejected = await handler(
-      new Request("https://eve.test/eve/v1/sessions/wrun_A/messages", {
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
         body: JSON.stringify({ continuationToken: "wrun_B", message: "redirect" }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -115,8 +115,8 @@ describe("eve ID-addressed session routes", () => {
     const session = createFixedSession({
       send: vi.fn().mockResolvedValue({ status: "session_not_active" }),
     });
-    const response = await route("POST", "/eve/v1/sessions/:sessionId/messages")(
-      new Request("https://eve.test/eve/v1/sessions/wrun_A/messages", {
+    const response = await route("POST", "/eve/v1/session/:sessionId")(
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
         body: JSON.stringify({ message: "late" }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -129,14 +129,14 @@ describe("eve ID-addressed session routes", () => {
   });
 
   it.each([
-    ["cancel", "/eve/v1/sessions/:sessionId/cancel"],
-    ["compact", "/eve/v1/sessions/:sessionId/compact"],
-    ["clear", "/eve/v1/sessions/:sessionId/clear"],
-    ["reset", "/eve/v1/sessions/:sessionId/reset"],
+    ["cancel", "/eve/v1/session/:sessionId/cancel"],
+    ["compact", "/eve/v1/session/:sessionId/compact"],
+    ["clear", "/eve/v1/session/:sessionId/clear"],
+    ["reset", "/eve/v1/session/:sessionId/reset"],
   ] as const)("dispatches %s through the fixed session handle", async (operation, path) => {
     const session = createFixedSession();
     const response = await route("POST", path)(
-      new Request(`https://eve.test/eve/v1/sessions/wrun_A/${operation}`, { method: "POST" }),
+      new Request(`https://eve.test/eve/v1/session/wrun_A/${operation}`, { method: "POST" }),
       createArgs(session),
     );
 
@@ -145,14 +145,14 @@ describe("eve ID-addressed session routes", () => {
   });
 
   it.each([
-    ["cancel", "/eve/v1/sessions/:sessionId/cancel"],
-    ["compact", "/eve/v1/sessions/:sessionId/compact"],
-    ["clear", "/eve/v1/sessions/:sessionId/clear"],
-    ["reset", "/eve/v1/sessions/:sessionId/reset"],
+    ["cancel", "/eve/v1/session/:sessionId/cancel"],
+    ["compact", "/eve/v1/session/:sessionId/compact"],
+    ["clear", "/eve/v1/session/:sessionId/clear"],
+    ["reset", "/eve/v1/session/:sessionId/reset"],
   ] as const)("rejects continuation tokens on the %s route", async (operation, path) => {
     const session = createFixedSession();
     const response = await route("POST", path)(
-      new Request(`https://eve.test/eve/v1/sessions/wrun_A/${operation}`, {
+      new Request(`https://eve.test/eve/v1/session/wrun_A/${operation}`, {
         body: JSON.stringify({ continuationToken: "wrun_B" }),
         headers: { "content-type": "application/json" },
         method: "POST",

@@ -44,7 +44,7 @@ export default defineEval({
   async test(t) {
     const created = await postJson<AcceptedResponse>(
       t.target,
-      "/eve/v1/sessions",
+      "/eve/v1/session",
       { message: "Reply with exactly HTTP-SESSION-INITIAL-OK." },
       202,
     );
@@ -53,7 +53,7 @@ export default defineEval({
       satisfies(
         (value: AcceptedResponse) =>
           value.ok === true && value.status === "accepted" && typeof value.sessionId === "string",
-        "the plural HTTP route creates a session without a continuation token",
+        "the HTTP session route creates a session without a continuation token",
       ),
     );
     const sessionId = created.sessionId!;
@@ -68,7 +68,7 @@ export default defineEval({
     });
     const sent = await postJson<AcceptedResponse>(
       t.target,
-      `/eve/v1/sessions/${sessionId}/messages`,
+      `/eve/v1/session/${sessionId}`,
       { message: "Please wait for cancellation." },
       202,
     );
@@ -88,7 +88,7 @@ export default defineEval({
     });
     const cancelled = await postJson<AcceptedResponse>(
       t.target,
-      `/eve/v1/sessions/${sessionId}/cancel`,
+      `/eve/v1/session/${sessionId}/cancel`,
       {},
       200,
     );
@@ -110,7 +110,7 @@ export default defineEval({
     const liveCompaction = t.target.watchTurn(sessionId, { startIndex: eventIndex });
     const compacted = await postJson<AcceptedResponse>(
       t.target,
-      `/eve/v1/sessions/${sessionId}/compact`,
+      `/eve/v1/session/${sessionId}/compact`,
       {},
       202,
     );
@@ -133,7 +133,7 @@ export default defineEval({
     const liveClear = t.target.watchTurn(sessionId, { startIndex: eventIndex });
     const cleared = await postJson<AcceptedResponse>(
       t.target,
-      `/eve/v1/sessions/${sessionId}/clear`,
+      `/eve/v1/session/${sessionId}/clear`,
       {},
       202,
     );
@@ -153,7 +153,7 @@ export default defineEval({
     const liveFollowUp = t.target.watchTurn(sessionId, { startIndex: eventIndex });
     const followUpResponse = await postJson<AcceptedResponse>(
       t.target,
-      `/eve/v1/sessions/${sessionId}/messages`,
+      `/eve/v1/session/${sessionId}`,
       { message: "Reply with exactly HTTP-SESSION-FOLLOW-UP-OK." },
       202,
     );
@@ -171,7 +171,7 @@ export default defineEval({
 
     const reset = await postJson<ResetResponse>(
       t.target,
-      `/eve/v1/sessions/${sessionId}/reset`,
+      `/eve/v1/session/${sessionId}/reset`,
       { reason: "Verify immutable HTTP session identity" },
       200,
     );
@@ -185,7 +185,7 @@ export default defineEval({
 
     const rejected = await postJson<{ readonly code?: string; readonly ok?: boolean }>(
       t.target,
-      `/eve/v1/sessions/${sessionId}/messages`,
+      `/eve/v1/session/${sessionId}`,
       { message: "This must not create or follow a replacement." },
       409,
     );
@@ -200,7 +200,7 @@ export default defineEval({
 
     const replacement = await postJson<AcceptedResponse>(
       t.target,
-      "/eve/v1/sessions",
+      "/eve/v1/session",
       { message: "Reply with exactly HTTP-SESSION-REPLACEMENT-OK." },
       202,
     );

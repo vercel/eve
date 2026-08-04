@@ -567,9 +567,9 @@ describe("EveTUIRunner development session continuity", () => {
 
         if (method === "POST") {
           const sessionId =
-            url.pathname === "/eve/v1/sessions"
+            url.pathname === "/eve/v1/session"
               ? `session-${String(++nextSession)}`
-              : (url.pathname.split("/").at(-2) ?? `session-${String(++nextSession)}`);
+              : (url.pathname.split("/")[4] ?? `session-${String(++nextSession)}`);
           return Response.json({ sessionId });
         }
 
@@ -621,10 +621,10 @@ describe("EveTUIRunner development session continuity", () => {
       requests
         .filter(
           (request) =>
-            request.method === "POST" && request.url.pathname.startsWith("/eve/v1/sessions"),
+            request.method === "POST" && request.url.pathname.startsWith("/eve/v1/session"),
         )
         .map((request) => request.url.pathname),
-    ).toEqual(["/eve/v1/sessions/session-1/messages", "/eve/v1/sessions/session-1/messages"]);
+    ).toEqual(["/eve/v1/session/session-1", "/eve/v1/session/session-1"]);
   });
 
   it("starts a fresh session only after an explicit /reset command", async () => {

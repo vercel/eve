@@ -8,7 +8,7 @@ pnpm --filter framework-next dev
 
 The Next.js config uses `withEve()` from `eve/next`. In local
 development it starts eve on a random available port and rewrites same-origin
-eve endpoints like `/eve/v1/sessions` to that server.
+eve endpoints like `/eve/v1/session` to that server.
 
 Set `EVE_BASE_URL` before starting Next.js to reuse an already-running eve
 server instead of letting `withEve()` start one.

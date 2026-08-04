@@ -8,7 +8,7 @@ import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { createDevelopmentNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
 import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { dispatchChannelRequest } from "../../src/internal/nitro/routes/channel-dispatch.js";
-import { EVE_INFO_ROUTE_PATH, EVE_SESSIONS_ROUTE_PATH } from "../../src/protocol/routes.js";
+import { EVE_INFO_ROUTE_PATH, EVE_SESSION_ROUTE_PATH } from "../../src/protocol/routes.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const createAppRoot = useTemporaryAppRoots();
@@ -140,7 +140,7 @@ describe("eve agent info route", () => {
       status: "active",
     });
     expect(payload.channels.available.map((channel) => channel.urlPath)).toContain(
-      EVE_SESSIONS_ROUTE_PATH,
+      EVE_SESSION_ROUTE_PATH,
     );
     expect(payload.channels.framework.length).toBeGreaterThan(0);
     expect(payload.diagnostics).toEqual({

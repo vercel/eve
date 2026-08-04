@@ -41,7 +41,7 @@ export interface TraceChannelRequestInput {
  * Wraps one inbound channel HTTP request in an OTel `SERVER` span.
  *
  * The span is named for the low-cardinality registered `routeKey`
- * (`"POST /eve/v1/sessions/:sessionId/messages"`), never the concrete URL, while the
+ * (`"POST /eve/v1/session/:sessionId"`), never the concrete URL, while the
  * `http.route` attribute carries only the path template — the OTel HTTP
  * semantic convention reserves `http.route` for the route template alone,
  * with the method in `http.request.method`. The span is started from the

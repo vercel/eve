@@ -92,7 +92,7 @@ describe("development generation artifacts", () => {
           "const defineRemoteAgent = (definition) => ({",
           "  ...definition,",
           '  kind: "remote",',
-          '  path: "/eve/v1/sessions",',
+          '  path: "/eve/v1/session",',
           "});",
           "export default defineDynamic({",
           "  events: {",

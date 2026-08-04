@@ -12,8 +12,8 @@ import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-ap
 import { resolveLocalWorkflowWorldDataDirectory } from "../../src/internal/workflow/local-world-data-directory.js";
 import {
   EVE_HEALTH_ROUTE_PATH,
-  EVE_SESSIONS_ROUTE_PATH,
-  EVE_SESSION_MESSAGES_ROUTE_PATTERN,
+  EVE_SESSION_ROUTE_PATH,
+  EVE_SESSION_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
 } from "../../src/protocol/routes.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
@@ -245,8 +245,8 @@ describe("runCli", () => {
     expect(getLogOutput(logger)).toContain("eve Info");
     expect(getLogOutput(logger)).toContain("Application");
     expect(getLogOutput(logger)).toContain("Workflow ID");
-    expect(getLogOutput(logger)).toContain(`POST ${EVE_SESSIONS_ROUTE_PATH}`);
-    expect(getLogOutput(logger)).toContain(`POST ${EVE_SESSION_MESSAGES_ROUTE_PATTERN}`);
+    expect(getLogOutput(logger)).toContain(`POST ${EVE_SESSION_ROUTE_PATH}`);
+    expect(getLogOutput(logger)).toContain(`POST ${EVE_SESSION_ROUTE_PATTERN}`);
     expect(getLogOutput(logger)).toContain(`GET ${EVE_SESSION_STREAM_ROUTE_PATTERN}`);
   });
 

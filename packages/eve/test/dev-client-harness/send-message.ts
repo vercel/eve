@@ -1,8 +1,8 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
-  EVE_SESSIONS_ROUTE_PATH,
-  createEveSessionMessagesRoutePath,
+  EVE_SESSION_ROUTE_PATH,
+  createEveSessionRoutePath,
   createEveSessionStreamRoutePath,
 } from "#protocol/routes.js";
 import {
@@ -148,8 +148,8 @@ export async function sendDevelopmentMessage(input: {
 }> {
   const session = input.session;
   const routePath = session.sessionId
-    ? createEveSessionMessagesRoutePath(session.sessionId)
-    : EVE_SESSIONS_ROUTE_PATH;
+    ? createEveSessionRoutePath(session.sessionId)
+    : EVE_SESSION_ROUTE_PATH;
   const messageRouteUrl = resolveDevelopmentServerRouteUrl({
     routePath,
     serverUrl: input.serverUrl,

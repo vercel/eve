@@ -545,9 +545,7 @@ describe("executeTask", () => {
 
     expect(outcome.error).toBeUndefined();
     expect(server.posts).toHaveLength(1);
-    expect(new URL(server.posts[0]!.url).pathname).toBe(
-      "/eve/v1/sessions/channel-session/messages",
-    );
+    expect(new URL(server.posts[0]!.url).pathname).toBe("/eve/v1/session/channel-session");
     expect(server.posts[0]?.body).toEqual({
       message: "continue please",
     });

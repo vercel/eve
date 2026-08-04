@@ -146,7 +146,7 @@ for await (const event of session.stream({ follow: false })) {
 await session.reset({ reason: "User requested a fresh session" });
 ```
 
-`client.sessions` stores only the session ID and stream cursor. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement. Reset leaves the handle pinned to the retired ID.
+`client.sessions` stores only the session ID and stream cursor. Every method calls an ID-addressed `/eve/v1/session/:sessionId/...` route. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement, and reset leaves the handle pinned to the retired ID.
 
 A client can own many independent fixed sessions at once:
 

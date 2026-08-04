@@ -2,7 +2,7 @@ import { defineEval } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
 /**
- * Proof that `GET /eve/v1/sessions/:id/stream?startIndex=N` replays missed
+ * Proof that `GET /eve/v1/session/:id/stream?startIndex=N` replays missed
  * events from durable storage when a reader reconnects mid-conversation:
  * drives a multi-step turn to completion, reattaches at a non-zero
  * `startIndex`, and asserts the replayed tail matches the full event log

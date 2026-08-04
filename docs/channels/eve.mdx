@@ -24,25 +24,25 @@ The application exposes a health route plus eve channel routes that inspect the 
 
 - `GET /eve/v1/health` (check whether the application is reachable)
 - `GET /eve/v1/info` (inspect the agent)
-- `POST /eve/v1/sessions` (start a session and send its first message)
-- `POST /eve/v1/sessions/:sessionId/messages` (send a follow-up)
-- `POST /eve/v1/sessions/:sessionId/cancel` (cancel the in-flight turn)
-- `POST /eve/v1/sessions/:sessionId/clear` (clear the session's model history)
-- `POST /eve/v1/sessions/:sessionId/compact` (compact the session's context)
-- `POST /eve/v1/sessions/:sessionId/reset` (retire the session)
-- `GET /eve/v1/sessions/:sessionId/stream` (stream events as NDJSON)
+- `POST /eve/v1/session` (start a session and send its first message)
+- `POST /eve/v1/session/:sessionId` (send a follow-up)
+- `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
+- `POST /eve/v1/session/:sessionId/clear` (clear the session's model history)
+- `POST /eve/v1/session/:sessionId/compact` (compact the session's context)
+- `POST /eve/v1/session/:sessionId/reset` (retire the session)
+- `GET /eve/v1/session/:sessionId/stream` (stream events as NDJSON)
 
 The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
 
 ### Start and continue a session
 
 ```bash
-curl -X POST https://<deployment>/eve/v1/sessions \
+curl -X POST https://<deployment>/eve/v1/session \
   -H "Content-Type: application/json" \
   -d '{"message":"What is the weather in Paris?"}'
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 
-curl -X POST https://<deployment>/eve/v1/sessions/wrun_A/messages \
+curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -H "Content-Type: application/json" \
   -d '{"message":"How about tomorrow?"}'
 ```
@@ -54,7 +54,7 @@ Sending a message to an unknown or terminal session ID returns `409` with `{"cod
 Stream responses are newline-delimited JSON (`application/x-ndjson; charset=utf-8`), one event object per line:
 
 ```bash
-curl -N https://<deployment>/eve/v1/sessions/wrun_A/stream
+curl -N https://<deployment>/eve/v1/session/wrun_A/stream
 # {"type":"turn.started",...}
 # {"type":"message.appended","data":{"messageDelta":"It is ",...}}
 # {"type":"message.completed",...}
@@ -65,7 +65,7 @@ curl -N https://<deployment>/eve/v1/sessions/wrun_A/stream
 Cancel a session's in-flight turn with an empty body, or scope the cancel to the turn you observed by passing the `turnId` stamped on that turn's stream events:
 
 ```bash
-curl -X POST https://<deployment>/eve/v1/sessions/wrun_A/cancel
+curl -X POST https://<deployment>/eve/v1/session/wrun_A/cancel
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
@@ -78,7 +78,7 @@ When there is no cancellable turn—including an unknown session, a settled turn
 Clear one session's model-message history without replacing the session:
 
 ```bash
-curl -X POST https://<deployment>/eve/v1/sessions/wrun_A/clear
+curl -X POST https://<deployment>/eve/v1/session/wrun_A/clear
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
@@ -89,7 +89,7 @@ An accepted clear emits `context.cleared` followed by `session.waiting`. The nex
 Compact one session's context without sending a message:
 
 ```bash
-curl -X POST https://<deployment>/eve/v1/sessions/wrun_A/compact
+curl -X POST https://<deployment>/eve/v1/session/wrun_A/compact
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
@@ -100,13 +100,13 @@ Compaction is asynchronous. A successful operation emits `compaction.requested` 
 Reset terminally retires the exact session ID:
 
 ```bash
-curl -X POST https://<deployment>/eve/v1/sessions/wrun_A/reset \
+curl -X POST https://<deployment>/eve/v1/session/wrun_A/reset \
   -H "Content-Type: application/json" \
   -d '{"reason":"Start over"}'
 # {"ok":true,"previousSessionId":"wrun_A","status":"reset"}
 ```
 
-After reset, the old ID cannot accept another message. Start a replacement explicitly with `POST /eve/v1/sessions`.
+After reset, the old ID cannot accept another message. Start a replacement explicitly with `POST /eve/v1/session`.
 
 The control routes never create sessions. `compact`, `clear`, and `reset` return `"no_active_session"` when the ID is already inactive. None of the session routes accepts or returns a continuation token.
 

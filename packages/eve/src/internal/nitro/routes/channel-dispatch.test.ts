@@ -125,7 +125,7 @@ describe("dispatchChannelRequest", () => {
           name: "eve",
           sourceId: "channel-eve",
           sourceKind: "module",
-          urlPath: "/eve/v1/sessions",
+          urlPath: "/eve/v1/session",
         } satisfies ResolvedChannelDefinition,
       ],
       runtime,
@@ -133,12 +133,12 @@ describe("dispatchChannelRequest", () => {
 
     const response = await dispatchChannelRequest(
       createEvent({ waitUntil: vi.fn() }),
-      "POST /eve/v1/sessions",
+      "POST /eve/v1/session",
       DEVELOPMENT_ARTIFACTS_CONFIG,
     );
     const nextResponse = await dispatchChannelRequest(
       createEvent({ waitUntil: vi.fn() }),
-      "POST /eve/v1/sessions",
+      "POST /eve/v1/session",
       DEVELOPMENT_ARTIFACTS_CONFIG,
     );
 
@@ -915,7 +915,7 @@ describe("dispatchChannelRequest tracing", () => {
           name: "eve",
           sourceId: "channel-eve",
           sourceKind: "module",
-          urlPath: "/eve/v1/sessions/:sessionId",
+          urlPath: "/eve/v1/session/:sessionId",
         } satisfies ResolvedChannelDefinition,
       ],
       runtime,
@@ -925,13 +925,13 @@ describe("dispatchChannelRequest tracing", () => {
       body: bodySecret,
       headers: { authorization: authSecret, cookie: "eve_session=cookiesecret" },
       method: "POST",
-      url: `https://eve.test/eve/v1/sessions/${sessionId}?token=${hookToken}`,
+      url: `https://eve.test/eve/v1/session/${sessionId}?token=${hookToken}`,
     });
 
-    await dispatchChannelRequest(event, "POST /eve/v1/sessions/:sessionId", {} as never);
+    await dispatchChannelRequest(event, "POST /eve/v1/session/:sessionId", {} as never);
 
     const [span] = await finishedSpans();
-    expect(span!.name).toBe("POST /eve/v1/sessions/:sessionId");
+    expect(span!.name).toBe("POST /eve/v1/session/:sessionId");
     const serialized = JSON.stringify({
       attributes: span!.attributes,
       events: span!.events,

@@ -48,7 +48,7 @@ describe("eveChannel GET stream", () => {
     const attachSession = createMockAttachSession(events);
 
     const response = await (getRoute as any).handler(
-      new Request("https://example.com/eve/v1/sessions/session_xyz/stream?startIndex=42", {
+      new Request("https://example.com/eve/v1/session/session_xyz/stream?startIndex=42", {
         method: "GET",
       }),
       createArgs({ attachSession, params: { sessionId: "session_xyz" } }),
@@ -64,7 +64,7 @@ describe("eveChannel GET stream", () => {
     const attachSession = createMockAttachSession(createEvents([]));
 
     const response = await (getRoute as any).handler(
-      new Request("https://example.com/eve/v1/sessions/session_xyz/stream", {
+      new Request("https://example.com/eve/v1/session/session_xyz/stream", {
         method: "GET",
       }),
       createArgs({ attachSession, params: { sessionId: "session_xyz" } }),
@@ -79,7 +79,7 @@ describe("eveChannel GET stream", () => {
     const attachSession = createMockAttachSession(createEvents([]));
 
     const response = await (getRoute as any).handler(
-      new Request("https://example.com/eve/v1/sessions/session_xyz/stream?startIndex=-3", {
+      new Request("https://example.com/eve/v1/session/session_xyz/stream?startIndex=-3", {
         method: "GET",
       }),
       createArgs({ attachSession, params: { sessionId: "session_xyz" } }),
@@ -94,7 +94,7 @@ describe("eveChannel GET stream", () => {
     const attachSession = createMockAttachSession(createEvents([]));
 
     const response = await (getRoute as any).handler(
-      new Request("https://example.com/eve/v1/sessions/session_xyz/stream?startIndex=banana", {
+      new Request("https://example.com/eve/v1/session/session_xyz/stream?startIndex=banana", {
         method: "GET",
       }),
       createArgs({ attachSession, params: { sessionId: "session_xyz" } }),
@@ -109,7 +109,7 @@ describe("eveChannel GET stream", () => {
     const attachSession = createMockAttachSession(createEvents([]));
 
     const response = await (getRoute as any).handler(
-      new Request("https://example.com/eve/v1/sessions//stream", { method: "GET" }),
+      new Request("https://example.com/eve/v1/session//stream", { method: "GET" }),
       createArgs({ attachSession, params: {} }),
     );
 
@@ -138,7 +138,7 @@ describe("eveChannel GET stream", () => {
     const attachSession = createMockAttachSession(createEvents(events));
 
     const response = await (getRoute as any).handler(
-      new Request("https://example.com/eve/v1/sessions/session_xyz/stream", {
+      new Request("https://example.com/eve/v1/session/session_xyz/stream", {
         method: "GET",
       }),
       createArgs({ attachSession, params: { sessionId: "session_xyz" } }),

@@ -113,7 +113,7 @@ describe("ClientSession", () => {
     expect(session.state.sessionId).toBe("session_1");
     expect(cancelled).toEqual({ sessionId: "session_1", status: "accepted" });
     expect(requests).toHaveLength(2);
-    expect(new URL(requests[1]!.url).pathname).toBe("/eve/v1/sessions/session_1/cancel");
+    expect(new URL(requests[1]!.url).pathname).toBe("/eve/v1/session/session_1/cancel");
     expect(requests[1]!.method).toBe("POST");
     expect(requests[1]!.headers.get("authorization")).toBe("Bearer token-2");
   });
@@ -280,7 +280,7 @@ describe("ClientSession", () => {
     });
 
     expect(session.state).toEqual(state);
-    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/sessions/session_1/clear");
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/session_1/clear");
     expect(requests[0]!.method).toBe("POST");
     expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({});
   });
@@ -309,7 +309,7 @@ describe("ClientSession", () => {
     });
 
     expect(session.state).toEqual(state);
-    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/sessions/session_1/compact");
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/session_1/compact");
     expect(requests[0]!.method).toBe("POST");
     expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({});
   });
@@ -350,7 +350,7 @@ describe("ClientSession", () => {
 
     expect(session.state).toEqual({ sessionId: "session_1", streamIndex: 4 });
     expect(requests).toHaveLength(1);
-    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/sessions/session_1/reset");
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/session_1/reset");
     expect(requests[0]!.method).toBe("POST");
     expect(requests[0]!.headers.get("authorization")).toBe("Bearer token-1");
     expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({});
@@ -456,7 +456,7 @@ describe("ClientSession", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const postRequests = requests.filter((request) => request.method === "POST");
-    expect(new URL(postRequests[1]!.url).pathname).toBe("/eve/v1/sessions/session_1/messages");
+    expect(new URL(postRequests[1]!.url).pathname).toBe("/eve/v1/session/session_1");
     expect(postRequests[1]!.body).toEqual({
       message: "second",
     });
@@ -520,7 +520,7 @@ describe("ClientSession", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const postRequests = requests.filter((request) => request.method === "POST");
-    expect(new URL(postRequests[1]!.url).pathname).toBe("/eve/v1/sessions/session_1/messages");
+    expect(new URL(postRequests[1]!.url).pathname).toBe("/eve/v1/session/session_1");
     expect(postRequests[1]!.body).toEqual({
       message: "second",
     });

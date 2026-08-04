@@ -29,11 +29,11 @@ import {
 } from "#protocol/message.js";
 import {
   EVE_INFO_ROUTE_PATH,
-  EVE_SESSIONS_ROUTE_PATH,
+  EVE_SESSION_ROUTE_PATH,
   EVE_SESSION_CANCEL_ROUTE_PATTERN,
   EVE_SESSION_CLEAR_ROUTE_PATTERN,
   EVE_SESSION_COMPACT_ROUTE_PATTERN,
-  EVE_SESSION_MESSAGES_ROUTE_PATTERN,
+  EVE_SESSION_ROUTE_PATTERN,
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
 } from "#protocol/routes.js";
@@ -224,7 +224,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         return await respond();
       }),
 
-      POST(EVE_SESSIONS_ROUTE_PATH, async (req, args) => {
+      POST(EVE_SESSION_ROUTE_PATH, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
 
@@ -298,7 +298,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         );
       }),
 
-      POST(EVE_SESSION_MESSAGES_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+      POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
 

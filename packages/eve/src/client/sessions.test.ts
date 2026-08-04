@@ -28,9 +28,9 @@ describe("Client.sessions", () => {
     const { response, session } = await client.sessions.create("hello");
     await response.result();
 
-    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/sessions");
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session");
     expect(JSON.parse(requests[0]!.body!)).toEqual({ message: "hello" });
-    expect(new URL(requests[1]!.url).pathname).toBe("/eve/v1/sessions/wrun_A/stream");
+    expect(new URL(requests[1]!.url).pathname).toBe("/eve/v1/session/wrun_A/stream");
     expect(session.state).toEqual({ sessionId: "wrun_A", streamIndex: 1 });
   });
 
@@ -40,7 +40,7 @@ describe("Client.sessions", () => {
       const url = String(request);
       requests.push({ body: init?.body as string | undefined, url });
       const path = new URL(url).pathname;
-      if (path.endsWith("/messages")) {
+      if (path === "/eve/v1/session/wrun_A") {
         return Response.json(
           { ok: true, sessionId: "wrun_A", status: "accepted" },
           { status: 202 },
@@ -68,11 +68,11 @@ describe("Client.sessions", () => {
     await session.reset({ reason: "fresh start" });
 
     expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
-      "/eve/v1/sessions/wrun_A/messages",
-      "/eve/v1/sessions/wrun_A/cancel",
-      "/eve/v1/sessions/wrun_A/compact",
-      "/eve/v1/sessions/wrun_A/clear",
-      "/eve/v1/sessions/wrun_A/reset",
+      "/eve/v1/session/wrun_A",
+      "/eve/v1/session/wrun_A/cancel",
+      "/eve/v1/session/wrun_A/compact",
+      "/eve/v1/session/wrun_A/clear",
+      "/eve/v1/session/wrun_A/reset",
     ]);
     expect(JSON.parse(requests[0]!.body!)).toEqual({ message: "follow-up" });
     expect(JSON.parse(requests[4]!.body!)).toEqual({ reason: "fresh start" });

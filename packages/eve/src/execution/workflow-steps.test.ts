@@ -544,7 +544,7 @@ describe("dispatchRuntimeActionsStep", () => {
         description: "Research remote",
         kind: "remote",
         name: "research",
-        path: "/eve/v1/sessions",
+        path: "/eve/v1/session",
         url: "https://remote.example.com",
       },
     };
@@ -637,7 +637,7 @@ describe("dispatchRuntimeActionsStep", () => {
         kind: "remote",
         name: "research",
         nodeId: "remote/research",
-        path: "/eve/v1/sessions",
+        path: "/eve/v1/session",
         url: "https://remote.example.com",
       },
     };

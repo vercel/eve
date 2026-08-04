@@ -40,10 +40,7 @@ describe("runtime-artifact refresher session continuity", () => {
         return request.method === "POST" && !pathname.startsWith("/eve/v1/dev/runtime-artifacts");
       })
       .map((request) => new URL(request.url).pathname);
-    expect(postUrls).toEqual([
-      "/eve/v1/sessions/session_test/messages",
-      "/eve/v1/sessions/session_test/messages",
-    ]);
+    expect(postUrls).toEqual(["/eve/v1/session/session_test", "/eve/v1/session/session_test"]);
   });
 
   it("keeps the active session eligible when a candidate rebuild fails", async () => {
@@ -74,10 +71,7 @@ describe("runtime-artifact refresher session continuity", () => {
         return request.method === "POST" && !pathname.startsWith("/eve/v1/dev/runtime-artifacts");
       })
       .map((request) => new URL(request.url).pathname);
-    expect(postUrls).toEqual([
-      "/eve/v1/sessions/session_test/messages",
-      "/eve/v1/sessions/session_test/messages",
-    ]);
+    expect(postUrls).toEqual(["/eve/v1/session/session_test", "/eve/v1/session/session_test"]);
   });
 
   it("keeps the active local session for input-response resumes after the dev artifact revision changes", async () => {
@@ -116,10 +110,7 @@ describe("runtime-artifact refresher session continuity", () => {
       })
       .map((request) => new URL(request.url).pathname);
     expect(rebuilds).toHaveLength(1);
-    expect(postUrls).toEqual([
-      "/eve/v1/sessions/session_test/messages",
-      "/eve/v1/sessions/session_test/messages",
-    ]);
+    expect(postUrls).toEqual(["/eve/v1/session/session_test", "/eve/v1/session/session_test"]);
   });
 });
 
@@ -294,9 +285,9 @@ function createDevFetchMock(input: {
 
     if (method === "POST") {
       const sessionId =
-        pathname === "/eve/v1/sessions"
+        pathname === "/eve/v1/session"
           ? `session-${String(++nextSessionIndex)}`
-          : (pathname.split("/").at(-2) ?? `session-${String(++nextSessionIndex)}`);
+          : (pathname.split("/")[4] ?? `session-${String(++nextSessionIndex)}`);
       return Response.json({ sessionId });
     }
 

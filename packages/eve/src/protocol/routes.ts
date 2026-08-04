@@ -16,26 +16,26 @@ export const EVE_HEALTH_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/health`;
  */
 export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
 
-/** Stable collection route for creating ID-addressed sessions. */
-export const EVE_SESSIONS_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/sessions`;
+/** Stable route for creating ID-addressed sessions. */
+export const EVE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;
 
 /** Stable route pattern for sending a message to one exact session ID. */
-export const EVE_SESSION_MESSAGES_ROUTE_PATTERN = `${EVE_SESSIONS_ROUTE_PATH}/:sessionId/messages`;
+export const EVE_SESSION_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId`;
 
 /** Stable route pattern for cancelling one exact session ID. */
-export const EVE_SESSION_CANCEL_ROUTE_PATTERN = `${EVE_SESSIONS_ROUTE_PATH}/:sessionId/cancel`;
+export const EVE_SESSION_CANCEL_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/cancel`;
 
 /** Stable route pattern for compacting one exact session ID. */
-export const EVE_SESSION_COMPACT_ROUTE_PATTERN = `${EVE_SESSIONS_ROUTE_PATH}/:sessionId/compact`;
+export const EVE_SESSION_COMPACT_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/compact`;
 
 /** Stable route pattern for clearing one exact session ID. */
-export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSIONS_ROUTE_PATH}/:sessionId/clear`;
+export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/clear`;
 
 /** Stable route pattern for resetting one exact session ID. */
-export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSIONS_ROUTE_PATH}/:sessionId/reset`;
+export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/reset`;
 
 /** Stable event-stream route pattern for one exact session ID. */
-export const EVE_SESSION_STREAM_ROUTE_PATTERN = `${EVE_SESSIONS_ROUTE_PATH}/:sessionId/stream`;
+export const EVE_SESSION_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stream`;
 
 /**
  * Framework-owned route pattern for dispatching one authored schedule
@@ -108,33 +108,33 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 
 /** Builds the ID-addressed message route for one session. */
-export function createEveSessionMessagesRoutePath(sessionId: string): string {
-  return `${EVE_SESSIONS_ROUTE_PATH}/${encodeURIComponent(sessionId)}/messages`;
+export function createEveSessionRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}`;
 }
 
 /** Builds the ID-addressed cancel route for one session. */
 export function createEveSessionCancelRoutePath(sessionId: string): string {
-  return `${EVE_SESSIONS_ROUTE_PATH}/${encodeURIComponent(sessionId)}/cancel`;
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/cancel`;
 }
 
 /** Builds the ID-addressed compact route for one session. */
 export function createEveSessionCompactRoutePath(sessionId: string): string {
-  return `${EVE_SESSIONS_ROUTE_PATH}/${encodeURIComponent(sessionId)}/compact`;
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/compact`;
 }
 
 /** Builds the ID-addressed clear route for one session. */
 export function createEveSessionClearRoutePath(sessionId: string): string {
-  return `${EVE_SESSIONS_ROUTE_PATH}/${encodeURIComponent(sessionId)}/clear`;
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/clear`;
 }
 
 /** Builds the ID-addressed reset route for one session. */
 export function createEveSessionResetRoutePath(sessionId: string): string {
-  return `${EVE_SESSIONS_ROUTE_PATH}/${encodeURIComponent(sessionId)}/reset`;
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/reset`;
 }
 
 /** Builds the ID-addressed event-stream route for one session. */
 export function createEveSessionStreamRoutePath(sessionId: string): string {
-  return `${EVE_SESSIONS_ROUTE_PATH}/${encodeURIComponent(sessionId)}/stream`;
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/stream`;
 }
 
 /**

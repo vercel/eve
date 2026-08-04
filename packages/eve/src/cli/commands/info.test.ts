@@ -18,9 +18,9 @@ import { buildApplicationInfoJson, printApplicationInfo } from "./info.js";
 vi.mock("#services/inspect-application.js", () => ({ inspectApplication: vi.fn() }));
 
 const MESSAGING = {
-  createSessionRoutePath: "/eve/v1/sessions",
-  sessionMessagesRoutePattern: "/eve/v1/sessions/:sessionId/messages",
-  streamRoutePattern: "/eve/v1/sessions/:sessionId/stream",
+  createSessionRoutePath: "/eve/v1/session",
+  sessionMessagesRoutePattern: "/eve/v1/session/:sessionId",
+  streamRoutePattern: "/eve/v1/session/:sessionId/stream",
 };
 
 const APP_ROOT = "/virtual/app";
@@ -81,7 +81,7 @@ function makeCompiledState(
       name: "eve",
       logicalPath: "agent/channels/eve.ts",
       method: "POST",
-      urlPath: "/eve/v1/sessions",
+      urlPath: "/eve/v1/session",
       sourceId: "memory::eve",
       sourceKind: "module",
       adapterKind: "http",
@@ -163,9 +163,9 @@ describe("buildApplicationInfoJson", () => {
     expect(json.diagnostics).toEqual({ errors: 0, warnings: 0 });
     expect(json.channels).toEqual([
       { name: "slack", kind: "slack", method: "POST", urlPath: "/eve/v1/slack" },
-      { name: "eve", kind: "http", method: "POST", urlPath: "/eve/v1/sessions" },
+      { name: "eve", kind: "http", method: "POST", urlPath: "/eve/v1/session" },
     ]);
-    expect(json.messaging.create).toBe("/eve/v1/sessions");
+    expect(json.messaging.create).toBe("/eve/v1/session");
     expect(json.artifacts?.compiledManifest).toContain("compiled-agent-manifest.json");
   });
 
@@ -201,7 +201,7 @@ describe("buildApplicationInfoJson", () => {
     expect(json.subagents).toEqual([]);
     expect(json.schedules).toEqual([]);
     expect(json.appRoot).toBe(APP_ROOT);
-    expect(json.messaging.stream).toBe("/eve/v1/sessions/:sessionId/stream");
+    expect(json.messaging.stream).toBe("/eve/v1/session/:sessionId/stream");
   });
 });
 

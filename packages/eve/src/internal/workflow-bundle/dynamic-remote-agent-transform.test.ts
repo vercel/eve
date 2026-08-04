@@ -26,7 +26,7 @@ function evaluateSessionHandler(code: string): Function {
   const defineRemoteAgent = (definition: Record<string, unknown>) => ({
     ...definition,
     kind: "remote",
-    path: "/eve/v1/sessions",
+    path: "/eve/v1/session",
   });
   const evaluate = new Function(
     "defineDynamic",

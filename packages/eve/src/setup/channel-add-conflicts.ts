@@ -5,7 +5,7 @@ import type { DisabledChannelReasons } from "#setup/cli/index.js";
 
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { discoverAgent } from "#discover/discover-agent.js";
-import { EVE_SESSIONS_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 
 const SCAFFOLDED_WEB_CHANNEL_LOGICAL_PATH = "channels/eve.ts";
 const SCAFFOLDED_SLACK_CHANNEL_LOGICAL_PATH = "channels/slack.ts";
@@ -49,7 +49,7 @@ export async function inspectExistingChannelRegistrations(
       if (definition.kind !== "channel") {
         continue;
       }
-      if (definition.method === "POST" && definition.urlPath === EVE_SESSIONS_ROUTE_PATH) {
+      if (definition.method === "POST" && definition.urlPath === EVE_SESSION_ROUTE_PATH) {
         webRouteOwners.add(source.logicalPath);
       }
       if (definition.adapterKind === "slack") {
@@ -62,7 +62,7 @@ export async function inspectExistingChannelRegistrations(
   if (
     [...webRouteOwners].some((logicalPath) => logicalPath !== SCAFFOLDED_WEB_CHANNEL_LOGICAL_PATH)
   ) {
-    disabledChannelReasons.web = `POST ${EVE_SESSIONS_ROUTE_PATH} already registered`;
+    disabledChannelReasons.web = `POST ${EVE_SESSION_ROUTE_PATH} already registered`;
   }
   if (slackOwners.size > 0) {
     disabledChannelReasons.slack = "Slack channel already registered";
@@ -90,7 +90,7 @@ export function assertCanAddSelectedChannels(
     );
     if (conflictingOwner !== undefined) {
       throw new Error(
-        `Cannot scaffold Web Chat because agent/${conflictingOwner} already defines POST ${EVE_SESSIONS_ROUTE_PATH}. Web Chat scaffolds the same eve session routes.`,
+        `Cannot scaffold Web Chat because agent/${conflictingOwner} already defines POST ${EVE_SESSION_ROUTE_PATH}. Web Chat scaffolds the same eve session routes.`,
       );
     }
   }

@@ -385,7 +385,7 @@ describe("Session.send (result)", () => {
     >;
     expect(secondPostBody.message).toBe("Follow up");
     expect(new URL(String(fetchMock.mock.calls[2]?.[0])).pathname).toBe(
-      "/eve/v1/sessions/session_001/messages",
+      "/eve/v1/session/session_001",
     );
 
     const secondStreamUrl = String(fetchMock.mock.calls[3]?.[0]);
@@ -513,7 +513,7 @@ describe("Session.send (result)", () => {
     await (await session.send("New conversation")).result();
 
     expect(new URL(String(fetchMock.mock.calls[2]?.[0])).pathname).toBe(
-      "/eve/v1/sessions/session_001/messages",
+      "/eve/v1/session/session_001",
     );
   });
 
@@ -718,7 +718,7 @@ describe("Session state", () => {
     await (await session.send("Hello")).result();
 
     expect(new URL(String(fetchMock.mock.calls[0]?.[0])).pathname).toBe(
-      "/eve/v1/sessions/session_001/messages",
+      "/eve/v1/session/session_001",
     );
   });
 
