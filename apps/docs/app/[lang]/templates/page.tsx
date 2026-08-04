@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
+import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
+import { staticOgImage } from "@/lib/geistdocs/og";
 import { translations } from "@/geistdocs";
 import { templateEntries } from "@/lib/templates/data";
 import { TemplateGallery } from "./template-gallery";
@@ -7,11 +9,18 @@ import { TemplateGallery } from "./template-gallery";
 const title = "Templates";
 const description =
   "Explore agents built on eve. Set one up with a prompt or use its source as a starting point.";
+const titleMetadata = pageTitleMetadata(title);
 
 export const metadata: Metadata = {
-  title,
+  ...titleMetadata,
   description,
   alternates: canonicalAlternates(canonicalRoutes.templates),
+  openGraph: { ...titleMetadata.openGraph, images: [staticOgImage] },
+  twitter: {
+    ...titleMetadata.twitter,
+    card: "summary_large_image",
+    images: [staticOgImage],
+  },
 };
 
 export const generateStaticParams = () => Object.keys(translations).map((lang) => ({ lang }));

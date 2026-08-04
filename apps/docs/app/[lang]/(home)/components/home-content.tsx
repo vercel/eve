@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
+import { pageTitleMetadata, siteTitle } from "@/lib/geistdocs/metadata-title";
 import { staticOgImage } from "@/lib/geistdocs/og";
 import { ArchitectureDiagram } from "./architecture";
 import { CTA } from "./cta";
@@ -8,21 +9,21 @@ import { FileTree } from "./file-tree";
 import { HeroAudience } from "./hero-audience";
 import { NextjsInterop } from "./nextjs-interop";
 
-const title = "eve - Framework for building durable agents";
 const tagline = "Like Next.js for agents. Build durable agents with one folder.";
+const titleMetadata = pageTitleMetadata(siteTitle);
 
 export const homeMetadata: Metadata = {
-  title,
+  ...titleMetadata,
   description: tagline,
   alternates: canonicalAlternates(canonicalRoutes.home),
   openGraph: {
-    title,
+    ...titleMetadata.openGraph,
     description: tagline,
     images: [staticOgImage],
   },
   twitter: {
+    ...titleMetadata.twitter,
     card: "summary_large_image",
-    title,
     description: tagline,
     images: [staticOgImage],
   },

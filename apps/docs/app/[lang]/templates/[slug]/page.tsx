@@ -8,6 +8,7 @@ import { notFound } from "next/navigation";
 import type { ComponentProps } from "react";
 import { translations } from "@/geistdocs";
 import { canonicalAlternates, templatePath } from "@/lib/geistdocs/canonical";
+import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
 import {
   getTemplateEntry,
   templateEntries,
@@ -38,13 +39,16 @@ export const generateMetadata = async ({
 }): Promise<Metadata> => {
   const { slug } = await params;
   const entry = getTemplateEntry(slug);
-  return entry
-    ? {
-        title: `${entry.title} template - eve`,
-        description: entry.description,
-        alternates: canonicalAlternates(templatePath(entry.slug)),
-      }
-    : { title: "Template not found" };
+  if (!entry) return { title: "Template not found" };
+
+  const titleMetadata = pageTitleMetadata(`${entry.title} template - eve`);
+  return {
+    ...titleMetadata,
+    description: entry.description,
+    alternates: canonicalAlternates(templatePath(entry.slug)),
+    openGraph: titleMetadata.openGraph,
+    twitter: { ...titleMetadata.twitter, card: "summary_large_image" },
+  };
 };
 
 const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) => {
