@@ -219,9 +219,9 @@ export interface StreamOptions {
 
 /** Result of requesting cancellation for a client session's active turn. */
 export interface CancelSessionResult {
-  /** Session whose active turn was targeted. */
+  /** Session whose command inbox accepted the request. */
   readonly sessionId: string;
-  /** Both outcomes are successful; `no_active_turn` means there was nothing left to cancel. */
+  /** Both outcomes are successful; `no_active_turn` means the session is inactive. */
   readonly status: CancelTurnStatus;
 }
 

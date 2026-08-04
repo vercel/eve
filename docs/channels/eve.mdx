@@ -69,9 +69,9 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A/cancel
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
-Cancellation is asynchronous: `"accepted"` means the request was durably queued. Confirm the outcome on the stream as `turn.cancelled` followed by `session.waiting`—never as a failure. Active local and remote subagents are cancelled recursively before the parent settles. Content emitted before cancellation stays on the event stream, while durable model history keeps only content that had already settled. The session accepts the next message normally.
+Cancellation is asynchronous: `"accepted"` means the live session durably queued the request. Confirm an actual cancellation on the stream as `turn.cancelled` followed by `session.waiting`—never as a failure. Active local and remote subagents are cancelled recursively before the parent settles. Content emitted before cancellation stays on the event stream, while durable model history keeps only content that had already settled. The session accepts the next message normally.
 
-When there is no cancellable turn—including an unknown session, a settled turn, or a duplicate cancel—the route returns `"no_active_turn"`. A `turnId` naming any other turn is accepted and consumed as a no-op, so a guarded cancel racing a turn boundary cannot stop a turn the caller never saw.
+A live session also returns `"accepted"` when it is already parked; the driver consumes that late or duplicate cancel as a no-op. An unknown or terminal session returns `"no_active_turn"`. A `turnId` naming any other turn is likewise accepted and consumed as a no-op, so a guarded cancel racing a turn boundary cannot stop a turn the caller never saw.
 
 ### Clear context
 
