@@ -1,6 +1,6 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
-import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext, SessionCommand } from "#channel/types.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
@@ -602,11 +602,12 @@ export async function routeProxiedDeliverStep(input: {
   });
 
   for (const forChild of routed.forChildren) {
-    await resumeHook(forChild.childContinuationToken, {
+    const command = {
       auth: input.auth,
-      kind: "deliver",
-      payloads: [forChild.payload],
-    });
+      kind: "send",
+      payload: forChild.payload,
+    } satisfies SessionCommand;
+    await resumeHook(forChild.childContinuationToken, command);
   }
 
   return routed.parentAction ?? { kind: "continue", remainder: routed.forSelf };

@@ -90,12 +90,15 @@ export class TurnControlReceiver {
       });
       return undefined;
     }
-    await forwardTurnCancellationStep({
-      payload: {},
-      token: turnCancellationHookToken(this.control.token),
-    });
-    this.bufferedSessionControls.push("reset");
-    return undefined;
+    if (command.kind === "reset") {
+      await forwardTurnCancellationStep({
+        payload: {},
+        token: turnCancellationHookToken(this.control.token),
+      });
+      this.bufferedSessionControls.push("reset");
+      return undefined;
+    }
+    return unsupportedSessionCommand(command);
   }
 
   private bufferTurnDeliveries(
@@ -256,6 +259,10 @@ export class TurnControlReceiver {
       if (terminal !== undefined) return terminal;
     }
   }
+}
+
+function unsupportedSessionCommand(command: never): never {
+  throw new Error(`Unsupported session command: ${JSON.stringify(command)}`);
 }
 
 function commandToDelivery(

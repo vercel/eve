@@ -20,6 +20,7 @@ import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
+import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -39,6 +40,7 @@ import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import {
   dispatchTurnStep,
+  routeProxiedDeliverStep,
   resolveEffectiveOutputSchema,
   turnStep,
 } from "#execution/workflow-steps.js";
@@ -94,6 +96,7 @@ function createStubSessionState(overrides: Partial<DurableSessionState> = {}): D
 
 const DEFAULT_WORKFLOW_STREAM_NAMESPACE = "__default__";
 const getRunMock = vi.fn();
+const resumeHookMock = vi.fn();
 const startMock = vi.fn();
 const workflowWritesByNamespace = new Map<string, unknown[]>();
 
@@ -125,7 +128,7 @@ vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getHookByToken: vi.fn(async () => ({ runId: "child-run" })),
   getRun: (...args: unknown[]) => getRunMock(...args),
-  resumeHook: vi.fn(),
+  resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
 }));
 
@@ -194,11 +197,55 @@ function createSerializedContext(): Record<string, unknown> {
 
 afterEach(() => {
   getRunMock.mockReset();
+  resumeHookMock.mockReset();
   startMock.mockReset();
   workflowWritesByNamespace.clear();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+
+describe("routeProxiedDeliverStep", () => {
+  it("forwards descendant input responses as session send commands", async () => {
+    const auth = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "user-1",
+      principalType: "user",
+    };
+    const session = upsertProxyInputRequests({
+      entries: [["request-1", { childContinuationToken: "child-token", kind: "tool-approval" }]],
+      forChildContinuationToken: "child-token",
+      session: createStubSession({
+        continuationToken: "parent-token",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    await expect(
+      routeProxiedDeliverStep({
+        auth,
+        parentWritable: createTestWritable(),
+        payload: {
+          inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+        },
+        sessionState: createStubSessionState({
+          continuationToken: "parent-token",
+          hasProxyInputRequests: true,
+          sessionId: "parent-session",
+        }),
+      }),
+    ).resolves.toEqual({ kind: "continue", remainder: undefined });
+
+    expect(resumeHookMock).toHaveBeenCalledWith("child-token", {
+      auth,
+      kind: "send",
+      payload: {
+        inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+      },
+    });
+  });
 });
 
 describe("dispatchTurnStep", () => {
