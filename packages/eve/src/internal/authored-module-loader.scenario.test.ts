@@ -316,7 +316,10 @@ describe("loadAuthoredModuleNamespace", () => {
         JSON.stringify(
           {
             exports: {
-              "./exa-linkedin": "./src/exa-linkedin.ts",
+              "./exa-linkedin": {
+                "eve-source": "./src/exa-linkedin.ts",
+                default: "./dist/exa-linkedin.js",
+              },
             },
             name: "@repo/enrichment",
             type: "module",
