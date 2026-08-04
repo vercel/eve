@@ -20,6 +20,7 @@
   },
   "files": [
     "dist",
+    "scaffold",
     "README.md"
   ],
   "type": "module",
@@ -30,15 +31,15 @@
     },
     "./agent": {
       "eve-source": "./src/agent.ts",
-      "types": "./dist/scaffold/agent.d.ts",
-      "import": "./dist/scaffold/agent.js",
-      "default": "./dist/scaffold/agent.js"
+      "types": "./scaffold/agent.d.ts",
+      "import": "./scaffold/agent.js",
+      "default": "./scaffold/agent.js"
     },
     "./sandbox": {
       "eve-source": "./src/sandbox.ts",
-      "types": "./dist/scaffold/sandbox.d.ts",
-      "import": "./dist/scaffold/sandbox.js",
-      "default": "./dist/scaffold/sandbox.js"
+      "types": "./scaffold/sandbox.d.ts",
+      "import": "./scaffold/sandbox.js",
+      "default": "./scaffold/sandbox.js"
     },
     "./tools": {
       "types": "./dist/tools/index.d.ts",

@@ -1,7 +1,7 @@
 import { defineAgent, defineDynamic } from "eve";
 
 export default defineDynamic({
-  build: { externalDependencies: ["just-bash"] },
+  build: { externalDependencies: ["eve-selfmod"] },
   events: {
     "session.started": () =>
       process.env.EVE_DEV === "1"

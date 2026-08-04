@@ -5,7 +5,7 @@
     "declaration": true,
     "declarationMap": true,
     "noEmit": false,
-    "outDir": "./dist/scaffold",
+    "outDir": "./scaffold",
     "rootDir": "./src"
   },
   "include": ["src/**/*.ts"]
