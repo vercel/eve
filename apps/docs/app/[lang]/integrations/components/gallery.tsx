@@ -67,8 +67,11 @@ export const Gallery = ({ filter, integrations }: GalleryProps) => {
   }, [integrations, filter, query]);
 
   useEffect(() => {
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery) return;
+    const normalizedQuery = normalizeSearchQuery(query);
+    if (!normalizedQuery) {
+      lastTrackedSearch.current = "";
+      return;
+    }
 
     const searchKey = `${filter}:${normalizedQuery}`;
     if (searchKey === lastTrackedSearch.current) return;
@@ -76,7 +79,7 @@ export const Gallery = ({ filter, integrations }: GalleryProps) => {
     const timer = setTimeout(() => {
       track(analyticsEvents.integrationsSearched, {
         filter,
-        query: normalizeSearchQuery(normalizedQuery),
+        query: normalizedQuery,
         query_length: getQueryLengthBucket(normalizedQuery),
         results: getCountBucket(results.length),
       });

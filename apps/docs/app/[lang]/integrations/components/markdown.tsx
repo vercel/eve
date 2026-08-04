@@ -53,7 +53,7 @@ export const Markdown = ({ analytics, children }: MarkdownProps) => {
           event.target instanceof Element &&
           event.target.closest('[data-streamdown="code-block-copy-button"]')
         ) {
-          track(analyticsEvents.integrationCodeCopied, analytics);
+          track(analyticsEvents.integrationCodeCopyClicked, analytics);
         }
       }}
     >

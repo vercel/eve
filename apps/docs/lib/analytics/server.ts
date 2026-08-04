@@ -1,17 +1,13 @@
 import { track } from "@vercel/analytics/server";
-import { type AnalyticsEventName, getAnalyticsUrl } from "./events";
+import { type AnalyticsEventName, isQueryFreeUrl } from "./events";
 
 export const trackServerEvent = (
   request: Request,
   event: AnalyticsEventName,
   properties: Record<string, boolean | number | string>,
 ) => {
-  const analyticsUrl = getAnalyticsUrl(request.url);
-  if (!analyticsUrl) return;
-
-  const analyticsRequest = new Request(analyticsUrl, {
-    headers: request.headers,
-    method: request.method,
-  });
-  void track(event, properties, { request: analyticsRequest });
+  // The SDK prefers Next's ambient request URL over the passed Request, so a
+  // query-bearing request must be skipped rather than reconstructed.
+  if (!isQueryFreeUrl(request.url)) return;
+  void track(event, properties, { request });
 };

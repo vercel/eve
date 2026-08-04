@@ -66,7 +66,7 @@ export const InstallSwitcher = ({
       </CommandPromptViewport>
       <CommandPromptCopy
         onClick={() =>
-          track(analyticsEvents.installerCommandCopied, {
+          track(analyticsEvents.installerCommandCopyClicked, {
             source: "home_hero",
             target: value ?? "humans",
           })

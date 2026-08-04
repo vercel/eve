@@ -1,5 +1,10 @@
 import { createChatRoute } from "@vercel/geistdocs/routes/chat";
-import { analyticsEvents, getDocsSurface, getResponseOutcome } from "@/lib/analytics/events";
+import {
+  analyticsEvents,
+  getAskAiContext,
+  getDocsSurface,
+  getResponseOutcome,
+} from "@/lib/analytics/events";
 import { trackServerEvent } from "@/lib/analytics/server";
 import { config } from "@/lib/geistdocs/config";
 import { geistdocsSource } from "@/lib/geistdocs/source";
@@ -29,7 +34,7 @@ export const POST = async (request: Request) => {
     const hasPageContext = "pageContext" in body && Boolean(body.pageContext);
 
     trackServerEvent(request, analyticsEvents.askAiSubmitted, {
-      context: hasPageContext ? "page" : "global",
+      context: getAskAiContext(currentRoute, hasPageContext),
       outcome: getResponseOutcome(response.status),
       surface: getDocsSurface(currentRoute),
       turn: userTurns > 1 ? "follow_up" : "first",

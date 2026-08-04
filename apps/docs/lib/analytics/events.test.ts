@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   analyticsEvents,
   countMarkdownSuggestions,
-  getAnalyticsUrl,
+  getAskAiContext,
   getCountBucket,
   getDocsSurface,
   getMarkdownFormat,
   getQueryLengthBucket,
   getResponseOutcome,
+  isQueryFreeUrl,
   normalizeSearchQuery,
 } from "./events";
 
@@ -17,12 +18,10 @@ describe("docs analytics", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it("removes query-string input from server analytics URLs", () => {
-    expect(getAnalyticsUrl("https://eve.dev/api/chat")).toBe("https://eve.dev/api/chat");
-    expect(getAnalyticsUrl("https://eve.dev/docs/missing?token=secret#hash")).toBe(
-      "https://eve.dev/docs/missing",
-    );
-    expect(getAnalyticsUrl("not a URL")).toBeUndefined();
+  it("identifies requests safe for server analytics", () => {
+    expect(isQueryFreeUrl("https://eve.dev/api/chat")).toBe(true);
+    expect(isQueryFreeUrl("https://eve.dev/docs/missing?token=secret")).toBe(false);
+    expect(isQueryFreeUrl("not a URL")).toBe(false);
   });
 
   it.each([
@@ -34,6 +33,15 @@ describe("docs analytics", () => {
     [undefined, "other"],
   ])("classifies %s as %s without retaining the URL", (value, expected) => {
     expect(getDocsSurface(value)).toBe(expected);
+  });
+
+  it.each([
+    ["/docs/agent-config", false, "page"],
+    ["/", false, "global"],
+    [undefined, false, "global"],
+    [undefined, true, "page"],
+  ])("classifies Ask AI context for %s", (currentRoute, hasPageContext, expected) => {
+    expect(getAskAiContext(currentRoute, hasPageContext)).toBe(expected);
   });
 
   it("uses bounded result-count buckets", () => {

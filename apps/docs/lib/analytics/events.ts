@@ -1,10 +1,11 @@
 export const analyticsEvents = {
   askAiSubmitted: "Submitted docs question",
   docsSearched: "Searched docs",
+  docsSearchResultOpened: "Opened docs search result",
   gettingStartedOpened: "Opened getting started",
-  installerCommandCopied: "Copied installer command",
+  installerCommandCopyClicked: "Clicked installer command copy",
   installerCommandSelected: "Selected installer command",
-  integrationCodeCopied: "Copied integration code",
+  integrationCodeCopyClicked: "Clicked integration code copy",
   integrationDocsOpened: "Opened integration docs",
   integrationFilterSelected: "Selected integration filter",
   integrationOpened: "Opened integration",
@@ -22,14 +23,11 @@ export type AnalyticsEventName = (typeof analyticsEvents)[keyof typeof analytics
 
 export type DocsSurface = "docs" | "home" | "integrations" | "other" | "templates";
 
-export const getAnalyticsUrl = (url: string): string | undefined => {
+export const isQueryFreeUrl = (url: string): boolean => {
   try {
-    const parsed = new URL(url);
-    parsed.search = "";
-    parsed.hash = "";
-    return parsed.toString();
+    return new URL(url).search === "";
   } catch {
-    return undefined;
+    return false;
   }
 };
 
@@ -54,6 +52,12 @@ export const getDocsSurface = (value: unknown): DocsSurface => {
   if (pathname === "/templates" || pathname.startsWith("/templates/")) return "templates";
   return "other";
 };
+
+export const getAskAiContext = (
+  currentRoute: unknown,
+  hasPageContext: boolean,
+): "global" | "page" =>
+  hasPageContext || getDocsSurface(currentRoute) === "docs" ? "page" : "global";
 
 export const getCountBucket = (count: number): "0" | "1-5" | "6-10" | "11+" => {
   if (count <= 0) return "0";

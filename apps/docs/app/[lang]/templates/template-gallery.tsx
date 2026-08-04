@@ -152,8 +152,11 @@ export const TemplateGallery = ({ entries }: TemplateGalleryProps) => {
   }, [category, entries, integration, query]);
 
   useEffect(() => {
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery) return;
+    const normalizedQuery = normalizeSearchQuery(query);
+    if (!normalizedQuery) {
+      lastTrackedSearch.current = "";
+      return;
+    }
 
     const searchKey = `${category}:${integration}:${normalizedQuery}`;
     if (searchKey === lastTrackedSearch.current) return;
@@ -162,7 +165,7 @@ export const TemplateGallery = ({ entries }: TemplateGalleryProps) => {
       track(analyticsEvents.templatesSearched, {
         category,
         integration,
-        query: normalizeSearchQuery(normalizedQuery),
+        query: normalizedQuery,
         query_length: getQueryLengthBucket(normalizedQuery),
         results: getCountBucket(results.length),
       });
