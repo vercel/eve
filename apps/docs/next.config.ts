@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { createMDX } from "fumadocs-mdx/next";
 import type { NextConfig } from "next";
+import { docsRedirects } from "./lib/geistdocs/redirects";
 
 const withMDX = createMDX();
 const require = createRequire(import.meta.url);
@@ -64,27 +65,7 @@ const config: NextConfig = {
         destination: "/:lang/docs/getting-started",
         permanent: true,
       },
-      {
-        source: "/docs/introduction",
-        destination: "/docs/getting-started",
-        permanent: true,
-      },
-      {
-        source: "/:lang/docs/introduction",
-        destination: "/:lang/docs/getting-started",
-        permanent: true,
-      },
-      // Evals moved from a single Advanced page to a top-level section.
-      {
-        source: "/docs/advanced/evals",
-        destination: "/docs/evals/overview",
-        permanent: true,
-      },
-      {
-        source: "/:lang/docs/advanced/evals",
-        destination: "/:lang/docs/evals/overview",
-        permanent: true,
-      },
+      ...docsRedirects,
     ];
   },
 };
