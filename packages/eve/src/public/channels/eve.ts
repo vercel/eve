@@ -326,15 +326,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           dispatchAuth = messageResult.auth;
         }
 
-        const result = await attachSession(sessionId).send(
-          {
-            context,
-            inputResponses: body.inputResponses,
-            message: body.message,
-            outputSchema: body.outputSchema,
-          },
-          { auth: dispatchAuth },
-        );
+        const result = await attachSession(sessionId).send({
+          auth: dispatchAuth,
+          context,
+          inputResponses: body.inputResponses,
+          message: body.message,
+          outputSchema: body.outputSchema,
+        });
         if (result.status === "session_not_active") {
           return Response.json(
             { code: "session_not_active", ok: false },

@@ -1,5 +1,3 @@
-import type { UserContent } from "ai";
-
 import type { ContextAccessor } from "#context/key.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
@@ -51,10 +49,7 @@ export interface Session {
 export interface FixedSession {
   readonly id: string;
   /** Sends input to this exact session ID without creating or following a replacement. */
-  send(
-    input: string | UserContent | SendPayload,
-    options: SessionSendOptions,
-  ): Promise<SessionSendCommandResult>;
+  send(input: SessionSendInput): Promise<SessionSendCommandResult>;
   /** Requests cancellation of this exact session's active turn. */
   cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
@@ -67,8 +62,8 @@ export interface FixedSession {
   getStreamTailIndex(): Promise<number>;
 }
 
-/** Per-delivery metadata required when sending through a fixed session handle. */
-export interface SessionSendOptions {
+/** Message and authorization for delivery through a fixed session handle. */
+export interface SessionSendInput extends SendPayload {
   readonly auth: SessionAuthContext | null;
 }
 
@@ -95,11 +90,12 @@ export function createSession(
   return {
     id,
     continuationToken,
-    async send(input, options) {
-      const payload = normalizeSendInput(input);
+    async send(input) {
+      const { auth, ...sendInput } = input;
+      const payload = normalizeSendInput(sendInput);
       return await runtime.dispatchSession({
         command: {
-          auth: options.auth,
+          auth,
           kind: "send",
           payload: {
             ...payload,

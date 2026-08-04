@@ -62,7 +62,7 @@ describe("fixed session operations", () => {
     const runtime = createRuntime();
     const session = createAttachSessionFn(runtime, { requestId: "req_1" })("sess_1");
 
-    await session.send("hello", { auth: null });
+    await session.send({ auth: null, message: "hello" });
     await session.compact();
     await session.clear();
     await session.reset({ reason: "fresh start" });

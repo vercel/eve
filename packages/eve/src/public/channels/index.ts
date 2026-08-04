@@ -26,7 +26,7 @@ export {
   type Session,
   type FixedSession,
   type SessionHandle,
-  type SessionSendOptions,
+  type SessionSendInput,
   type RouteDefinition,
   type RouteHandlerArgs,
   type ResetFn,

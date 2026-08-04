@@ -76,7 +76,7 @@ The handle keeps every operation next to the ID it targets. The calls below show
 ```ts
 const session = attachSession(sessionId);
 
-await session.send("Continue the analysis.", { auth: null });
+await session.send({ auth: null, message: "Continue the analysis." });
 await session.cancel({ turnId });
 await session.compact();
 await session.clear();

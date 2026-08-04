@@ -99,15 +99,13 @@ describe("eve ID-addressed session routes", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(session.send).toHaveBeenCalledWith(
-      {
-        context: undefined,
-        inputResponses: undefined,
-        message: "follow-up",
-        outputSchema: undefined,
-      },
-      { auth: expect.objectContaining({ authenticator: "none" }) },
-    );
+    expect(session.send).toHaveBeenCalledWith({
+      auth: expect.objectContaining({ authenticator: "none" }),
+      context: undefined,
+      inputResponses: undefined,
+      message: "follow-up",
+      outputSchema: undefined,
+    });
 
     const rejected = await handler(
       new Request("https://eve.test/eve/v1/sessions/wrun_A/messages", {
