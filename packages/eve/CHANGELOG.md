@@ -1,5 +1,15 @@
 # eve
 
+## 0.30.5
+
+### Patch Changes
+
+- 5ee18e2: Prevent successful local `eve invoke` commands from logging a spurious Workflow queue 503 while their temporary development server shuts down.
+- d8fc092: Format registry search results as concise, width-aware entries and limit searches to 10 matches by default. Use `--limit` to request up to 100 results.
+- 557000b: Add skills.sh as a built-in registry, so `eve registry search --registry @skills <query>` and `eve add @skills/<skill>` work without project configuration.
+- 1953d20: Prevent sandbox abort listeners from accumulating across repeated operations in a turn.
+- 7086776: Route session controls and follow-up messages through one durable command inbox shared by stable session IDs and rekeyable channel addresses.
+
 ## 0.30.4
 
 ### Patch Changes
