@@ -11,7 +11,6 @@ function deps(): GitHubSetupDeps {
   return {
     deriveConnectorSlug: vi.fn(async () => "agent" as never),
     ensureVercelProject: vi.fn(async () => ({ orgId: "team-id", projectId: "project-id" })),
-    openUrl: vi.fn(),
     provisionConnector: vi.fn(async () => ({ id: "scl_github", uid: "github/agent" })),
     writeTextFile: vi.fn(async () => {}),
   };
@@ -53,7 +52,6 @@ describe("GitHub setup", () => {
     expect(scaffold).toContain("onIssue(ctx, issue)");
     expect(scaffold).toContain("onWorkflowRun(ctx, workflowRun)");
     expect(scaffold).not.toContain("onPullRequest(ctx, pullRequest)");
-    expect(effects.openUrl).toHaveBeenCalledOnce();
   });
 
   it("recommends comment events that the default scaffold handles", async () => {

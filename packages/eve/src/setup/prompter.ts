@@ -173,8 +173,8 @@ export interface EditableSelectOptions<T extends PrompterValue> extends SingleSe
   };
 }
 
-/** Color intent for {@link Prompter.note}: red warning (default), green success, or dim info. */
-export type NoteTone = "warning" | "success" | "info";
+/** Color intent for {@link Prompter.note}: red warning (default) or green success. */
+export type NoteTone = "warning" | "success";
 
 /** Input for {@link Prompter.acknowledge}: a heading plus optional body lines. */
 export interface AcknowledgeOptions {
@@ -240,7 +240,7 @@ export interface Prompter {
   /**
    * Rail-attached notice, no bullet — reads as a follow-up to the previous
    * step. Red by default (warnings, collisions); pass `tone: "success"` for a
-   * green closing note or `tone: "info"` for a subdued informational note.
+   * green closing note like the one-shot next steps.
    */
   note(message: string, title?: string, options?: { tone?: NoteTone }): void;
 
@@ -502,9 +502,8 @@ export function createPrompter(): Prompter {
 
     note(message, title, options) {
       log.settle();
-      const paint =
-        options?.tone === "success" ? pc.green : options?.tone === "info" ? pc.dim : pc.red;
-      if (title) process.stdout.write(formatRailLine(paint(title), pc, process.stdout));
+      const paint = options?.tone === "success" ? pc.green : pc.red;
+      if (title) process.stdout.write(formatRailLine(paint(pc.bold(title)), pc, process.stdout));
       process.stdout.write(formatRailLine(paint(message), pc, process.stdout));
     },
 

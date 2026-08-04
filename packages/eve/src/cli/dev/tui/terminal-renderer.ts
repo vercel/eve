@@ -1648,6 +1648,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const content = stripTerminalControls(text);
     if (content.trim().length === 0) return;
     this.#start();
+    const latest = this.#blocks.at(-1);
+    if (latest?.kind === "command") latest.live = false;
     this.#pushBlock(
       tone === "success"
         ? { kind: "result", body: content, live: false, status: "done" }
@@ -1695,6 +1697,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (flow === undefined) return;
     this.#setupFlow = undefined;
     this.#stopTicker();
+    // The result belongs to the slash command that opened this flow. Its
+    // elbow should stay adjacent even though closing the panel repaints first.
+    const latest = this.#blocks.at(-1);
+    if (latest?.kind === "command") latest.live = true;
 
     if (preserveDiagnostics) {
       let evidence: string[] = [];

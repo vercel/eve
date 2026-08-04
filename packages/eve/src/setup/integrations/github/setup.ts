@@ -2,7 +2,6 @@ import { join } from "node:path";
 
 import type { MultiSelectQuestion } from "#setup/ask.js";
 import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
-import { openUrl } from "#setup/primitives/open-url.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
 import { WizardCancelledError } from "#setup/step.js";
@@ -17,7 +16,6 @@ import { provisionGitHubConnector } from "./connect.js";
 export interface GitHubSetupDeps {
   deriveConnectorSlug: typeof deriveSlackConnectorSlug;
   ensureVercelProject: typeof ensureVercelProject;
-  openUrl: typeof openUrl;
   provisionConnector: typeof provisionGitHubConnector;
   writeTextFile: typeof writeTextFile;
 }
@@ -25,7 +23,6 @@ export interface GitHubSetupDeps {
 const defaultDeps: GitHubSetupDeps = {
   deriveConnectorSlug: deriveSlackConnectorSlug,
   ensureVercelProject,
-  openUrl,
   provisionConnector: provisionGitHubConnector,
   writeTextFile,
 };
@@ -146,10 +143,9 @@ export async function setupGitHub(
     );
   }
   try {
-    context.ui.prompter.note(
+    context.ui.prompter.log.info("GitHub App");
+    context.ui.prompter.log.info(
       "Vercel Connect creates a GitHub App and routes verified webhooks to your deployed agent.",
-      "GitHub App",
-      { tone: "info" },
     );
     const events = await context.ui.asker.askMany(githubEventsQuestion);
     const project = await deps.ensureVercelProject({
@@ -175,7 +171,6 @@ export async function setupGitHub(
       "Deploy the agent, then open the GitHub App in Vercel Connect and install it in the organization or account where you want to use it.",
       "Mention the app in an issue, pull request, or review comment to start a conversation.",
     ]);
-    deps.openUrl(dashboardUrl);
     return {
       kind: "done",
       facts: [{ label: "Vercel Connect", value: dashboardUrl, kind: "url" }],

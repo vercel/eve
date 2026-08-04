@@ -64,7 +64,7 @@ export type RegistrySetupChildMessage =
       level: "message" | "info" | "success" | "warning" | "error" | "commandOutput";
       text: string;
     }
-  | { type: "note"; message: string; title?: string; tone?: "warning" | "success" | "info" }
+  | { type: "note"; message: string; title?: string; tone?: "warning" | "success" }
   | { type: "intro" | "outro"; text: string; subtitle?: string }
   | { type: "result"; outcome: RegistrySetupOutcome }
   | {
