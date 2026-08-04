@@ -56,18 +56,23 @@ describe("Vercel MCP connection setup", () => {
     );
     expect(appQuickStart).toContain('"list_deployments"');
     expect(appQuickStart).toContain('"get_runtime_logs"');
-    const configure = buildConnectionConfigure(integration);
-    expect(configure).toContain("vercel connect create vercel");
-    expect(configure).not.toContain("vercel connect attach");
-    expect(configure.indexOf("vercel link")).toBeLessThan(
-      configure.indexOf("vercel connect create vercel"),
-    );
-    expect(configure).toContain("select None");
-    expect(configure).toContain("vercel connect create api-key --name vercel");
-    expect(configure).toContain(
+    const userConfigure = setup.configureVariants["mcp:user"];
+    const appConfigure = setup.configureVariants["mcp:app"];
+
+    expect(userConfigure).toContain("vercel connect create vercel --name vercel");
+    expect(userConfigure).toContain("Select None");
+    expect(userConfigure).not.toContain("create api-key");
+    expect(appConfigure).toContain("vercel connect create api-key --name vercel");
+    expect(appConfigure).not.toContain("Select None");
+    expect(appConfigure).toContain(
       "[Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token)",
     );
-    expect(configure).toContain("Copy the returned connector UID into the App example");
-    expect(configure).toContain("token still belongs to the user who created it");
+    expect(appConfigure).toContain("copy the returned connector UID into the App example");
+    expect(appConfigure).toContain("token still belongs to the user who created it");
+
+    const configure = buildConnectionConfigure(integration);
+    expect(configure).toContain("### MCP · User");
+    expect(configure).toContain("### MCP · App");
+    expect(configure).not.toContain("vercel connect attach");
   });
 });

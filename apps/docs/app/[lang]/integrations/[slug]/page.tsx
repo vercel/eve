@@ -3,11 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import {
-  buildConnectionConfigure,
-  buildConnectionInstall,
-  buildConnectionSetup,
-} from "@/lib/integrations/connection-setup";
+import { buildConnectionInstall, buildConnectionSetup } from "@/lib/integrations/connection-setup";
 import {
   getIntegration,
   integrations,
@@ -66,9 +62,7 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
 
   const isConnection = Boolean(integration.connection);
   const install = isConnection ? buildConnectionInstall(integration) : (integration.install ?? "");
-  const configure = isConnection
-    ? buildConnectionConfigure(integration)
-    : (integration.configure ?? "");
+  const configure = integration.configure ?? "";
   const setup = isConnection ? buildConnectionSetup(integration) : null;
 
   return (
@@ -140,7 +134,23 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
           )}
         </Section>
         <Section title="Configure">
-          <Markdown>{configure}</Markdown>
+          {setup ? (
+            <Suspense
+              fallback={
+                <Markdown>
+                  {setup.configureVariants[`${setup.protocols[0]}:${setup.authModes[0]}`] ?? ""}
+                </Markdown>
+              }
+            >
+              <SetupTabs
+                authModes={setup.authModes}
+                protocols={setup.protocols}
+                variants={setup.configureVariants}
+              />
+            </Suspense>
+          ) : (
+            <Markdown>{configure}</Markdown>
+          )}
         </Section>
       </div>
     </main>

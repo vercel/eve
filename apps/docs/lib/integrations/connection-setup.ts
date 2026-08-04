@@ -4,6 +4,7 @@ import {
   type ConnectionSpec,
   type Integration,
   authModeLabel,
+  protocolLabel,
 } from "./data";
 
 /**
@@ -15,6 +16,8 @@ export interface ConnectionSetup {
   authModes: AuthMode[];
   /** Generated quick-start markdown keyed by `"<protocol>:<auth>"`. */
   variants: Record<string, string>;
+  /** Generated configure markdown keyed by `"<protocol>:<auth>"`. */
+  configureVariants: Record<string, string>;
 }
 
 export const setupKey = (protocol: ConnectionProtocol, auth: AuthMode): string =>
@@ -136,18 +139,81 @@ const buildVariant = (
   ].join("\n");
 };
 
-/** All quick-start variants for a connection, plus its switcher options. */
+/** Configure markdown for one auth mode. */
+const buildConfigureVariant = (integration: Integration, auth: AuthMode): string => {
+  const spec = integration.connection;
+  if (!spec) {
+    return "";
+  }
+  const sections: string[] = [];
+
+  if (auth !== "apiKey") {
+    const connector = connectorOf(integration.slug, spec, auth);
+    const modeService = spec.connectorServices?.[auth];
+    const connectorService = modeService ?? spec.connectorService ?? connector;
+    const namedConnector = modeService !== undefined || spec.connectorService !== undefined;
+    sections.push(
+      [
+        "Link your project, create the connector, and pull OIDC locally:",
+        ``,
+        "```bash",
+        "vercel link",
+        `vercel connect create ${connectorService}${
+          namedConnector ? ` --name ${integration.slug}` : ""
+        }`,
+        "vercel env pull",
+        "```",
+      ].join("\n"),
+    );
+  }
+
+  if (auth === "apiKey" && spec.apiKey) {
+    sections.push(
+      [
+        `Set \`${spec.apiKey.env}\` as a server-side environment variable:`,
+        ``,
+        "```bash",
+        `${spec.apiKey.env}=your_api_key`,
+        "```",
+      ].join("\n"),
+    );
+  }
+
+  if (auth === "jwtBearer") {
+    sections.push(
+      'For JWT bearer, `principalToSubject` controls the asserted subject. The default maps app principals to `{ type: "app" }` and user principals to `{ type: "user", id, issuer }`.',
+    );
+  }
+
+  const modeNote = spec.configureNotes?.[auth];
+  if (modeNote) {
+    sections.push(modeNote);
+  }
+  if (spec.configureNote) {
+    sections.push(spec.configureNote);
+  }
+
+  sections.push(
+    "See the [Connections docs](/docs/connections) for principal types, headers, approval, and protocol-specific filters.",
+  );
+  return sections.join("\n\n");
+};
+
+/** All quick-start and configure variants for a connection, plus their switcher options. */
 export const buildConnectionSetup = (integration: Integration): ConnectionSetup => {
   const spec = integration.connection;
   const protocols = spec ? (integration.protocols ?? []) : [];
   const authModes = spec?.authModes ?? [];
   const variants: Record<string, string> = {};
+  const configureVariants: Record<string, string> = {};
   for (const protocol of protocols) {
     for (const auth of authModes) {
-      variants[setupKey(protocol, auth)] = buildVariant(integration, protocol, auth);
+      const key = setupKey(protocol, auth);
+      variants[key] = buildVariant(integration, protocol, auth);
+      configureVariants[key] = buildConfigureVariant(integration, auth);
     }
   }
-  return { protocols, authModes, variants };
+  return { protocols, authModes, variants, configureVariants };
 };
 
 /** Generated Install markdown for a connection. */
@@ -166,55 +232,15 @@ export const buildConnectionInstall = (integration: Integration): string => {
 
 /** Generated Configure markdown for a connection. */
 export const buildConnectionConfigure = (integration: Integration): string => {
-  const spec = integration.connection;
-  if (!spec) {
-    return "";
-  }
-  const sections: string[] = [];
-  if (spec.authModes.some((auth) => auth !== "apiKey")) {
-    const connector = connectorOf(integration.slug, spec);
-    const connectorService = spec.connectorService ?? connector;
-    sections.push(
-      [
-        "Link your project, create the connector, and pull OIDC locally:",
-        ``,
-        "```bash",
-        "vercel link",
-        `vercel connect create ${connectorService}${
-          spec.connectorService === undefined ? "" : ` --name ${integration.slug}`
-        }`,
-        "vercel env pull",
-        "```",
-      ].join("\n"),
-    );
-  }
-
-  if (spec.apiKey) {
-    sections.push(
-      [
-        `Set \`${spec.apiKey.env}\` as a server-side environment variable:`,
-        ``,
-        "```bash",
-        `${spec.apiKey.env}=your_api_key`,
-        "```",
-      ].join("\n"),
-    );
-  }
-
-  if (spec.authModes.includes("jwtBearer")) {
-    sections.push(
-      'For JWT bearer, `principalToSubject` controls the asserted subject. The default maps app principals to `{ type: "app" }` and user principals to `{ type: "user", id, issuer }`.',
-    );
-  }
-
-  if (spec.configureNote) {
-    sections.push(spec.configureNote);
-  }
-
-  sections.push(
-    "See the [Connections docs](/docs/connections) for principal types, headers, approval, and protocol-specific filters.",
-  );
-  return sections.join("\n\n");
+  const setup = buildConnectionSetup(integration);
+  return setup.protocols
+    .flatMap((protocol) =>
+      setup.authModes.map((auth) => {
+        const content = setup.configureVariants[setupKey(protocol, auth)] ?? "";
+        return `### ${protocolLabel[protocol]} · ${authModeLabel[auth]}\n\n${content}`;
+      }),
+    )
+    .join("\n\n");
 };
 
 /** Human label for an auth-mode switcher button. */
