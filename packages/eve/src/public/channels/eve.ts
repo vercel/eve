@@ -1,10 +1,6 @@
 import { type FilePart, type TextPart, type UserContent } from "ai";
 
-import type {
-  SessionAuthContext,
-  SessionCallback,
-  SessionCapabilities,
-} from "#channel/types.js";
+import type { SessionAuthContext, SessionCallback, SessionCapabilities } from "#channel/types.js";
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
 import type { ClearResponse } from "#protocol/clear-session.js";
 import type { CompactResponse } from "#protocol/compact-session.js";
@@ -333,6 +329,14 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           const session = attachSession(sessionId);
           const options = {
             auth: dispatchAuth,
+            caller:
+              body.callback === undefined
+                ? undefined
+                : {
+                    callId: body.callback.callId,
+                    replyTo: { kind: "callback" as const, url: body.callback.url },
+                    subagentName: body.callback.subagentName,
+                  },
             context,
             outputSchema: body.outputSchema,
           };
@@ -647,6 +651,7 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
 }
 
 interface ParsedSessionMessageBody {
+  callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly InputResponse[];
   context?: readonly string[];
@@ -667,6 +672,8 @@ function parseSessionMessageBody(
 
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
+  const callback = parseCallbackField(payload.callback);
+  if (callback instanceof Response) return callback;
   const inputResponses = parseInputResponses(payload.inputResponses);
   if (inputResponses instanceof Response) return inputResponses;
   const context = parseClientContextField(payload.clientContext);
@@ -691,7 +698,7 @@ function parseSessionMessageBody(
     );
   }
 
-  return { message, inputResponses, context, outputSchema };
+  return { callback, message, inputResponses, context, outputSchema };
 }
 
 interface ParsedCancelTurnBody {

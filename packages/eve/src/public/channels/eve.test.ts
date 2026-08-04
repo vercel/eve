@@ -20,7 +20,6 @@ import {
   type Session as RuntimeSession,
 } from "#context/keys.js";
 import { createMessageCompletedEvent } from "#protocol/message.js";
-import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
@@ -47,7 +46,10 @@ const OVERRIDE_AUTH: SessionAuthContext = {
   principalType: "user",
 };
 
-type MockSendOptions = Pick<RunInput, "auth" | "callback" | "initiatorAuth" | "mode" | "title">;
+type MockSendOptions = Pick<
+  RunInput,
+  "auth" | "callback" | "capabilities" | "initiatorAuth" | "mode" | "title"
+>;
 
 function createJsonMessageRequest(body: unknown): Request {
   return new Request("https://example.com/eve/v1/session", {
@@ -111,6 +113,7 @@ function createEveCreateHandler(input: EveChannelInput) {
     await mockSend(payload, {
       auth: runInput.auth,
       callback: runInput.callback,
+      capabilities: runInput.capabilities,
       initiatorAuth: runInput.initiatorAuth,
       mode: runInput.mode,
       title: runInput.title,
@@ -727,14 +730,13 @@ describe("eveChannel — onMessage", () => {
           token: "tok123",
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
-        continuationToken: "http:existing",
         message: "follow up",
       }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledWith(
-      expect.not.objectContaining({ caller: expect.anything() }),
+      "follow up",
       expect.objectContaining({
         caller: {
           callId: "call-2",
@@ -744,7 +746,6 @@ describe("eveChannel — onMessage", () => {
           },
           subagentName: "research",
         },
-        intent: "resume",
       }),
     );
   });
@@ -760,7 +761,6 @@ describe("eveChannel — onMessage", () => {
           token: "tok123",
           url: "https://caller.example.com/eve/v1/callback/other",
         },
-        continuationToken: "http:existing",
         message: "follow up",
       }),
     );
@@ -769,21 +769,19 @@ describe("eveChannel — onMessage", () => {
     expect(handler.send).not.toHaveBeenCalled();
   });
 
-  it("returns SESSION_NOT_RESUMABLE instead of starting a replacement session", async () => {
+  it("returns session_not_active instead of starting a replacement session", async () => {
     const handler = createEveContinueHandler({ auth: none() });
-    handler.send.mockRejectedValueOnce(new RuntimeNoActiveSessionError("eve:http:existing"));
+    handler.send.mockResolvedValueOnce({ status: "session_not_active" });
 
     const response = await handler.fetch(
       createJsonMessageRequest({
-        continuationToken: "http:existing",
         message: "follow up",
       }),
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      code: "SESSION_NOT_RESUMABLE",
-      error: "Session is not active and cannot be resumed.",
+      code: "session_not_active",
       ok: false,
     });
   });

@@ -9,6 +9,7 @@ import type {
   Runtime,
   SessionAuthContext,
   SessionSendCommandResult,
+  TurnCaller,
 } from "#channel/types.js";
 import { serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
@@ -43,6 +44,8 @@ export interface Session {
 
 interface SessionDeliveryOptions {
   readonly auth: SessionAuthContext | null;
+  /** Delegated caller waiting for this turn's settled result. */
+  readonly caller?: TurnCaller;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
 }
@@ -87,6 +90,7 @@ export function createSession(
       return await runtime.dispatchSession({
         command: {
           auth: options.auth,
+          caller: options.caller,
           kind: "send",
           payload,
           requestId: metadata.requestId,
@@ -108,6 +112,7 @@ export function createSession(
       return await runtime.dispatchSession({
         command: {
           auth: options.auth,
+          caller: options.caller,
           kind: "send",
           payload,
           requestId: metadata.requestId,
