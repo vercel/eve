@@ -385,6 +385,9 @@ async function runDriverLoop(input: {
 
       action = await runTurn({
         delivery: {
+          ...(nextDeliver.adapterState === undefined
+            ? {}
+            : { adapterState: nextDeliver.adapterState }),
           auth: nextDeliver.auth,
           kind: "deliver",
           payloads: [routed.remainder],

@@ -232,6 +232,10 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     kindHint: "github",
     state: initialGitHubState(),
 
+    updateState(state, incoming) {
+      return { ...state, ...incoming };
+    },
+
     context(state, session) {
       return rebuildGitHubContext(state, session, config);
     },

@@ -8,6 +8,7 @@ import {
   AuthKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
+  ChannelInstrumentationKey,
   ModeKey,
   SessionDynamicSubagentSelectionsKey,
   SessionDynamicToolMetadataKey,
@@ -140,7 +141,25 @@ const TestTurnAgent = {
 
 const threadContextAdapter: ChannelAdapter = {
   kind: "thread-context",
+  instrumentation: {
+    metadata(state) {
+      return { headSha: state?.headSha };
+    },
+  },
+  updateState(state, incoming) {
+    if (typeof incoming.eventId === "string") {
+      const seen = Array.isArray(state.seen) ? state.seen : [];
+      return { ...state, seen: [...seen, incoming.eventId] };
+    }
+    return { ...state, ...incoming };
+  },
   deliver(payload: DeliverPayload, adapterCtx: ChannelAdapterContext) {
+    if (payload.message === "review the update") {
+      expect(adapterCtx.ctx.require(ChannelKey).state?.headSha).toBe("new-head");
+      expect(adapterCtx.ctx.get(ChannelInstrumentationKey)?.metadata).toEqual({
+        headSha: "new-head",
+      });
+    }
     if (typeof payload.message === "string" && payload.message.startsWith("seed:")) {
       adapterCtx.ctx.set(ThreadKey, payload.message.slice(5));
     }
@@ -163,12 +182,14 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
   };
 }
 
-function createSerializedContext(): Record<string, unknown> {
+function createSerializedContext(
+  adapter: ChannelAdapter = threadContextAdapter,
+): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, {
     adapterRegistry: {
-      adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      adaptersByKind: new Map([[adapter.kind, adapter]]),
     },
     compiledArtifactsSource: {} as never,
     graph: {
@@ -184,7 +205,7 @@ function createSerializedContext(): Record<string, unknown> {
     toolRegistry: {},
     turnAgent: TestTurnAgent,
   } as never);
-  ctx.set(ChannelKey, threadContextAdapter);
+  ctx.set(ChannelKey, adapter);
   ctx.set(ContinuationTokenKey, "http:thread-context");
   ctx.set(ModeKey, "conversation");
   ctx.set(SessionIdKey, "session-1");
@@ -1023,6 +1044,33 @@ describe("turnStep", () => {
     expect(createExecutionNodeStep).toHaveBeenCalledWith(
       expect.objectContaining({ node: effectiveNode }),
     );
+  });
+
+  it("lets the adapter reconcile deliver-time channel state before handling the turn", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: { done: true, output: "ok" },
+        session: stepSession,
+      });
+    });
+
+    const result = await turnStep({
+      input: {
+        adapterState: { headSha: "new-head" },
+        kind: "deliver",
+        payloads: [{ message: "review the update" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    const channel = result.serializedContext[ChannelKey.name] as {
+      state: { headSha?: string };
+    };
+    expect(channel.state.headSha).toBe("new-head");
   });
 
   it("reads the durable session from normalized turn-step input", async () => {

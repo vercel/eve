@@ -69,6 +69,18 @@ export interface GenericChannelDefinition<
    */
   context?(state: NonNullable<TState>, session: SessionHandle): TCtx;
 
+  /**
+   * Reconciles the latest state supplied to a resumed `send()` with the
+   * session's durable state. When deliveries are coalesced, every payload in
+   * the turn observes that latest supplied state. When omitted, resumed
+   * deliveries ignore supplied state, preserving mutations made by event
+   * handlers and channel context methods.
+   */
+  updateState?(
+    state: NonNullable<TState>,
+    incoming: Readonly<NonNullable<TState>>,
+  ): NonNullable<TState>;
+
   readonly routes: readonly RouteDefinition<TState>[];
   receive?(
     input: GenericReceiveInput<TReceiveTarget>,

@@ -41,6 +41,7 @@ const ADAPTER_NON_EVENT_FIELDS: ReadonlySet<string> = new Set([
   "createAdapterContext",
   "fetchFile",
   "instrumentation",
+  "updateState",
 ]);
 
 /**
@@ -87,8 +88,9 @@ export function createRuntimeAdapterRegistry(input: {
           `Channel adapter kind "${kind}" is reserved by the framework. ` +
             `A route-declared adapter may share a framework kind only as a ` +
             `pass-through with no \`deliver\` hook, event handlers, ` +
-            `\`attachments\` resolver, or \`createAdapterContext\` factory. ` +
-            `Use a custom \`kind\` to add channel-specific behavior.`,
+            `\`attachments\` resolver, \`createAdapterContext\` factory, or ` +
+            `\`updateState\` reconciler. Use a custom \`kind\` to add ` +
+            `channel-specific behavior.`,
           { ...location, entryName: kind },
         );
       }
@@ -166,6 +168,10 @@ function carriesAdapterBehavior(adapter: ChannelAdapter): boolean {
   }
 
   if (adapter.createAdapterContext !== undefined) {
+    return true;
+  }
+
+  if (adapter.updateState !== undefined) {
     return true;
   }
 

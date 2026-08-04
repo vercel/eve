@@ -259,6 +259,31 @@ describe("createSendFn", () => {
     expect(vi.mocked(runtime.run).mock.calls[0]![0].continuationToken).toBe("stateful:C1:T1");
   });
 
+  it("forwards state from send() when resuming an existing session", async () => {
+    interface State {
+      channelId: string;
+      threadTs: string;
+    }
+    const runtime = createRuntime(undefined);
+    vi.mocked(runtime.deliver).mockResolvedValue({ sessionId: "existing-session-id" });
+    const stateful: ChannelAdapter = {
+      kind: "channel:stateful",
+      state: { channelId: null, threadTs: null },
+    };
+
+    const send = createSendFn<State>(runtime, stateful, "stateful");
+    await send("hello", {
+      auth: null,
+      continuationToken: "C1:T1",
+      state: { channelId: "C2", threadTs: "T2" },
+    });
+
+    expect(runtime.deliver).toHaveBeenCalledWith(
+      expect.objectContaining({ adapterState: { channelId: "C2", threadTs: "T2" } }),
+    );
+    expect(runtime.run).not.toHaveBeenCalled();
+  });
+
   it("seeds adapter state from the send() call so the new session resumes with it", async () => {
     interface State {
       channelId: string;

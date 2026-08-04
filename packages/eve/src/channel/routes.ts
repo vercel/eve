@@ -73,8 +73,10 @@ export interface SendPayload {
 
 /**
  * Starts or continues a session on this channel. Accepts a plain string,
- * `UserContent`, or a {@link SendPayload}, plus {@link SendOptions}. Resolves
- * to the resulting {@link Session}.
+ * `UserContent`, or a {@link SendPayload}, plus {@link SendOptions} (auth,
+ * continuation token, run mode, and `state` for stateful channels). The state
+ * seeds a new session; an existing session applies it only when the channel
+ * defines an `updateState` reconciler. Resolves to the resulting {@link Session}.
  */
 export type SendFn<TState = undefined> = (
   input: string | UserContent | SendPayload,
@@ -117,8 +119,10 @@ type BaseSendOptions = {
  * Options for {@link SendFn}. The channel owns its continuation-token
  * format: pass the channel-local raw token (the framework prepends
  * the channel name). Stateful channels also seed initial adapter
- * state via {@link state}, which becomes the new session's `state`
- * on first `runtime.run()` and is ignored on subsequent `deliver`s.
+ * state via {@link state}. It seeds a new session on `runtime.run()`. On a
+ * subsequent `deliver`, it is ignored unless the channel defines an
+ * `updateState` reconciler. If deliveries coalesce into one turn, every
+ * payload observes the latest supplied state.
  */
 export type SendOptions<TState = undefined> = [TState] extends [undefined]
   ? BaseSendOptions

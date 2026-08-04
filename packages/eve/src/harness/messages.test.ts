@@ -1,6 +1,7 @@
 import type { FilePart, ModelMessage, UserContent } from "ai";
 import { describe, expect, it } from "vitest";
 import {
+  coalesceDeliveries,
   coalesceTurnInputs,
   normalizeUserContent,
   resolveAssistantStepText,
@@ -18,6 +19,34 @@ function textFilePart(overrides: {
     type: "file",
   };
 }
+
+describe("coalesceDeliveries", () => {
+  it("keeps the latest supplied adapter state for every payload in the coalesced turn", () => {
+    const result = coalesceDeliveries([
+      {
+        adapterState: { eventId: "A" },
+        kind: "deliver" as const,
+        payloads: [{ message: "first" }],
+      },
+      {
+        kind: "deliver" as const,
+        payloads: [{ message: "without state" }],
+      },
+      {
+        adapterState: { eventId: "B" },
+        kind: "deliver" as const,
+        payloads: [{ message: "second" }],
+      },
+    ]);
+
+    expect(result.adapterState).toEqual({ eventId: "B" });
+    expect(result.payloads).toEqual([
+      { message: "first" },
+      { message: "without state" },
+      { message: "second" },
+    ]);
+  });
+});
 
 describe("coalesceTurnInputs", () => {
   it("joins two messages with a double newline", () => {

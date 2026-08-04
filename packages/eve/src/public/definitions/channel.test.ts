@@ -214,6 +214,24 @@ describe("defineChannel", () => {
     void invalid;
   });
 
+  it("wires an updateState reconciler onto the built adapter", () => {
+    const channel = defineChannel({
+      state: { durable: "keep", inbound: "old" },
+      routes: [POST("/x", async () => new Response("ok"))],
+      updateState(state, incoming) {
+        return { ...state, inbound: incoming.inbound };
+      },
+    });
+
+    const adapter = getAdapter(channel);
+    expect(
+      adapter.updateState?.(adapter.state ?? {}, { durable: "replace", inbound: "new" }),
+    ).toEqual({
+      durable: "keep",
+      inbound: "new",
+    });
+  });
+
   it("wires a turn.cancelled handler onto the built adapter", () => {
     const channel = defineChannel({
       routes: [POST("/x", async () => new Response("ok"))],

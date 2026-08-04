@@ -148,7 +148,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   let durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
-  const adapter = ctx.require(ChannelKey);
+  let adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
 
@@ -229,6 +229,17 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     turnAgent: effectiveAgent.turnAgent,
   });
 
+  if (
+    input.input?.kind === "deliver" &&
+    input.input.adapterState !== undefined &&
+    adapter.updateState !== undefined
+  ) {
+    adapter = {
+      ...adapter,
+      state: adapter.updateState(adapter.state ?? {}, input.input.adapterState),
+    };
+    setChannelContext(ctx, adapter);
+  }
   const adapterCtx = buildAdapterContext(adapter, ctx);
 
   // Run the adapter's deliver hook for each queued payload and

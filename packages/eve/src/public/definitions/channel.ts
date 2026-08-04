@@ -276,10 +276,11 @@ export type ReceiveInput<TReceiveTarget = Record<string, unknown>> =
 
 /**
  * The object passed to {@link defineChannel}. `routes` is required; `state`
- * seeds durable adapter state, `context` builds the per-step `channel` argument
- * for `events` and `deliver`, `events` handle session lifecycle, `receive`
- * accepts cross-channel handoffs, `fetchFile` stages remote file URLs, and
- * `metadata` projects observability data.
+ * seeds durable adapter state, `updateState` reconciles state supplied by
+ * resumed sends, `context` builds the per-step `channel` argument for `events`
+ * and `deliver`, `events` handle session lifecycle, `receive` accepts
+ * cross-channel handoffs, `fetchFile` stages remote file URLs, and `metadata`
+ * projects observability data.
  *
  * Generics: `TState` (adapter state), `TCtx` (context factory return type),
  * `TReceiveTarget` (cross-channel target shape), `TMetadata` (instrumentation
@@ -383,7 +384,8 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   const hasFetchFile = definition.fetchFile !== undefined;
   const metadata = definition.metadata;
   const hasMetadata = metadata !== undefined;
-  const hasBehavior = hasState || hasContext || hasMetadata;
+  const hasUpdateState = definition.updateState !== undefined;
+  const hasBehavior = hasState || hasContext || hasMetadata || hasUpdateState;
 
   const eventHandlers: Record<string, unknown> = {};
   let hasEventHandlers = false;
@@ -448,6 +450,15 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     deliver(payload: DeliverPayload) {
       return defaultDeliverResult(payload);
     },
+
+    updateState:
+      definition.updateState === undefined
+        ? undefined
+        : (state, incoming) =>
+            definition.updateState!(
+              state as NonNullable<TState>,
+              incoming as Readonly<NonNullable<TState>>,
+            ) as Record<string, unknown>,
 
     ...eventHandlers,
   } as ChannelAdapter<any>;

@@ -14,7 +14,7 @@ import {
 } from "#public/channels/github/auth.js";
 import { defaultGitHubAuth } from "#public/channels/github/defaults.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
-import { type GitHubChannelState } from "#public/channels/github/state.js";
+import { initialGitHubState, type GitHubChannelState } from "#public/channels/github/state.js";
 import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
 
 const SECRET = "github-secret";
@@ -509,6 +509,21 @@ describe("githubChannel", () => {
         repo: "eve",
       },
     });
+  });
+
+  it("reconciles webhook state into durable state for resumed turns", () => {
+    const channel = githubChannel();
+    const adapter = getAdapter(channel);
+    const current = {
+      ...initialGitHubState(),
+      checkoutPath: "/workspace",
+      headSha: "old-head",
+      owner: "vercel",
+      repo: "eve",
+    };
+    const incoming = { ...current, checkoutPath: null, headSha: "new-head" };
+
+    expect(adapter.updateState?.(current, incoming)).toEqual(incoming);
   });
 
   it("dispatches opt-in pull request webhook hooks with checkout-ready state", async () => {

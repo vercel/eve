@@ -187,6 +187,8 @@ export interface DeliverPayload {
  * metadata so both cross the durable hook boundary outside adapter-owned data.
  */
 export interface DeliverHookPayload {
+  /** Latest channel state supplied by the coalesced inbound deliveries. */
+  readonly adapterState?: Readonly<Record<string, unknown>>;
   readonly auth?: SessionAuthContext | null;
   /** Delegated caller waiting for this turn's settled result. */
   readonly caller?: TurnCaller;
@@ -416,6 +418,8 @@ export interface RunInput {
 }
 
 export interface DeliverInput {
+  /** Channel state supplied by the inbound delivery. */
+  readonly adapterState?: Readonly<Record<string, unknown>>;
   /**
    * Authenticated principal for this follow-up message.
    * May differ from the session initiator when different users send

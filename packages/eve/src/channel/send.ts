@@ -36,6 +36,9 @@ export function createSendFn<TState = undefined>(
 
     try {
       const deliverInput: DeliverInput = {
+        ...(state === undefined
+          ? {}
+          : { adapterState: state as Readonly<Record<string, unknown>> }),
         auth,
         caller,
         continuationToken,

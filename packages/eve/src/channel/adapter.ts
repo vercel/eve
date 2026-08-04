@@ -141,6 +141,16 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
   deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
 
   /**
+   * Reconciles the latest state supplied by resumed `send()` calls with
+   * durable state before a coalesced turn. Channels opt in so inbound snapshots
+   * cannot overwrite channel-owned mutations unless explicitly permitted.
+   */
+  updateState?(
+    state: Record<string, unknown>,
+    incoming: Readonly<Record<string, unknown>>,
+  ): Record<string, unknown>;
+
+  /**
    * Optional factory that builds the adapter context for this adapter.
    *
    * @internal

@@ -125,6 +125,22 @@ describe("createWorkflowRuntime#deliver", () => {
     });
   });
 
+  it("forwards incoming adapter state with the delivery", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "owner-session" });
+
+    await buildRuntime().deliver({
+      adapterState: { eventId: "A" },
+      auth: null,
+      continuationToken: "test:active-hook",
+      payload: { message: "hello" },
+    });
+
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "test:active-hook",
+      expect.objectContaining({ adapterState: { eventId: "A" } }),
+    );
+  });
+
   it("returns the owner from the hook resumed by the delivery", async () => {
     resumeHookMock.mockResolvedValue({ runId: "owner-session" });
 

@@ -214,19 +214,21 @@ function toUserContentArray(value: string | UserContent): UserContentArray {
  * runtime type.
  */
 interface DeliverLike {
+  readonly adapterState?: Readonly<Record<string, unknown>>;
   readonly auth?: SessionAuthContext | null;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
 }
 
 /**
- * Coalesces an array of deliver-like items into a single item by
- * collecting all payloads and keeping the most recent auth value.
+ * Coalesces an array of deliver-like items into a single item by collecting
+ * all payloads and keeping the most recent auth and channel-state snapshots.
+ * Every payload in the resulting turn observes that final state.
  *
- * Used by the workflow runtime to batch follow-up deliveries that
- * arrived while a turn or subagent delegation was in progress. Each
- * payload is later passed to `onDeliver` individually so channel-
- * specific fields are never lost.
+ * Used by the workflow runtime to batch follow-up deliveries that arrived
+ * while a turn or subagent delegation was in progress. Each payload is later
+ * passed to `onDeliver` individually so channel-specific payload fields are
+ * never lost.
  */
 export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): T {
   const [first, ...rest] = items;
@@ -235,15 +237,24 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
     throw new Error("Cannot coalesce an empty delivery batch.");
   }
 
+  let adapterState = first.adapterState;
   let auth = first.auth;
   const payloads = [...first.payloads];
 
   for (const item of rest) {
+    if (item.adapterState !== undefined) {
+      adapterState = item.adapterState;
+    }
     if (item.auth !== undefined) {
       auth = item.auth;
     }
     payloads.push(...item.payloads);
   }
 
-  return { ...first, auth, payloads };
+  return {
+    ...first,
+    adapterState,
+    auth,
+    payloads,
+  };
 }
