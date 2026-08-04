@@ -31,6 +31,7 @@ import {
   type RuntimeAgentHandleAction,
   type RuntimeSession,
 } from "#execution/agent-handle-dispatch.js";
+import { createAgentContinuationBundle } from "#execution/agent-continuation-bundle.js";
 import { SUBAGENT_START_FAILED } from "#harness/agent-handle-errors.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import {
@@ -375,38 +376,6 @@ function planDispatch(input: {
         throw new Error(`Unsupported runtime action kind "${action.kind}" in workflow runtime.`);
     }
   });
-}
-
-function createAgentContinuationBundle(input: {
-  readonly action: RuntimeAgentHandleAction;
-  readonly bundle: CompiledBundle;
-  readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
-}): CompiledBundle {
-  const { action, dynamicRemoteAgent } = input;
-  if (action.kind !== "remote-agent-call" || dynamicRemoteAgent === undefined) {
-    return input.bundle;
-  }
-
-  const registry = input.bundle.subagentRegistry.subagentsByNodeId;
-  const subagentsByNodeId = Object.assign(new Map(registry), {
-    // Resolve only after the handle dispatcher validates and prepares ownership.
-    get: (nodeId: string) =>
-      nodeId === action.nodeId
-        ? {
-            definition: resolveRemoteAgentForAction({
-              dynamicRemoteAgent,
-              nodeId,
-              registry,
-              remoteAgentName: action.remoteAgentName,
-            }),
-          }
-        : registry.get(nodeId),
-  });
-
-  return {
-    ...input.bundle,
-    subagentRegistry: { ...input.bundle.subagentRegistry, subagentsByNodeId },
-  };
 }
 
 async function startSubagent(input: {
