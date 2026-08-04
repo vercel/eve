@@ -35,7 +35,7 @@ export function buildHarnessDefinition(options: {
     env,
     installInstructionsUrl:
       "https://github.com/vercel/eve/tree/main/packages/eve-buzz-acp-adapter#readme",
-    installHint: "Install eve-buzz-acp-adapter globally, then run eve-buzz-acp-adapter install.",
+    installHint: "Install @eve/buzz-acp-adapter globally, then run eve-buzz-acp-adapter install.",
   };
 }
 

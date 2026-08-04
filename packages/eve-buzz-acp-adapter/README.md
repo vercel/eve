@@ -1,4 +1,4 @@
-# eve-buzz-acp-adapter
+# @eve/buzz-acp-adapter
 
 Experimental Buzz ACP compatibility adapter for [`eve`](https://eve.dev) agents.
 
@@ -11,7 +11,7 @@ buzz-acp -> eve-buzz-acp-adapter -> eve acp -> eve runtime
 ## Install
 
 ```sh
-npm install --global eve-buzz-acp-adapter
+npm install --global @eve/buzz-acp-adapter
 eve-buzz-acp-adapter install
 ```
 
@@ -45,7 +45,7 @@ From the eve repository:
 
 ```sh
 pnpm --filter eve build
-pnpm --filter eve-buzz-acp-adapter build
+pnpm --filter @eve/buzz-acp-adapter build
 node packages/eve-buzz-acp-adapter/dist/cli.js install apps/fixtures/weather-agent
 ```
 
