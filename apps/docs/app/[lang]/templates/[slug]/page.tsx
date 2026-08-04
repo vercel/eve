@@ -115,11 +115,8 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
           <FileViewer files={highlightedFiles} />
         </section>
 
-        <section aria-label="README" className="mt-16 border-gray-alpha-400 border-t pt-12">
-          <div className="font-mono text-gray-700 text-label-12 uppercase tracking-wider">
-            README
-          </div>
-          <div className="mt-5 max-w-[760px]">
+        <section aria-label="README" className="mt-16">
+          <div className="max-w-[760px]">
             <TemplateReadme readme={entry.readme} sourceRevisionHref={entry.sourceRevisionHref} />
           </div>
         </section>
