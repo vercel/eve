@@ -27,7 +27,7 @@ export interface TemplateEntry {
   title: string;
 }
 
-/** Shape of `generated/templates.json`, before language narrowing. */
+/** Shape of the repository snapshot produced before a docs build. */
 export interface GeneratedTemplatesInput {
   templates: Record<
     string,

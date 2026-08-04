@@ -9,12 +9,8 @@ import type { ComponentProps } from "react";
 import { translations } from "@/geistdocs";
 import { canonicalAlternates, templatePath } from "@/lib/geistdocs/canonical";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
-import {
-  getTemplateEntry,
-  templateEntries,
-  type TemplateEntry,
-  type TemplateFile,
-} from "@/lib/templates/data";
+import { getTemplateEntry, type TemplateEntry, type TemplateFile } from "@/lib/templates/data";
+import { templateManifest } from "@/lib/templates/manifest";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
 import { cn } from "@/lib/utils";
 import { integrationIcons } from "../integration-icons";
@@ -29,7 +25,7 @@ interface PageParams {
 
 export const generateStaticParams = (): PageParams[] =>
   Object.keys(translations).flatMap((lang) =>
-    templateEntries.map((entry) => ({ lang, slug: entry.slug })),
+    templateManifest.map((entry) => ({ lang, slug: entry.slug })),
   );
 
 export const dynamicParams = false;
@@ -40,8 +36,10 @@ export const generateMetadata = async ({
   params: Promise<PageParams>;
 }): Promise<Metadata> => {
   const { slug } = await params;
-  const entry = getTemplateEntry(slug);
-  if (!entry) return { title: "Template not found" };
+  const entry = templateManifest.find((template) => template.slug === slug);
+  if (!entry) {
+    return { title: "Template not found" };
+  }
 
   const canonicalPath = templatePath(entry.slug);
   const titleMetadata = pageTitleMetadata(entry.title);
@@ -65,7 +63,7 @@ export const generateMetadata = async ({
 
 const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) => {
   const { slug } = await params;
-  const entry = getTemplateEntry(slug);
+  const entry = await getTemplateEntry(slug);
   if (!entry) {
     notFound();
   }

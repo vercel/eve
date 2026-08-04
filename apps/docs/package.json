@@ -5,8 +5,8 @@
   "description": "eve documentation site.",
   "type": "module",
   "scripts": {
-    "build": "pnpm run registry:check && next build",
-    "dev": "next dev --turbo",
+    "build": "pnpm run registry:check && pnpm run templates:sync && next build",
+    "dev": "pnpm run templates:sync && next dev --turbo",
     "start": "next start",
     "postinstall": "fumadocs-mdx",
     "translate": "npx @vercel/geistdocs translate",

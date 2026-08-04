@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { composeTemplateEntries, type GeneratedTemplatesInput } from "./compose";
-import generatedTemplates from "./generated/templates.json";
-import { templateManifest, type TemplateManifestEntry } from "./manifest";
+import type { TemplateManifestEntry } from "./manifest";
 
 const manifestEntry: TemplateManifestEntry = {
   slug: "example",
@@ -85,25 +84,5 @@ describe("composeTemplateEntries", () => {
     expect(() => composeTemplateEntries([manifestEntry], emptyReadme)).toThrow(
       /Generated README is empty/,
     );
-  });
-});
-
-describe("committed generated data", () => {
-  it("composes cleanly with the manifest", () => {
-    const entries = composeTemplateEntries(
-      templateManifest,
-      generatedTemplates as GeneratedTemplatesInput,
-    );
-
-    expect(entries).toHaveLength(templateManifest.length);
-    for (const entry of entries) {
-      expect(entry.sourceRevision).toMatch(/^[0-9a-f]{40}$/);
-      expect(entry.readme.length).toBeGreaterThan(0);
-      expect(entry.files.length).toBeGreaterThan(0);
-      for (const file of entry.files) {
-        expect(file.contents.length).toBeGreaterThan(0);
-        expect(["markdown", "typescript"]).toContain(file.language);
-      }
-    }
   });
 });

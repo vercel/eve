@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getTemplateEntry } from "@/lib/templates/data";
+import { templateManifest } from "@/lib/templates/manifest";
 import { createTemplateOgImage } from "@/lib/templates/og-image";
 
 export const size = {
@@ -14,7 +14,7 @@ const TemplateTwitterImage = async ({
   params: Promise<{ lang: string; slug: string }>;
 }) => {
   const { slug } = await params;
-  const template = getTemplateEntry(slug);
+  const template = templateManifest.find((entry) => entry.slug === slug);
 
   if (!template) {
     notFound();
