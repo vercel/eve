@@ -39,4 +39,8 @@ describe("metadata titles", () => {
     expect(metadataTitle(title)).toBe(title);
     expect(formatPageTitle(title)).toBe(`${title} – eve`);
   });
+
+  it("applies the shared suffix to template titles", () => {
+    expect(formatPageTitle("Chat template")).toBe("Chat template – eve");
+  });
 });

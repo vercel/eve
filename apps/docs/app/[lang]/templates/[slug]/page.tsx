@@ -41,7 +41,7 @@ export const generateMetadata = async ({
   const entry = getTemplateEntry(slug);
   if (!entry) return { title: "Template not found" };
 
-  const titleMetadata = pageTitleMetadata(`${entry.title} template - eve`);
+  const titleMetadata = pageTitleMetadata(`${entry.title} template`);
   return {
     ...titleMetadata,
     description: entry.description,
