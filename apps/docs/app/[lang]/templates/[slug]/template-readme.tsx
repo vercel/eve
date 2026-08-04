@@ -2,7 +2,7 @@
 
 import { createCodePlugin } from "@streamdown/code";
 import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
-import { isValidElement, type ReactNode, useMemo } from "react";
+import { useMemo } from "react";
 import { type Components, Streamdown } from "streamdown";
 import { resolveReadmeHref } from "@/lib/templates/readme-links";
 
@@ -34,27 +34,16 @@ export const TemplateReadme = ({ readme, sourceRevisionHref }: TemplateReadmePro
         );
       },
       h1: ({ children }) => (
-        <h2
-          className="mt-10 mb-4 text-heading-32 text-gray-1000 first:mt-0"
-          id={headingId(children)}
-        >
-          {children}
-        </h2>
+        <h2 className="mt-10 mb-4 text-heading-32 text-gray-1000 first:mt-0">{children}</h2>
       ),
       h2: ({ children }) => (
-        <h3 className="mt-8 mb-3 text-heading-24 text-gray-1000" id={headingId(children)}>
-          {children}
-        </h3>
+        <h3 className="mt-8 mb-3 text-heading-24 text-gray-1000">{children}</h3>
       ),
       h3: ({ children }) => (
-        <h4 className="mt-6 mb-3 text-heading-20 text-gray-1000" id={headingId(children)}>
-          {children}
-        </h4>
+        <h4 className="mt-6 mb-3 text-heading-20 text-gray-1000">{children}</h4>
       ),
       h4: ({ children }) => (
-        <h5 className="mt-6 mb-3 text-heading-16 text-gray-1000" id={headingId(children)}>
-          {children}
-        </h5>
+        <h5 className="mt-6 mb-3 text-heading-16 text-gray-1000">{children}</h5>
       ),
     }),
     [sourceRevisionHref],
@@ -79,25 +68,4 @@ export const TemplateReadme = ({ readme, sourceRevisionHref }: TemplateReadmePro
       {readme}
     </Streamdown>
   );
-};
-
-const headingId = (children: ReactNode): string =>
-  getText(children)
-    .toLowerCase()
-    .trim()
-    .replace(/[^\p{L}\p{N}\s-]/gu, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
-
-const getText = (node: ReactNode): string => {
-  if (typeof node === "string" || typeof node === "number") {
-    return String(node);
-  }
-  if (Array.isArray(node)) {
-    return node.map(getText).join("");
-  }
-  if (isValidElement<{ children?: ReactNode }>(node)) {
-    return getText(node.props.children);
-  }
-  return "";
 };
