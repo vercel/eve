@@ -127,10 +127,26 @@ If you already know the durable ID, attach a fixed handle without performing I/O
 
 ```ts
 const session = client.sessions.attach("wrun_A");
-await session.cancel();
 ```
 
-`client.sessions` stores only the session ID and stream cursor. Reset leaves the handle pinned to the retired ID rather than silently creating or following a replacement.
+The fixed client handle exposes the full lifecycle around that ID. The calls below show the available shapes independently:
+
+```ts
+const response = await session.send("Continue the analysis.");
+await response.result();
+
+await session.cancel({ turnId: "turn_123" });
+await session.compact();
+await session.clear();
+
+for await (const event of session.stream({ follow: false })) {
+  console.log(event.type);
+}
+
+await session.reset({ reason: "User requested a fresh session" });
+```
+
+`client.sessions` stores only the session ID and stream cursor. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement. Reset leaves the handle pinned to the retired ID.
 
 The continuation-addressed client surface remains available for callers that persist continuation tokens. Create a `ClientSession` for each conversation:
 

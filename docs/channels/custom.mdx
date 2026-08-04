@@ -60,17 +60,33 @@ Declare routes with the `POST()` and `GET()` helpers. Each route handler receive
 
 Event handlers like `"message.completed"` are declared under the `events` key. They receive `(eventData, channel, ctx)`, where `eventData` is the event payload, `channel` carries platform handles and session continuation operations, and `ctx` is the eve `SessionContext`. Every channel kind shares this signature. The one exception is `session.failed`, which receives only `(eventData, channel)` with no `ctx`.
 
-## Session handles
+## Fixed session handles
 
-Use `attachSession()` when you already have a durable session ID and must target that exact session. Attaching performs no network or runtime lookup; the first operation reports whether the session is still active:
+Use `attachSession(sessionId)` when you already have a durable session ID and must target that exact session. Attaching performs no I/O and never creates or follows a replacement session:
 
 ```ts
-POST("/sessions/:sessionId/clear", async (_request, { attachSession, params }) => {
-  return Response.json(await attachSession(params.sessionId).clear());
+POST("/control/:sessionId/clear", async (_request, { attachSession, params }) => {
+  const session = attachSession(params.sessionId);
+  return Response.json(await session.clear());
 });
 ```
 
-The fixed session handle exposes `send`, `cancel`, `compact`, `clear`, `reset`, and `stream`. It never creates or follows another session.
+The handle keeps every operation next to the ID it targets. The calls below show the available shapes independently:
+
+```ts
+const session = attachSession(sessionId);
+
+await session.send("Continue the analysis.", { auth: null });
+await session.cancel({ turnId });
+await session.compact();
+await session.clear();
+await session.reset({ reason: "User requested a fresh session" });
+
+const stream = await session.getEventStream({ startIndex: 0 });
+const tailIndex = await session.getStreamTailIndex();
+```
+
+`send()` reports `session_not_active` instead of creating a session when the ID is unknown or terminal. Control methods are benign for an inactive ID. After `reset()`, the handle remains pinned to the retired ID.
 
 ## Cancel a turn
 
@@ -213,7 +229,7 @@ export default defineChannel({
 });
 ```
 
-`WS()` handlers receive the same helpers as HTTP route handlers: `send`, `cancel`, `clear`, `compact`, `reset`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
+`WS()` handlers receive the same helpers as HTTP route handlers: `attachSession`, `send`, `cancel`, `clear`, `compact`, `reset`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
 
 ### Node upgrade server escape hatch
 
