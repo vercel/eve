@@ -2286,6 +2286,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         mask: opts.mask === true,
       };
       if (opts.placeholder !== undefined) state.placeholder = opts.placeholder;
+      else if (opts.defaultValue !== undefined) state.placeholder = opts.defaultValue;
       if (opts.notices !== undefined) state.notices = opts.notices;
       if (error !== undefined) state.error = error;
       return renderTextQuestion(state, this.#theme, width, this.#caretVisible);

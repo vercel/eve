@@ -10,6 +10,8 @@ import {
   createJustBashSandboxBackend,
   pruneJustBashSandboxTemplates,
 } from "#execution/sandbox/bindings/just-bash.js";
+import { executeGlobOnSandbox } from "#execution/sandbox/glob-tool.js";
+import { executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
 import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
 import { justbash } from "#public/sandbox/backends/just-bash.js";
 
@@ -101,6 +103,20 @@ describe("just-bash sandbox file API", () => {
 
     expect(factoryCalls).toBe(1);
     expect(await handle.session.readTextFile({ path: "/source/instructions.md" })).toBe("before");
+    await expect(
+      executeGlobOnSandbox(handle.session, { path: "/source", pattern: "*" }),
+    ).resolves.toMatchObject({
+      content: "/source/instructions.md",
+      count: 1,
+      path: "/source",
+    });
+    await expect(
+      executeGrepOnSandbox(handle.session, { path: "/source", pattern: "before" }),
+    ).resolves.toMatchObject({
+      content: "/source/instructions.md:1:before",
+      matchCount: 1,
+      path: "/source",
+    });
     await handle.session.writeTextFile({
       content: "after",
       path: "/source/instructions.md",

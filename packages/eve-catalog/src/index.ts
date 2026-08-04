@@ -129,7 +129,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "linear-agent",
     name: "Linear Agent",
     kind: "channel",
-    tagline: "Delegate Linear issues and comments to your agent through Linear's Agent Sessions.",
+    tagline:
+      "Delegate Linear issues and comments through Agent Sessions, with guided Connect setup.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
@@ -745,6 +746,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Braintrust",
     kind: "instrumentation",
     tagline: "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "posthog-instrumentation",
+    name: "PostHog",
+    kind: "instrumentation",
+    tagline: "Send agent traces and generations to PostHog AI Observability.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {

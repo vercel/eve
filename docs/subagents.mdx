@@ -74,6 +74,25 @@ supported for subagents. A nil result (`null` or `undefined`) removes the
 subagent's description and tool definition from the model-visible surface.
 The subagent's filesystem manifest is always compiled; a non-nil result injects
 the returned agent configuration when the child runs.
+
+Packaging controls must be available before the resolver runs. Put them on
+`defineDynamic`, rather than the `defineAgent` returned by an event handler:
+
+```ts
+export default defineDynamic({
+  build: { externalDependencies: ["native-package"] },
+  events: {
+    "session.started": () =>
+      defineAgent({
+        description: "Use a native package when handling delegated work.",
+        model: "anthropic/claude-opus-4.8",
+      }),
+  },
+});
+```
+
+The compiler applies `build.externalDependencies` while bundling every authored
+module in that dynamic subagent.
 See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-subagents) for
 scope precedence, failure behavior, and the dispatch-time guard.
 

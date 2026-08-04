@@ -1178,18 +1178,19 @@
       "name": "channel/linear-agent",
       "type": "registry:item",
       "title": "Linear Agent",
-      "description": "Delegate Linear issues and comments to your agent through Linear's Agent Sessions.",
-      "envVars": {
-        "LINEAR_AGENT_ACCESS_TOKEN": "",
-        "LINEAR_WEBHOOK_SECRET": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/linear-agent.ts",
-          "type": "registry:file",
-          "target": "agent/channels/linear.ts"
+      "description": "Delegate Linear issues and comments through Agent Sessions, with guided Vercel Connect setup.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "linear"]
+          },
+          "requires": ">=0.31.0"
         }
-      ]
+      },
+      "dependencies": ["@vercel/connect"]
     },
     {
       "name": "channel/web",
@@ -1756,6 +1757,30 @@
           "path": "registry/instrumentation/braintrust-hook.ts",
           "type": "registry:file",
           "target": "agent/hooks/braintrust.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/posthog",
+      "type": "registry:item",
+      "title": "PostHog",
+      "description": "Send agent traces and generations to PostHog AI Observability.",
+      "dependencies": [
+        "@posthog/ai@^7.19.6",
+        "@opentelemetry/api",
+        "@opentelemetry/exporter-trace-otlp-http",
+        "@opentelemetry/sdk-trace-base",
+        "@vercel/otel"
+      ],
+      "envVars": {
+        "POSTHOG_PROJECT_TOKEN": "",
+        "POSTHOG_HOST": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/posthog.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
         }
       ]
     },

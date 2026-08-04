@@ -110,5 +110,13 @@ describe("integration discovery", () => {
     expect(markdown).toContain("eve add instrumentation/braintrust");
     expect(markdown).toContain("agent/instrumentation.ts");
     expect(markdown).toContain("BRAINTRUST_API_KEY");
+
+    const posthog = getIntegration("posthog-instrumentation");
+    expect(posthog).toBeDefined();
+
+    const posthogMarkdown = integrationMarkdown(posthog!);
+    expect(posthogMarkdown).toContain("eve add instrumentation/posthog");
+    expect(posthogMarkdown).toContain("PostHogTraceExporter");
+    expect(posthogMarkdown).toContain("POSTHOG_PROJECT_TOKEN");
   });
 });

@@ -41,13 +41,17 @@ export interface ApiKeySpec {
  * Structured description of a connection consumed by the detail page to
  * generate Install, Quick start, and Configure content. Transport (`mcp`,
  * `openapi`) and `description` are filled from the shared catalog identity;
- * `authModes`, `connector`, and `configureNote` are the docs-only overlay.
+ * Auth modes, connectors, and configure notes are the docs-only overlay.
  */
 export interface ConnectionSpec {
   /** Vercel Connect connector UID; defaults to the integration slug. */
   connector?: string;
+  /** Auth-mode-specific connector UIDs when one service needs separate connectors. */
+  connectors?: Partial<Record<AuthMode, string>>;
   /** Service passed to `vercel connect create` when it differs from the connector UID. */
   connectorService?: string;
+  /** Auth-mode-specific services passed to `vercel connect create`. */
+  connectorServices?: Partial<Record<AuthMode, string>>;
   /** Supported auth modes in display order; the first is the default. */
   authModes: AuthMode[];
   /** API-key wiring when `authModes` includes `apiKey`. */
@@ -56,8 +60,10 @@ export interface ConnectionSpec {
   description?: string;
   mcp?: ConnectionIdentity["mcp"];
   openapi?: ConnectionIdentity["openapi"];
-  /** Optional one-line, provider-specific configure note. Keep it short. */
+  /** Optional provider-specific configure guidance, rendered as markdown. */
   configureNote?: string;
+  /** Auth-mode-specific configure guidance, rendered as markdown. */
+  configureNotes?: Partial<Record<AuthMode, string>>;
 }
 
 export interface Integration {
@@ -116,8 +122,11 @@ interface ConnectionPresentation extends Presentation {
   authModes: AuthMode[];
   apiKey?: ApiKeySpec;
   connector?: string;
+  connectors?: Partial<Record<AuthMode, string>>;
   connectorService?: string;
+  connectorServices?: Partial<Record<AuthMode, string>>;
   configureNote?: string;
+  configureNotes?: Partial<Record<AuthMode, string>>;
 }
 
 const channelPresentations: Record<string, ChannelPresentation> = {
@@ -287,25 +296,23 @@ export default githubChannel({
     logo: "linear",
     docsHref: "/docs/channels/linear",
     keywords: ["issues", "comments", "agent sessions", "developer preview", "webhook"],
-    install: `Add this channel from eve's registry. This writes \`agent/channels/linear.ts\`:
+    install: `Add this channel from eve's registry to create a Vercel Connect client, route verified Agent Session events, and write \`agent/channels/linear.ts\`:
 
 \`\`\`bash
 eve add channel/linear-agent
 \`\`\``,
-    quickStart: `Create \`agent/channels/linear.ts\`:
+    quickStart: `The guided setup writes \`agent/channels/linear.ts\`:
 
 \`\`\`ts
 // agent/channels/linear.ts
+import { connectLinearCredentials } from "@vercel/connect/eve";
 import { linearChannel } from "eve/channels/linear";
 
 export default linearChannel({
-  credentials: {
-    accessToken: () => process.env.LINEAR_AGENT_ACCESS_TOKEN!,
-    webhookSecret: () => process.env.LINEAR_WEBHOOK_SECRET!,
-  },
+  credentials: connectLinearCredentials("linear/my-agent"),
 });
 \`\`\``,
-    configure: `Create a Linear OAuth app with Agent Session events enabled, make the app assignable and mentionable, and point the webhook at eve's route (\`/eve/v1/linear\`). Provide the app access token and webhook secret through environment variables. See the [Linear channel docs](/docs/channels/linear) for scopes and Agent Activity behavior.`,
+    configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the Linear app, and attach its verified AgentSessionEvent trigger to \`/eve/v1/linear\`. Deploy, install the app in your Linear workspace from Vercel Connect, then delegate an issue or mention the agent. See the [Linear channel docs](/docs/channels/linear) for Agent Activity behavior.`,
   },
   eve: {
     logo: "eve",
@@ -1473,11 +1480,15 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     logo: "vercel",
     docsHref: "https://vercel.com/docs/agent-resources/vercel-mcp",
     keywords: ["mcp", "projects", "deployments", "logs", "oauth", "connect"],
-    authModes: ["user"],
+    authModes: ["user", "app"],
     connector: "vercel",
+    connectors: { app: "vercel/your-connector" },
     connectorService: "vercel",
-    configureNote:
-      "When the Connect form asks for a token authentication method, select None. Vercel MCP completes OAuth when the agent first calls an authenticated tool.",
+    connectorServices: { app: "api-key" },
+    configureNotes: {
+      user: "Select None when prompted for a token authentication method. Each user completes OAuth when needed.",
+      app: "Enter a team-scoped [Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token) when prompted, then copy the returned connector UID into the App example. This avoids per-user OAuth, though the Vercel token still belongs to the user who created it.",
+    },
   },
   linear: {
     logo: "linear",
@@ -1763,6 +1774,55 @@ export default defineInstrumentation(
 \`\`\``,
     configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the hook's \`app\` metadata with your app name. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
+  "posthog-instrumentation": {
+    logo: "posthog",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "generations", "analytics"],
+    install: `Add PostHog AI Observability from eve's registry:
+
+\`\`\`bash
+eve add instrumentation/posthog
+\`\`\``,
+
+    quickStart: `eve installs \`agent/instrumentation.ts\` with PostHog's trace exporter. It also links spans to the user who initiated the session when an authenticated principal is available:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { trace } from "@opentelemetry/api";
+import { SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { PostHogTraceExporter } from "@posthog/ai/otel";
+import { registerOTel } from "@vercel/otel";
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) =>
+    registerOTel({
+      serviceName: agentName,
+      spanProcessors: [
+        new SimpleSpanProcessor(
+          new PostHogTraceExporter({
+            projectToken: process.env.POSTHOG_PROJECT_TOKEN!,
+            host: process.env.POSTHOG_HOST,
+          }),
+        ),
+      ],
+    }),
+  events: {
+    "step.started"(input) {
+      const distinctId =
+        input.session.auth.initiator?.principalId ??
+        input.session.auth.current?.principalId;
+
+      if (!distinctId) return undefined;
+
+      trace.getActiveSpan()?.setAttribute("posthog.distinct_id", distinctId);
+      return { runtimeContext: { posthog_distinct_id: distinctId } };
+    },
+  },
+});
+\`\`\``,
+    configure: `Copy your project token and client API host from PostHog's project settings and expose them as \`POSTHOG_PROJECT_TOKEN\` and \`POSTHOG_HOST\`. Remove the \`events\` handler to capture generations anonymously. PostHog groups turns using \`eve.session.id\` and preserves eve's trace hierarchy. See [PostHog's eve installation guide](https://posthog.com/docs/ai-observability/installation/eve) for verification steps and the [instrumentation guide](/docs/guides/instrumentation) for input and output capture controls.`,
+  },
   "sentry-instrumentation": {
     logo: "sentry",
     docsHref: "/docs/guides/instrumentation",
@@ -1995,12 +2055,17 @@ function buildConnection(entry: IntegrationEntry): Integration {
   };
   if (presentation.apiKey !== undefined) spec.apiKey = presentation.apiKey;
   if (presentation.connector !== undefined) spec.connector = presentation.connector;
+  if (presentation.connectors !== undefined) spec.connectors = presentation.connectors;
   if (presentation.connectorService !== undefined) {
     spec.connectorService = presentation.connectorService;
+  }
+  if (presentation.connectorServices !== undefined) {
+    spec.connectorServices = presentation.connectorServices;
   }
   if (identity.mcp !== undefined) spec.mcp = identity.mcp;
   if (identity.openapi !== undefined) spec.openapi = identity.openapi;
   if (presentation.configureNote !== undefined) spec.configureNote = presentation.configureNote;
+  if (presentation.configureNotes !== undefined) spec.configureNotes = presentation.configureNotes;
   return {
     slug: entry.slug,
     name: entry.name,

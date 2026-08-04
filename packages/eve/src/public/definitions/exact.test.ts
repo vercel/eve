@@ -61,6 +61,7 @@ function typeOnlyFixtures(): void {
   });
 
   defineDynamic({
+    build: { externalDependencies: ["just-bash"] },
     events: {
       "session.started": () =>
         Math.random() > 0.5
