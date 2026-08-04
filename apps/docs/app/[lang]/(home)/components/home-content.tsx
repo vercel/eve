@@ -7,12 +7,13 @@ import { FileTree } from "./file-tree";
 import { HeroAudience } from "./hero-audience";
 import { NextjsInterop } from "./nextjs-interop";
 
-const title = "eve";
+const title = "eve - Framework for building durable agents";
 const tagline = "Like Next.js for agents. Build durable agents with one folder.";
 
 export const homeMetadata: Metadata = {
   title,
   description: tagline,
+  alternates: { canonical: "/" },
   openGraph: {
     title,
     description: tagline,

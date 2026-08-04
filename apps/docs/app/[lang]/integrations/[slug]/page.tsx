@@ -44,6 +44,7 @@ export const generateMetadata = async ({
   return {
     title: `${integration.name} Integration`,
     description: integration.tagline,
+    alternates: { canonical: `/integrations/${integration.slug}` },
   };
 };
 

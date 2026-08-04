@@ -10,6 +10,7 @@ const description =
 export const metadata: Metadata = {
   title,
   description,
+  alternates: { canonical: "/integrations" },
 };
 
 export const generateStaticParams = () => Object.keys(translations).map((lang) => ({ lang }));

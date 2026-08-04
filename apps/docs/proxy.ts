@@ -1,9 +1,11 @@
 import { createProxy } from "@vercel/geistdocs/proxy";
 import { config as geistdocsConfig } from "@/lib/geistdocs/config";
+import { markdownRoutes } from "@/lib/geistdocs/markdown-routes";
 import { trackMdRequest } from "@/lib/geistdocs/md-tracking";
 
 const proxy = createProxy({
   config: geistdocsConfig,
+  markdownRoutes,
   trackMarkdownRequest: trackMdRequest,
   before: () => null,
 });

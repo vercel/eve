@@ -1,6 +1,8 @@
 import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
 import type { GeistdocsGithubConfig } from "@vercel/geistdocs/config";
 
+export { translations } from "@/lib/geistdocs/languages";
+
 export const Logo = () => <LogoEve />;
 
 export const github: GeistdocsGithubConfig = {
@@ -34,13 +36,13 @@ export const agent = {
   product: {
     name: "eve",
     description:
-      "A filesystem-first framework for building durable agents on Vercel with markdown instructions, TypeScript tools, and built-in runtime primitives.",
+      "A filesystem-first, Apache-2.0 framework for building durable backend AI agents that run on Vercel or your own infrastructure. eve is currently in beta.",
     category: "Agent framework",
-    audience: ["developers building AI agents", "Vercel users"],
+    audience: ["developers building AI agents", "teams running agents on any infrastructure"],
     useCases: [
       "Create durable agents with filesystem conventions",
       "Add channels, tools, skills, sandboxes, hooks, and schedules",
-      "Deploy agent workloads on Vercel",
+      "Deploy agent workloads on Vercel or self-host them as Node services",
     ],
   },
   instructions: [
@@ -49,7 +51,7 @@ export const agent = {
     "Verify setup with `eve info --json` and `eve channels list --json` before reporting success.",
     "Use /sitemap.md to identify the most relevant documentation pages before answering broad questions.",
     "Use /llms.txt when you need the complete documentation corpus as Markdown context.",
-    "Fetch individual documentation pages with a .md or .mdx extension for focused page-level context.",
+    "Fetch individual docs or integration pages with a .md or .mdx extension for focused page-level context. Template pages are HTML discovery pages and do not expose this alternate Markdown route.",
     "Do not assume API, authentication, OpenAPI, or MCP support unless it is listed in this file.",
   ],
 };
@@ -63,12 +65,6 @@ export const prompt =
 // The deployment keeps the framework's pre-rename "ash" domain.
 export const eveAgent = {
   url: "https://help-ash.vercel.sh",
-};
-
-export const translations = {
-  en: {
-    displayName: "English",
-  },
 };
 
 export const basePath: string | undefined = undefined;

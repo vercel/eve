@@ -38,7 +38,11 @@ export const generateMetadata = async ({
   const { slug } = await params;
   const entry = getTemplateEntry(slug);
   return entry
-    ? { title: `${entry.title} template - eve`, description: entry.description }
+    ? {
+        title: `${entry.title} template - eve`,
+        description: entry.description,
+        alternates: { canonical: `/templates/${entry.slug}` },
+      }
     : { title: "Template not found" };
 };
 

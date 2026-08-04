@@ -1,3 +1,4 @@
+import { getPublicPath } from "@vercel/geistdocs/config";
 import { MobileDocsBar } from "@vercel/geistdocs/mobile-docs-bar";
 import { createDocsPage, createPageActions } from "@vercel/geistdocs/pages/docs";
 import type { MDXComponents } from "mdx/types";
@@ -29,6 +30,10 @@ const docsPage = createDocsPage({
         tree: geistdocsSource.source.getPageTree(params.lang),
       }),
       metadataBase: new URL(getSiteOrigin()),
+      alternates: {
+        ...metadata.alternates,
+        canonical: getPublicPath(page.url, config.basePath),
+      },
       openGraph: {
         ...metadata.openGraph,
         // Override with the static OG image for now. To restore dynamic per-page

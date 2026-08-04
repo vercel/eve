@@ -1,7 +1,11 @@
 import { createRequire } from "node:module";
 import { createMDX } from "fumadocs-mdx/next";
 import type { NextConfig } from "next";
-import { docsRedirects } from "./lib/geistdocs/redirects";
+import {
+  compatibilityRedirects,
+  docsRedirects,
+  rootMarkdownRedirects,
+} from "./lib/geistdocs/redirects";
 
 const withMDX = createMDX();
 const require = createRequire(import.meta.url);
@@ -21,6 +25,7 @@ const config: NextConfig = {
   transpilePackages: ["@eve/catalog"],
 
   experimental: {
+    globalNotFound: true,
     turbopackFileSystemCacheForDev: true,
   },
 
@@ -65,7 +70,9 @@ const config: NextConfig = {
         destination: "/:lang/docs/getting-started",
         permanent: true,
       },
+      ...compatibilityRedirects,
       ...docsRedirects,
+      ...rootMarkdownRedirects,
     ];
   },
 };
