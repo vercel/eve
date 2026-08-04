@@ -1,16 +1,19 @@
 "use client";
 
 import { SiGithub } from "@icons-pack/react-simple-icons";
+import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { analyticsEvents } from "@/lib/analytics/events";
 
 interface TemplateActionsProps {
   setupPrompt: string;
   sourceHref: string;
+  template: string;
 }
 
-export const TemplateActions = ({ setupPrompt, sourceHref }: TemplateActionsProps) => {
+export const TemplateActions = ({ setupPrompt, sourceHref, template }: TemplateActionsProps) => {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -25,6 +28,7 @@ export const TemplateActions = ({ setupPrompt, sourceHref }: TemplateActionsProp
 
   const copyPrompt = async () => {
     await navigator.clipboard.writeText(setupPrompt);
+    track(analyticsEvents.templateSetupCopied, { template });
     setCopied(true);
     if (resetTimer.current) {
       clearTimeout(resetTimer.current);
@@ -63,7 +67,12 @@ export const TemplateActions = ({ setupPrompt, sourceHref }: TemplateActionsProp
         </span>
       </Button>
       <Button asChild className="font-medium text-label-14" variant="outline">
-        <a href={sourceHref} rel="noopener noreferrer" target="_blank">
+        <a
+          href={sourceHref}
+          onClick={() => track(analyticsEvents.templateSourceOpened, { template })}
+          rel="noopener noreferrer"
+          target="_blank"
+        >
           <SiGithub aria-hidden="true" className="size-4" />
           View GitHub
         </a>

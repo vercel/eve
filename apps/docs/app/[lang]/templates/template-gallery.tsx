@@ -1,5 +1,6 @@
 "use client";
 
+import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
 import {
   DropdownMenu,
@@ -11,7 +12,8 @@ import {
 import { Input } from "@vercel/geistdocs/components/input";
 import { ChevronDownIcon, SearchIcon } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { analyticsEvents, getCountBucket, getQueryLengthBucket } from "@/lib/analytics/events";
 import { templatePath } from "@/lib/geistdocs/canonical";
 import type { TemplateCategory, TemplateEntry, TemplateIntegration } from "@/lib/templates/data";
 import { integrationIcons } from "./integration-icons";
@@ -70,11 +72,12 @@ const FilterOption = ({ label, value }: { label: string; value: string }) => (
   </DropdownMenuRadioItem>
 );
 
-const TemplateCard = ({ entry }: { entry: TemplateEntry }) => (
+const TemplateCard = ({ entry, onSelect }: { entry: TemplateEntry; onSelect: () => void }) => (
   <li>
     <Link
       className="flex min-h-36 flex-col rounded-lg border border-gray-alpha-400 bg-background-100 p-4 no-underline outline-none transition-colors hover:border-gray-alpha-500 hover:bg-gray-alpha-100 focus-visible:border-gray-alpha-600 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
       href={templatePath(entry.slug)}
+      onClick={onSelect}
     >
       <h2 className="text-gray-1000 text-heading-16">{entry.title}</h2>
       <p className="mt-2 line-clamp-2 max-w-[90%] text-balance text-[14px] leading-[1.3] text-gray-800">
@@ -103,6 +106,7 @@ export const TemplateGallery = ({ entries }: TemplateGalleryProps) => {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<FilterValue<TemplateCategory>>(ALL);
   const [integration, setIntegration] = useState<FilterValue<TemplateIntegration>>(ALL);
+  const lastTrackedSearch = useRef("");
 
   const filterOptions = useMemo(() => {
     const categories = new Set<TemplateCategory>();
@@ -142,6 +146,26 @@ export const TemplateGallery = ({ entries }: TemplateGalleryProps) => {
     });
   }, [category, entries, integration, query]);
 
+  useEffect(() => {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return;
+
+    const searchKey = `${category}:${integration}:${normalizedQuery}`;
+    if (searchKey === lastTrackedSearch.current) return;
+
+    const timer = setTimeout(() => {
+      track(analyticsEvents.templatesSearched, {
+        category,
+        integration,
+        query_length: getQueryLengthBucket(normalizedQuery),
+        results: getCountBucket(results.length),
+      });
+      lastTrackedSearch.current = searchKey;
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [category, integration, query, results.length]);
+
   return (
     <section aria-label="Templates" className="flex flex-col gap-6">
       <div className="flex flex-col gap-2 md:flex-row">
@@ -163,14 +187,26 @@ export const TemplateGallery = ({ entries }: TemplateGalleryProps) => {
           <FilterSelect
             allLabel="All categories"
             label="Filter by category"
-            onChange={setCategory}
+            onChange={(value) => {
+              setCategory(value);
+              track(analyticsEvents.templateFilterSelected, {
+                filter: "category",
+                value,
+              });
+            }}
             options={filterOptions.categories}
             value={category}
           />
           <FilterSelect
             allLabel="All integrations"
             label="Filter by integration"
-            onChange={setIntegration}
+            onChange={(value) => {
+              setIntegration(value);
+              track(analyticsEvents.templateFilterSelected, {
+                filter: "integration",
+                value,
+              });
+            }}
             options={filterOptions.integrations}
             value={integration}
           />
@@ -181,7 +217,18 @@ export const TemplateGallery = ({ entries }: TemplateGalleryProps) => {
         {results.length > 0 ? (
           <ul className="grid list-none gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3">
             {results.map((entry) => (
-              <TemplateCard entry={entry} key={entry.title} />
+              <TemplateCard
+                entry={entry}
+                key={entry.title}
+                onSelect={() =>
+                  track(analyticsEvents.templateOpened, {
+                    category,
+                    integration,
+                    search: query.trim().length > 0,
+                    template: entry.slug,
+                  })
+                }
+              />
             ))}
           </ul>
         ) : (

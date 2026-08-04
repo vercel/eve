@@ -13,6 +13,7 @@ import {
   CommandPromptViewport,
 } from "@vercel/geistdocs/components/command-prompt";
 import type { JSX } from "react";
+import { analyticsEvents } from "@/lib/analytics/events";
 import { cn } from "@/lib/utils";
 
 const HUMAN_COMMAND = "npx eve@latest init my-agent";
@@ -39,7 +40,7 @@ export const InstallSwitcher = ({
     defaultValue="humans"
     onValueChange={(nextValue) => {
       const audience = nextValue === "agents" ? "agents" : "humans";
-      track("Selected installer command", { target: audience });
+      track(analyticsEvents.installerCommandSelected, { target: audience });
       onValueChange?.(audience);
     }}
   >
@@ -63,7 +64,14 @@ export const InstallSwitcher = ({
           {AGENT_COMMAND}
         </CommandPromptContent>
       </CommandPromptViewport>
-      <CommandPromptCopy />
+      <CommandPromptCopy
+        onClick={() =>
+          track(analyticsEvents.installerCommandCopied, {
+            source: "home_hero",
+            target: value ?? "humans",
+          })
+        }
+      />
     </CommandPromptSurface>
   </CommandPromptRoot>
 );

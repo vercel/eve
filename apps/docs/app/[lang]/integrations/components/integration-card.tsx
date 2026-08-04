@@ -12,15 +12,17 @@ const typeLabel: Record<Integration["type"], string> = {
 
 interface IntegrationCardProps {
   integration: Integration;
+  onSelect?: () => void;
 }
 
-export const IntegrationCard = ({ integration }: IntegrationCardProps) => {
+export const IntegrationCard = ({ integration, onSelect }: IntegrationCardProps) => {
   const Logo = logos[integration.logo];
 
   return (
     <Link
       className="group flex flex-col gap-4 rounded-lg border bg-background-100 p-5 transition-colors hover:border-gray-400 hover:bg-gray-100"
       href={integrationPath(integration.slug)}
+      onClick={onSelect}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background text-gray-1000">

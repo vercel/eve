@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ArrowUpRightIcon } from "lucide-react";
+import { ArrowLeftIcon } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -17,6 +17,7 @@ import { logos } from "@/lib/integrations/logos";
 import { translations } from "@/geistdocs";
 import { Markdown } from "../components/markdown";
 import { SetupTabs } from "../components/setup-tabs";
+import { IntegrationDocsLink } from "./integration-docs-link";
 
 const typeLabel = {
   channel: "Channel",
@@ -113,18 +114,18 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
           </div>
           <p className="text-gray-900 text-lg">{integration.tagline}</p>
         </div>
-        <Link
-          className="inline-flex w-fit items-center gap-1 text-gray-900 text-sm transition-colors hover:text-gray-1000"
+        <IntegrationDocsLink
           href={integration.docsHref}
-        >
-          Read the full {typeLabel[integration.type].toLowerCase()} docs
-          <ArrowUpRightIcon className="size-3.5" />
-        </Link>
+          integration={integration.slug}
+          type={typeLabel[integration.type]}
+        />
       </header>
 
       <div className="mt-10 flex flex-col">
         <Section title="Install">
-          <Markdown>{install}</Markdown>
+          <Markdown analytics={{ integration: integration.slug, section: "install" }}>
+            {install}
+          </Markdown>
         </Section>
         <Section title="Quick start">
           {setup ? (
@@ -136,13 +137,16 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
               }
             >
               <SetupTabs
+                analytics={{ integration: integration.slug, section: "quick_start" }}
                 authModes={setup.authModes}
                 protocols={setup.protocols}
                 variants={setup.variants}
               />
             </Suspense>
           ) : (
-            <Markdown>{integration.quickStart ?? ""}</Markdown>
+            <Markdown analytics={{ integration: integration.slug, section: "quick_start" }}>
+              {integration.quickStart ?? ""}
+            </Markdown>
           )}
         </Section>
         <Section title="Configure">
@@ -155,13 +159,16 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
               }
             >
               <SetupTabs
+                analytics={{ integration: integration.slug, section: "configure" }}
                 authModes={setup.authModes}
                 protocols={setup.protocols}
                 variants={setup.configureVariants}
               />
             </Suspense>
           ) : (
-            <Markdown>{configure}</Markdown>
+            <Markdown analytics={{ integration: integration.slug, section: "configure" }}>
+              {configure}
+            </Markdown>
           )}
         </Section>
       </div>

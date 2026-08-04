@@ -1,10 +1,12 @@
 "use client";
 
+import { track } from "@vercel/analytics";
 import { Input } from "@vercel/geistdocs/components/input";
 import { InputGroup, InputGroupAddon } from "@vercel/geistdocs/components/input-group";
 import { SearchIcon } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { analyticsEvents, getCountBucket, getQueryLengthBucket } from "@/lib/analytics/events";
 import type { Integration, IntegrationType } from "@/lib/integrations/data";
 import { cn } from "@/lib/utils";
 import { IntegrationCard } from "./integration-card";
@@ -38,6 +40,7 @@ interface GalleryProps {
 
 export const Gallery = ({ filter, integrations }: GalleryProps) => {
   const [query, setQuery] = useState("");
+  const lastTrackedSearch = useRef("");
 
   const results = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -58,6 +61,25 @@ export const Gallery = ({ filter, integrations }: GalleryProps) => {
     });
   }, [integrations, filter, query]);
 
+  useEffect(() => {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return;
+
+    const searchKey = `${filter}:${normalizedQuery}`;
+    if (searchKey === lastTrackedSearch.current) return;
+
+    const timer = setTimeout(() => {
+      track(analyticsEvents.integrationsSearched, {
+        filter,
+        query_length: getQueryLengthBucket(normalizedQuery),
+        results: getCountBucket(results.length),
+      });
+      lastTrackedSearch.current = searchKey;
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [filter, query, results.length]);
+
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <div className="flex min-w-0 flex-col gap-3 min-[1024px]:flex-row min-[1024px]:items-center min-[1024px]:justify-between">
@@ -77,6 +99,7 @@ export const Gallery = ({ filter, integrations }: GalleryProps) => {
               )}
               href={value === "all" ? "/integrations" : `/integrations?filter=${value}`}
               key={value}
+              onClick={() => track(analyticsEvents.integrationFilterSelected, { filter: value })}
               scroll={false}
             >
               {label}
@@ -102,7 +125,17 @@ export const Gallery = ({ filter, integrations }: GalleryProps) => {
       {results.length > 0 ? (
         <div className="grid min-w-0 grid-cols-1 gap-4 min-[1024px]:grid-cols-2 min-[1200px]:grid-cols-3">
           {results.map((integration) => (
-            <IntegrationCard integration={integration} key={integration.slug} />
+            <IntegrationCard
+              integration={integration}
+              key={integration.slug}
+              onSelect={() =>
+                track(analyticsEvents.integrationOpened, {
+                  filter,
+                  integration: integration.slug,
+                  search: query.trim().length > 0,
+                })
+              }
+            />
           ))}
         </div>
       ) : (
