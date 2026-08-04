@@ -47,7 +47,7 @@ export const TemplateActions = ({ setupPrompt, sourceHref, template }: TemplateA
           {copied ? (
             <>
               <CheckIcon aria-hidden="true" className="size-4" />
-              Paste in your agent.
+              Paste into your agent.
             </>
           ) : (
             <>
