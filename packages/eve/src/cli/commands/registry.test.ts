@@ -521,9 +521,12 @@ describe("registry commands", () => {
     await runRegistryListCommand(logger, "/project", "https://example.com/r/registry.json");
 
     expect(logger.logs).toEqual([
-      "Found 1 item in 1 registry",
-      "",
-      "https://example.com/r/search.json — External search tools",
+      [
+        "Found 1 item in 1 registry",
+        "",
+        "https://example.com/r/search.json",
+        "  External search tools",
+      ].join("\n"),
     ]);
   });
 
@@ -554,14 +557,106 @@ describe("registry commands", () => {
         registries: { "@acme": "https://example.com/r/{name}.json" },
       },
       continueOnError: true,
-      limit: 100,
+      limit: 10,
       query: "browser",
     });
     expect(logger.logs).toEqual([
-      'Found 2 items matching "browser" in 2 registries',
-      "",
-      "extension/agent-browser",
-      "@acme/browser",
+      [
+        'Found 2 items matching "browser" in 2 registries',
+        "",
+        "extension/agent-browser",
+        "  Browser automation",
+        "",
+        "@acme/browser",
+        "  Browser tools",
+      ].join("\n"),
+    ]);
+  });
+
+  it("limits search results and reports the total match count", async () => {
+    const logger = createLogger();
+    searchRegistries.mockResolvedValue({
+      items: Array.from({ length: 5 }, (_, index) => ({
+        registry: "@acme",
+        name: `result-${index + 1}`,
+        addCommandArgument: `@acme/result-${index + 1}`,
+      })),
+      pagination: { total: 21, offset: 0, limit: 5, hasMore: true },
+    });
+
+    await runRegistrySearchCommand(logger, "/project", "web", undefined, { limit: 5 });
+
+    expect(searchRegistries).toHaveBeenCalledWith(
+      ["https://eve.dev/r/registry.json", "@acme"],
+      expect.objectContaining({ limit: 5, query: "web" }),
+    );
+    expect(logger.logs[0]).toMatch(/^Showing 5 of 21 items matching "web" in 2 registries/);
+  });
+
+  it("sanitizes and wraps registry descriptions beneath their addresses", async () => {
+    const logger = createLogger();
+    const columnsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+    Object.defineProperty(process.stdout, "columns", { configurable: true, value: 40 });
+    searchRegistries.mockResolvedValue({
+      items: [
+        {
+          registry: "@acme",
+          name: "browser",
+          addCommandArgument: "@acme/browser",
+          description:
+            "A long registry description that wraps cleanly\n beneath its \u001B]0;spoofed\u0007address.",
+        },
+      ],
+      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+    });
+
+    try {
+      await runRegistrySearchCommand(logger, "/project", "browser\u001B]0;spoofed\u0007");
+    } finally {
+      if (columnsDescriptor === undefined) {
+        Reflect.deleteProperty(process.stdout, "columns");
+      } else {
+        Object.defineProperty(process.stdout, "columns", columnsDescriptor);
+      }
+    }
+
+    expect(logger.logs).toEqual([
+      [
+        'Found 1 item matching "browser" in 2 registries',
+        "",
+        "@acme/browser",
+        "  A long registry description that wraps",
+        "  cleanly beneath its address.",
+      ].join("\n"),
+    ]);
+    expect(logger.logs[0]).not.toContain("spoofed");
+    expect(logger.logs[0]).not.toContain("\u001B");
+  });
+
+  it("shows a concise first sentence and fixes escaped quotes", async () => {
+    const logger = createLogger();
+    searchRegistries.mockResolvedValue({
+      items: [
+        {
+          registry: "@acme",
+          name: "resources",
+          addCommandArgument: "@acme/resources",
+          description:
+            'Use when asked to \\"list resources\\". WHEN: inventory, tags, subscriptions, resource groups, virtual machines, websites, storage accounts.',
+        },
+      ],
+      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+    });
+
+    await runRegistrySearchCommand(logger, "/project", "resources");
+
+    expect(logger.logs).toEqual([
+      [
+        'Found 1 item matching "resources" in 2 registries',
+        "",
+        "@acme/resources",
+        '  Use when asked to "list resources".',
+      ].join("\n"),
     ]);
   });
 

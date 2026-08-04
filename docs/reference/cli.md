@@ -91,6 +91,7 @@ eve add channel/slack --skip-install
 eve add https://example.com/r/my-extension.json --overwrite
 eve registry add @acme=https://example.com/r/{name}.json
 eve registry search browser
+eve registry search browser --limit 5
 eve registry search browser --registry @acme
 eve registry view @acme/my-extension
 eve add @acme/my-extension
@@ -98,7 +99,7 @@ eve add @acme/my-extension
 
 `eve add` asks before running setup declared by an official item and prints the matching `eve add <item> --skip-install` command when setup is skipped or cancelled. `--skip-install` reruns setup without reinstalling the item.
 
-`eve registry add` records configured sources in `package.json#registries`. `eve registry list` and `search` aggregate the official catalog and all configured sources by default, or browse one supplied URL or namespace. Official and other universal items with explicit file targets do not require shadcn project configuration.
+`eve registry add` records configured sources in `package.json#registries`. `eve registry list` and `search` aggregate the official catalog and all configured sources by default, or browse one supplied URL or namespace. Search returns up to 10 matches by default; pass `--limit <count>` to request between 1 and 100. Official and other universal items with explicit file targets do not require shadcn project configuration.
 
 ## `eve info`
 

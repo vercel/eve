@@ -30,10 +30,10 @@ List every official integration and configured third-party source:
 eve registry list
 ```
 
-Search the catalog when you know what capability you need:
+Search the catalog when you know what capability you need. Search returns up to 10 matches by default; use `--limit` to request between 1 and 100:
 
 ```bash
-eve registry search browser
+eve registry search browser --limit 5
 ```
 
 Inspect an integration before you install it:

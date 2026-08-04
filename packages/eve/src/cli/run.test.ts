@@ -75,7 +75,7 @@ describe("CLI command registration", () => {
     expect(help).not.toContain("--path");
   });
 
-  it("registers JSON output for registry discovery commands", async () => {
+  it("registers JSON output and a search result limit for registry discovery commands", async () => {
     const output: string[] = [];
     const logger = {
       error: (message: string) => output.push(message),
@@ -85,7 +85,10 @@ describe("CLI command registration", () => {
     await runCli(["registry", "list", "--help"], logger).catch(() => {});
     await runCli(["registry", "search", "--help"], logger).catch(() => {});
 
-    expect(output.join("\n")).toContain("--json");
+    const help = output.join("\n");
+    expect(help).toContain("--json");
+    expect(help).toContain("--limit <count>");
+    expect(help).toContain("default: 10");
   });
 
   it("registers only supported shadcn registry commands", async () => {
@@ -173,6 +176,15 @@ describe("eve CLI malformed argument handling", () => {
   it("still surfaces the usage error for commands other than init", async () => {
     await expect(
       runCli(["dev", "--unknown-flag"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow();
+  });
+
+  it.each(["0", "101", "many"])("rejects invalid registry search limit %s", async (limit) => {
+    await expect(
+      runCli(["registry", "search", "web", "--limit", limit], {
+        error: () => {},
+        log: () => {},
+      }),
     ).rejects.toThrow();
   });
 });

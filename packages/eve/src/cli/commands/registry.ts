@@ -5,6 +5,8 @@ import {
   type RegistryConfig,
   type RegistrySearchItem,
 } from "#compiled/shadcn-registry/index.js";
+import { createCliTheme, sanitizeForTerminal } from "#cli/ui/output.js";
+import { clipVisible, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 import semver from "#compiled/semver/index.js";
 import { z } from "#compiled/zod/index.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -34,6 +36,12 @@ export interface AddCommandOptions {
 export interface RegistryCommandOptions {
   /** Emit the underlying registry result as JSON. */
   json?: boolean;
+}
+
+/** Options for searching registry catalogs. */
+export interface RegistrySearchCommandOptions extends RegistryCommandOptions {
+  /** Maximum number of matching items to return. */
+  limit?: number;
 }
 
 type SetupCommandOptions = Pick<AddCommandOptions, "yes"> & {
@@ -110,6 +118,7 @@ export function resolveOfficialRegistryUrl(
 const OFFICIAL_REGISTRY = resolveOfficialRegistryUrl();
 const OFFICIAL_CATALOG = `${OFFICIAL_REGISTRY}/registry.json`;
 const CATALOG_PAGE_SIZE = 100;
+const DEFAULT_SEARCH_LIMIT = 10;
 
 function isRegistryAddress(value: string): boolean {
   return value.startsWith("@") || /^https?:\/\//.test(value);
@@ -215,6 +224,40 @@ function validateRegistrySource(source: string | undefined): void {
   }
 }
 
+function normalizeRegistryText(value: string): string {
+  return sanitizeForTerminal(value)
+    .replaceAll('\\"', '"')
+    .replaceAll("\\'", "'")
+    .replaceAll(/\s+/gu, " ")
+    .trim();
+}
+
+function registryDescriptionSummary(description: string): string {
+  const normalized = normalizeRegistryText(description);
+  return normalized.match(/^.*?[.!?](?=\s|$)/u)?.[0] ?? normalized;
+}
+
+function renderSearchItem(
+  item: RegistrySearchItem,
+  width: number,
+  theme: ReturnType<typeof createCliTheme>,
+): string {
+  const rawAddress = item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument;
+  const address = theme.accent(normalizeRegistryText(rawAddress));
+  if (!item.description) return address;
+
+  const description = registryDescriptionSummary(item.description);
+  if (description.length === 0) return address;
+
+  const descriptionWidth = Math.max(1, width - 2);
+  const wrapped = wrapVisibleLine(description, descriptionWidth);
+  const lines =
+    wrapped.length <= 2
+      ? wrapped
+      : [wrapped[0]!, `${clipVisible(wrapped[1]!, Math.max(1, descriptionWidth - 1)).trimEnd()}…`];
+  return [address, ...lines.map((line) => theme.muted(`  ${line}`))].join("\n");
+}
+
 function printSearchResults(
   logger: RegistryCommandLogger,
   result: Awaited<ReturnType<typeof searchRegistries>>,
@@ -230,23 +273,25 @@ function printSearchResults(
     return;
   }
 
-  const count = `${result.pagination.total} item${result.pagination.total === 1 ? "" : "s"}`;
-  const query = options.query === undefined ? "" : ` matching "${options.query}"`;
+  const total = result.pagination.total;
+  const count = `${total} item${total === 1 ? "" : "s"}`;
+  const query =
+    options.query === undefined ? "" : ` matching "${normalizeRegistryText(options.query)}"`;
   const registries = `${options.sources.length} registr${options.sources.length === 1 ? "y" : "ies"}`;
-  logger.log(`Found ${count}${query} in ${registries}`);
-  logger.log("");
-
-  for (const item of result.items) {
-    const address = item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument;
-    const description =
-      options.query === undefined && item.description ? ` — ${item.description}` : "";
-    logger.log(`${address}${description}`);
-  }
+  const resultCount = result.items.length;
+  const summary =
+    resultCount < total
+      ? `Showing ${resultCount} of ${count}${query} in ${registries}`
+      : `Found ${count}${query} in ${registries}`;
+  const theme = createCliTheme();
+  const width = Math.max(20, process.stdout.columns ?? 80);
+  const items = result.items.map((item) => renderSearchItem(item, width, theme));
+  logger.log([summary, ...items].join("\n\n"));
 }
 
 async function searchRegistryCatalog(
   appRoot: string,
-  options: { query?: string; source?: string },
+  options: { limit?: number; query?: string; source?: string },
 ) {
   validateRegistrySource(options.source);
   const config = await readRegistryConfig(appRoot);
@@ -256,7 +301,7 @@ async function searchRegistryCatalog(
   const result = await searchRegistries(sources, {
     config,
     continueOnError: sources.length > 1,
-    limit: CATALOG_PAGE_SIZE,
+    limit: options.limit ?? CATALOG_PAGE_SIZE,
     query: options.query,
   });
   return { config, result, sources };
@@ -304,9 +349,13 @@ async function browseRegistryItems(
   appRoot: string,
   query: string | undefined,
   source: string | undefined,
-  options: RegistryCommandOptions = {},
+  options: RegistrySearchCommandOptions = {},
 ): Promise<void> {
-  const { result, sources } = await searchRegistryCatalog(appRoot, { query, source });
+  const { result, sources } = await searchRegistryCatalog(appRoot, {
+    limit: options.limit,
+    query,
+    source,
+  });
   const errors = result.errors ?? [];
   if (options.json || errors.length < sources.length) {
     printSearchResults(logger, result, { ...options, query, sources });
@@ -492,10 +541,13 @@ export async function runRegistrySearchCommand(
   appRoot: string,
   query: string,
   source?: string,
-  options: RegistryCommandOptions = {},
+  options: RegistrySearchCommandOptions = {},
 ): Promise<void> {
   await runRegistryAction(logger, appRoot, () =>
-    browseRegistryItems(logger, appRoot, query, source, options),
+    browseRegistryItems(logger, appRoot, query, source, {
+      ...options,
+      limit: options.limit ?? DEFAULT_SEARCH_LIMIT,
+    }),
   );
 }
 
