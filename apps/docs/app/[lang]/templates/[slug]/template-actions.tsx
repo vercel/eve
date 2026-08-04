@@ -66,7 +66,11 @@ export const TemplateActions = ({ setupPrompt, sourceHref, template }: TemplateA
           </span>
         </span>
       </Button>
-      <Button asChild className="font-medium text-label-14" variant="outline">
+      <Button
+        asChild
+        className="w-full justify-center font-medium text-label-14 sm:w-auto sm:flex-1"
+        variant="outline"
+      >
         <a
           href={sourceHref}
           onClick={() => track(analyticsEvents.templateSourceOpened, { template })}
