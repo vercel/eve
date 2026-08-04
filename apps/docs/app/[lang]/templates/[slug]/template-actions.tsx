@@ -37,9 +37,9 @@ export const TemplateActions = ({ setupPrompt, sourceHref, template }: TemplateA
   };
 
   return (
-    <div className="grid gap-2 sm:flex sm:flex-wrap">
+    <div className="flex flex-wrap gap-2">
       <Button
-        className="w-full justify-center font-medium text-background-100! text-label-14 sm:w-auto lg:flex-1"
+        className="justify-center font-medium text-background-100! text-label-14"
         onClick={copyPrompt}
         type="button"
       >
@@ -57,11 +57,7 @@ export const TemplateActions = ({ setupPrompt, sourceHref, template }: TemplateA
           )}
         </span>
       </Button>
-      <Button
-        asChild
-        className="w-full justify-center font-medium text-label-14 sm:w-auto lg:flex-1"
-        variant="outline"
-      >
+      <Button asChild className="justify-center font-medium text-label-14" variant="outline">
         <a
           href={sourceHref}
           onClick={() => track(analyticsEvents.templateSourceOpened, { template })}
