@@ -1,4 +1,5 @@
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
+import type { ChannelOperations } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -49,12 +50,7 @@ import { type DiscordWebhookVerifier } from "#public/channels/discord/verify.js"
 import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js";
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import {
-  defineChannel,
-  POST,
-  type Channel,
-  type ChannelAddressFn,
-} from "#public/definitions/channel.js";
+import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 
 const log = createLogger("discord.channel");
 
@@ -233,7 +229,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     routes: [
       POST<DiscordChannelState>(
         config.route ?? "/eve/v1/discord",
-        async (req, { channelAddress, waitUntil }) => {
+        async (req, { send, waitUntil }) => {
           const body = await verifyDiscordInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
 
@@ -258,14 +254,14 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
             config,
             interaction,
             onCommand,
-            channelAddress,
+            send,
             waitUntil,
           });
         },
       ),
     ],
 
-    async receive(input, { channelAddress }) {
+    async receive(input, { send }) {
       const receiveTarget = input.target as Partial<DiscordReceiveTarget>;
       const channelId = readNonEmptyString(receiveTarget.channelId);
       if (!channelId) {
@@ -294,21 +290,19 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
         hasMessageAnchor = posted.id.length > 0;
       }
 
-      return channelAddress(discordContinuationToken(channelId, conversationId)).send(
-        input.message,
-        {
-          auth: input.auth,
-          state: {
-            applicationId: null,
-            channelId,
-            conversationId: conversationId || null,
-            guildId: null,
-            hasMessageAnchor,
-            initialResponseSent: true,
-            interactionToken: null,
-          },
+      return send(discordContinuationToken(channelId, conversationId), {
+        auth: input.auth,
+        message: input.message,
+        state: {
+          applicationId: null,
+          channelId,
+          conversationId: conversationId || null,
+          guildId: null,
+          hasMessageAnchor,
+          initialResponseSent: true,
+          interactionToken: null,
         },
-      );
+      });
     },
 
     events: mergedEvents,
@@ -472,7 +466,7 @@ async function handleInteraction(input: {
   readonly config: DiscordChannelConfig;
   readonly interaction: DiscordInteraction;
   readonly onCommand: NonNullable<DiscordChannelConfig["onCommand"]>;
-  readonly channelAddress: ChannelAddressFn<DiscordChannelState>;
+  readonly send: ChannelOperations<DiscordChannelState>["send"];
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
   if (input.interaction.type === DISCORD_INTERACTION_TYPE.APPLICATION_COMMAND) {
@@ -480,20 +474,20 @@ async function handleInteraction(input: {
       config: input.config,
       interaction: input.interaction,
       onCommand: input.onCommand,
-      channelAddress: input.channelAddress,
+      send: input.send,
       waitUntil: input.waitUntil,
     });
   }
   if (input.interaction.type === DISCORD_INTERACTION_TYPE.MESSAGE_COMPONENT) {
     return handleComponentInteraction({
       interaction: input.interaction,
-      channelAddress: input.channelAddress,
+      send: input.send,
       waitUntil: input.waitUntil,
     });
   }
   return handleModalSubmitInteraction({
     interaction: input.interaction,
-    channelAddress: input.channelAddress,
+    send: input.send,
     waitUntil: input.waitUntil,
   });
 }
@@ -502,7 +496,7 @@ async function handleCommandInteraction(input: {
   readonly config: DiscordChannelConfig;
   readonly interaction: DiscordCommandInteraction;
   readonly onCommand: NonNullable<DiscordChannelConfig["onCommand"]>;
-  readonly channelAddress: ChannelAddressFn<DiscordChannelState>;
+  readonly send: ChannelOperations<DiscordChannelState>["send"];
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
   const state = stateFromInteraction(input.interaction, {
@@ -529,7 +523,7 @@ async function handleCommandInteraction(input: {
     dispatchCommand({
       interaction: input.interaction,
       result,
-      channelAddress: input.channelAddress,
+      send: input.send,
       state,
     }),
   );
@@ -538,7 +532,7 @@ async function handleCommandInteraction(input: {
 
 function handleComponentInteraction(input: {
   readonly interaction: DiscordComponentInteraction;
-  readonly channelAddress: ChannelAddressFn<DiscordChannelState>;
+  readonly send: ChannelOperations<DiscordChannelState>["send"];
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Response {
   if (isDiscordFreeformComponent(input.interaction.customId)) {
@@ -558,7 +552,7 @@ function handleComponentInteraction(input: {
         conversationId: input.interaction.messageId,
         inputResponses,
         interaction: input.interaction,
-        channelAddress: input.channelAddress,
+        send: input.send,
       }),
     );
   }
@@ -567,7 +561,7 @@ function handleComponentInteraction(input: {
 
 function handleModalSubmitInteraction(input: {
   readonly interaction: DiscordModalSubmitInteraction;
-  readonly channelAddress: ChannelAddressFn<DiscordChannelState>;
+  readonly send: ChannelOperations<DiscordChannelState>["send"];
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Response {
   const inputResponses = deriveModalInputResponses(input.interaction);
@@ -577,7 +571,7 @@ function handleModalSubmitInteraction(input: {
         conversationId: input.interaction.messageId ?? input.interaction.id,
         inputResponses,
         interaction: input.interaction,
-        channelAddress: input.channelAddress,
+        send: input.send,
       }),
     );
   }
@@ -587,7 +581,7 @@ function handleModalSubmitInteraction(input: {
 async function dispatchCommand(input: {
   readonly interaction: DiscordCommandInteraction;
   readonly result: Exclude<DiscordCommandResult, null>;
-  readonly channelAddress: ChannelAddressFn<DiscordChannelState>;
+  readonly send: ChannelOperations<DiscordChannelState>["send"];
   readonly state: DiscordChannelState;
 }): Promise<void> {
   const turnMessage = commandInteractionMessage(input.interaction);
@@ -602,18 +596,12 @@ async function dispatchCommand(input: {
   const channelContext = input.result.context ?? [];
 
   try {
-    await input
-      .channelAddress(discordContinuationToken(input.interaction.channelId, input.interaction.id))
-      .send(
-        {
-          message: turnMessage,
-          context: [contextBlock, ...channelContext],
-        },
-        {
-          auth: input.result.auth,
-          state: input.state,
-        },
-      );
+    await input.send(discordContinuationToken(input.interaction.channelId, input.interaction.id), {
+      auth: input.result.auth,
+      context: [contextBlock, ...channelContext],
+      message: turnMessage,
+      state: input.state,
+    });
   } catch (error) {
     log.error("command delivery failed", { error });
   }
@@ -623,22 +611,18 @@ async function dispatchInputResponses(input: {
   readonly conversationId: string;
   readonly inputResponses: readonly { requestId: string; optionId?: string; text?: string }[];
   readonly interaction: DiscordComponentInteraction | DiscordModalSubmitInteraction;
-  readonly channelAddress: ChannelAddressFn<DiscordChannelState>;
+  readonly send: ChannelOperations<DiscordChannelState>["send"];
 }): Promise<void> {
   try {
-    await input
-      .channelAddress(discordContinuationToken(input.interaction.channelId, input.conversationId))
-      .send(
-        { inputResponses: input.inputResponses },
-        {
-          auth: null,
-          state: stateFromInteraction(input.interaction, {
-            conversationId: input.conversationId,
-            hasMessageAnchor: true,
-            initialResponseSent: true,
-          }),
-        },
-      );
+    await input.send(discordContinuationToken(input.interaction.channelId, input.conversationId), {
+      auth: null,
+      inputResponses: input.inputResponses,
+      state: stateFromInteraction(input.interaction, {
+        conversationId: input.conversationId,
+        hasMessageAnchor: true,
+        initialResponseSent: true,
+      }),
+    });
   } catch (error) {
     log.error("interaction response delivery failed", { error });
   }

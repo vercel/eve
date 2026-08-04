@@ -65,10 +65,11 @@ export default defineChannel({
   },
 
   routes: [
-    POST<ActionNarrationState>("/action-narration/start", async (request, { channelAddress }) => {
+    POST<ActionNarrationState>("/action-narration/start", async (request, { send }) => {
       const input = await readRequest(request);
-      const session = await channelAddress(continuationToken(input.token)).send(input.message, {
+      const session = await send(continuationToken(input.token), {
         auth: null,
+        message: input.message,
         state: initialState(),
       });
       return Response.json({ sessionId: session.id });

@@ -1,4 +1,5 @@
 import type { SessionAuthContext } from "#channel/types.js";
+import type { ChannelOperations } from "#channel/channel-operations.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import { buildGitHubBinding } from "#public/channels/github/binding.js";
@@ -39,7 +40,6 @@ import type {
   GitHubInboundResult,
   GitHubInboundResultOrPromise,
 } from "#public/channels/github/githubChannel.js";
-import type { ChannelAddressFn } from "#public/definitions/channel.js";
 
 const log = createLogger("github.dispatch");
 
@@ -56,7 +56,7 @@ export async function dispatchIssueComment(input: {
   readonly config: GitHubChannelConfig;
   readonly event: GitHubIssueCommentEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onComment"]>;
-  readonly channelAddress: ChannelAddressFn<GitHubChannelState>;
+  readonly send: ChannelOperations<GitHubChannelState>["send"];
 }): Promise<void> {
   if (
     isIgnoredInboundComment(input.event.comment.body, input.event.comment.author, input.botName)
@@ -71,7 +71,7 @@ export async function dispatchIssueComment(input: {
     event: input.event,
     handlerResult: () => input.handler(ctx, toGitHubComment(input.event.comment)),
     config: input.config,
-    channelAddress: input.channelAddress,
+    send: input.send,
     state: stateFromIssueCommentEvent(input.event),
   });
 }
@@ -82,7 +82,7 @@ export async function dispatchPullRequestReviewComment(input: {
   readonly config: GitHubChannelConfig;
   readonly event: GitHubPullRequestReviewCommentEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onComment"]>;
-  readonly channelAddress: ChannelAddressFn<GitHubChannelState>;
+  readonly send: ChannelOperations<GitHubChannelState>["send"];
 }): Promise<void> {
   if (
     isIgnoredInboundComment(input.event.comment.body, input.event.comment.author, input.botName)
@@ -97,7 +97,7 @@ export async function dispatchPullRequestReviewComment(input: {
     event: input.event,
     handlerResult: () => input.handler(ctx, toGitHubComment(input.event.comment)),
     config: input.config,
-    channelAddress: input.channelAddress,
+    send: input.send,
     state: stateFromPullRequestReviewCommentEvent(input.event),
   });
 }
@@ -107,7 +107,7 @@ export async function dispatchIssue(input: {
   readonly config: GitHubChannelConfig;
   readonly event: GitHubIssueWebhookEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onIssue"]>;
-  readonly channelAddress: ChannelAddressFn<GitHubChannelState>;
+  readonly send: ChannelOperations<GitHubChannelState>["send"];
 }): Promise<void> {
   const ctx = buildInboundContext(input.config, input.event);
   await dispatchWebhookEventTurn({
@@ -115,7 +115,7 @@ export async function dispatchIssue(input: {
     event: input.event,
     handlerResult: () => input.handler(ctx, input.event.issue),
     message: formatIssueEventMessage(input.event),
-    channelAddress: input.channelAddress,
+    send: input.send,
     state: stateFromIssueEvent(input.event),
   });
 }
@@ -125,7 +125,7 @@ export async function dispatchPullRequest(input: {
   readonly config: GitHubChannelConfig;
   readonly event: GitHubPullRequestWebhookEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onPullRequest"]>;
-  readonly channelAddress: ChannelAddressFn<GitHubChannelState>;
+  readonly send: ChannelOperations<GitHubChannelState>["send"];
 }): Promise<void> {
   const ctx = buildInboundContext(input.config, input.event);
   await dispatchWebhookEventTurn({
@@ -133,7 +133,7 @@ export async function dispatchPullRequest(input: {
     event: input.event,
     handlerResult: () => input.handler(ctx, input.event.pullRequest),
     message: formatPullRequestEventMessage(input.event),
-    channelAddress: input.channelAddress,
+    send: input.send,
     state: stateFromPullRequestEvent(input.event),
   });
 }
@@ -143,7 +143,7 @@ export async function dispatchCheckSuite(input: {
   readonly config: GitHubChannelConfig;
   readonly event: GitHubCheckSuiteWebhookEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onCheckSuite"]>;
-  readonly channelAddress: ChannelAddressFn<GitHubChannelState>;
+  readonly send: ChannelOperations<GitHubChannelState>["send"];
 }): Promise<void> {
   await dispatchCiEvent({
     ...input,
@@ -158,7 +158,7 @@ export async function dispatchCheckRun(input: {
   readonly config: GitHubChannelConfig;
   readonly event: GitHubCheckRunWebhookEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onCheckRun"]>;
-  readonly channelAddress: ChannelAddressFn<GitHubChannelState>;
+  readonly send: ChannelOperations<GitHubChannelState>["send"];
 }): Promise<void> {
   await dispatchCiEvent({
     ...input,
@@ -173,7 +173,7 @@ export async function dispatchWorkflowRun(input: {
   readonly config: GitHubChannelConfig;
   readonly event: GitHubWorkflowRunWebhookEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onWorkflowRun"]>;
-  readonly channelAddress: ChannelAddressFn<GitHubChannelState>;
+  readonly send: ChannelOperations<GitHubChannelState>["send"];
 }): Promise<void> {
   await dispatchCiEvent({
     ...input,
@@ -189,7 +189,7 @@ async function dispatchCiEvent(input: {
   readonly event: GitHubCiWebhookEvent;
   readonly handlerResult: (ctx: GitHubInboundContext) => GitHubInboundResultOrPromise;
   readonly label: string;
-  readonly channelAddress: ChannelAddressFn<GitHubChannelState>;
+  readonly send: ChannelOperations<GitHubChannelState>["send"];
 }): Promise<void> {
   const state = stateFromCiEvent(input.event);
   const ctx = buildInboundContext(input.config, input.event);
@@ -212,7 +212,7 @@ async function dispatchCiEvent(input: {
     event: input.event,
     handlerResult: () => input.handlerResult(ctx),
     message: formatCiEventMessage(input.label, input.ci),
-    channelAddress: input.channelAddress,
+    send: input.send,
     state,
   });
 }
@@ -222,7 +222,7 @@ async function dispatchWebhookEventTurn(input: {
   readonly event: GitHubCiWebhookEvent | GitHubIssueWebhookEvent | GitHubPullRequestWebhookEvent;
   readonly handlerResult: () => GitHubInboundResultOrPromise;
   readonly message: string;
-  readonly channelAddress: ChannelAddressFn<GitHubChannelState>;
+  readonly send: ChannelOperations<GitHubChannelState>["send"];
   readonly state: GitHubChannelState;
 }): Promise<void> {
   const result = await runInboundHandler({
@@ -239,7 +239,7 @@ async function dispatchWebhookEventTurn(input: {
       github: await buildPullRequestContext(input.config, input.state, input.event.delivery.id),
       hook: result.context,
     }),
-    channelAddress: input.channelAddress,
+    send: input.send,
     state: input.state,
   });
 }
@@ -251,7 +251,7 @@ async function dispatchCommentTurn(input: {
   readonly config: GitHubChannelConfig;
   readonly event: GitHubIssueCommentEvent | GitHubPullRequestReviewCommentEvent;
   readonly handlerResult: () => GitHubInboundResultOrPromise;
-  readonly channelAddress: ChannelAddressFn<GitHubChannelState>;
+  readonly send: ChannelOperations<GitHubChannelState>["send"];
   readonly state: GitHubChannelState;
 }): Promise<void> {
   const result = await runInboundHandler({
@@ -275,7 +275,7 @@ async function dispatchCommentTurn(input: {
       github: await buildPullRequestContext(input.config, input.state, input.event.delivery.id),
       hook: result.context,
     }),
-    channelAddress: input.channelAddress,
+    send: input.send,
     state: input.state,
   });
 }
@@ -301,7 +301,7 @@ async function sendGitHubTurn(input: {
   readonly logMessage?: string;
   readonly message: string;
   readonly context: readonly string[] | undefined;
-  readonly channelAddress: ChannelAddressFn<GitHubChannelState>;
+  readonly send: ChannelOperations<GitHubChannelState>["send"];
   readonly state: GitHubChannelState;
 }): Promise<void> {
   const contextBlock = formatGitHubContextBlock({
@@ -316,16 +316,12 @@ async function sendGitHubTurn(input: {
   const turnMessage = prependGitHubContext(input.message, contextBlock);
 
   try {
-    await input.channelAddress(continuationTokenFromState(input.state)).send(
-      {
-        message: turnMessage,
-        context: input.context,
-      },
-      {
-        auth: input.auth,
-        state: input.state,
-      },
-    );
+    await input.send(continuationTokenFromState(input.state), {
+      auth: input.auth,
+      context: input.context,
+      message: turnMessage,
+      state: input.state,
+    });
   } catch (error) {
     logError(log, input.logMessage ?? "GitHub delivery failed", error, {
       deliveryId: input.event.delivery.id,

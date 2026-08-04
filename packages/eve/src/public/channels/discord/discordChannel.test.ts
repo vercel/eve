@@ -8,6 +8,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   DISCORD_HITL_FREEFORM_TEXT_INPUT_ID,
@@ -20,14 +21,6 @@ function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
     throw new Error("Expected a CompiledChannel.");
   }
   return channel as CompiledChannel<T>;
-}
-
-function mockChannelAddress(send: (input: unknown, options: Record<string, unknown>) => unknown) {
-  return (continuationToken: string) =>
-    ({
-      send: (input: unknown, options: Record<string, unknown>) =>
-        send(input, { ...options, continuationToken }),
-    }) as never;
 }
 
 function getAdapter(channel: unknown): ChannelAdapter<any> {
@@ -135,7 +128,7 @@ async function firePost(
 
   const response = await post.handler(request, {
     attachSession: vi.fn() as any,
-    channelAddress: mockChannelAddress(send),
+    ...mockChannelOperations(send),
     receive: vi.fn() as any,
     params: {},
     requestIp: null,
@@ -209,15 +202,15 @@ describe("discordChannel() inbound route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ type: 5 });
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect((payload as { context: string[] }).context[0]).toContain("<discord_context>");
-    expect(String((payload as { message: string }).message)).toContain("hello discord");
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect((input as { context: string[] }).context[0]).toContain("<discord_context>");
+    expect(String((input as { message: string }).message)).toContain("hello discord");
+    expect(continuationToken).toBe("C01:I01");
+    expect(input).toMatchObject({
       auth: {
         authenticator: "discord-interaction",
         principalId: "discord:G01:U01",
       },
-      continuationToken: "C01:I01",
       state: {
         applicationId: "APP1",
         channelId: "C01",
@@ -296,10 +289,10 @@ describe("discordChannel() inbound route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ type: 6 });
     expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "approve", requestId: "call_1" }] },
+      "C01:M01",
       expect.objectContaining({
         auth: null,
-        continuationToken: "C01:M01",
+        inputResponses: [{ optionId: "approve", requestId: "call_1" }],
       }),
     );
   });
@@ -369,9 +362,9 @@ describe("discordChannel() inbound route", () => {
       type: 4,
     });
     expect(submit.send).toHaveBeenCalledWith(
-      { inputResponses: [{ requestId: "call_1", text: "freeform answer" }] },
+      "C01:M01",
       expect.objectContaining({
-        continuationToken: "C01:M01",
+        inputResponses: [{ requestId: "call_1", text: "freeform answer" }],
       }),
     );
   });
@@ -535,17 +528,13 @@ describe("discordChannel() default event handlers", () => {
         message: "start",
       },
       {
-        channelAddress: (continuationToken) =>
-          ({
-            send: (input: unknown, options: Record<string, unknown>) =>
-              send(input, { ...options, continuationToken }),
-          }) as never,
+        ...mockChannelOperations(send),
       },
     );
 
-    expect(send).toHaveBeenCalledWith("start", {
+    expect(send).toHaveBeenCalledWith("C01:", {
       auth: null,
-      continuationToken: "C01:",
+      message: "start",
       state: {
         applicationId: null,
         channelId: "C01",

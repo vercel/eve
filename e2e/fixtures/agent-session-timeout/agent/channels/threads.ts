@@ -9,15 +9,16 @@ const AUTH = {
 
 export default defineChannel({
   routes: [
-    POST("/threads/:threadId/messages", async (request, { channelAddress, params }) => {
+    POST("/threads/:threadId/messages", async (request, { params, send }) => {
       const body = (await request.json().catch(() => ({}))) as { message?: string };
-      const session = await channelAddress(params.threadId ?? "").send(body.message ?? "", {
+      const session = await send(params.threadId ?? "", {
         auth: AUTH,
+        message: body.message ?? "",
       });
       return Response.json({ sessionId: session.id });
     }),
-    POST("/threads/:threadId/owner", async (_request, { channelAddress, params }) => {
-      const session = await channelAddress(params.threadId ?? "").resolveSession();
+    POST("/threads/:threadId/owner", async (_request, { params, resolveSession }) => {
+      const session = await resolveSession(params.threadId ?? "");
       return Response.json({ sessionId: session?.id ?? null });
     }),
   ],

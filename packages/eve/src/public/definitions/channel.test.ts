@@ -179,13 +179,15 @@ describe("defineChannel", () => {
         return { state };
       },
       routes: [
-        POST<State>("/x", async (_request, { channelAddress }) => {
-          await channelAddress("x").send("hello", {
+        POST<State>("/x", async (_request, { send }) => {
+          await send("x", {
             auth: null,
+            message: "hello",
             state: { completedTurns: 1 },
           });
-          await channelAddress("x").send("hello", {
+          await send("x", {
             auth: null,
+            message: "hello",
             // @ts-expect-error route send state is inferred from defineChannel state.
             state: { completedTurns: "1" },
           });

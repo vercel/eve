@@ -2,9 +2,10 @@ import { defineChannel, POST } from "eve/channels";
 
 export default defineChannel<undefined, void, { id: string }>({
   routes: [POST("/quiet-sink", async () => new Response("ok"))],
-  receive(input, { channelAddress }) {
-    return channelAddress(input.target.id).send(input.message, {
+  receive(input, { send }) {
+    return send(input.target.id, {
       auth: input.auth,
+      message: input.message,
     });
   },
   events: {

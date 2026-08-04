@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
+import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
 import {
   captureTurnEvents,
   containsEventSequence,
@@ -234,10 +235,10 @@ function createCancelRouteCaller(): (
       },
     );
     const args = {
+      ...mockChannelOperations(() => {
+        throw new Error("cancel route must not send through a channel address");
+      }),
       attachSession: (id: string) => createSession(id, runtime),
-      channelAddress: () => {
-        throw new Error("cancel route must not create a channel address");
-      },
       receive: () => {
         throw new Error("cancel route must not receive");
       },

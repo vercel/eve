@@ -1,7 +1,7 @@
 import type { UserContent } from "ai";
 
 import type { CrossChannelReceiveFn } from "#channel/cross-channel-receive.js";
-import type { ChannelAddressFn } from "#channel/channel-address.js";
+import type { ChannelOperations } from "#channel/channel-operations.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
@@ -10,13 +10,11 @@ import type { ChannelMethod } from "#public/definitions/channel.js";
 type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Record<string, string>;
 
 /**
- * Second argument passed to every route handler. `channelAddress` binds a
- * current-owner handle, `attachSession` binds an immutable-ID handle, and
+ * Second argument passed to every route handler. Channel operations target a
+ * continuation address, `attachSession` binds an immutable-ID handle, and
  * `receive` hands inbound work to a different channel.
  */
-export interface RouteHandlerArgs<TState = undefined> {
-  /** Binds a channel-local continuation token to its current-owner operation surface. */
-  channelAddress: ChannelAddressFn<TState>;
+export interface RouteHandlerArgs<TState = undefined> extends ChannelOperations<TState> {
   /** Attaches a fixed operation handle to one exact durable session ID without performing I/O. */
   attachSession: AttachSessionFn;
   /**
@@ -26,8 +24,11 @@ export interface RouteHandlerArgs<TState = undefined> {
    * supplies the payload, channel-specific args, and auth.
    */
   receive: CrossChannelReceiveFn;
+  /** Path parameters matched for the current route. */
   params: Readonly<Record<string, string>>;
+  /** Keeps background work alive after the route returns its response. */
   waitUntil: (task: Promise<unknown>) => void;
+  /** Best-effort client IP reported by the host, or `null` when unavailable. */
   requestIp: string | null;
 }
 

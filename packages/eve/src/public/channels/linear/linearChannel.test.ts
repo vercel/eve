@@ -6,26 +6,13 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { linearChannel, type LinearChannelState } from "#public/channels/linear/linearChannel.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 import type { InputRequest } from "#runtime/input/types.js";
 
 const SECRET = "linear-secret";
-
-function mockChannelAddress(send: (input: unknown, options: Record<string, unknown>) => unknown) {
-  return (continuationToken: string) =>
-    ({
-      continuationToken,
-      send: (input: unknown, options: Record<string, unknown>) =>
-        send(input, { ...options, continuationToken }),
-      cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
-      compact: vi.fn().mockResolvedValue({ status: "accepted" }),
-      clear: vi.fn().mockResolvedValue({ status: "accepted" }),
-      reset: vi.fn().mockResolvedValue({ status: "not_found" }),
-      resolveSession: vi.fn().mockResolvedValue(undefined),
-    }) as never;
-}
 
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
   if (!isCompiledChannel(channel)) throw new Error("Expected a CompiledChannel.");
@@ -141,7 +128,7 @@ async function firePost(
 
   const response = await post.handler(request, {
     attachSession: vi.fn() as any,
-    channelAddress: mockChannelAddress(send),
+    ...mockChannelOperations(send),
     params: {},
     receive: vi.fn() as any,
     requestIp: null,
@@ -175,16 +162,16 @@ describe("linearChannel inbound Agent Session events", () => {
 
     expect(response.status).toBe(200);
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toBe("Please handle this issue.");
-    expect(payload.context[0]).toContain("<linear_context>");
-    expect(payload.context[0]).toContain("issue_identifier: EVE-123");
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toBe("Please handle this issue.");
+    expect(input.context?.[0]).toContain("<linear_context>");
+    expect(input.context?.[0]).toContain("issue_identifier: EVE-123");
+    expect(continuationToken).toBe("agent-session:agent_session_1");
+    expect(input).toMatchObject({
       auth: {
         authenticator: "linear-agent-webhook",
         principalId: "linear:user_1",
       },
-      continuationToken: "agent-session:agent_session_1",
       state: {
         agentSessionId: "agent_session_1",
         issueId: "issue_1",
@@ -212,9 +199,9 @@ describe("linearChannel inbound Agent Session events", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload] = send.mock.calls[0]!;
-    expect(payload.inputResponses).toBeUndefined();
-    expect(payload.message).toBe("approve");
+    const [, input] = send.mock.calls[0]!;
+    expect(input.inputResponses).toBeUndefined();
+    expect(input.message).toBe("approve");
   });
 
   it("attaches authenticated Linear upload images to prompted messages", async () => {
@@ -249,10 +236,10 @@ describe("linearChannel inbound Agent Session events", () => {
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
       "Bearer linear-token",
     );
-    const [payload] = send.mock.calls[0]!;
-    expect(payload.message[0]).toEqual({ text: "Inspect screenshot.", type: "text" });
-    expect(payload.message[1]).toMatchObject({ mediaType: "image/webp", type: "file" });
-    expect(payload.message[1].data).toEqual(Buffer.from([1, 2, 3]));
+    const [, input] = send.mock.calls[0]!;
+    expect(input.message?.[0]).toEqual({ text: "Inspect screenshot.", type: "text" });
+    expect(input.message?.[1]).toMatchObject({ mediaType: "image/webp", type: "file" });
+    expect(input.message?.[1]?.data).toEqual(Buffer.from([1, 2, 3]));
   });
 
   it("acks generic data webhooks without dispatch when no hook is configured", async () => {
@@ -520,17 +507,13 @@ describe("linearChannel default event handlers", () => {
         target: { agentSessionId: "agent_session_1" },
       },
       {
-        channelAddress: (continuationToken) =>
-          ({
-            send: (input: unknown, options: Record<string, unknown>) =>
-              send(input, { ...options, continuationToken }),
-          }) as never,
+        ...mockChannelOperations(send),
       },
     );
 
-    expect(send).toHaveBeenCalledWith("start", {
+    expect(send).toHaveBeenCalledWith("agent-session:agent_session_1", {
       auth: null,
-      continuationToken: "agent-session:agent_session_1",
+      message: "start",
       state: {
         agentSessionId: "agent_session_1",
         agentSessionUrl: null,
@@ -574,20 +557,16 @@ describe("linearChannel default event handlers", () => {
         target: { issueId: "issue_1" },
       },
       {
-        channelAddress: (continuationToken) =>
-          ({
-            send: (input: unknown, options: Record<string, unknown>) =>
-              send(input, { ...options, continuationToken }),
-          }) as never,
+        ...mockChannelOperations(send),
       },
     );
 
     expect(requestBody(fetchMock.mock.calls[0]?.[1])).toMatchObject({
       variables: { input: { issueId: "issue_1" } },
     });
-    expect(send).toHaveBeenCalledWith("start", {
+    expect(send).toHaveBeenCalledWith("agent-session:agent_session_2", {
       auth: null,
-      continuationToken: "agent-session:agent_session_2",
+      message: "start",
       state: expect.objectContaining({
         agentSessionId: "agent_session_2",
         issueId: "issue_1",

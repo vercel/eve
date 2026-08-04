@@ -1,5 +1,5 @@
 import { type ChannelCors } from "#channel/cors.js";
-import type { ChannelAddressFn } from "#channel/channel-address.js";
+import type { ChannelOperations } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -73,7 +73,7 @@ export interface GenericChannelDefinition<
   readonly routes: readonly RouteDefinition<TState>[];
   receive?(
     input: GenericReceiveInput<TReceiveTarget>,
-    args: { channelAddress: ChannelAddressFn<TState> },
+    args: ChannelOperations<TState>,
   ): Promise<Session>;
 
   readonly events?: TEvents;

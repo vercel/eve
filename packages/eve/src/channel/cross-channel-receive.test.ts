@@ -89,7 +89,8 @@ describe("createCrossChannelReceiveFn", () => {
       target: { channelId: "C1" },
       auth: expect.objectContaining({ principalId: "u" }),
     });
-    expect(typeof ctx.channelAddress).toBe("function");
+    expect(typeof ctx.send).toBe("function");
+    expect(typeof ctx.resolveSession).toBe("function");
   });
 
   it("resolves the target by reference identity even when multiple channels are registered", async () => {

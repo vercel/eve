@@ -53,7 +53,7 @@ import type {
   SlackInteractionContext,
   SlackInteractionUser,
 } from "#public/channels/slack/slackChannel.js";
-import type { ChannelAddressFn } from "#channel/channel-address.js";
+import type { ChannelOperations } from "#channel/channel-operations.js";
 import { bindSlackConversation } from "#public/channels/slack/conversation.js";
 
 const log = createLogger("slack.interactions");
@@ -340,7 +340,7 @@ export interface InteractionHandlerDeps {
 export async function handleInteractionPost(
   rawBody: string,
   ctx: {
-    channelAddress: ChannelAddressFn<SlackChannelState>;
+    operations: ChannelOperations<SlackChannelState>;
     waitUntil: (task: Promise<unknown>) => void;
   },
   deps: InteractionHandlerDeps,
@@ -382,26 +382,23 @@ export async function handleInteractionPost(
     if (!user) return ack;
 
     ctx.waitUntil(
-      ctx
-        .channelAddress(continuationToken)
-        .send(
-          { inputResponses },
-          {
-            auth: buildSlackAuthContext({
-              channelId: interaction.channelId,
-              teamId: interaction.teamId,
-              threadTs: interaction.threadTs,
-              userId: user.id,
-              userName: user.username ?? user.name,
-            }),
-            state: {
-              channelId: interaction.channelId,
-              threadTs: interaction.threadTs,
-              teamId: interaction.teamId ?? null,
-              triggeringUserId: user.id,
-            },
+      ctx.operations
+        .send(continuationToken, {
+          auth: buildSlackAuthContext({
+            channelId: interaction.channelId,
+            teamId: interaction.teamId,
+            threadTs: interaction.threadTs,
+            userId: user.id,
+            userName: user.username ?? user.name,
+          }),
+          inputResponses,
+          state: {
+            channelId: interaction.channelId,
+            threadTs: interaction.threadTs,
+            teamId: interaction.teamId ?? null,
+            triggeringUserId: user.id,
           },
-        )
+        })
         .catch((error: unknown) => {
           log.error("HITL interaction delivery failed", { error });
         }),
@@ -425,7 +422,7 @@ export async function handleInteractionPost(
         teamId: interaction.teamId,
       });
       const slackCtx: SlackInteractionContext = {
-        conversation: bindSlackConversation(ctx.channelAddress(continuationToken), {
+        conversation: bindSlackConversation(ctx.operations, continuationToken, {
           channelId: interaction.channelId,
           teamId: interaction.teamId ?? null,
           threadTs: interaction.threadTs,
@@ -503,7 +500,7 @@ async function openFreeformModal(input: {
 async function handleViewSubmission(
   payload: SlackViewSubmissionPayload,
   ctx: {
-    channelAddress: ChannelAddressFn<SlackChannelState>;
+    operations: ChannelOperations<SlackChannelState>;
     waitUntil: (task: Promise<unknown>) => void;
   },
   _deps: InteractionHandlerDeps,
@@ -544,26 +541,23 @@ async function handleViewSubmission(
   const teamId = user?.teamId ?? payload.teamId ?? null;
 
   ctx.waitUntil(
-    ctx
-      .channelAddress(metadata.continuationToken)
-      .send(
-        { inputResponses: [{ requestId: metadata.requestId, text }] },
-        {
-          auth: buildSlackAuthContext({
-            channelId: metadata.channelId,
-            teamId,
-            threadTs: metadata.threadTs,
-            userId: triggeringUserId,
-            userName: user?.username ?? user?.name,
-          }),
-          state: {
-            channelId: metadata.channelId,
-            threadTs: metadata.threadTs,
-            teamId,
-            triggeringUserId,
-          },
+    ctx.operations
+      .send(metadata.continuationToken, {
+        auth: buildSlackAuthContext({
+          channelId: metadata.channelId,
+          teamId,
+          threadTs: metadata.threadTs,
+          userId: triggeringUserId,
+          userName: user?.username ?? user?.name,
+        }),
+        inputResponses: [{ requestId: metadata.requestId, text }],
+        state: {
+          channelId: metadata.channelId,
+          threadTs: metadata.threadTs,
+          teamId,
+          triggeringUserId,
         },
-      )
+      })
       .catch((error: unknown) => {
         log.error("freeform answer delivery failed", { error });
       }),

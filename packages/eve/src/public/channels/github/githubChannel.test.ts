@@ -6,6 +6,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
+import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
@@ -18,20 +19,6 @@ import { type GitHubChannelState } from "#public/channels/github/state.js";
 import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
 
 const SECRET = "github-secret";
-
-function mockChannelAddress(send: (input: unknown, options: Record<string, unknown>) => unknown) {
-  return (continuationToken: string) =>
-    ({
-      continuationToken,
-      send: (input: unknown, options: Record<string, unknown>) =>
-        send(input, { ...options, continuationToken }),
-      cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
-      compact: vi.fn().mockResolvedValue({ status: "accepted" }),
-      clear: vi.fn().mockResolvedValue({ status: "accepted" }),
-      reset: vi.fn().mockResolvedValue({ status: "not_found" }),
-      resolveSession: vi.fn().mockResolvedValue(undefined),
-    }) as never;
-}
 
 function prContextFetch() {
   return vi.fn((input: Request | URL | string): Promise<Response> => {
@@ -186,7 +173,7 @@ async function firePost(
 
   const response = await post.handler(request, {
     attachSession: vi.fn() as any,
-    channelAddress: mockChannelAddress(send),
+    ...mockChannelOperations(send),
     params: {},
     receive: vi.fn() as any,
     requestIp: null,
@@ -243,11 +230,12 @@ describe("githubChannel", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toContain("<github_context>");
-    expect(payload.message).toContain("help me");
-    expect(payload.inputResponses).toBeUndefined();
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toContain("<github_context>");
+    expect(input.message).toContain("help me");
+    expect(input.inputResponses).toBeUndefined();
+    expect(continuationToken).toBe("repo:123:issue:5");
+    expect(input).toMatchObject({
       auth: {
         attributes: {
           conversation_kind: "issue",
@@ -259,7 +247,6 @@ describe("githubChannel", () => {
         authenticator: "github-webhook",
         principalId: "github:1",
       },
-      continuationToken: "repo:123:issue:5",
       state: {
         conversationKind: "issue",
         issueNumber: 5,
@@ -293,16 +280,16 @@ describe("githubChannel", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toContain("delivery_id: inferred:issue_comment:10:created");
-    expect(payload.message).toContain("help me");
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toContain("delivery_id: inferred:issue_comment:10:created");
+    expect(input.message).toContain("help me");
+    expect(continuationToken).toBe("repo:123:issue:5");
+    expect(input).toMatchObject({
       auth: {
         attributes: {
           delivery_id: "inferred:issue_comment:10:created",
         },
       },
-      continuationToken: "repo:123:issue:5",
     });
     expect(warn).toHaveBeenCalledWith(
       "[eve:github.channel] GitHub webhook missing standard headers; inferred metadata from payload",
@@ -416,9 +403,9 @@ describe("githubChannel", () => {
     );
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://github.test/repos/vercel/eve/pulls/7");
-    const [payload] = send.mock.calls[0]!;
-    expect(payload.context?.[0]).toContain("title: Add GitHub context");
-    expect(payload.context?.[0]).toContain("head_sha: head-sha");
+    const [, input] = send.mock.calls[0]!;
+    expect(input.context?.[0]).toContain("title: Add GitHub context");
+    expect(input.context?.[0]).toContain("head_sha: head-sha");
   });
 
   it("dispatches inline review comments to the review-thread token", async () => {
@@ -444,8 +431,8 @@ describe("githubChannel", () => {
       ),
     );
 
+    expect(send.mock.calls[0]?.[0]).toBe("repo:123:pull:7:review-comment:99");
     expect(send.mock.calls[0]?.[1]).toMatchObject({
-      continuationToken: "repo:123:pull:7:review-comment:99",
       state: {
         conversationKind: "review_thread",
         headSha: "abc123",
@@ -507,10 +494,10 @@ describe("githubChannel", () => {
       expect.objectContaining({ action: "opened", issueNumber: 5 }),
     );
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toContain("Issue opened: #5 Track webhook issue events");
-    expect(options).toMatchObject({
-      continuationToken: "repo:123:issue:5",
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toContain("Issue opened: #5 Track webhook issue events");
+    expect(continuationToken).toBe("repo:123:issue:5");
+    expect(input).toMatchObject({
       state: {
         conversationKind: "issue",
         issueNumber: 5,
@@ -558,10 +545,10 @@ describe("githubChannel", () => {
       expect.objectContaining({ action: "opened", headSha, pullRequestNumber: 7 }),
     );
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toContain("Pull request opened: #7 Add webhook PR handling");
-    expect(options).toMatchObject({
-      continuationToken: "repo:123:pull:7",
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toContain("Pull request opened: #7 Add webhook PR handling");
+    expect(continuationToken).toBe("repo:123:pull:7");
+    expect(input).toMatchObject({
       state: {
         baseRef: "main",
         baseSha,
@@ -644,10 +631,10 @@ describe("githubChannel", () => {
       }),
     );
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toContain(`${testCase.label} completed: 9001 (failure)`);
-    expect(options).toMatchObject({
-      continuationToken: "repo:123:pull:7",
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toContain(`${testCase.label} completed: 9001 (failure)`);
+    expect(continuationToken).toBe("repo:123:pull:7");
+    expect(input).toMatchObject({
       state: {
         conversationKind: "pull_request",
         headSha,

@@ -51,11 +51,12 @@ export default defineChannel({
     };
   },
   routes: [
-    POST<AnchorState>("/anchor/start", async (request, { channelAddress }) => {
+    POST<AnchorState>("/anchor/start", async (request, { send }) => {
       const body = readBody(await request.json().catch(() => ({})));
       const anchorToken = `thread:${body.threadId}`;
-      const session = await channelAddress(`pending:${body.threadId}`).send(body.message, {
+      const session = await send(`pending:${body.threadId}`, {
         auth: authFor("start", body.marker),
+        message: body.message,
         state: initialState(anchorToken),
       });
 
@@ -67,11 +68,12 @@ export default defineChannel({
       });
     }),
 
-    POST<AnchorState>("/anchor/reply", async (request, { channelAddress }) => {
+    POST<AnchorState>("/anchor/reply", async (request, { send }) => {
       const body = readBody(await request.json().catch(() => ({})));
       const anchorToken = `thread:${body.threadId}`;
-      const session = await channelAddress(anchorToken).send(body.message, {
+      const session = await send(anchorToken, {
         auth: authFor("reply", body.marker),
+        message: body.message,
         state: initialState(anchorToken),
       });
 

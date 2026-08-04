@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
 
@@ -30,8 +31,8 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
 
 function createArgs(session = createFixedSession()): RouteHandlerArgs {
   return {
+    ...mockChannelOperations(vi.fn()),
     attachSession: () => session,
-    channelAddress: vi.fn() as never,
     receive: vi.fn() as never,
     params: { sessionId: "wrun_A" },
     waitUntil: vi.fn(),

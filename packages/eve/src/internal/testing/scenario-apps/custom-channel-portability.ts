@@ -12,9 +12,10 @@ export default defineChannel({
   },
 
   routes: [
-    POST("/api/message", async (req, { channelAddress }) => {
+    POST("/api/message", async (req, { send }) => {
       const body = await req.json();
-      const session = await channelAddress("test:" + crypto.randomUUID()).send(body.message, {
+      const session = await send("test:" + crypto.randomUUID(), {
+        message: body.message,
         auth: null,
         state: { lastSender: body.userId ?? "anonymous" },
       });

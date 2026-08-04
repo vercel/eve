@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Replace continuation-token HTTP, client, and free channel helper APIs with explicit ID-addressed sessions and bound channel addresses. The eve HTTP API now uses only `/eve/v1/session` routes, `client.sessions.create()` or `.attach()`, and `channelAddress(token)` or `attachSession(id)` operation handles.
+Replace continuation-token HTTP, client, and channel APIs with explicit ID-addressed sessions and consistent channel-local operations. The eve HTTP API now uses only `/eve/v1/session` routes, clients use `client.sessions.create()` or `.attach()`, and channel authors use `send(address, input)` or `attachSession(id)`.

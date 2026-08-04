@@ -6,7 +6,7 @@ import {
   toCrossChannelTargets,
 } from "#channel/cross-channel-receive.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
-import { createChannelAddressFn } from "#channel/channel-address.js";
+import { createChannelOperations } from "#channel/channel-operations.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
@@ -201,7 +201,7 @@ function buildRouteArgs(
   };
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };
-  const channelAddress = createChannelAddressFn({
+  const operations = createChannelOperations({
     adapter,
     channelName,
     metadata: { requestId },
@@ -216,8 +216,8 @@ function buildRouteArgs(
   const args = attachRouteSessionCreator(
     attachAgentInfoRouteResponse(
       {
+        ...operations,
         attachSession,
-        channelAddress,
         receive,
         params,
         waitUntil,

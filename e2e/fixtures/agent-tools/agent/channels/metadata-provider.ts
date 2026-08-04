@@ -16,23 +16,21 @@ export default defineChannel({
   },
 
   routes: [
-    POST<MetadataProviderState>("/metadata-provider/start", async (request, { channelAddress }) => {
+    POST<MetadataProviderState>("/metadata-provider/start", async (request, { send }) => {
       const body = (await request.json().catch(() => ({}))) as {
         message?: string;
         topic?: string;
         contextMessages?: string[];
       };
 
-      const session = await channelAddress(`mp:${crypto.randomUUID().slice(0, 8)}`).send(
-        body.message ?? "hello",
-        {
-          auth: null,
-          state: {
-            topic: body.topic ?? null,
-            contextMessages: body.contextMessages ?? [],
-          },
+      const session = await send(`mp:${crypto.randomUUID().slice(0, 8)}`, {
+        auth: null,
+        message: body.message ?? "hello",
+        state: {
+          topic: body.topic ?? null,
+          contextMessages: body.contextMessages ?? [],
         },
-      );
+      });
 
       return Response.json({ ok: true, sessionId: session.id });
     }),

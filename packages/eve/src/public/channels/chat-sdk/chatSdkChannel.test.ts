@@ -6,6 +6,7 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   chatSdkChannel,
@@ -109,18 +110,9 @@ async function firePost(
       method: "POST",
     }),
     {
+      ...mockChannelOperations(send),
       attachSession: vi.fn() as any,
-      channelAddress: (continuationToken) =>
-        ({
-          continuationToken,
-          send: (input: unknown, options: Record<string, unknown>) =>
-            send(input, { ...options, continuationToken }),
-          cancel: () => cancel({ continuationToken }),
-          compact: vi.fn().mockResolvedValue({ status: "accepted" }),
-          clear: vi.fn().mockResolvedValue({ status: "accepted" }),
-          reset: vi.fn().mockResolvedValue({ status: "not_found" }),
-          resolveSession: vi.fn().mockResolvedValue(undefined),
-        }) as never,
+      cancel: (continuationToken) => cancel({ continuationToken }),
       params: {},
       receive: vi.fn() as any,
       requestIp: null,
@@ -173,8 +165,8 @@ describe("chatSdkChannel", () => {
     const response = await get.handler(
       new Request("https://example.com/eve/v1/test?crc_token=abc123", { method: "GET" }),
       {
+        ...mockChannelOperations(vi.fn()),
         attachSession: vi.fn() as any,
-        channelAddress: vi.fn() as any,
         params: {},
         receive: vi.fn() as any,
         requestIp: null,
@@ -206,10 +198,10 @@ describe("chatSdkChannel", () => {
     expect(response.status).toBe(200);
     expect(cancel).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]?.[0]).toBe("@bot hello");
+    expect(send.mock.calls[0]?.[0]).toBe(THREAD_ID);
     expect(send.mock.calls[0]?.[1]).toMatchObject({
       auth: AUTH,
-      continuationToken: THREAD_ID,
+      message: "@bot hello",
       state: {
         thread: {
           _type: "chat:Thread",
@@ -244,9 +236,9 @@ describe("chatSdkChannel", () => {
 
     expect(response.status).toBe(200);
     expect(cancel).toHaveBeenCalledWith({ continuationToken: THREAD_ID });
-    expect(send).toHaveBeenCalledWith("@bot correction", {
+    expect(send).toHaveBeenCalledWith(THREAD_ID, {
       auth: AUTH,
-      continuationToken: THREAD_ID,
+      message: "@bot correction",
       state: {
         thread: expect.objectContaining({
           adapterName: "test",
@@ -279,8 +271,10 @@ describe("chatSdkChannel", () => {
     expect(response.status).toBe(200);
     expect(cancel).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
-      expect.objectContaining({ continuationToken: THREAD_ID }),
+      THREAD_ID,
+      expect.objectContaining({
+        inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+      }),
     );
   });
 
@@ -314,18 +308,12 @@ describe("chatSdkChannel", () => {
         message: "proactive",
         target: { adapterName: "test", threadId: THREAD_ID },
       },
-      {
-        channelAddress: (continuationToken) =>
-          ({
-            send: (input: unknown, options: Record<string, unknown>) =>
-              send(input, { ...options, continuationToken }),
-          }) as never,
-      },
+      mockChannelOperations(send),
     );
 
-    expect(send).toHaveBeenCalledWith("proactive", {
+    expect(send).toHaveBeenCalledWith(THREAD_ID, {
       auth: AUTH,
-      continuationToken: THREAD_ID,
+      message: "proactive",
       state: {
         thread: {
           _type: "chat:Thread",
@@ -604,19 +592,16 @@ describe("chatSdkChannel", () => {
       value: "approve",
     });
 
-    expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
-      {
-        auth: null,
-        continuationToken: THREAD_ID,
-        state: {
-          thread: expect.objectContaining({
-            adapterName: "test",
-            id: THREAD_ID,
-          }),
-        },
+    expect(send).toHaveBeenCalledWith(THREAD_ID, {
+      auth: null,
+      inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+      state: {
+        thread: expect.objectContaining({
+          adapterName: "test",
+          id: THREAD_ID,
+        }),
       },
-    );
+    });
   });
 });
 

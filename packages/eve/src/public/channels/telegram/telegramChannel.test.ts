@@ -6,18 +6,11 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { telegramChannel, type TelegramChannelState } from "#public/channels/telegram/index.js";
 
 const SECRET = "telegram-secret";
-
-function mockChannelAddress(send: (input: unknown, options: Record<string, unknown>) => unknown) {
-  return (continuationToken: string) =>
-    ({
-      send: (input: unknown, options: Record<string, unknown>) =>
-        send(input, { ...options, continuationToken }),
-    }) as never;
-}
 
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
   if (!isCompiledChannel(channel)) {
@@ -95,7 +88,7 @@ async function firePost(
 
   const response = await post.handler(signedRequest(JSON.stringify(body)), {
     attachSession: vi.fn() as any,
-    channelAddress: mockChannelAddress(send),
+    ...mockChannelOperations(send),
     receive: vi.fn() as any,
     params: {},
     requestIp: null,
@@ -163,15 +156,15 @@ describe("telegramChannel() inbound route", () => {
 
     expect(response.status).toBe(200);
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect((payload as { context: string[] }).context[0]).toContain("<telegram_context>");
-    expect(String((payload as { message: string }).message)).toContain("hello");
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect((input as { context: string[] }).context[0]).toContain("<telegram_context>");
+    expect(String((input as { message: string }).message)).toContain("hello");
+    expect(continuationToken).toBe("42::");
+    expect(input).toMatchObject({
       auth: {
         authenticator: "telegram-webhook",
         principalId: "telegram:42",
       },
-      continuationToken: "42::",
       state: {
         chatId: "42",
         chatType: "private",
@@ -206,9 +199,7 @@ describe("telegramChannel() inbound route", () => {
       },
     });
     expect(mentioned.send).toHaveBeenCalledTimes(1);
-    expect(mentioned.send.mock.calls[0]![1]).toMatchObject({
-      continuationToken: "-1001::11",
-    });
+    expect(mentioned.send.mock.calls[0]![0]).toBe("-1001::11");
   });
 
   it("delivers Telegram callback queries as compact HITL input responses", async () => {
@@ -230,10 +221,10 @@ describe("telegramChannel() inbound route", () => {
     });
 
     expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "selected", requestId: "telegram_callback:eve:0" }] },
+      "-1001::55",
       expect.objectContaining({
         auth: null,
-        continuationToken: "-1001::55",
+        inputResponses: [{ optionId: "selected", requestId: "telegram_callback:eve:0" }],
       }),
     );
   });
@@ -258,11 +249,11 @@ describe("telegramChannel() inbound route", () => {
       },
     });
 
-    const [payload] = send.mock.calls[0]!;
-    expect(payload).toMatchObject({
+    const [, input] = send.mock.calls[0]!;
+    expect(input).toMatchObject({
       inputResponses: [{ requestId: "telegram_reply:55", text: "approved" }],
     });
-    expect(String((payload as { message: string }).message)).toContain("approved");
+    expect(String((input as { message: string }).message)).toContain("approved");
   });
 
   it("rejects requests with invalid webhook verification", async () => {
@@ -282,7 +273,7 @@ describe("telegramChannel() inbound route", () => {
       }),
       {
         attachSession: vi.fn() as any,
-        channelAddress: () => ({ send }) as never,
+        ...mockChannelOperations(send),
         receive: vi.fn() as any,
         params: {},
         requestIp: null,
@@ -638,13 +629,13 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      { channelAddress: mockChannelAddress(send) },
+      mockChannelOperations(send),
     );
 
     expect(send).toHaveBeenCalledWith(
-      "run",
+      "42::",
       expect.objectContaining({
-        continuationToken: "42::",
+        message: "run",
         state: expect.objectContaining({
           chatId: "42",
           chatType: "private",
@@ -677,13 +668,13 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      { channelAddress: mockChannelAddress(send) },
+      mockChannelOperations(send),
     );
 
     expect(send).toHaveBeenCalledWith(
-      "run",
+      "42:7:",
       expect.objectContaining({
-        continuationToken: "42:7:",
+        message: "run",
         state: expect.objectContaining({
           chatId: "42",
           chatType: "private",
@@ -718,13 +709,13 @@ describe("telegramChannel().receive", () => {
           auth: null,
           message: "run",
         },
-        { channelAddress: mockChannelAddress(send) },
+        mockChannelOperations(send),
       );
 
       expect(send).toHaveBeenCalledWith(
-        "run",
+        "-1001::88",
         expect.objectContaining({
-          continuationToken: "-1001::88",
+          message: "run",
           state: expect.objectContaining({
             chatId: "-1001",
             chatType,
@@ -755,13 +746,13 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      { channelAddress: mockChannelAddress(send) },
+      mockChannelOperations(send),
     );
 
     expect(send).toHaveBeenCalledWith(
-      "run",
+      "42::",
       expect.objectContaining({
-        continuationToken: "42::",
+        message: "run",
         state: expect.objectContaining({
           chatId: "42",
           chatType: null,
@@ -794,13 +785,13 @@ describe("telegramChannel().receive", () => {
         auth: null,
         message: "run",
       },
-      { channelAddress: mockChannelAddress(send) },
+      mockChannelOperations(send),
     );
 
     expect(send).toHaveBeenCalledWith(
-      "run",
+      "42::",
       expect.objectContaining({
-        continuationToken: "42::",
+        message: "run",
         state: expect.objectContaining({
           chatId: "42",
           chatType: null,
@@ -815,10 +806,7 @@ describe("telegramChannel().receive", () => {
     const send = vi.fn();
 
     await expect(
-      channel.receive!(
-        { target: {}, auth: null, message: "run" },
-        { channelAddress: mockChannelAddress(send) },
-      ),
+      channel.receive!({ target: {}, auth: null, message: "run" }, mockChannelOperations(send)),
     ).rejects.toThrow(/requires target.chatId/);
     await expect(
       channel.receive!(
@@ -827,7 +815,7 @@ describe("telegramChannel().receive", () => {
           auth: null,
           message: "run",
         },
-        { channelAddress: mockChannelAddress(send) },
+        mockChannelOperations(send),
       ),
     ).rejects.toThrow(/mutually exclusive/);
   });

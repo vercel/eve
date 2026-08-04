@@ -6,20 +6,13 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { TwilioTextMessage } from "#public/channels/twilio/inbound.js";
 import { twilioChannel, type TwilioContext } from "#public/channels/twilio/twilioChannel.js";
 import { signTwilioRequest } from "#public/channels/twilio/verify.js";
 
 const AUTH_TOKEN = "test-auth-token";
-
-function mockChannelAddress(send: (input: unknown, options: Record<string, unknown>) => unknown) {
-  return (continuationToken: string) =>
-    ({
-      send: (input: unknown, options: Record<string, unknown>) =>
-        send(input, { ...options, continuationToken }),
-    }) as never;
-}
 
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
   if (!isCompiledChannel(channel)) {
@@ -118,7 +111,7 @@ async function firePost(
 
   const response = await post.handler(signedFormRequest(path, params), {
     attachSession: vi.fn() as any,
-    channelAddress: mockChannelAddress(send),
+    ...mockChannelOperations(send),
     receive: vi.fn() as any,
     params: {},
     requestIp: null,
@@ -154,7 +147,7 @@ async function fireGet(
 
   const response = await get.handler(signedGetRequest(path, params), {
     attachSession: vi.fn() as any,
-    channelAddress: mockChannelAddress(send),
+    ...mockChannelOperations(send),
     receive: vi.fn() as any,
     params: {},
     requestIp: null,
@@ -218,8 +211,8 @@ describe("twilioChannel() inbound text pipeline", () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("<Response></Response>");
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    const { message, context } = payload as { message: string; context: string[] };
+    const [continuationToken, input] = send.mock.calls[0]!;
+    const { message, context } = input as { message: string; context: string[] };
     const contextBlock = context[0]!;
     expect(contextBlock).toContain("<twilio_context>");
     expect(contextBlock).toContain("channel: text");
@@ -227,12 +220,12 @@ describe("twilioChannel() inbound text pipeline", () => {
     expect(contextBlock).toContain("Reply for SMS in plain text.");
     expect(contextBlock).toContain("avoid Markdown formatting");
     expect(message).toBe("hello");
-    expect(options).toMatchObject({
+    expect(continuationToken).toBe("+15551234567:+15557654321");
+    expect(input).toMatchObject({
       auth: {
         authenticator: "twilio-webhook",
         principalId: "twilio:+15551234567",
       },
-      continuationToken: "+15551234567:+15557654321",
       state: {
         from: "+15551234567",
         lastMessageSid: "SM123",
@@ -254,10 +247,10 @@ describe("twilioChannel() inbound text pipeline", () => {
 
     expect(response.status).toBe(200);
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload).toMatchObject({ message: "hello from get" });
-    expect(options).toMatchObject({
-      continuationToken: "+15551234567:+15557654321",
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(continuationToken).toBe("+15551234567:+15557654321");
+    expect(input).toMatchObject({
+      message: "hello from get",
       state: {
         from: "+15551234567",
         lastMessageSid: "SM123",
@@ -368,7 +361,7 @@ describe("twilioChannel() inbound text pipeline", () => {
       }),
       {
         attachSession: vi.fn() as any,
-        channelAddress: () => ({ send }) as never,
+        ...mockChannelOperations(send),
         receive: vi.fn() as any,
         params: {},
         requestIp: null,
@@ -402,12 +395,12 @@ describe("twilioChannel() inbound text pipeline", () => {
       }),
     );
 
+    expect(first.send.mock.calls[0]![0]).toBe("+15551234567:+15550000001");
     expect(first.send.mock.calls[0]![1]).toMatchObject({
-      continuationToken: "+15551234567:+15550000001",
       state: { from: "+15551234567", to: "+15550000001" },
     });
+    expect(second.send.mock.calls[0]![0]).toBe("+15551234567:+15550000002");
     expect(second.send.mock.calls[0]![1]).toMatchObject({
-      continuationToken: "+15551234567:+15550000002",
       state: { from: "+15551234567", to: "+15550000002" },
     });
   });
@@ -533,15 +526,15 @@ describe("twilioChannel() voice pipeline", () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("Thanks. I&apos;ll follow up by text.");
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    const { message, context } = payload as { message: string; context: string[] };
+    const [continuationToken, input] = send.mock.calls[0]!;
+    const { message, context } = input as { message: string; context: string[] };
     const contextBlock = context[0]!;
     expect(contextBlock).toContain("channel: voice");
     expect(contextBlock).toContain("response_medium: sms");
     expect(contextBlock).toContain("Reply for SMS in plain text.");
     expect(message).toBe("book a table");
-    expect(options).toMatchObject({
-      continuationToken: "+15551234567:+15557654321",
+    expect(continuationToken).toBe("+15551234567:+15557654321");
+    expect(input).toMatchObject({
       state: {
         from: "+15551234567",
         lastCallSid: "CA123",
@@ -657,17 +650,13 @@ describe("twilioChannel() default event handlers", () => {
         message: "start",
       },
       {
-        channelAddress: (continuationToken) =>
-          ({
-            send: (input: unknown, options: Record<string, unknown>) =>
-              send(input, { ...options, continuationToken }),
-          }) as never,
+        ...mockChannelOperations(send),
       },
     );
 
-    expect(send).toHaveBeenCalledWith("start", {
+    expect(send).toHaveBeenCalledWith("+15551234567:+15557654321", {
       auth: null,
-      continuationToken: "+15551234567:+15557654321",
+      message: "start",
       state: {
         from: "+15551234567",
         lastCallSid: null,

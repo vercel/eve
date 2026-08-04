@@ -7,11 +7,12 @@ import { defineChannel, POST } from "eve/channels";
  */
 export default defineChannel({
   routes: [POST("/target", async () => new Response("ok"))],
-  async receive(input, { channelAddress }) {
+  async receive(input, { send }) {
     const sessionRef =
       typeof input.target.sessionRef === "string" ? input.target.sessionRef : "default";
-    return channelAddress(`target:${sessionRef}`).send(input.message, {
+    return send(`target:${sessionRef}`, {
       auth: input.auth,
+      message: input.message,
     });
   },
 });

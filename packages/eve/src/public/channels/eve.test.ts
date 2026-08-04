@@ -5,6 +5,7 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
 import { type AuthFn, none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth, type EveChannelInput } from "#public/channels/eve.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
@@ -79,8 +80,8 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
 
 function createRouteArgs(): RouteHandlerArgs {
   return {
+    ...mockChannelOperations(vi.fn()),
     attachSession: () => createMockSession(),
-    channelAddress: vi.fn() as never,
     receive: vi.fn() as never,
     params: {},
     waitUntil: () => undefined,

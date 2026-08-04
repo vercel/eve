@@ -16,6 +16,7 @@ import {
   withRuntimeSession,
 } from "../../src/runtime/sessions/runtime-session.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
+import { mockChannelOperations } from "../../src/internal/testing/mocks/mock-channel-operations.js";
 
 /**
  * Locks the cross-channel `args.receive(channel, …)` path end-to-end:
@@ -61,10 +62,11 @@ const TARGET_CHANNEL = `export default {
   routes: [
     { method: "POST", path: "/target", handler: async () => new Response("ok") },
   ],
-  async receive(input, { channelAddress }) {
+  async receive(input, { send }) {
     const target = input.target;
-    return channelAddress(\`target:\${target.sessionId ?? "default"}\`).send(input.message, {
+    return send(\`target:\${target.sessionId ?? "default"}\`, {
       auth: input.auth,
+      message: input.message,
     });
   },
 };
@@ -174,6 +176,9 @@ describe("cross-channel receive end-to-end", () => {
           }),
         }),
         {
+          ...mockChannelOperations(() => {
+            throw new Error("webhook should not send directly");
+          }),
           attachSession: () => {
             throw new Error("webhook should not attach sessions directly");
           },

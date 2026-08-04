@@ -1,7 +1,7 @@
 import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { createChannelAddressFn } from "#channel/channel-address.js";
+import { createChannelOperations } from "#channel/channel-operations.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
 import type { Session } from "#channel/session.js";
@@ -10,9 +10,9 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 /**
  * Options accepted by {@link CrossChannelReceiveFn}. Mirrors the input
- * argument of a channel's authored `receive(input, { channelAddress })` hook —
- * the runtime constructs the bound address factory so route-handler callers
- * only supply the platform target, payload, and auth.
+ * argument of a channel's authored `receive(input, operations)` hook. The
+ * runtime supplies the target channel's operation functions, so route-handler
+ * callers only provide the platform target, payload, and auth.
  */
 export interface CrossChannelReceiveOptions<TTarget = Record<string, unknown>> {
   readonly message: string | UserContent;
@@ -71,7 +71,7 @@ export function toCrossChannelTargets(
  * Builds the `args.receive` closure used by every route handler. The
  * closure resolves the target channel by reference identity against
  * the request-scoped channel bundle, then delegates to the target's
- * authored `receive` hook with a per-target `send` factory.
+ * authored `receive` hook with per-target channel operations.
  */
 export function createCrossChannelReceiveFn(
   runtime: Runtime,
@@ -109,10 +109,10 @@ interface InvokeChannelReceiveInput {
 }
 
 /**
- * Shared `receive(input, { channelAddress })` invocation used by both the route-
+ * Shared `receive(input, operations)` invocation used by both the route-
  * handler cross-channel surface and the schedule dispatcher. Owns the
- * receive/adapter precondition checks and the per-target `channelAddress`
- * factory so both call sites stay byte-identical.
+ * receive/adapter precondition checks and the per-target operation functions so
+ * both call sites stay byte-identical.
  */
 export async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Session> {
   if (!args.target.receive) {
@@ -121,12 +121,12 @@ export async function invokeChannelReceive(args: InvokeChannelReceiveInput): Pro
   if (!args.target.adapter) {
     throw new Error(args.describeMissingAdapter());
   }
-  const channelAddress = createChannelAddressFn({
+  const operations = createChannelOperations({
     adapter: args.target.adapter,
     channelName: args.target.name,
     runtime: args.runtime,
   });
-  return await args.target.receive(args.input, { channelAddress });
+  return await args.target.receive(args.input, operations);
 }
 
 function resolveTargetByReference(

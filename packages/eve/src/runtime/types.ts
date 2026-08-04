@@ -232,7 +232,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   /**
    * Universal entry point for new sessions, called by cross-channel
    * initiators (the schedule dispatcher today). Typed precisely as
-   * {@link CompiledChannel.receive} — `(input, { channelAddress }) => Session` —
+   * {@link CompiledChannel.receive} — `(input, operations) => Session` —
    * so any caller passing the wrong context shape is a typecheck error,
    * not a runtime crash.
    *

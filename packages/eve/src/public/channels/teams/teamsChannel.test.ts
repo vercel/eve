@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
+import { mockChannelOperations } from "#internal/testing/mocks/mock-channel-operations.js";
 import { teamsChannel, type TeamsChannelState } from "#public/channels/teams/index.js";
 
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
@@ -43,19 +44,12 @@ async function firePost(
       method: "POST",
     }),
     {
+      ...mockChannelOperations<TeamsChannelState>(send),
       attachSession: vi.fn() as any,
-      channelAddress: (continuationToken) =>
-        ({
+      resolveSession: (continuationToken) =>
+        (overrides.resolveSession ?? vi.fn().mockResolvedValue(undefined))(
           continuationToken,
-          send: (input: unknown, options: Record<string, unknown>) =>
-            send(input, { ...options, continuationToken }),
-          cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
-          compact: vi.fn().mockResolvedValue({ status: "accepted" }),
-          clear: vi.fn().mockResolvedValue({ status: "accepted" }),
-          reset: vi.fn().mockResolvedValue({ status: "not_found" }),
-          resolveSession: () =>
-            (overrides.resolveSession ?? vi.fn().mockResolvedValue(undefined))(continuationToken),
-        }) as never,
+        ) as never,
       params: {},
       receive: vi.fn(),
       requestIp: null,
@@ -104,15 +98,15 @@ describe("teamsChannel", () => {
 
     expect(response.status).toBe(200);
     expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![0]).toBe("TENANT:CONV:");
     expect(send.mock.calls[0]![1]).toMatchObject({
-      continuationToken: "TENANT:CONV:",
       state: {
         conversationId: "CONV",
         replyToActivityId: null,
         serviceUrl: "https://smba.example.test/teams",
       },
     });
-    expect(send.mock.calls[0]![0].context[0]).toContain("<teams_context>");
+    expect(send.mock.calls[0]![1].context[0]).toContain("<teams_context>");
   });
 
   it("default dispatch ignores unmentioned group messages", async () => {
@@ -214,10 +208,10 @@ describe("teamsChannel", () => {
 
     expect(await response.json()).toMatchObject({ statusCode: 200 });
     expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "approve", requestId: "REQ" }] },
+      "TENANT:CONV:THREAD_ROOT",
       expect.objectContaining({
         auth: expect.objectContaining({ subject: "AAD_USER" }),
-        continuationToken: "TENANT:CONV:THREAD_ROOT",
+        inputResponses: [{ optionId: "approve", requestId: "REQ" }],
       }),
     );
   });
@@ -244,8 +238,10 @@ describe("teamsChannel", () => {
 
     expect(onMessage).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "deny", requestId: "REQ" }] },
-      expect.objectContaining({ continuationToken: "TENANT:CONV:THREAD_ROOT" }),
+      "TENANT:CONV:THREAD_ROOT",
+      expect.objectContaining({
+        inputResponses: [{ optionId: "deny", requestId: "REQ" }],
+      }),
     );
   });
 
@@ -285,8 +281,8 @@ describe("teamsChannel", () => {
 
     const { send } = await firePost(channel, raw);
 
+    expect(send.mock.calls[0]![0]).toBe("TENANT:CONV:THREAD_ROOT");
     expect(send.mock.calls[0]![1]).toMatchObject({
-      continuationToken: "TENANT:CONV:THREAD_ROOT",
       state: { replyToActivityId: "THREAD_ROOT" },
     });
   });
@@ -305,15 +301,13 @@ describe("teamsChannel", () => {
 
     const initialRequest = await firePost(channel, initial);
     const followUpRequest = await firePost(channel, followUp);
-    const initialOptions = initialRequest.send.mock.calls[0]![1] as {
-      readonly continuationToken: string;
-    };
+    const initialToken = initialRequest.send.mock.calls[0]![0] as string;
 
+    expect(followUpRequest.send.mock.calls[0]![0]).toBe(initialToken);
     expect(followUpRequest.send.mock.calls[0]![1]).toMatchObject({
-      continuationToken: initialOptions.continuationToken,
       state: { replyToActivityId: "THREAD_ROOT" },
     });
-    expect(initialOptions.continuationToken).toBe("TENANT:CONV:THREAD_ROOT");
+    expect(initialToken).toBe("TENANT:CONV:THREAD_ROOT");
   });
 
   it("receive starts proactive sessions and anchors initial channel messages", async () => {
@@ -350,18 +344,12 @@ describe("teamsChannel", () => {
         auth: null,
         message: "Begin",
       },
-      {
-        channelAddress: (continuationToken) =>
-          ({
-            send: (input: unknown, options: Record<string, unknown>) =>
-              send(input, { ...options, continuationToken }),
-          }) as never,
-      },
+      mockChannelOperations(send),
     );
 
     expect(requests[0]!.url).toBe("https://service.example/teams/v3/conversations/CONV/activities");
+    expect(send.mock.calls[0]![0]).toBe("TENANT:CONV:ANCHOR");
     expect(send.mock.calls[0]![1]).toMatchObject({
-      continuationToken: "TENANT:CONV:ANCHOR",
       state: { replyToActivityId: "ANCHOR" },
     });
   });

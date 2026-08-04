@@ -1,6 +1,7 @@
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { RouteHandler } from "#channel/routes.js";
+import type { ChannelOperations } from "#channel/channel-operations.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
@@ -43,13 +44,7 @@ import {
 } from "#public/channels/twilio/routing.js";
 import { type TwilioAuthToken, type TwilioWebhookUrl } from "#public/channels/twilio/verify.js";
 import { readNonEmptyString } from "#shared/guards.js";
-import {
-  defineChannel,
-  GET,
-  POST,
-  type Channel,
-  type ChannelAddressFn,
-} from "#public/definitions/channel.js";
+import { defineChannel, GET, POST, type Channel } from "#public/definitions/channel.js";
 
 const log = createLogger("twilio.channel");
 
@@ -329,24 +324,22 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
       POST<TwilioChannelState>(routes.transcription, transcription),
     ],
 
-    async receive(input, { channelAddress }) {
+    async receive(input, { send }) {
       const phoneNumber = readNonEmptyString(input.target.phoneNumber);
       if (!phoneNumber) {
         throw new Error("twilioChannel().receive requires target.phoneNumber.");
       }
       const from = readNonEmptyString(input.target.from) ?? config.messaging?.from ?? null;
-      return channelAddress(twilioContinuationToken(phoneNumber, from ?? undefined)).send(
-        input.message,
-        {
-          auth: input.auth,
-          state: {
-            from: phoneNumber,
-            lastCallSid: null,
-            lastMessageSid: null,
-            to: from,
-          },
+      return send(twilioContinuationToken(phoneNumber, from ?? undefined), {
+        auth: input.auth,
+        message: input.message,
+        state: {
+          from: phoneNumber,
+          lastCallSid: null,
+          lastMessageSid: null,
+          to: from,
         },
-      );
+      });
     },
 
     events: mergedEvents,
@@ -357,7 +350,7 @@ function handleTwilioMessages(input: {
   readonly config: TwilioChannelConfig;
   readonly onText: NonNullable<TwilioChannelConfig["onText"]>;
 }): RouteHandler<TwilioChannelState> {
-  return async (req, { channelAddress, waitUntil }) => {
+  return async (req, { send, waitUntil }) => {
     const verified = await verifyTwilioInbound(req, input.config);
     if (verified === null) return new Response("unauthorized", { status: 401 });
 
@@ -372,7 +365,7 @@ function handleTwilioMessages(input: {
         config: input.config,
         message,
         onText: input.onText,
-        channelAddress,
+        send,
       }),
     );
     return emptyTwilioResponse();
@@ -424,7 +417,7 @@ function handleTwilioTranscription(input: {
   readonly onVoiceTranscription: NonNullable<TwilioChannelConfig["onVoiceTranscription"]>;
   readonly routes: TwilioRoutes;
 }): RouteHandler<TwilioChannelState> {
-  return async (req, { channelAddress, waitUntil }) => {
+  return async (req, { send, waitUntil }) => {
     const verified = await verifyTwilioInbound(req, input.config);
     if (verified === null) return new Response("unauthorized", { status: 401 });
 
@@ -446,7 +439,7 @@ function handleTwilioTranscription(input: {
       dispatchVoiceTranscription({
         config: input.config,
         onVoiceTranscription: input.onVoiceTranscription,
-        channelAddress,
+        send,
         transcription,
       }),
     );
@@ -533,7 +526,7 @@ async function dispatchText(input: {
   readonly config: TwilioChannelConfig;
   readonly message: TwilioTextMessage;
   readonly onText: NonNullable<TwilioChannelConfig["onText"]>;
-  readonly channelAddress: ChannelAddressFn<TwilioChannelState>;
+  readonly send: ChannelOperations<TwilioChannelState>["send"];
 }): Promise<void> {
   const { message } = input;
   const twilio: TwilioContext = {
@@ -562,21 +555,17 @@ async function dispatchText(input: {
   });
 
   try {
-    await input.channelAddress(twilioContinuationToken(message.from, message.to)).send(
-      {
-        message: message.body,
-        context: [contextBlock],
+    await input.send(twilioContinuationToken(message.from, message.to), {
+      auth: result.auth,
+      context: [contextBlock],
+      message: message.body,
+      state: {
+        from: message.from,
+        lastCallSid: null,
+        lastMessageSid: message.messageSid ?? null,
+        to: message.to ?? null,
       },
-      {
-        auth: result.auth,
-        state: {
-          from: message.from,
-          lastCallSid: null,
-          lastMessageSid: message.messageSid ?? null,
-          to: message.to ?? null,
-        },
-      },
-    );
+    });
   } catch (error) {
     log.error("text delivery failed", { error });
   }
@@ -608,7 +597,7 @@ async function acceptVoiceCall(input: {
 async function dispatchVoiceTranscription(input: {
   readonly config: TwilioChannelConfig;
   readonly onVoiceTranscription: NonNullable<TwilioChannelConfig["onVoiceTranscription"]>;
-  readonly channelAddress: ChannelAddressFn<TwilioChannelState>;
+  readonly send: ChannelOperations<TwilioChannelState>["send"];
   readonly transcription: TwilioVoiceTranscription;
 }): Promise<void> {
   const { transcription } = input;
@@ -638,21 +627,17 @@ async function dispatchVoiceTranscription(input: {
   });
 
   try {
-    await input.channelAddress(twilioContinuationToken(transcription.from, transcription.to)).send(
-      {
-        message: transcription.text,
-        context: [contextBlock],
+    await input.send(twilioContinuationToken(transcription.from, transcription.to), {
+      auth: result.auth,
+      context: [contextBlock],
+      message: transcription.text,
+      state: {
+        from: transcription.from,
+        lastCallSid: transcription.callSid ?? null,
+        lastMessageSid: null,
+        to: transcription.to ?? null,
       },
-      {
-        auth: result.auth,
-        state: {
-          from: transcription.from,
-          lastCallSid: transcription.callSid ?? null,
-          lastMessageSid: null,
-          to: transcription.to ?? null,
-        },
-      },
-    );
+    });
   } catch (error) {
     log.error("voice transcription delivery failed", { error });
   }

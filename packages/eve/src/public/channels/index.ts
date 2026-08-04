@@ -12,6 +12,8 @@ export {
   type CompactSessionResult,
   type ResetSessionResult,
   type Channel,
+  type ChannelOperations,
+  type ChannelSendInput,
   type ChannelCors,
   type ChannelCorsOptions,
   type ChannelDefinition,

@@ -1,3 +1,8 @@
+import type { UserContent } from "ai";
+
+import type { ChannelOperations, ChannelSendInput } from "#channel/channel-operations.js";
+import { normalizeSendInput } from "#channel/send-input.js";
+import type { SendPayload } from "#channel/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
@@ -28,9 +33,6 @@ import {
   GET,
   POST,
   type Channel,
-  type ChannelAddress,
-  type ChannelAddressFn,
-  type ChannelAddressSendOptions,
   type ChannelEvents,
   type ChannelSessionOps,
   type RouteHandlerArgs,
@@ -44,15 +46,16 @@ const DEFAULT_STREAMING_EDIT_INTERVAL_MS = 1_000;
 const MAX_TYPING_STATUS = 80;
 
 type ChatSdkAdapters = Record<string, Adapter>;
-type ChatSdkSendInput = Parameters<ChannelAddress<ChatSdkChannelState>["send"]>[0];
-type MutableChannelAddressSendOptions<TState> = {
-  -readonly [Key in keyof ChannelAddressSendOptions<TState>]: ChannelAddressSendOptions<TState>[Key];
+type ChatSdkSendInput = string | UserContent | SendPayload;
+type MutableChannelSendInput<TState> = {
+  -readonly [Key in keyof ChannelSendInput<TState>]: ChannelSendInput<TState>[Key];
 };
 type EventData<T extends UnstampedMessageStreamEvent["type"]> =
   Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 interface ActiveWebhookContext {
-  readonly channelAddress: ChannelAddressFn<ChatSdkChannelState>;
+  readonly cancel: ChannelOperations<ChatSdkChannelState>["cancel"];
+  readonly send: ChannelOperations<ChatSdkChannelState>["send"];
 }
 
 const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-webhook");
@@ -134,8 +137,8 @@ export type ChatSdkChannelEvents<TAdapters extends ChatSdkAdapters = ChatSdkAdap
  */
 export interface ChatSdkSendOptions {
   readonly auth?: SessionAuthContext | null;
-  readonly callback?: ChannelAddressSendOptions<ChatSdkChannelState>["callback"];
-  readonly mode?: ChannelAddressSendOptions<ChatSdkChannelState>["mode"];
+  readonly callback?: ChannelSendInput<ChatSdkChannelState>["callback"];
+  readonly mode?: ChannelSendInput<ChatSdkChannelState>["mode"];
   readonly thread: SerializedThread | Thread | string;
   readonly title?: string;
   /**
@@ -306,7 +309,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       ): Promise<Response> => {
         const webhook = bot.webhooks[adapterName];
         const ctx = new ContextContainer();
-        ctx.setVirtualContext(ActiveWebhookKey, { channelAddress: args.channelAddress });
+        ctx.setVirtualContext(ActiveWebhookKey, { cancel: args.cancel, send: args.send });
         return contextStorage.run(ctx, () =>
           webhook(request, {
             ...config.webhook,
@@ -318,10 +321,11 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       };
       return [GET<ChatSdkChannelState>(path, handler), POST<ChatSdkChannelState>(path, handler)];
     }),
-    async receive(input, { channelAddress }) {
+    async receive(input, { send }) {
       const thread = serializeReceiveTarget(bot, input.target);
-      return channelAddress(thread.id).send(input.message, {
+      return send(thread.id, {
         auth: input.auth,
+        message: input.message,
         state: { thread },
       });
     },
@@ -555,18 +559,18 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
     );
   }
   const thread = serializeThread(bot, options.thread, options.adapterName);
-  const sendOptions: MutableChannelAddressSendOptions<ChatSdkChannelState> = {
+  const sendInput: MutableChannelSendInput<ChatSdkChannelState> = {
+    ...normalizeSendInput(input),
     auth: options.auth ?? null,
     state: { thread },
   };
-  if (options.callback !== undefined) sendOptions.callback = options.callback;
-  if (options.mode !== undefined) sendOptions.mode = options.mode;
-  if (options.title !== undefined) sendOptions.title = options.title;
-  const conversation = active.channelAddress(thread.id);
+  if (options.callback !== undefined) sendInput.callback = options.callback;
+  if (options.mode !== undefined) sendInput.mode = options.mode;
+  if (options.title !== undefined) sendInput.title = options.title;
   if (options.turnPolicy === "experimental-steer" && hasMessageInput(input)) {
-    await conversation.cancel();
+    await active.cancel(thread.id);
   }
-  return conversation.send(input, sendOptions);
+  return active.send(thread.id, sendInput);
 }
 
 function hasMessageInput(input: ChatSdkSendInput): boolean {

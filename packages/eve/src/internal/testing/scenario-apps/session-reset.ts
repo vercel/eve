@@ -18,21 +18,21 @@ const AUTH = {
 
 export default defineChannel({
   routes: [
-    POST("/session-reset/:threadId/messages", async (request, { channelAddress, params }) => {
+    POST("/session-reset/:threadId/messages", async (request, { params, send }) => {
       const body = (await request.json().catch(() => ({}))) as { message?: string };
-      const session = await channelAddress(params.threadId ?? "").send(
-        body.message ?? "Reply with hello.", {
+      const session = await send(params.threadId ?? "", {
         auth: AUTH,
+        message: body.message ?? "Reply with hello.",
       });
       return Response.json({ sessionId: session.id });
     }),
-    POST("/session-reset/:threadId/owner", async (_request, { channelAddress, params }) => {
-      const owner = await channelAddress(params.threadId ?? "").resolveSession();
+    POST("/session-reset/:threadId/owner", async (_request, { params, resolveSession }) => {
+      const owner = await resolveSession(params.threadId ?? "");
       return Response.json({ sessionId: owner?.id ?? null });
     }),
-    POST("/session-reset/:threadId/new", async (_request, { channelAddress, params }) => {
+    POST("/session-reset/:threadId/new", async (_request, { params, reset }) => {
       return Response.json(
-        await channelAddress(params.threadId ?? "").reset({
+        await reset(params.threadId ?? "", {
           reason: "Vercel session reset integration test",
         }),
       );

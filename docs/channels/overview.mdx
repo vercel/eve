@@ -36,7 +36,7 @@ The eve channel is the framework's default HTTP session API, the routes the term
 
 ## Custom channels
 
-When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel declares route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and uses `channelAddress(token).send()` to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel hand-off, channel metadata, address tokens, and file uploads.
+When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel declares route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and uses `send(address, input)` to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel hand-off, channel metadata, address tokens, and file uploads.
 
 ## Relationship to the Chat SDK
 
