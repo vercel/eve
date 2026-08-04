@@ -5,6 +5,7 @@ import { config } from "@/lib/geistdocs/config";
 import { defaultLanguage } from "@/lib/geistdocs/languages";
 import {
   compatibilityRedirects,
+  defaultLanguageRedirects,
   docsRedirects,
   rootMarkdownRedirects,
 } from "@/lib/geistdocs/redirects";
@@ -24,6 +25,7 @@ const redirectPathnames = [
   ...compatibilityRedirects.map(({ source }) => source),
   ...docsRedirects.map(({ source }) => source),
   ...rootMarkdownRedirects.map(({ source }) => source),
+  ...defaultLanguageRedirects.map(({ source }) => source),
 ].filter((pathname) => !pathname.includes(":"));
 
 export default function sitemap(): MetadataRoute.Sitemap {

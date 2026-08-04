@@ -1,3 +1,5 @@
+import { defaultLanguage } from "./languages";
+
 interface DocsRedirect {
   destination: string;
   permanent: true;
@@ -15,8 +17,8 @@ export const createDocsRedirects = (source: string, destination: string): DocsRe
       permanent: true,
     },
     {
-      source: `/:lang/docs${source}${extension}`,
-      destination: `/:lang/docs${destination}${extension}`,
+      source: `/${defaultLanguage}/docs${source}${extension}`,
+      destination: `/docs${destination}${extension}`,
       permanent: true,
     },
   ]);
@@ -27,6 +29,20 @@ export const createRootMarkdownRedirects = (source: string, destination: string)
     destination: `/docs${destination}${extension}`,
     permanent: true,
   }));
+
+export const createIntegrationRedirects = (source: string, destination: string): DocsRedirect[] =>
+  extensions.flatMap((extension) => [
+    {
+      source: `/integrations/${source}${extension}`,
+      destination: `/integrations/${destination}${extension}`,
+      permanent: true,
+    },
+    {
+      source: `/${defaultLanguage}/integrations/${source}${extension}`,
+      destination: `/integrations/${destination}${extension}`,
+      permanent: true,
+    },
+  ]);
 
 export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/introduction", "/getting-started"),
@@ -72,6 +88,7 @@ export const rootMarkdownRedirects: DocsRedirect[] = [
 ].flatMap(([source, destination]) => createRootMarkdownRedirects(source, destination));
 
 export const compatibilityRedirects: DocsRedirect[] = [
+  ...createIntegrationRedirects("chat-sdk-photon", "photon"),
   { source: "/feed", destination: "/rss.xml", permanent: true },
   { source: "/feed.xml", destination: "/rss.xml", permanent: true },
   { source: "/guides/hooks", destination: "/docs/guides/hooks", permanent: true },
@@ -88,6 +105,24 @@ export const compatibilityRedirects: DocsRedirect[] = [
   {
     source: "/apple-touch-icon-120x120-precomposed.png",
     destination: "/apple-touch-icon.png",
+    permanent: true,
+  },
+];
+
+export const defaultLanguageRedirects: DocsRedirect[] = [
+  {
+    source: `/${defaultLanguage}/docs`,
+    destination: "/docs/getting-started",
+    permanent: true,
+  },
+  {
+    source: `/${defaultLanguage}/resources`,
+    destination: "/templates",
+    permanent: true,
+  },
+  {
+    source: `/${defaultLanguage}/:path*`,
+    destination: "/:path*",
     permanent: true,
   },
 ];

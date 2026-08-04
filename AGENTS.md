@@ -177,6 +177,8 @@ live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 - `docs/**` is the published documentation. If your change alters
   public behavior, update the relevant doc in the same PR and run
   `pnpm docs:check`.
+- When moving a published route, update authored links to the new URL and add a
+  permanent redirect from every old HTML and supported Markdown URL.
 - Sidebar order lives in `docs/meta.json`.
 - Keep markdown framework-agnostic — no MDX-only constructs unless the page is
   `.mdx`.
