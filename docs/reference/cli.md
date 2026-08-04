@@ -255,12 +255,12 @@ eve traces ls --json       # emit machine-readable trace summaries
 eve traces                 # show the most recent span tree
 eve traces <trace>         # show one span tree
 eve traces --verbose       # expand every span with all attributes and events
-eve traces --json          # dump the full trace — every span's attributes and events — as JSON
+eve traces --json          # dump the full trace as JSON
 ```
 
 Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed segments are skipped without hiding valid spans from the same trace.
 
-Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name on `ai.toolCall` rows — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` nests each span's full record under its tree row: status (with the error message when failed), timing, ids, every attribute (prompts, responses, and tool payloads rendered as readable blocks), and every span event with its offset from span start. `--json` emits the same records machine-readably, one object per selected trace.
+Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `ai.toolCall` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
 
 A subagent keeps its own session id but records into the trace its parent had open at dispatch, so delegated work appears under the session that caused it, tagged with `agent.root.session.id`. Either session id resolves to that trace. A remote agent traces under its own deployment and is not recorded here.
 
