@@ -1,5 +1,16 @@
 # eve
 
+## 0.30.3
+
+### Patch Changes
+
+- 601fb13: Allow just-bash sandboxes to compose a custom filesystem around eve's durable, session-owned workspace.
+- c8bd9c0: Allow declared local subagents to mount extensions under their own `extensions/` directory. Contributions, configuration, and overrides are scoped to that subagent and do not extend the root agent.
+- 279b5e6: Use compatible POSIX search fallbacks in sandboxes whose `rg` implementation lacks the options required by eve, and surface command errors instead of reporting them as empty results.
+- c10ca06: Allow dynamic subagents to declare compile-time `build.externalDependencies`, so their authored modules can safely use packages that must remain external before runtime resolution.
+- 95b4183: Configure new Linear connectors to receive only Agent Session webhook events, avoiding unrelated default Linear webhook deliveries.
+- 95b4183: Add guided Linear Agent channel setup through `eve add channel/linear-agent`. The flow provisions a Vercel Connect Linear app, routes verified Agent Session events, scaffolds the channel, and explains how to install and use the agent in Linear.
+
 ## 0.30.2
 
 ### Patch Changes
