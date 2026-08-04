@@ -20,7 +20,7 @@ const TemplateTwitterImage = async ({
     notFound();
   }
 
-  return createTemplateOgImage(template.title);
+  return createTemplateOgImage(template.headline);
 };
 
 export default TemplateTwitterImage;

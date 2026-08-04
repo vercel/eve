@@ -37,7 +37,8 @@ const githubJson = async <T>(url: string, notFoundMessage: string): Promise<T> =
 
 console.log(`Syncing templates from GitHub (${token ? "authenticated" : "unauthenticated"})`);
 
-const templates: Record<string, { sourceRevision: string; files: TemplateFile[] }> = {};
+const templates: Record<string, { readme: string; sourceRevision: string; files: TemplateFile[] }> =
+  {};
 
 for (const entry of templateManifest) {
   const { github } = entry;
@@ -56,7 +57,18 @@ for (const entry of templateManifest) {
     files.push(decodeContentsResponse(relativePath, contents));
   }
 
-  templates[entry.slug] = { sourceRevision: commit.sha, files: sortTemplateFiles(files) };
+  const readmeResponse = await githubJson<GitHubContentsResponse>(
+    contentsUrl(github, commit.sha, "README.md"),
+    `README.md not found for template "${entry.slug}" in ` +
+      `${github.owner}/${github.repo}@${commit.sha}`,
+  );
+  const readme = decodeContentsResponse("README.md", readmeResponse).contents;
+
+  templates[entry.slug] = {
+    files: sortTemplateFiles(files),
+    readme,
+    sourceRevision: commit.sha,
+  };
   console.log(`${entry.slug} ${github.ref} → ${commit.sha.slice(0, 7)} (${files.length} files)`);
 }
 

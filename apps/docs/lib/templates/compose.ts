@@ -15,12 +15,16 @@ export interface TemplateEntry {
   category: TemplateCategory;
   description: string;
   files: TemplateFile[];
+  headline: string;
   integrations: TemplateIntegration[];
   model: string;
+  readme: string;
+  seoTitle: string;
   slug: string;
   source: TemplateSource;
   sourceHref: string;
   sourceRevision: string;
+  sourceRevisionHref: string;
   setupPrompt: string;
   title: string;
 }
@@ -30,6 +34,7 @@ export interface GeneratedTemplatesInput {
   templates: Record<
     string,
     {
+      readme: string;
       sourceRevision: string;
       files: { contents: string; language: string; relativePath: string }[];
     }
@@ -78,8 +83,24 @@ export const composeTemplateEntries = (
       return { contents: file.contents, language: file.language, relativePath: file.relativePath };
     });
 
+    if (!data.readme.trim()) {
+      throw new Error(`Generated README is empty for template "${entry.slug}" — ${SYNC_HINT}`);
+    }
+
     const { github: _github, files: _paths, ...curated } = entry;
-    return { ...curated, sourceRevision: data.sourceRevision, files };
+    const sourceRevisionHref = [
+      `https://github.com/${entry.github.owner}/${entry.github.repo}/tree/${data.sourceRevision}`,
+      entry.github.pathPrefix,
+    ]
+      .filter(Boolean)
+      .join("/");
+    return {
+      ...curated,
+      files,
+      readme: data.readme,
+      sourceRevision: data.sourceRevision,
+      sourceRevisionHref,
+    };
   });
 
   if (orphanedSlugs.size > 0) {
