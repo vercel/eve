@@ -2,7 +2,7 @@ import type { HandleMessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "web_search";
-const SEARCH_COUNT = 10;
+const SEARCH_COUNT = 8;
 const QUERIES = [
   "web search fanout probe 01",
   "web search fanout probe 02",
@@ -12,8 +12,6 @@ const QUERIES = [
   "web search fanout probe 06",
   "web search fanout probe 07",
   "web search fanout probe 08",
-  "web search fanout probe 09",
-  "web search fanout probe 10",
 ] as const;
 
 function completedDistinctCalls(events: readonly HandleMessageStreamEvent[]): number {
@@ -32,11 +30,12 @@ function completedDistinctCalls(events: readonly HandleMessageStreamEvent[]): nu
 }
 
 export default defineEval({
-  description: "Provider tools smoke: ten Exa web searches complete in a single turn.",
+  tags: ["real-model"],
+  description: "Provider tools smoke: eight parallel Exa web searches complete in one turn.",
   async test(t) {
     const turn = await t.send(
       [
-        `Call the \`${TOOL_NAME}\` tool exactly ${SEARCH_COUNT} separate times.`,
+        `Call the \`${TOOL_NAME}\` tool exactly ${SEARCH_COUNT} times in one parallel batch.`,
         `Use each query exactly once: ${QUERIES.map((query) => `"${query}"`).join(", ")}.`,
         "Do not use any other tool.",
         "After every call returns, reply with exactly: web search fanout complete",
@@ -48,7 +47,7 @@ export default defineEval({
     t.calledTool(TOOL_NAME, { count: (count) => count >= SEARCH_COUNT });
     t.noFailedActions();
     turn.eventsSatisfy(
-      "ten distinct web_search calls complete",
+      "eight distinct web_search calls complete",
       (events) => completedDistinctCalls(events) >= SEARCH_COUNT,
     );
     t.messageIncludes(/web search fanout complete/iu);

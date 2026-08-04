@@ -95,6 +95,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     compactOnly: input.compactOnly,
     workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,
+    webSearchProvider: input.node.agent.webSearchProvider,
     handleEvent: input.handleEvent,
     instrumentation,
     mode: input.mode,

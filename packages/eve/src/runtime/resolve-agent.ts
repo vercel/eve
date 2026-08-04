@@ -111,6 +111,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       input.manifest.workflowTool === undefined
         ? undefined
         : { maxSubagents: input.manifest.workflowTool.maxSubagents },
+    webSearchProvider: input.manifest.webSearchProvider,
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,

@@ -15,6 +15,7 @@ import {
   createCompiledAgentNodeManifest,
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
@@ -113,6 +114,7 @@ async function compileAgentNodeManifest(
   const dynamicTools: CompiledDynamicToolDefinition[] = [];
   const disabledFrameworkTools: string[] = [];
   let workflowTool: CompiledWorkflowToolDefinition | undefined;
+  let webSearchProvider: WebSearchProvider | undefined;
 
   for (const entry of compiledToolEntries) {
     if (entry.kind === "tool") {
@@ -121,6 +123,8 @@ async function compileAgentNodeManifest(
       dynamicTools.push(entry.definition);
     } else if (entry.kind === "workflow-tool") {
       workflowTool = { maxSubagents: entry.maxSubagents };
+    } else if (entry.kind === "web-search-tool") {
+      webSearchProvider = entry.provider;
     } else {
       disabledFrameworkTools.push(entry.name);
     }
@@ -253,6 +257,7 @@ async function compileAgentNodeManifest(
     diagnosticsSummary: manifest.diagnosticsSummary,
     disabledFrameworkTools,
     workflowTool,
+    webSearchProvider,
     dynamicSkills,
     dynamicTools,
     hooks,

@@ -28,6 +28,7 @@ import type {
   ModelRouting,
 } from "#shared/agent-definition.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 
 /**
  * Stable manifest kind emitted by the compiler for runtime loading.
@@ -42,7 +43,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 38;
+export const COMPILED_AGENT_MANIFEST_VERSION = 39;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -652,6 +653,7 @@ const compiledAgentNodeManifestSchema = z
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
     disabledFrameworkTools: z.array(z.string()).readonly(),
     workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
+    webSearchProvider: z.enum(["exa", "parallel"]).optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
@@ -750,6 +752,7 @@ export const compiledAgentManifestSchema = z
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
     disabledFrameworkTools: z.array(z.string()).readonly(),
     workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
+    webSearchProvider: z.enum(["exa", "parallel"]).optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
@@ -781,6 +784,7 @@ export function createCompiledAgentNodeManifest(input: {
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly disabledFrameworkTools?: readonly string[];
   readonly workflowTool?: CompiledWorkflowToolDefinition;
+  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
@@ -863,6 +867,7 @@ export function createCompiledAgentNodeManifest(input: {
       input.workflowTool === undefined
         ? undefined
         : { maxSubagents: input.workflowTool.maxSubagents },
+    webSearchProvider: input.webSearchProvider,
     dynamicInstructions: [...(input.dynamicInstructions ?? [])],
     dynamicSkills: [...(input.dynamicSkills ?? [])],
     dynamicTools: [...(input.dynamicTools ?? [])],
@@ -936,6 +941,7 @@ export function createCompiledAgentManifest(input: {
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly disabledFrameworkTools?: readonly string[];
   readonly workflowTool?: CompiledWorkflowToolDefinition;
+  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
   readonly hooks?: readonly CompiledHookDefinition[];

@@ -10,6 +10,7 @@ import {
   WEB_SEARCH_TOOL_DEFINITION,
 } from "#runtime/framework-tools/web-search.js";
 import type { JsonObject } from "#shared/json.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 
 /**
  * The provider backend resolved for one web search tool invocation.
@@ -70,15 +71,18 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
 /**
  * Determines the web search backend for a model reference.
  *
- * - All AI Gateway models: Exa search via gateway
+ * - All AI Gateway models: the configured search provider (Parallel by default)
  * - Direct/BYO OpenAI models: native OpenAI search
  * - Direct/BYO Anthropic models: native Anthropic search
  * - Direct/BYO Google models: native Google search grounding
  * - Other BYO models: not available (returns `null`)
  */
-export function resolveWebSearchBackend(modelRef: RuntimeModelReference): WebSearchBackend | null {
+export function resolveWebSearchBackend(
+  modelRef: RuntimeModelReference,
+  gatewayProvider: WebSearchProvider = "parallel",
+): WebSearchBackend | null {
   if (modelRef.source === undefined) {
-    return "exa";
+    return gatewayProvider;
   }
 
   const providerId = modelRef.id.split("/")[0] ?? "";
@@ -130,7 +134,13 @@ export async function resolveWebSearchProviderTool(
     }
     case "exa": {
       const { gateway } = await import("ai");
-      return attachWebSearchOutputSchema(gateway.tools.exaSearch() as ToolSet[string], backend);
+      return attachWebSearchOutputSchema(
+        gateway.tools.exaSearch({
+          contents: { highlights: { maxCharacters: 1_000 } },
+          numResults: 10,
+        }) as ToolSet[string],
+        backend,
+      );
     }
     case "parallel": {
       const { gateway } = await import("ai");

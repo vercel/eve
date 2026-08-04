@@ -2,6 +2,7 @@ import { type ToolApprovalConfiguration, type ToolApprovalStatus, type ToolSet, 
 
 import type { SessionCapabilities } from "#channel/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { isObject } from "#shared/guards.js";
@@ -206,6 +207,7 @@ export async function buildToolSetWithProviderTools(input: {
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly modelReference: RuntimeModelReference;
   readonly tools: HarnessToolMap;
+  readonly webSearchProvider?: WebSearchProvider;
 }): Promise<ToolSet> {
   const disabled = input.disabledProviderTools;
   const tools: ToolSet = {
@@ -222,7 +224,7 @@ export async function buildToolSetWithProviderTools(input: {
   if (!disabled?.has(WEB_SEARCH_TOOL_DEFINITION.name)) {
     const webSearchTool = input.tools.get(WEB_SEARCH_TOOL_DEFINITION.name);
     if (webSearchTool !== undefined && webSearchTool.execute === undefined) {
-      const backend = resolveWebSearchBackend(input.modelReference);
+      const backend = resolveWebSearchBackend(input.modelReference, input.webSearchProvider);
       if (backend === null) {
         delete tools[WEB_SEARCH_TOOL_DEFINITION.name];
       } else {

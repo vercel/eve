@@ -11,6 +11,7 @@ import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessInstrumentation } from "#harness/instrumentation-runtime.js";
@@ -257,6 +258,8 @@ export interface ToolLoopHarnessConfig {
    * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
    */
   readonly workflowMaxSubagents?: number;
+  /** AI Gateway provider selected for the framework `web_search` tool. */
+  readonly webSearchProvider?: WebSearchProvider;
   readonly handleEvent?: HandleEventFn;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.

@@ -956,6 +956,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         disabledProviderTools: opts.disabledProviderTools,
         modelReference: session.agent.modelReference,
         tools: advertisedHarnessTools,
+        webSearchProvider: config.webSearchProvider,
       });
 
       if (ctx !== undefined) {

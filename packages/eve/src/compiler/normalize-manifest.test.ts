@@ -11,6 +11,7 @@ import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineDynamic, experimental_workflow } from "#public/definitions/tool.js";
+import { webSearch } from "#public/tools/web-search.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 const mocks = vi.hoisted(() => ({
@@ -94,6 +95,37 @@ describe("compileAgentManifest", () => {
     const compiled = await compileAgentManifest(manifest);
 
     expect(compiled.workflowTool).toEqual({ maxSubagents: 6 });
+  });
+
+  it("compiles web search provider configuration", async () => {
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      tools: [createModuleSourceRef({ logicalPath: "tools/web_search.ts" })],
+    });
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.loadModuleBackedDefinition.mockResolvedValue(webSearch({ provider: "exa" }));
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.webSearchProvider).toBe("exa");
+    expect(compiled.tools).toEqual([]);
+  });
+
+  it("requires web search configuration to use the web_search filename", async () => {
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      tools: [createModuleSourceRef({ logicalPath: "tools/search.ts" })],
+    });
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.loadModuleBackedDefinition.mockResolvedValue(webSearch({ provider: "exa" }));
+
+    await expect(compileAgentManifest(manifest)).rejects.toThrow(
+      'must be exported from "tools/web_search.ts"',
+    );
   });
 
   it("compiles a dynamic subagent manifest without resolving an agent config", async () => {
