@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { TemplateCategory, TemplateEntry, TemplateIntegration } from "@/lib/templates/data";
 import { integrationIcons } from "./integration-icons";
+import { TemplatePreviewImage } from "./template-preview-image";
 
 const ALL = "all" as const;
 
@@ -72,28 +73,38 @@ const FilterOption = ({ label, value }: { label: string; value: string }) => (
 const TemplateCard = ({ entry }: { entry: TemplateEntry }) => (
   <li>
     <Link
-      className="flex min-h-36 flex-col rounded-lg border border-gray-alpha-400 bg-background-100 p-4 no-underline outline-none transition-colors hover:border-gray-alpha-500 hover:bg-gray-alpha-100 focus-visible:border-gray-alpha-600 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
+      className="group relative block h-[260px] overflow-hidden rounded-lg border border-gray-alpha-400 bg-background-100 no-underline outline-none transition-colors hover:border-gray-alpha-500 hover:bg-gray-alpha-100 focus-visible:border-gray-alpha-600 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
       href={`/templates/${entry.slug}`}
     >
-      <h2 className="text-gray-1000 text-heading-16">{entry.title}</h2>
-      <p className="mt-2 line-clamp-2 max-w-[90%] text-balance text-[14px] leading-[1.3] text-gray-800">
-        {entry.description}
-      </p>
-      <ul aria-label="Integrations" className="mt-auto flex items-center gap-2 pt-4">
-        {entry.integrations.map((integration) => {
-          const Icon = integrationIcons[integration];
-          return (
-            <li
-              className="flex size-4 items-center justify-center text-gray-700 grayscale"
-              key={integration}
-              title={integration}
-            >
-              <Icon aria-hidden="true" className="size-3.5" />
-              <span className="sr-only">{integration}</span>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="relative z-10 p-5">
+        <h2 className="text-gray-1000 text-heading-16">{entry.title}</h2>
+        <p className="mt-2 line-clamp-2 max-w-[90%] text-balance text-[14px] leading-[1.3] text-gray-800">
+          {entry.description}
+        </p>
+        <ul aria-label="Integrations" className="mt-3 flex items-center gap-2">
+          {entry.integrations.map((integration) => {
+            const Icon = integrationIcons[integration];
+            return (
+              <li
+                className="flex size-4 items-center justify-center text-gray-700 grayscale"
+                key={integration}
+                title={integration}
+              >
+                <Icon aria-hidden="true" className="size-3.5" />
+                <span className="sr-only">{integration}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+      <div className="absolute top-[58%] left-[10%] w-[105%] origin-center -rotate-6 overflow-hidden rounded-md border border-gray-alpha-400 bg-black shadow-[0_5px_10px_rgba(0,0,0,0.12)] transition-transform duration-150 ease-in-out group-hover:-rotate-2 motion-reduce:transition-none">
+        <TemplatePreviewImage
+          className="block h-auto w-full"
+          sizes="(max-width: 639px) 90vw, (max-width: 1023px) 45vw, 340px"
+          slug={entry.slug}
+          title={entry.title}
+        />
+      </div>
     </Link>
   </li>
 );
