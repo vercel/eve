@@ -15,11 +15,9 @@ export interface TemplateEntry {
   category: TemplateCategory;
   description: string;
   files: TemplateFile[];
-  headline: string;
   integrations: TemplateIntegration[];
   model: string;
   readme: string;
-  seoTitle: string;
   slug: string;
   source: TemplateSource;
   sourceHref: string;

@@ -43,13 +43,23 @@ export const generateMetadata = async ({
   const entry = getTemplateEntry(slug);
   if (!entry) return { title: "Template not found" };
 
-  const titleMetadata = pageTitleMetadata(`${entry.title} template - eve`);
+  const canonicalPath = templatePath(entry.slug);
+  const titleMetadata = pageTitleMetadata(entry.title);
   return {
     ...titleMetadata,
     description: entry.description,
-    alternates: canonicalAlternates(templatePath(entry.slug)),
-    openGraph: titleMetadata.openGraph,
-    twitter: { ...titleMetadata.twitter, card: "summary_large_image" },
+    alternates: canonicalAlternates(canonicalPath),
+    openGraph: {
+      ...titleMetadata.openGraph,
+      description: entry.description,
+      type: "website",
+      url: canonicalPath,
+    },
+    twitter: {
+      ...titleMetadata.twitter,
+      card: "summary_large_image",
+      description: entry.description,
+    },
   };
 };
 
@@ -83,9 +93,7 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
 
         <header className="mt-8 grid gap-4 lg:grid-cols-2 lg:items-start lg:gap-8">
           <div className="min-w-0">
-            <h1 className="m-0 text-heading-40 text-gray-1000 sm:text-heading-48">
-              {entry.headline}
-            </h1>
+            <h1 className="m-0 text-heading-40 text-gray-1000 sm:text-heading-48">{entry.title}</h1>
             <div className="hidden lg:block">
               <IntegrationList entry={entry} />
             </div>
@@ -103,10 +111,6 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
               <IntegrationList entry={entry} />
             </div>
           </div>
-          <dl className="flex flex-wrap gap-x-10 gap-y-4 border-gray-alpha-400 border-t pt-6 lg:col-span-2">
-            <OverviewItem label="Model" value={entry.model} />
-            <OverviewItem label="Authored files" value={String(entry.files.length)} />
-          </dl>
         </header>
 
         <section aria-label="Filesystem" className="mt-8">
@@ -141,7 +145,7 @@ const createStructuredData = (entry: TemplateEntry, canonicalUrl: string) => ({
         {
           "@type": "ListItem",
           item: canonicalUrl,
-          name: entry.headline,
+          name: entry.title,
           position: 2,
         },
       ],
@@ -151,7 +155,7 @@ const createStructuredData = (entry: TemplateEntry, canonicalUrl: string) => ({
       codeRepository: entry.sourceRevisionHref,
       description: entry.description,
       keywords: ["eve", ...entry.integrations],
-      name: entry.headline,
+      name: entry.title,
       programmingLanguage: ["TypeScript", "Markdown"],
       runtimePlatform: "eve",
       url: canonicalUrl,
@@ -199,13 +203,6 @@ const IntegrationList = ({ entry }: { entry: TemplateEntry }) => (
       );
     })}
   </ul>
-);
-
-const OverviewItem = ({ label, value }: { label: string; value: string }) => (
-  <div className="min-w-0">
-    <dt className="text-gray-800 text-label-12">{label}</dt>
-    <dd className="mt-1 break-all text-copy-13-mono text-gray-1000">{value}</dd>
-  </div>
 );
 
 export default TemplateDetailPage;

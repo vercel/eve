@@ -6,9 +6,7 @@ import { templateManifest, type TemplateManifestEntry } from "./manifest";
 
 const manifestEntry: TemplateManifestEntry = {
   slug: "example",
-  title: "Example",
-  headline: "Example agent template",
-  seoTitle: "Example Agent Template | eve",
+  title: "Example agent template",
   description: "An example template.",
   category: "Example",
   integrations: ["HTTP API"],
@@ -41,7 +39,7 @@ describe("composeTemplateEntries", () => {
     const [entry] = composeTemplateEntries([manifestEntry], generated);
 
     expect(entry.slug).toBe("example");
-    expect(entry.title).toBe("Example");
+    expect(entry.title).toBe("Example agent template");
     expect(entry.sourceRevision).toBe("0123456789abcdef0123456789abcdef01234567");
     expect(entry.sourceRevisionHref).toBe(
       "https://github.com/vercel-labs/example/tree/0123456789abcdef0123456789abcdef01234567",
