@@ -35,8 +35,8 @@ PR descriptions are reviewer-oriented explanations of the problem, solution,
 meaningful behavior changes, and validation—not file lists or commit logs. Keep
 them proportional to the change, link the prior issue, call out important scope
 boundaries or preserved behavior, and report only checks actually run. Use the
-[`gh-pr-description`](./skills/gh-pr-description/SKILL.md) skill when drafting
-or updating one.
+[`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md) skill when
+drafting or updating one.
 
 ## Commands
 
