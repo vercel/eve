@@ -1763,6 +1763,55 @@ export default defineInstrumentation(
 \`\`\``,
     configure: `Create an API key in the Braintrust dashboard and expose it as \`BRAINTRUST_API_KEY\`. Replace the hook's \`app\` metadata with your app name. Spans land in the Braintrust project named after your agent. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
+  "posthog-instrumentation": {
+    logo: "posthog",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "generations", "analytics"],
+    install: `Add PostHog AI Observability from eve's registry:
+
+\`\`\`bash
+eve add instrumentation/posthog
+\`\`\``,
+
+    quickStart: `eve installs \`agent/instrumentation.ts\` with PostHog's trace exporter. It also links spans to the user who initiated the session when an authenticated principal is available:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { trace } from "@opentelemetry/api";
+import { SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { PostHogTraceExporter } from "@posthog/ai/otel";
+import { registerOTel } from "@vercel/otel";
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) =>
+    registerOTel({
+      serviceName: agentName,
+      spanProcessors: [
+        new SimpleSpanProcessor(
+          new PostHogTraceExporter({
+            projectToken: process.env.POSTHOG_PROJECT_TOKEN!,
+            host: process.env.POSTHOG_HOST,
+          }),
+        ),
+      ],
+    }),
+  events: {
+    "step.started"(input) {
+      const distinctId =
+        input.session.auth.initiator?.principalId ??
+        input.session.auth.current?.principalId;
+
+      if (!distinctId) return undefined;
+
+      trace.getActiveSpan()?.setAttribute("posthog.distinct_id", distinctId);
+      return { runtimeContext: { posthog_distinct_id: distinctId } };
+    },
+  },
+});
+\`\`\``,
+    configure: `Copy your project token and client API host from PostHog's project settings and expose them as \`POSTHOG_PROJECT_TOKEN\` and \`POSTHOG_HOST\`. Remove the \`events\` handler to capture generations anonymously. PostHog groups turns using \`eve.session.id\` and preserves eve's trace hierarchy. See [PostHog's eve installation guide](https://posthog.com/docs/ai-observability/installation/eve) for verification steps and the [instrumentation guide](/docs/guides/instrumentation) for input and output capture controls.`,
+  },
   "sentry-instrumentation": {
     logo: "sentry",
     docsHref: "/docs/guides/instrumentation",

@@ -748,6 +748,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "posthog-instrumentation",
+    name: "PostHog",
+    kind: "instrumentation",
+    tagline: "Send agent traces and generations to PostHog AI Observability.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "sentry-instrumentation",
     name: "Sentry",
     kind: "instrumentation",

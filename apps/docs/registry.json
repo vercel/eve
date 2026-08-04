@@ -1760,6 +1760,30 @@
       ]
     },
     {
+      "name": "instrumentation/posthog",
+      "type": "registry:item",
+      "title": "PostHog",
+      "description": "Send agent traces and generations to PostHog AI Observability.",
+      "dependencies": [
+        "@posthog/ai@^7.19.6",
+        "@opentelemetry/api",
+        "@opentelemetry/exporter-trace-otlp-http",
+        "@opentelemetry/sdk-trace-base",
+        "@vercel/otel"
+      ],
+      "envVars": {
+        "POSTHOG_PROJECT_TOKEN": "",
+        "POSTHOG_HOST": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/posthog.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        }
+      ]
+    },
+    {
       "name": "instrumentation/sentry",
       "type": "registry:item",
       "title": "Sentry",

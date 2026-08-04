@@ -19,6 +19,7 @@ interface Registry {
 
 const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   braintrust: "braintrust",
+  "posthog-instrumentation": "posthog",
   "sentry-instrumentation": "sentry",
   "datadog-instrumentation": "datadog",
   "honeycomb-instrumentation": "honeycomb",
