@@ -12,8 +12,9 @@ export interface PublicationReservation {
 export type PublicationState = PublicationReservation | "published" | "unknown";
 
 export function publicationKey(route: BuzzRoute): string {
-  if (!route.replyTo) throw new Error("Buzz reply routes require an event anchor");
-  return createHash("sha256").update(`${route.channelId}\0${route.replyTo}`).digest("hex");
+  return createHash("sha256")
+    .update(`${route.channelId}\0${route.triggeringEventId}`)
+    .digest("hex");
 }
 
 export async function reservePublication(options: {

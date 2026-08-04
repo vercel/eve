@@ -58,7 +58,7 @@ eve-buzz-acp-adapter                         # local application in the current 
 eve-buzz-acp-adapter https://agent.example.com
 ```
 
-This package is an experimental compatibility adapter for ordinary conversational replies. It is pinned to Buzz's current prompt framing and requires Buzz to supply an explicit reply anchor. It coordinates idempotent reply publication across local connector processes. If Buzz does not confirm whether a send was accepted, the adapter records an unknown delivery state and refuses automatic retries to avoid duplicate replies. It does not provide arbitrary Buzz actions, remote MCP, or interactive form elicitation.
+This package is an experimental compatibility adapter for ordinary conversational replies. It is pinned to Buzz's current prompt framing and uses Buzz's triggering event ID for idempotency while preserving an optional thread reply anchor. It coordinates idempotent reply publication across local connector processes, including top-level DMs. If Buzz does not confirm whether a send was accepted, the adapter records an unknown delivery state and refuses automatic retries to avoid duplicate replies. It does not provide arbitrary Buzz actions, remote MCP, or interactive form elicitation.
 
 ## Why this adapter exists
 

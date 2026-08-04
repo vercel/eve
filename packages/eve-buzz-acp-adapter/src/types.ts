@@ -1,5 +1,6 @@
 export interface BuzzRoute {
   channelId: string;
+  triggeringEventId: string;
   replyTo?: string;
 }
 

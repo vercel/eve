@@ -11,6 +11,7 @@ describe("Buzz publication", () => {
       publicationArguments({
         channelId: "8bdf2680-5c6d-52e6-be27-8c688fb81262",
         replyTo: eventId,
+        triggeringEventId: eventId,
       }),
     ).toEqual([
       "messages",
@@ -21,6 +22,22 @@ describe("Buzz publication", () => {
       "-",
       "--reply-to",
       eventId,
+    ]);
+  });
+
+  it("omits a reply anchor for a top-level message", () => {
+    expect(
+      publicationArguments({
+        channelId: "8bdf2680-5c6d-52e6-be27-8c688fb81262",
+        triggeringEventId: eventId,
+      }),
+    ).toEqual([
+      "messages",
+      "send",
+      "--channel",
+      "8bdf2680-5c6d-52e6-be27-8c688fb81262",
+      "--content",
+      "-",
     ]);
   });
 
@@ -41,7 +58,11 @@ describe("Buzz publication", () => {
       publishBuzzReply({
         buzzCli: "buzz",
         environment: {},
-        route: { channelId: "8bdf2680-5c6d-52e6-be27-8c688fb81262", replyTo: eventId },
+        route: {
+          channelId: "8bdf2680-5c6d-52e6-be27-8c688fb81262",
+          replyTo: eventId,
+          triggeringEventId: eventId,
+        },
         spawnProcess: respondingProcess({ accepted: true, event_id: eventId }),
         text: "hello",
         timeoutMs: 1_000,
@@ -52,7 +73,11 @@ describe("Buzz publication", () => {
       publishBuzzReply({
         buzzCli: "buzz",
         environment: {},
-        route: { channelId: "8bdf2680-5c6d-52e6-be27-8c688fb81262", replyTo: eventId },
+        route: {
+          channelId: "8bdf2680-5c6d-52e6-be27-8c688fb81262",
+          replyTo: eventId,
+          triggeringEventId: eventId,
+        },
         spawnProcess: respondingProcess({ accepted: false }),
         text: "hello",
         timeoutMs: 1_000,

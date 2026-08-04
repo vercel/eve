@@ -20,20 +20,24 @@ async function directory(): Promise<string> {
 
 describe("publication state", () => {
   it("uses the selected channel and triggering event as its idempotency key", () => {
-    expect(
-      publicationKey({
-        channelId: "8bdf2680-5c6d-52e6-be27-8c688fb81262",
-        replyTo: "a".repeat(64),
-      }),
-    ).not.toBe(
-      publicationKey({
-        channelId: "8bdf2680-5c6d-52e6-be27-8c688fb81262",
-        replyTo: "b".repeat(64),
-      }),
-    );
-    expect(() => publicationKey({ channelId: "8bdf2680-5c6d-52e6-be27-8c688fb81262" })).toThrow(
-      "require an event anchor",
-    );
+    const channelId = "8bdf2680-5c6d-52e6-be27-8c688fb81262";
+    const first = publicationKey({
+      channelId,
+      replyTo: "c".repeat(64),
+      triggeringEventId: "a".repeat(64),
+    });
+    const second = publicationKey({
+      channelId,
+      replyTo: "c".repeat(64),
+      triggeringEventId: "b".repeat(64),
+    });
+    const sameEventAtTopLevel = publicationKey({
+      channelId,
+      triggeringEventId: "a".repeat(64),
+    });
+
+    expect(first).not.toBe(second);
+    expect(first).toBe(sameEventAtTopLevel);
   });
 
   it("permits exactly one successful publication for a triggering event", async () => {

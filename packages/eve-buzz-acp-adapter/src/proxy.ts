@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
-import { addReplySinkInstruction, parseBuzzRoute, promptText } from "./buzz-context.js";
+import { addReplySinkInstruction, parseBuzzRoute } from "./buzz-context.js";
 import { eveChildEnvironment } from "./environment.js";
 import { readJsonLines } from "./line-reader.js";
 import { fixedModelResult, isFixedModelRequest } from "./model.js";
@@ -99,10 +99,10 @@ export async function runProxy(options: ProxyOptions): Promise<void> {
         }
 
         if (message.method === "session/prompt" && message.id !== undefined) {
-          const text = promptText(message.params?.prompt);
+          const prompt = message.params?.prompt;
           turns.set(keyForId(message.id), {
             cancelled: false,
-            route: parseBuzzRoute(text),
+            route: parseBuzzRoute(prompt),
             sessionId:
               typeof message.params?.sessionId === "string" ? message.params.sessionId : undefined,
             text: "",
