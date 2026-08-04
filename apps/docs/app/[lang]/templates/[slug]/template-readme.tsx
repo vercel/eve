@@ -56,13 +56,19 @@ export const TemplateReadme = ({ readme, sourceRevisionHref }: TemplateReadmePro
           {children}
         </h5>
       ),
-      img: () => null,
     }),
     [sourceRevisionHref],
   );
 
   return (
     <Streamdown
+      allowElement={(element) => {
+        for (const child of element.children) {
+          if (child.type !== "text") continue;
+          if (/\[(?:Image )?blocked(?::[^\]]*)?\]/i.test(child.value)) return false;
+        }
+        return true;
+      }}
       className="min-w-0 text-gray-900 [&_a]:font-medium [&_a]:text-gray-1000 [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:border-gray-alpha-400 [&_blockquote]:border-l [&_blockquote]:pl-4 [&_code]:text-gray-1000 [&_li]:my-1 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_table]:my-5 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5"
       components={components}
       disallowedElements={["img"]}
