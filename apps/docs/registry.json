@@ -1236,7 +1236,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "linear"]
           },
-          "requires": ">=0.31.0"
+          "requires": ">=0.30.6"
         }
       },
       "dependencies": ["@vercel/connect"]
