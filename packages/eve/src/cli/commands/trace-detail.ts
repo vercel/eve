@@ -105,15 +105,61 @@ export function formatCostUsd(costUsd: number): string {
 /**
  * The `--verbose` block for one span: facts (status, timing, ids), every
  * attribute sorted with payloads rendered as transcripts/pretty JSON, then
- * every event with its offset from span start. Returned lines carry no tree
- * prefix — the caller nests them under the span's tree row.
+ * every event with its offset from span start, rendered as `tree(1)`-style
+ * entries: each fact, attribute key, and event is an entry with a connector
+ * beneath the span's row, so the rails never break. Payload content wraps
+ * under its key on a plain margin. `childrenFollow` decides whether the last
+ * entry closes the branch — child span rows come after the detail entries.
  */
-export function renderSpanDetailLines(
+export function renderSpanDetailTree(
   span: LocalTraceSpan,
-  options: { readonly dim: (text: string) => string; readonly width: number },
+  options: {
+    readonly childrenFollow: boolean;
+    readonly margin: string;
+    readonly mute: (text: string) => string;
+    readonly width: number;
+  },
 ): string[] {
-  const width = Math.max(40, options.width);
+  const entries = spanDetailEntries(span, options.width - options.margin.length - 3);
   const lines: string[] = [];
+  entries.forEach((entry, index) => {
+    const last = index === entries.length - 1 && !options.childrenFollow;
+    emit(entry, options.margin, last ? "└─ " : "├─ ");
+  });
+  return lines;
+
+  function emit(entry: SpanDetailEntry, margin: string, connector: string): void {
+    lines.push(options.mute(`${margin}${connector}${entry.head}`));
+    const childMargin = `${margin}${connector === "└─ " ? "   " : "│  "}`;
+    for (const line of entry.lines) lines.push(options.mute(`${childMargin}  ${line}`));
+    entry.entries.forEach((nested, index) => {
+      emit(nested, childMargin, index === entry.entries.length - 1 ? "└─ " : "├─ ");
+    });
+  }
+}
+
+/** One entry in a span's detail block: a head line plus nested content. */
+interface SpanDetailEntry {
+  readonly head: string;
+  /** Payload content, rendered on a plain margin under the head. */
+  readonly lines: readonly string[];
+  /** Structural sub-entries (span events), rendered with connectors. */
+  readonly entries: readonly SpanDetailEntry[];
+}
+
+function spanDetailEntries(span: LocalTraceSpan, width: number): SpanDetailEntry[] {
+  // Payload formatting takes a dim style for de-emphasized parts; detail
+  // lines are dimmed wholesale at emit time, so payloads get the identity.
+  const dim = (text: string): string => text;
+  const attrWidth = Math.max(40, width);
+  const entries: SpanDetailEntry[] = [];
+  const push = (
+    head: string,
+    lines: readonly string[] = [],
+    nested: readonly SpanDetailEntry[] = [],
+  ): void => {
+    entries.push({ entries: nested, head, lines });
+  };
   const error = span.statusCode === 2;
   const status =
     error && span.statusMessage !== undefined
@@ -121,44 +167,49 @@ export function renderSpanDetailLines(
       : error
         ? "ERROR"
         : "ok";
-  lines.push(`status: ${status}`);
-  lines.push(`duration: ${formatElapsed(durationMs(span.startTimeNs, span.endTimeNs))}`);
-  lines.push(`started: ${new Date(Number(span.startTimeNs / 1_000_000n)).toISOString()}`);
-  lines.push(`span: ${span.spanId}`);
-  if (span.parentSpanId !== undefined) lines.push(`parent: ${span.parentSpanId}`);
-  if (span.scope !== undefined) lines.push(`scope: ${sanitizeForTerminal(span.scope)}`);
-  if (span.kind !== undefined && span.kind !== 1) lines.push(`kind: ${spanKind(span.kind)}`);
+  push(`status: ${status}`);
+  push(`duration: ${formatElapsed(durationMs(span.startTimeNs, span.endTimeNs))}`);
+  push(`started: ${new Date(Number(span.startTimeNs / 1_000_000n)).toISOString()}`);
+  push(`span: ${span.spanId}`);
+  if (span.parentSpanId !== undefined) push(`parent: ${span.parentSpanId}`);
+  if (span.scope !== undefined) push(`scope: ${sanitizeForTerminal(span.scope)}`);
+  if (span.kind !== undefined && span.kind !== 1) push(`kind: ${spanKind(span.kind)}`);
 
-  const keys = Object.keys(span.attributes).sort();
-  for (const key of keys) {
-    const block = formatAttributeContent(key, span.attributes[key], options.dim, width - 2);
+  for (const key of Object.keys(span.attributes).sort()) {
+    const block = formatAttributeContent(key, span.attributes[key], dim, attrWidth - 2);
     const cleanKey = sanitizeForTerminal(key);
     if (block.length === 1) {
-      lines.push(`${cleanKey}: ${block[0]}`);
+      push(`${cleanKey}: ${block[0]}`);
     } else {
-      lines.push(`${cleanKey}:`);
-      for (const line of block) lines.push(`  ${line}`);
+      push(`${cleanKey}:`, block);
     }
   }
 
   if (span.events.length > 0) {
-    lines.push("events:");
-    for (const event of span.events) {
-      const offsetMs = Math.max(0, durationMs(span.startTimeNs, event.timeNs));
-      lines.push(`  ${sanitizeForTerminal(event.name)}  +${formatElapsed(offsetMs)}`);
-      for (const key of Object.keys(event.attributes).sort()) {
-        const block = formatAttributeContent(key, event.attributes[key], options.dim, width - 4);
-        const cleanKey = sanitizeForTerminal(key);
-        if (block.length === 1) {
-          lines.push(`    ${cleanKey}: ${block[0]}`);
-        } else {
-          lines.push(`    ${cleanKey}:`);
-          for (const line of block) lines.push(`      ${line}`);
+    push(
+      "events:",
+      [],
+      span.events.map((event) => {
+        const offsetMs = Math.max(0, durationMs(span.startTimeNs, event.timeNs));
+        const lines: string[] = [];
+        for (const key of Object.keys(event.attributes).sort()) {
+          const block = formatAttributeContent(key, event.attributes[key], dim, attrWidth - 6);
+          const cleanKey = sanitizeForTerminal(key);
+          if (block.length === 1) {
+            lines.push(`${cleanKey}: ${block[0]}`);
+          } else {
+            lines.push(`${cleanKey}:`, ...block.map((line) => `  ${line}`));
+          }
         }
-      }
-    }
+        return {
+          entries: [],
+          head: `${sanitizeForTerminal(event.name)}  +${formatElapsed(offsetMs)}`,
+          lines,
+        };
+      }),
+    );
   }
-  return lines;
+  return entries;
 }
 
 function spanCostUsd(span: LocalTraceSpan): number | undefined {

@@ -5,7 +5,7 @@ import type { LocalTraceSpan } from "#tracing/local-trace-reader.js";
 import {
   formatCostUsd,
   formatTokenSummary,
-  renderSpanDetailLines,
+  renderSpanDetailTree,
   spanMetricChips,
   summarizeLocalTrace,
 } from "./trace-detail.js";
@@ -23,8 +23,6 @@ function span(overrides: Partial<LocalTraceSpan> = {}): LocalTraceSpan {
     ...overrides,
   };
 }
-
-const identity = (text: string): string => text;
 
 describe("spanMetricChips", () => {
   it("emits token, cost, and tool chips only when present", () => {
@@ -122,9 +120,11 @@ describe("formatTokenSummary / formatCostUsd", () => {
   });
 });
 
-describe("renderSpanDetailLines", () => {
-  it("renders facts, sorted attributes, and events with offsets", () => {
-    const lines = renderSpanDetailLines(
+describe("renderSpanDetailTree", () => {
+  const mute = (text: string): string => text;
+
+  it("renders facts, sorted attributes, and events as tree entries", () => {
+    const lines = renderSpanDetailTree(
       span({
         attributes: {
           "agent.model.id": "gpt-5",
@@ -141,45 +141,57 @@ describe("renderSpanDetailLines", () => {
         parentSpanId: "b".repeat(16),
         scope: "eve.agent",
       }),
-      { dim: identity, width: 80 },
+      { childrenFollow: false, margin: "│  ", mute, width: 80 },
     );
 
     expect(lines).toEqual([
-      "status: ok",
-      "duration: 10ms",
-      `started: ${new Date(10).toISOString()}`,
-      `span: ${"a".repeat(16)}`,
-      `parent: ${"b".repeat(16)}`,
-      "scope: eve.agent",
-      "agent.model.id: gpt-5",
-      "gen_ai.tool.call.arguments:",
-      "  {",
-      '    "city": "SF"',
-      "  }",
-      "events:",
-      "  step.started  +0ms",
-      "  step.completed  +10ms",
-      "    step.index: 0",
+      "│  ├─ status: ok",
+      "│  ├─ duration: 10ms",
+      `│  ├─ started: ${new Date(10).toISOString()}`,
+      `│  ├─ span: ${"a".repeat(16)}`,
+      `│  ├─ parent: ${"b".repeat(16)}`,
+      "│  ├─ scope: eve.agent",
+      "│  ├─ agent.model.id: gpt-5",
+      "│  ├─ gen_ai.tool.call.arguments:",
+      "│  │    {",
+      '│  │      "city": "SF"',
+      "│  │    }",
+      "│  └─ events:",
+      "│     ├─ step.started  +0ms",
+      "│     └─ step.completed  +10ms",
+      "│          step.index: 0",
     ]);
   });
 
+  it("keeps the last entry open when child spans follow", () => {
+    const lines = renderSpanDetailTree(span(), {
+      childrenFollow: true,
+      margin: "",
+      mute,
+      width: 80,
+    });
+
+    expect(lines[0]).toBe("├─ status: ok");
+    expect(lines[lines.length - 1]).toMatch(/^├─ /u);
+  });
+
   it("shows the status message on error spans and kind when non-internal", () => {
-    const lines = renderSpanDetailLines(
+    const lines = renderSpanDetailTree(
       span({ kind: 2, statusCode: 2, statusMessage: "model call failed" }),
-      { dim: identity, width: 80 },
+      { childrenFollow: false, margin: "", mute, width: 80 },
     );
 
-    expect(lines[0]).toBe("status: ERROR — model call failed");
-    expect(lines).toContain("kind: server");
+    expect(lines[0]).toBe("├─ status: ERROR — model call failed");
+    expect(lines).toContain("└─ kind: server");
   });
 
   it("sanitizes attribute keys, values, and event names", () => {
-    const lines = renderSpanDetailLines(
+    const lines = renderSpanDetailTree(
       span({
         attributes: { "evil\x1b[2Jkey": "va\x1b[31mlue" },
         events: [{ attributes: {}, name: "bad\x1b]0;owned\x07event", timeNs: 10_000_000n }],
       }),
-      { dim: identity, width: 80 },
+      { childrenFollow: false, margin: "", mute, width: 80 },
     );
 
     const joined = lines.join("\n");

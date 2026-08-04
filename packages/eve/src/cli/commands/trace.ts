@@ -3,7 +3,7 @@ import { basename } from "node:path";
 import {
   formatCostUsd,
   formatTokenSummary,
-  renderSpanDetailLines,
+  renderSpanDetailTree,
   spanMetricChips,
   summarizeLocalTrace,
 } from "#cli/commands/trace-detail.js";
@@ -248,20 +248,28 @@ function renderSpanTree(
 
   const lines: string[] = [];
   const visited = new Set<string>();
+  // All tree chrome — bars and connectors, on span rows and detail lines
+  // alike — is dimmed so only labels and values render bright.
+  const mute = options.dim ?? ((text: string) => text);
   const render = (span: LocalTraceSpan, prefix: string, connector: string): void => {
     if (visited.has(span.spanId)) return;
     visited.add(span.spanId);
-    lines.push(`${prefix}${connector}${spanLabel(span, extents.get(span.spanId))}`);
+    const chrome = `${prefix}${connector}`;
+    lines.push(`${chrome === "" ? "" : mute(chrome)}${spanLabel(span, extents.get(span.spanId))}`);
     const childPrefix = `${prefix}${connector === "" ? "" : connector === "└─ " ? "   " : "│  "}`;
+    const descendants = children.get(span.spanId) ?? [];
     if (options.verbose === true) {
-      for (const line of renderSpanDetailLines(span, {
-        dim: options.dim ?? ((text) => text),
-        width: width - childPrefix.length - 2,
+      // Detail entries render as `tree(1)`-style entries beneath the span's
+      // row, dimmed so the span rows keep visual priority.
+      for (const line of renderSpanDetailTree(span, {
+        childrenFollow: descendants.length > 0,
+        margin: childPrefix,
+        mute,
+        width,
       })) {
-        lines.push(`${childPrefix}  ${line}`);
+        lines.push(line);
       }
     }
-    const descendants = children.get(span.spanId) ?? [];
     descendants.forEach((child, index) => {
       const last = index === descendants.length - 1;
       render(child, childPrefix, last ? "└─ " : "├─ ");

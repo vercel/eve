@@ -280,7 +280,9 @@ describe("eve traces", () => {
       ],
     });
     await writeSegment(root, TRACE_ONE, {
-      ...span("b", "ai.toolCall", 20, 30, "a", { "gen_ai.tool.name": "get_weather" }),
+      ...span("b", "ai.toolCall", 20, 30, "a".repeat(16), {
+        "gen_ai.tool.name": "get_weather",
+      }),
       status: { code: 2, message: "tool exploded" },
     });
     const output = collectingLogger();
@@ -288,14 +290,15 @@ describe("eve traces", () => {
     await runTraceShowCommand(output.logger, root, "session-one", { verbose: true });
 
     expect(output.out[0]).toContain("agent.step [step 0]");
-    expect(output.out[0]).toContain("status: ok");
-    expect(output.out[0]).toContain("agent.model.id: gpt-5");
-    expect(output.out[0]).toContain("events:");
-    expect(output.out[0]).toContain("step.started  +0ms");
-    expect(output.out[0]).toContain("step.completed  +70ms");
+    expect(output.out[0]).toContain("├─ status: ok");
+    expect(output.out[0]).toContain("├─ agent.model.id: gpt-5");
+    expect(output.out[0]).toContain("├─ events:");
+    expect(output.out[0]).toContain("├─ step.started  +0ms");
+    expect(output.out[0]).toContain("└─ step.completed  +70ms");
     expect(output.out[0]).toContain("step.index: 0");
-    expect(output.out[0]).toContain("status: ERROR — tool exploded");
-    expect(output.out[0]).toContain("gen_ai.tool.name: get_weather");
+    expect(output.out[0]).toContain("└─ ai.toolCall  10ms  get_weather ERROR");
+    expect(output.out[0]).toContain("├─ status: ERROR — tool exploded");
+    expect(output.out[0]).toContain("└─ gen_ai.tool.name: get_weather");
     expect(output.out[0]).toContain("Errors");
     expect(output.out[0]).not.toContain("\u001B");
   });
