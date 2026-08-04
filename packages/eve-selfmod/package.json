@@ -1,0 +1,77 @@
+{
+  "name": "eve-selfmod",
+  "version": "0.0.0",
+  "description": "Development-only source editing subagent for eve applications.",
+  "keywords": [
+    "agents",
+    "eve",
+    "extension",
+    "self-modifying"
+  ],
+  "homepage": "https://github.com/vercel/eve#readme",
+  "bugs": {
+    "url": "https://github.com/vercel/eve/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vercel/eve.git",
+    "directory": "packages/eve-selfmod"
+  },
+  "files": [
+    "dist",
+    "scaffold",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./agent": {
+      "eve-source": "./src/agent.ts",
+      "types": "./scaffold/agent.d.ts",
+      "import": "./scaffold/agent.js",
+      "default": "./scaffold/agent.js"
+    },
+    "./sandbox": {
+      "eve-source": "./src/sandbox.ts",
+      "types": "./scaffold/sandbox.d.ts",
+      "import": "./scaffold/sandbox.js",
+      "default": "./scaffold/sandbox.js"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "eve extension build && tsc -p tsconfig.scaffold.json",
+    "prepare": "pnpm run build",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scaffold.json --noEmit"
+  },
+  "dependencies": {
+    "just-bash": "3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eve": "workspace:*",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "eve": "workspace:*"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
+  }
+}
