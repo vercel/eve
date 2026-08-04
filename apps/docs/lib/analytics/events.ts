@@ -1,7 +1,5 @@
 export const analyticsEvents = {
   askAiSubmitted: "Submitted docs question",
-  docsSearched: "Searched docs",
-  docsSearchResultOpened: "Opened docs search result",
   gettingStartedOpened: "Opened getting started",
   installerCommandCopyClicked: "Clicked installer command copy",
   installerCommandSelected: "Selected installer command",
