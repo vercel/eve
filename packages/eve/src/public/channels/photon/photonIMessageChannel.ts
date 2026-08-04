@@ -117,13 +117,13 @@ async function dispatchMessage(
   await markReadBestEffort(bridge.bot.getAdapter("imessage"), thread, message);
   const content = photonInboundContent(message);
   if (content === undefined) return;
-  await bridge.send({
-    auth: result.auth,
-    context: [...(result.context ?? [])],
-    message: content,
-    thread,
-    turnPolicy: "experimental-steer",
-  });
+  await bridge.send(
+    {
+      context: [...(result.context ?? [])],
+      message: content,
+    },
+    { auth: result.auth, thread, turnPolicy: "experimental-steer" },
+  );
 }
 
 async function markReadBestEffort(

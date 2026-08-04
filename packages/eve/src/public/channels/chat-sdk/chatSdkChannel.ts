@@ -1,4 +1,7 @@
+import type { UserContent } from "ai";
+
 import type { ChannelOperations, ChannelSendInput } from "#channel/channel-operations.js";
+import { normalizeSendInput } from "#channel/send-input.js";
 import type { SendPayload } from "#channel/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -43,6 +46,7 @@ const DEFAULT_STREAMING_EDIT_INTERVAL_MS = 1_000;
 const MAX_TYPING_STATUS = 80;
 
 type ChatSdkAdapters = Record<string, Adapter>;
+type ChatSdkSendInput = string | UserContent | SendPayload;
 type MutableChannelSendInput<TState> = {
   -readonly [Key in keyof ChannelSendInput<TState>]: ChannelSendInput<TState>[Key];
 };
@@ -128,10 +132,10 @@ export type ChatSdkChannelEvents<TAdapters extends ChatSdkAdapters = ChatSdkAdap
   ChannelEvents<ChatSdkChannelContext<TAdapters>>;
 
 /**
- * Input for `bridge.send(...)` inside Chat SDK handlers. The `thread`
- * determines the eve continuation token and persisted channel state.
+ * Options for `bridge.send(...)` inside Chat SDK handlers. The `thread`
+ * determines the eve continuation token and the persisted channel state.
  */
-export interface ChatSdkSendInput extends SendPayload {
+export interface ChatSdkSendOptions {
   readonly auth?: SessionAuthContext | null;
   readonly callback?: ChannelSendInput<ChatSdkChannelState>["callback"];
   readonly mode?: ChannelSendInput<ChatSdkChannelState>["mode"];
@@ -222,7 +226,7 @@ export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSd
    * Use `channel.receive(...)` for proactive sends that are not handling an
    * inbound Chat SDK webhook.
    */
-  send(input: ChatSdkSendInput): Promise<Session>;
+  send(input: ChatSdkSendInput, options: ChatSdkSendOptions): Promise<Session>;
 }
 
 /**
@@ -241,7 +245,7 @@ export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSd
  * });
  *
  * bot.onNewMention(async (thread, message) => {
- *   await send({ message: message.text, thread });
+ *   await send(message.text, { thread });
  * });
  * ```
  */
@@ -266,11 +270,14 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         "chatSdkChannel input actions require a thread on the Chat SDK action event.",
       );
     }
-    await bridgeSend(bot, {
-      auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
-      inputResponses: [response],
-      thread: event.thread,
-    });
+    await bridgeSend(
+      bot,
+      { inputResponses: [response] },
+      {
+        auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
+        thread: event.thread,
+      },
+    );
   });
 
   const channel = defineChannel<
@@ -328,8 +335,8 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   return {
     bot,
     channel,
-    send(input) {
-      return bridgeSend(bot, input);
+    send(input, options) {
+      return bridgeSend(bot, input, options);
     },
   };
 }
@@ -543,6 +550,7 @@ async function postFailure(
 async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
   input: ChatSdkSendInput,
+  options: ChatSdkSendOptions,
 ): Promise<Session> {
   const active = contextStorage.getStore()?.get(ActiveWebhookKey);
   if (!active) {
@@ -550,22 +558,23 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
       "chatSdkChannel().send can only run during a Chat SDK webhook handler for this bridge.",
     );
   }
-  const thread = serializeThread(bot, input.thread, input.adapterName);
+  const thread = serializeThread(bot, options.thread, options.adapterName);
   const sendInput: MutableChannelSendInput<ChatSdkChannelState> = {
-    context: input.context,
-    inputResponses: input.inputResponses,
-    message: input.message,
-    outputSchema: input.outputSchema,
-    auth: input.auth ?? null,
+    ...normalizeSendInput(input),
+    auth: options.auth ?? null,
     state: { thread },
   };
-  if (input.callback !== undefined) sendInput.callback = input.callback;
-  if (input.mode !== undefined) sendInput.mode = input.mode;
-  if (input.title !== undefined) sendInput.title = input.title;
-  if (input.turnPolicy === "experimental-steer" && input.message !== undefined) {
+  if (options.callback !== undefined) sendInput.callback = options.callback;
+  if (options.mode !== undefined) sendInput.mode = options.mode;
+  if (options.title !== undefined) sendInput.title = options.title;
+  if (options.turnPolicy === "experimental-steer" && hasMessageInput(input)) {
     await active.cancel(thread.id);
   }
   return active.send(thread.id, sendInput);
+}
+
+function hasMessageInput(input: ChatSdkSendInput): boolean {
+  return typeof input === "string" || Array.isArray(input) || input.message !== undefined;
 }
 
 function initialState(): ChatSdkChannelState {
