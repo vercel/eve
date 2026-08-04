@@ -74,6 +74,7 @@ minimumReleaseAgeExclude:
   - "@photon-ai/chat-adapter-imessage"
   - "@resend/chat-sdk-adapter"
   - "@upstash/agentkit-eve-extension"
+  - "@vectorize-io/hindsight-eve"
   - "@veltdev/chat-sdk-adapter"
   - "@zernio/chat-sdk-adapter"
   - chat

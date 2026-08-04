@@ -306,6 +306,9 @@ importers:
       '@upstash/agentkit-eve-extension':
         specifier: ^0.4.0
         version: 0.4.0(eve@packages+eve)
+      '@vectorize-io/hindsight-eve':
+        specifier: ^0.2.1
+        version: 0.2.1(eve@packages+eve)
       '@veltdev/chat-sdk-adapter':
         specifier: 0.2.4
         version: 0.2.4(ai@7.0.38(zod@4.4.3))(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
@@ -7492,6 +7495,12 @@ packages:
 
   '@upstash/redis@1.38.0':
     resolution: {integrity: sha512-wu+dZBptlLy0+MCUEoHmzrY/TnmgDey3+c7EbIGwrLqAvkP8yi5MWZHYGIFtAygmL4Bkz2TdFu+eU0vFPncIcg==}
+
+  '@vectorize-io/hindsight-eve@0.2.1':
+    resolution: {integrity: sha512-dFrCRgX/fXNV7bCCXfifmKTEQnj4insbxOQ79GU9mHMwZ9XfjQ1Oq8679C9xHwpItCtx6cDPqWZkluq8iY+qNg==}
+    engines: {node: '>=24'}
+    peerDependencies:
+      eve: '>=0.11.0'
 
   '@veltdev/chat-sdk-adapter@0.2.4':
     resolution: {integrity: sha512-Amzn9rMKpkDjpC1uxpn9ztsIdFSF6sC+6KOUhyIPkQhinKCS5AUI1XCO8aLZTlolyDObPt4Gmib8XSmSg9Uclg==}
@@ -21748,6 +21757,10 @@ snapshots:
   '@upstash/redis@1.38.0':
     dependencies:
       uncrypto: 0.1.3
+
+  '@vectorize-io/hindsight-eve@0.2.1(eve@packages+eve)':
+    dependencies:
+      eve: link:packages/eve
 
   '@veltdev/chat-sdk-adapter@0.2.4(ai@7.0.38(zod@4.4.3))(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)':
     dependencies:

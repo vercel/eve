@@ -281,6 +281,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "hindsight",
+    name: "Hindsight",
+    kind: "extension",
+    tagline: "Recall relevant context before every turn and retain each exchange automatically.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "jetty",
     name: "Jetty",
     kind: "extension",

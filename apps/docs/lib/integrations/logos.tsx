@@ -177,6 +177,24 @@ export const notionLogo = (props: LogoProps) => <SiNotion {...props} />;
 
 export const upstashLogo = (props: LogoProps) => <SiUpstash color="default" {...props} />;
 
+export const hindsightLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 186 139" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <g stroke="#078BC2" strokeLinecap="round" strokeLinejoin="round" strokeWidth="8">
+      <path d="m65 53-14-23M121 53l14-23M42 69l-20-5M144 69l20-5M61 96l-16 17M125 96l16 17" />
+      <circle cx="44" cy="19" fill="white" r="11" />
+      <circle cx="142" cy="19" fill="white" r="11" />
+      <circle cx="12" cy="61" fill="white" r="9" />
+      <circle cx="174" cy="61" fill="white" r="9" />
+      <circle cx="35" cy="121" fill="white" r="9" />
+      <circle cx="151" cy="121" fill="white" r="9" />
+    </g>
+    <path d="M37 72c14-21 34-33 56-33s42 12 56 33c-14 23-34 35-56 35S51 95 37 72Z" fill="#078BC2" />
+    <ellipse cx="93" cy="73" fill="white" rx="30" ry="21" />
+    <circle cx="93" cy="73" fill="#111827" r="17" />
+    <circle cx="102" cy="64" fill="white" r="7" />
+  </svg>
+);
+
 export const datadogLogo = (props: LogoProps) => <SiDatadog color="default" {...props} />;
 
 export const honeycombLogo = (props: LogoProps) => (
@@ -616,6 +634,7 @@ export const logos = {
   raindrop: raindropLogo,
   kernel: kernelLogo,
   upstash: upstashLogo,
+  hindsight: hindsightLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,
   brex: brexLogo,

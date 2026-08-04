@@ -77,6 +77,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@upstash/agentkit-eve-extension": "^0.4.0",
+    "@vectorize-io/hindsight-eve": "^0.2.1",
     "@veltdev/chat-sdk-adapter": "0.2.4",
     "@vercel/connect": "catalog:",
     "@vercel/otel": "catalog:",

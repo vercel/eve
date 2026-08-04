@@ -80,6 +80,19 @@ describe("integration discovery", () => {
     expect(integrationSearchText(agentkit!)).toContain("long-term memory");
   });
 
+  it("renders the Hindsight memory extension setup", () => {
+    const hindsight = getIntegration("hindsight");
+    expect(hindsight).toBeDefined();
+
+    const markdown = integrationMarkdown(hindsight!);
+    expect(markdown).toContain("eve add extension/hindsight");
+    expect(markdown).toContain('import { hindsightMemory } from "@vectorize-io/hindsight-eve"');
+    expect(markdown).toContain("hindsightRetainHook");
+    expect(markdown).toContain("HINDSIGHT_API_KEY");
+    expect(markdown).toContain("HINDSIGHT_BANK_ID");
+    expect(integrationSearchText(hindsight!)).toContain("long-term memory");
+  });
+
   it("renders the GitHub Tools extension setup", () => {
     const githubTools = getIntegration("github-tools");
     expect(githubTools).toBeDefined();

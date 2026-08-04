@@ -93,6 +93,11 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("upstash-agentkit")?.connection).toBeUndefined();
   });
 
+  it("exposes Hindsight as an extension", () => {
+    expect(getIntegrationEntry("hindsight")?.kind).toBe("extension");
+    expect(getIntegrationEntry("hindsight")?.connection).toBeUndefined();
+  });
+
   it("exposes GitHub Tools as an extension distinct from the GitHub channel", () => {
     expect(getIntegrationEntry("github")?.kind).toBe("channel");
     expect(getIntegrationEntry("github-tools")?.kind).toBe("extension");
