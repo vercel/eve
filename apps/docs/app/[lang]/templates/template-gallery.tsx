@@ -13,7 +13,12 @@ import { Input } from "@vercel/geistdocs/components/input";
 import { ChevronDownIcon, SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { analyticsEvents, getCountBucket, getQueryLengthBucket } from "@/lib/analytics/events";
+import {
+  analyticsEvents,
+  getCountBucket,
+  getQueryLengthBucket,
+  normalizeSearchQuery,
+} from "@/lib/analytics/events";
 import { templatePath } from "@/lib/geistdocs/canonical";
 import type { TemplateCategory, TemplateEntry, TemplateIntegration } from "@/lib/templates/data";
 import { integrationIcons } from "./integration-icons";
@@ -157,6 +162,7 @@ export const TemplateGallery = ({ entries }: TemplateGalleryProps) => {
       track(analyticsEvents.templatesSearched, {
         category,
         integration,
+        query: normalizeSearchQuery(normalizedQuery),
         query_length: getQueryLengthBucket(normalizedQuery),
         results: getCountBucket(results.length),
       });

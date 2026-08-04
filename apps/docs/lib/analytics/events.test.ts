@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   analyticsEvents,
   countMarkdownSuggestions,
+  getAnalyticsUrl,
   getCountBucket,
   getDocsSurface,
   getMarkdownFormat,
   getQueryLengthBucket,
   getResponseOutcome,
-  isQueryFreeUrl,
+  normalizeSearchQuery,
 } from "./events";
 
 describe("docs analytics", () => {
@@ -16,10 +17,12 @@ describe("docs analytics", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it("prevents server events from inheriting query-string input", () => {
-    expect(isQueryFreeUrl("https://eve.dev/api/chat")).toBe(true);
-    expect(isQueryFreeUrl("https://eve.dev/docs/missing?token=secret")).toBe(false);
-    expect(isQueryFreeUrl("not a URL")).toBe(false);
+  it("removes query-string input from server analytics URLs", () => {
+    expect(getAnalyticsUrl("https://eve.dev/api/chat")).toBe("https://eve.dev/api/chat");
+    expect(getAnalyticsUrl("https://eve.dev/docs/missing?token=secret#hash")).toBe(
+      "https://eve.dev/docs/missing",
+    );
+    expect(getAnalyticsUrl("not a URL")).toBeUndefined();
   });
 
   it.each([
@@ -45,11 +48,17 @@ describe("docs analytics", () => {
     ]);
   });
 
-  it("uses bounded query-length buckets instead of query text", () => {
+  it("uses bounded query-length buckets", () => {
     expect(getQueryLengthBucket("a")).toBe("1-2");
     expect(getQueryLengthBucket("agent")).toBe("3-10");
     expect(getQueryLengthBucket("how do sessions work")).toBe("11-30");
     expect(getQueryLengthBucket("how do I deploy an agent to my own infrastructure")).toBe("31+");
+  });
+
+  it("normalizes and bounds recorded search terms", () => {
+    expect(normalizeSearchQuery("  Durable   Agents  ")).toBe("durable agents");
+    expect(normalizeSearchQuery("ＡＧＥＮＴ")).toBe("agent");
+    expect(normalizeSearchQuery("a".repeat(200))).toHaveLength(120);
   });
 
   it.each([

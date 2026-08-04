@@ -1,5 +1,6 @@
 export const analyticsEvents = {
   askAiSubmitted: "Submitted docs question",
+  docsSearched: "Searched docs",
   gettingStartedOpened: "Opened getting started",
   installerCommandCopied: "Copied installer command",
   installerCommandSelected: "Selected installer command",
@@ -21,13 +22,19 @@ export type AnalyticsEventName = (typeof analyticsEvents)[keyof typeof analytics
 
 export type DocsSurface = "docs" | "home" | "integrations" | "other" | "templates";
 
-export const isQueryFreeUrl = (url: string): boolean => {
+export const getAnalyticsUrl = (url: string): string | undefined => {
   try {
-    return new URL(url).search === "";
+    const parsed = new URL(url);
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
   } catch {
-    return false;
+    return undefined;
   }
 };
+
+export const normalizeSearchQuery = (query: string): string =>
+  query.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase().slice(0, 120);
 
 export const getDocsSurface = (value: unknown): DocsSurface => {
   if (typeof value !== "string") return "other";

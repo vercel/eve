@@ -6,7 +6,12 @@ import { InputGroup, InputGroupAddon } from "@vercel/geistdocs/components/input-
 import { SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { analyticsEvents, getCountBucket, getQueryLengthBucket } from "@/lib/analytics/events";
+import {
+  analyticsEvents,
+  getCountBucket,
+  getQueryLengthBucket,
+  normalizeSearchQuery,
+} from "@/lib/analytics/events";
 import type { Integration, IntegrationType } from "@/lib/integrations/data";
 import { cn } from "@/lib/utils";
 import { IntegrationCard } from "./integration-card";
@@ -71,6 +76,7 @@ export const Gallery = ({ filter, integrations }: GalleryProps) => {
     const timer = setTimeout(() => {
       track(analyticsEvents.integrationsSearched, {
         filter,
+        query: normalizeSearchQuery(normalizedQuery),
         query_length: getQueryLengthBucket(normalizedQuery),
         results: getCountBucket(results.length),
       });
