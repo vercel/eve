@@ -2,7 +2,9 @@
 
 import {
   BotIcon,
+  BoxIcon,
   BracesIcon,
+  CalendarClockIcon,
   ChevronRightIcon,
   FileTextIcon,
   type LucideIcon,
@@ -32,8 +34,12 @@ interface CategoryStyle {
 const categoryStyles: Record<string, CategoryStyle> = {
   "agent.ts": { icon: SettingsIcon },
   "instructions.md": { icon: FileTextIcon },
+  "instructions.ts": { icon: FileTextIcon },
+  "sandbox.ts": { icon: BoxIcon },
+  sandbox: { icon: BoxIcon },
   channels: { icon: MessageSquareIcon },
   connections: { icon: PlugIcon },
+  schedules: { icon: CalendarClockIcon },
   skills: { icon: FileTextIcon },
   tools: { icon: WrenchIcon },
   subagents: { icon: BotIcon },
@@ -41,11 +47,19 @@ const categoryStyles: Record<string, CategoryStyle> = {
 };
 
 const defaultStyle: CategoryStyle = { icon: FileTextIcon };
+
+// Keys absent from this list render last in encounter order, so every top-level
+// name a template can author belongs here. Standalone files lead, folders follow;
+// `sandbox` appears twice because templates author it as either a file or a folder.
 const categoryOrder = [
   "agent.ts",
   "instructions.md",
+  "instructions.ts",
+  "sandbox.ts",
+  "sandbox",
   "channels",
   "connections",
+  "schedules",
   "skills",
   "tools",
   "subagents",

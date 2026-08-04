@@ -2,10 +2,12 @@ export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing
 import { templateSourceFiles } from "./sources";
 
 export type TemplateIntegration =
+  | "GitHub"
   | "HTTP API"
   | "Linear"
   | "Notion"
   | "Resend"
+  | "Sanity"
   | "Sentry"
   | "Slack"
   | "Typefully"
@@ -79,6 +81,21 @@ export const templateEntries: TemplateEntry[] = [
     files: templateSourceFiles["eve-slack-agent"],
   },
   {
+    slug: "kody",
+    title: "GitHub",
+    setupPrompt:
+      "I want to build a GitHub maintainer agent with the eve framework, using the Kody template. Read the setup instructions at https://agent-resources.dev/kody-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
+    description:
+      "Kody, a personal GitHub maintainer agent: emails you a weekly digest of open issues, acts on your replies, summarizes new pull requests, and works the issues you delegate in Linear.",
+    sourceHref: "https://github.com/vercel-labs/kody-eve-template/tree/main",
+    sourceRevision: "8427e3c7e88a6a449dd7c79c601619ac37cf18e1",
+    category: "Collaboration",
+    model: "anthropic/claude-fable-5",
+    integrations: ["GitHub", "Linear", "Resend"],
+    source: "Vercel Templates",
+    files: templateSourceFiles.kody,
+  },
+  {
     slug: "marketing-team-eve-template",
     title: "Marketing team",
     setupPrompt:
@@ -92,6 +109,36 @@ export const templateEntries: TemplateEntry[] = [
     integrations: ["Web chat", "Slack", "Notion", "Resend", "Typefully"],
     source: "Vercel Templates",
     files: templateSourceFiles["marketing-team-eve-template"],
+  },
+  {
+    slug: "sanity-copilot",
+    title: "Sanity",
+    setupPrompt:
+      "I want to build a Slack agent with the eve framework, using the Sanity copilot template. Read the setup instructions at https://agent-resources.dev/sanity-copilot-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
+    description:
+      "A Slack copilot for your Sanity project: query and edit content with GROQ, shape schemas, manage releases, and draft long-form pieces into Notion.",
+    sourceHref: "https://github.com/vercel-labs/sanity-copilot-eve-template/tree/main",
+    sourceRevision: "f076b80e2bb3a2ccae3dc1cfe4886d5ac88c338b",
+    category: "Collaboration",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Slack", "Sanity", "Notion"],
+    source: "Vercel Templates",
+    files: templateSourceFiles["sanity-copilot"],
+  },
+  {
+    slug: "typefully",
+    title: "Typefully",
+    setupPrompt:
+      "I want to build a Slack agent with the eve framework, using the Typefully social media agent template. Read the setup instructions at https://agent-resources.dev/typefully-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
+    description:
+      "A Slack agent that runs your social presence through Typefully: draft posts and threads for X, LinkedIn, Threads, Bluesky, and Mastodon, manage the publishing queue, and get a weekly analytics digest.",
+    sourceHref: "https://github.com/vercel-labs/typefully-eve-template/tree/main",
+    sourceRevision: "3627b2282a9ebfa1badd987f2b3a0c337219575f",
+    category: "Collaboration",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Slack", "Typefully", "Notion"],
+    source: "Vercel Templates",
+    files: templateSourceFiles.typefully,
   },
   {
     slug: "weather-agent-fixture",
