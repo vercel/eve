@@ -102,9 +102,9 @@ describe("routeDeliverPayload", () => {
     expect(routed.forChildren).toEqual([
       {
         childContinuationToken: "child-a",
+        parentAction: { kind: "cancel-turn" },
         payload: { inputResponses: [{ optionId: "stop", requestId: "req-limit" }] },
       },
     ]);
-    expect(routed.parentAction).toEqual({ kind: "cancel-turn" });
   });
 });

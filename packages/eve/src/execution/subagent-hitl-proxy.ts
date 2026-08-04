@@ -73,10 +73,10 @@ export async function emitProxiedInputRequest(input: {
 export interface RoutedDeliverPayload {
   readonly forChildren: readonly {
     readonly childContinuationToken: string;
+    readonly parentAction?: { readonly kind: "cancel-turn" };
     readonly payload: { readonly inputResponses: readonly InputResponse[] };
   }[];
   readonly forSelf: DeliverPayload | undefined;
-  readonly parentAction: { readonly kind: "cancel-turn" } | undefined;
 }
 
 /** Splits a deliver payload into parent-local and proxied-child buckets. */
@@ -89,7 +89,7 @@ export function routeDeliverPayload(input: {
 
   const responsesByChild = new Map<string, InputResponse[]>();
   const unroutedResponses: InputResponse[] = [];
-  let parentAction: RoutedDeliverPayload["parentAction"];
+  const childCancellationRequests = new Set<string>();
 
   for (const response of inputResponses) {
     const route = entries.get(response.requestId);
@@ -100,7 +100,7 @@ export function routeDeliverPayload(input: {
     }
 
     if (route.kind === "session-limit" && response.optionId === SESSION_LIMIT_STOP_OPTION_ID) {
-      parentAction = { kind: "cancel-turn" };
+      childCancellationRequests.add(route.childContinuationToken);
     }
 
     const existing = responsesByChild.get(route.childContinuationToken);
@@ -115,6 +115,9 @@ export function routeDeliverPayload(input: {
   const forChildren: RoutedDeliverPayload["forChildren"] = [...responsesByChild.entries()].map(
     ([childContinuationToken, responses]) => ({
       childContinuationToken,
+      ...(childCancellationRequests.has(childContinuationToken)
+        ? { parentAction: { kind: "cancel-turn" } as const }
+        : {}),
       payload: { inputResponses: responses },
     }),
   );
@@ -138,5 +141,5 @@ export function routeDeliverPayload(input: {
 
   const forSelf = Object.keys(remainder).length > 0 ? (remainder as DeliverPayload) : undefined;
 
-  return { forChildren, forSelf, parentAction };
+  return { forChildren, forSelf };
 }

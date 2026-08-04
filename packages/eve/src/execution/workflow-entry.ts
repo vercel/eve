@@ -370,11 +370,23 @@ async function runDriverLoop(input: {
           serializedContext: action.serializedContext,
           sessionState: action.sessionState,
         });
-        action = {
-          ...action,
-          serializedContext: settled.serializedContext,
-          sessionState: settled.sessionState,
-        };
+        action =
+          routed.remainder === undefined
+            ? {
+                ...action,
+                serializedContext: settled.serializedContext,
+                sessionState: settled.sessionState,
+              }
+            : await runTurn({
+                delivery: {
+                  auth: nextDeliver.auth,
+                  kind: "deliver",
+                  payloads: [routed.remainder],
+                  requestId: nextDeliver.requestId,
+                },
+                serializedContext: settled.serializedContext,
+                sessionState: settled.sessionState,
+              });
         continue;
       }
 

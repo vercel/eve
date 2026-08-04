@@ -1,3 +1,5 @@
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
 import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
@@ -41,6 +43,7 @@ import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { InputResponse } from "#runtime/input/types.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import {
   createAuthorizationCompletedEvent,
@@ -575,6 +578,7 @@ export function resolveEffectiveOutputSchema(input: {
 export type RoutedDeliverResult =
   | {
       readonly kind: "cancel-turn";
+      readonly remainder: DeliverPayload | undefined;
     }
   | {
       readonly kind: "continue";
@@ -601,15 +605,40 @@ export async function routeProxiedDeliverStep(input: {
     state: durableSession.state,
   });
 
+  const deliveredResponses = new Set<InputResponse>();
+  let parentAction: { readonly kind: "cancel-turn" } | undefined;
+
   for (const forChild of routed.forChildren) {
-    await resumeHook(forChild.childContinuationToken, {
-      auth: input.auth,
-      kind: "deliver",
-      payloads: [forChild.payload],
-    });
+    try {
+      await resumeHook(forChild.childContinuationToken, {
+        auth: input.auth,
+        kind: "deliver",
+        payloads: [forChild.payload],
+      });
+    } catch (error) {
+      if (HookNotFoundError.is(error)) {
+        continue;
+      }
+      throw error;
+    }
+
+    for (const response of forChild.payload.inputResponses) {
+      deliveredResponses.add(response);
+    }
+    parentAction ??= forChild.parentAction;
   }
 
-  return routed.parentAction ?? { kind: "continue", remainder: routed.forSelf };
+  const undeliveredResponses = input.payload.inputResponses?.filter(
+    (response) => !deliveredResponses.has(response),
+  );
+  const remainder =
+    undeliveredResponses === undefined || undeliveredResponses.length === 0
+      ? routed.forSelf
+      : { ...routed.forSelf, inputResponses: undeliveredResponses };
+
+  return parentAction === undefined
+    ? { kind: "continue", remainder }
+    : { ...parentAction, remainder };
 }
 
 /** Starts a per-turn child workflow for the current driver session. */

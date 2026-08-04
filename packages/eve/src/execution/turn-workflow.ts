@@ -371,6 +371,9 @@ async function waitForRuntimeActionResults(input: {
         sessionState: input.cursor.sessionState,
       });
       if (routed.kind === "cancel-turn") {
+        if (routed.remainder !== undefined) {
+          input.bufferedDeliveries.push({ ...value.delivery, payloads: [routed.remainder] });
+        }
         return routed.kind;
       }
       if (routed.remainder !== undefined) {

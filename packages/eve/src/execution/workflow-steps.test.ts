@@ -17,6 +17,7 @@ import {
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
@@ -40,6 +41,7 @@ import { emitTerminalSessionFailureStep } from "#execution/terminal-session-fail
 import {
   dispatchTurnStep,
   resolveEffectiveOutputSchema,
+  routeProxiedDeliverStep,
   turnStep,
 } from "#execution/workflow-steps.js";
 import {
@@ -47,6 +49,7 @@ import {
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 
 vi.mock("./durable-session-store.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./durable-session-store.js")>();
@@ -194,6 +197,7 @@ function createSerializedContext(): Record<string, unknown> {
 afterEach(() => {
   getRunMock.mockReset();
   startMock.mockReset();
+  vi.mocked(resumeHook).mockReset();
   workflowWritesByNamespace.clear();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -309,6 +313,121 @@ describe("dispatchTurnStep", () => {
         "$eve.type": "turn",
       },
     });
+  });
+});
+
+describe("routeProxiedDeliverStep", () => {
+  it("preserves a response when its proxied child hook is already disposed", async () => {
+    const childContinuationToken = "subagent:parent:call-1";
+    const requestId = "question-1";
+    const session = upsertProxyInputRequests({
+      entries: [[requestId, { childContinuationToken, kind: "question" }]],
+      forChildContinuationToken: childContinuationToken,
+      session: createStubSession(),
+    });
+    installSessionStoreMocks([session]);
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    vi.mocked(resumeHook).mockRejectedValueOnce(new HookNotFoundError(childContinuationToken));
+
+    await expect(
+      routeProxiedDeliverStep({
+        parentWritable: createTestWritable(),
+        payload: { inputResponses: [{ optionId: "candidate", requestId }] },
+        sessionState: createStubSessionState({ hasProxyInputRequests: true }),
+      }),
+    ).resolves.toEqual({
+      kind: "continue",
+      remainder: { inputResponses: [{ optionId: "candidate", requestId }] },
+    });
+  });
+
+  it("only removes responses accepted by live children", async () => {
+    const liveChild = "subagent:parent:call-live";
+    const staleChild = "subagent:parent:call-stale";
+    const session = upsertProxyInputRequests({
+      entries: [["limit-stale", { childContinuationToken: staleChild, kind: "session-limit" }]],
+      forChildContinuationToken: staleChild,
+      session: upsertProxyInputRequests({
+        entries: [["question-live", { childContinuationToken: liveChild, kind: "question" }]],
+        forChildContinuationToken: liveChild,
+        session: createStubSession(),
+      }),
+    });
+    installSessionStoreMocks([session]);
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    vi.mocked(resumeHook)
+      .mockResolvedValueOnce(undefined as never)
+      .mockRejectedValueOnce(new HookNotFoundError(staleChild));
+
+    await expect(
+      routeProxiedDeliverStep({
+        parentWritable: createTestWritable(),
+        payload: {
+          inputResponses: [
+            { optionId: "candidate", requestId: "question-live" },
+            { optionId: "stop", requestId: "limit-stale" },
+          ],
+        },
+        sessionState: createStubSessionState({ hasProxyInputRequests: true }),
+      }),
+    ).resolves.toEqual({
+      kind: "continue",
+      remainder: { inputResponses: [{ optionId: "stop", requestId: "limit-stale" }] },
+    });
+  });
+
+  it("preserves stale responses while cancelling for a live child Stop", async () => {
+    const liveChild = "subagent:parent:call-live";
+    const staleChild = "subagent:parent:call-stale";
+    const session = upsertProxyInputRequests({
+      entries: [["question-stale", { childContinuationToken: staleChild, kind: "question" }]],
+      forChildContinuationToken: staleChild,
+      session: upsertProxyInputRequests({
+        entries: [["limit-live", { childContinuationToken: liveChild, kind: "session-limit" }]],
+        forChildContinuationToken: liveChild,
+        session: createStubSession(),
+      }),
+    });
+    installSessionStoreMocks([session]);
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    vi.mocked(resumeHook)
+      .mockResolvedValueOnce(undefined as never)
+      .mockRejectedValueOnce(new HookNotFoundError(staleChild));
+
+    await expect(
+      routeProxiedDeliverStep({
+        parentWritable: createTestWritable(),
+        payload: {
+          inputResponses: [
+            { optionId: "stop", requestId: "limit-live" },
+            { optionId: "candidate", requestId: "question-stale" },
+          ],
+        },
+        sessionState: createStubSessionState({ hasProxyInputRequests: true }),
+      }),
+    ).resolves.toEqual({
+      kind: "cancel-turn",
+      remainder: { inputResponses: [{ optionId: "candidate", requestId: "question-stale" }] },
+    });
+  });
+
+  it("propagates child delivery failures other than a missing hook", async () => {
+    const childContinuationToken = "subagent:parent:call-1";
+    const session = upsertProxyInputRequests({
+      entries: [["question-1", { childContinuationToken, kind: "question" }]],
+      forChildContinuationToken: childContinuationToken,
+      session: createStubSession(),
+    });
+    installSessionStoreMocks([session]);
+    vi.mocked(resumeHook).mockRejectedValueOnce(new Error("delivery failed"));
+
+    await expect(
+      routeProxiedDeliverStep({
+        parentWritable: createTestWritable(),
+        payload: { inputResponses: [{ optionId: "candidate", requestId: "question-1" }] },
+        sessionState: createStubSessionState({ hasProxyInputRequests: true }),
+      }),
+    ).rejects.toThrow("delivery failed");
   });
 });
 

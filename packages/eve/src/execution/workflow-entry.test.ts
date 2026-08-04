@@ -57,6 +57,10 @@ vi.mock("./route-child-delivery.js", () => ({
   })),
 }));
 
+vi.mock("./cancel-descendant-turns-step.js", () => ({
+  cancelDescendantTurnsStep: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("./delegated-parent-notification.js", () => ({
   notifyDelegatedParentStep: vi.fn().mockResolvedValue(undefined),
 }));
@@ -705,6 +709,10 @@ describe("workflowEntry", () => {
       serializedContext: { "eve.sessionId": "wrun_test_123", settled: true },
       sessionState: settledState,
     });
+    vi.mocked(routeDeliverToChildren).mockResolvedValueOnce({
+      kind: "cancel-turn",
+      remainder: { message: "late answer" },
+    });
     installHookMocks({
       deliveryHooks: [
         {
@@ -732,12 +740,19 @@ describe("workflowEntry", () => {
     });
 
     expect(result).toEqual({ output: "ok" });
-    expect(settleCancelledTurnStep).toHaveBeenCalledExactlyOnceWith({
+    expect(settleCancelledTurnStep).toHaveBeenCalledTimes(2);
+    expect(settleCancelledTurnStep).toHaveBeenNthCalledWith(1, {
       parentWritable: expect.any(WritableStream),
       serializedContext: { "eve.sessionId": "wrun_test_123" },
       sessionState,
     });
+    expect(settleCancelledTurnStep).toHaveBeenNthCalledWith(2, {
+      parentWritable: expect.any(WritableStream),
+      serializedContext: { "eve.sessionId": "wrun_test_123", settled: true },
+      sessionState: settledState,
+    });
     expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0]).toMatchObject({
+      delivery: { kind: "deliver", payloads: [{ message: "late answer" }] },
       serializedContext: { settled: true },
       sessionState: settledState,
     });
