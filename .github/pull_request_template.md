@@ -1,4 +1,4 @@
-### Description
+### Summary
 
 <!--
 Link the issue where this change was discussed (for example, "Closes #123" or
@@ -7,14 +7,14 @@ meaningful behavior or decisions—not changed files or commits. Call out breaki
 changes, preserved behavior, scope boundaries, or stacked PRs when relevant.
 -->
 
-### How did you test your changes?
+### Testing
 
 <!--
 List the exact commands you ran and useful manual coverage. Include relevant
 results or limitations. Explain when tests are not applicable.
 -->
 
-### PR Checklist
+### Checklist
 
 - [ ] I linked an issue with prior discussion confirming this change is wanted
 - [ ] I ran the relevant checks from `CONTRIBUTING.md`
