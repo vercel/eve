@@ -1,5 +1,12 @@
 import { basename } from "node:path";
 
+import {
+  formatCostUsd,
+  formatTokenSummary,
+  renderSpanDetailLines,
+  spanMetricChips,
+  summarizeLocalTrace,
+} from "#cli/commands/trace-detail.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { createCliTheme, renderCliSection, sanitizeForTerminal } from "#cli/ui/output.js";
 import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
@@ -123,6 +130,7 @@ export async function runTraceShowCommand(
   logger: CliTraceLogger,
   appRoot: string,
   reference?: string,
+  options: { readonly json?: boolean; readonly verbose?: boolean } = {},
 ): Promise<void> {
   const traces = await listLocalTraces(appRoot);
   if (traces.length === 0) {
@@ -132,36 +140,95 @@ export async function runTraceShowCommand(
     return;
   }
   const selected = reference === undefined ? [traces[0]!] : resolveLocalTraces(traces, reference);
+  if (options.json === true) {
+    logger.log(JSON.stringify(selected.map(serializeTraceForJson), null, 2));
+    return;
+  }
   const theme = createCliTheme();
   logger.log(
     selected
       .map((trace) =>
         [
           renderCliSection(theme, {
-            rows: [
-              { label: "Trace ID", value: trace.traceId },
-              { label: "Session ID", value: trace.sessionId ?? "unknown" },
-              ...(trace.window === undefined
-                ? []
-                : [{ label: "Window", value: String(trace.window) }]),
-              { label: "Agent", value: trace.agentName ?? "unknown" },
-              { label: "Started", value: toDate(trace.startTimeNs).toISOString() },
-              {
-                label: "Duration",
-                value: formatElapsed(durationMs(trace.startTimeNs, trace.endTimeNs)),
-              },
-              { label: "Spans", value: String(trace.spans.length) },
-            ],
+            rows: traceHeaderRows(trace),
             title: "Trace",
           }),
-          `${theme.accent("Spans")}\n${renderSpanTree(trace.spans)}`,
+          `${theme.accent("Spans")}\n${renderSpanTree(trace.spans, {
+            dim: theme.muted,
+            verbose: options.verbose === true,
+          })}`,
         ].join("\n\n"),
       )
       .join("\n\n"),
   );
 }
 
-function renderSpanTree(spans: readonly LocalTraceSpan[]): string {
+function traceHeaderRows(trace: LocalTrace): { label: string; value: string }[] {
+  const summary = summarizeLocalTrace(trace.spans);
+  return [
+    { label: "Trace ID", value: trace.traceId },
+    { label: "Session ID", value: trace.sessionId ?? "unknown" },
+    ...(trace.window === undefined ? [] : [{ label: "Window", value: String(trace.window) }]),
+    { label: "Agent", value: trace.agentName ?? "unknown" },
+    { label: "Started", value: toDate(trace.startTimeNs).toISOString() },
+    {
+      label: "Duration",
+      value: formatElapsed(durationMs(trace.startTimeNs, trace.endTimeNs)),
+    },
+    { label: "Spans", value: String(trace.spans.length) },
+    ...(summary.models.length === 0 ? [] : [{ label: "Models", value: summary.models.join(", ") }]),
+    ...(summary.inputTokens === 0 && summary.outputTokens === 0
+      ? []
+      : [{ label: "Tokens", value: formatTokenSummary(summary) }]),
+    ...(summary.costUsd === undefined
+      ? []
+      : [{ label: "Cost", value: formatCostUsd(summary.costUsd) }]),
+    ...(summary.errorCount === 0
+      ? []
+      : [
+          {
+            label: "Errors",
+            value: `${summary.errorCount} span${summary.errorCount === 1 ? "" : "s"}`,
+          },
+        ]),
+  ];
+}
+
+function serializeTraceForJson(trace: LocalTrace): Record<string, unknown> {
+  return {
+    agentName: trace.agentName ?? null,
+    durationMs: durationMs(trace.startTimeNs, trace.endTimeNs),
+    sessionId: trace.sessionId ?? null,
+    sessionIds: trace.sessionIds,
+    spanCount: trace.spans.length,
+    spans: trace.spans.map((span) => ({
+      attributes: span.attributes,
+      durationMs: durationMs(span.startTimeNs, span.endTimeNs),
+      endTimeNs: span.endTimeNs.toString(),
+      events: span.events.map((event) => ({
+        attributes: event.attributes,
+        name: event.name,
+        timeNs: event.timeNs.toString(),
+      })),
+      kind: span.kind ?? null,
+      name: span.name,
+      parentSpanId: span.parentSpanId ?? null,
+      scope: span.scope ?? null,
+      spanId: span.spanId,
+      startTimeNs: span.startTimeNs.toString(),
+      statusCode: span.statusCode,
+      statusMessage: span.statusMessage ?? null,
+    })),
+    startedAt: toDate(trace.startTimeNs).toISOString(),
+    traceId: trace.traceId,
+    window: trace.window ?? null,
+  };
+}
+
+function renderSpanTree(
+  spans: readonly LocalTraceSpan[],
+  options: { readonly dim?: (text: string) => string; readonly verbose?: boolean } = {},
+): string {
   const byId = new Map(spans.map((span) => [span.spanId, span]));
   const children = new Map<string, LocalTraceSpan[]>();
   const roots: LocalTraceSpan[] = [];
@@ -177,6 +244,7 @@ function renderSpanTree(spans: readonly LocalTraceSpan[]): string {
   roots.sort(compareLocalTraceSpans);
   for (const siblings of children.values()) siblings.sort(compareLocalTraceSpans);
   const extents = subtreeExtents(spans, children);
+  const width = terminalWidth();
 
   const lines: string[] = [];
   const visited = new Set<string>();
@@ -184,14 +252,19 @@ function renderSpanTree(spans: readonly LocalTraceSpan[]): string {
     if (visited.has(span.spanId)) return;
     visited.add(span.spanId);
     lines.push(`${prefix}${connector}${spanLabel(span, extents.get(span.spanId))}`);
+    const childPrefix = `${prefix}${connector === "" ? "" : connector === "└─ " ? "   " : "│  "}`;
+    if (options.verbose === true) {
+      for (const line of renderSpanDetailLines(span, {
+        dim: options.dim ?? ((text) => text),
+        width: width - childPrefix.length - 2,
+      })) {
+        lines.push(`${childPrefix}  ${line}`);
+      }
+    }
     const descendants = children.get(span.spanId) ?? [];
     descendants.forEach((child, index) => {
       const last = index === descendants.length - 1;
-      render(
-        child,
-        `${prefix}${connector === "" ? "" : connector === "└─ " ? "   " : "│  "}`,
-        last ? "└─ " : "├─ ",
-      );
+      render(child, childPrefix, last ? "└─ " : "├─ ");
     });
   };
   for (const root of roots) render(root, "", "");
@@ -240,13 +313,20 @@ function subtreeExtents(
 function spanLabel(span: LocalTraceSpan, extent?: SpanExtent): string {
   const details = describeLocalTraceSpan(span).map(sanitizeForTerminal);
   const detail = details.length === 0 ? "" : ` [${details.join(", ")}]`;
+  const chips = spanMetricChips(span).map(sanitizeForTerminal);
+  const metrics = chips.length === 0 ? "" : `  ${chips.join(" ")}`;
   const error = span.statusCode === 2 ? " ERROR" : "";
   const recorded = durationMs(span.startTimeNs, span.endTimeNs);
   const elapsed =
     recorded === 0 && extent !== undefined
       ? durationMs(extent.startTimeNs, extent.endTimeNs)
       : recorded;
-  return `${sanitizeForTerminal(span.name)}${detail}  ${formatElapsed(elapsed)}${error}`;
+  return `${sanitizeForTerminal(span.name)}${detail}  ${formatElapsed(elapsed)}${metrics}${error}`;
+}
+
+function terminalWidth(): number {
+  const columns = process.stdout.columns;
+  return typeof columns === "number" && columns >= 40 ? columns : 100;
 }
 
 function durationMs(start: bigint, end: bigint): number {

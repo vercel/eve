@@ -237,7 +237,7 @@ export function renderSpanDetail(
   } else {
     lines.push(muted(`attributes (${keys.length})`));
     for (const key of keys) {
-      const block = formatAttributeContent(key, span.attributes[key], theme, innerWidth - 2);
+      const block = formatAttributeContent(key, span.attributes[key], colors.dim, innerWidth - 2);
       const cleanKey = stripTerminalControls(key);
       if (block.length === 1) {
         // Scalars stay beside the key; multi-line content nests beneath it.
