@@ -52,6 +52,9 @@ const categoryOrder = [
   "lib",
 ];
 
+const treeRowClassName =
+  "min-h-8 w-full touch-manipulation rounded-sm px-2 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none md:min-h-7";
+
 interface FileEntry {
   file: HighlightedTemplateFile;
   label: string;
@@ -162,7 +165,8 @@ export const FileViewer = ({ files }: FileViewerProps) => {
                   <button
                     aria-pressed={isSelected}
                     className={cn(
-                      "flex min-h-8 w-full touch-manipulation items-center gap-2 rounded-sm px-2 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none md:min-h-7",
+                      treeRowClassName,
+                      "flex items-center gap-2",
                       isSelected
                         ? "font-medium text-gray-1000"
                         : "text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000",
@@ -186,7 +190,8 @@ export const FileViewer = ({ files }: FileViewerProps) => {
                 <button
                   aria-expanded={isOpen}
                   className={cn(
-                    "flex min-h-8 w-full touch-manipulation items-center gap-2 rounded-sm px-2 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none md:min-h-7",
+                    treeRowClassName,
+                    "flex items-center gap-2",
                     containsSelected
                       ? "text-gray-1000"
                       : "text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000",
@@ -213,7 +218,8 @@ export const FileViewer = ({ files }: FileViewerProps) => {
                           <button
                             aria-pressed={isSelected}
                             className={cn(
-                              "min-h-8 w-full touch-manipulation truncate rounded-sm px-2 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none md:min-h-7",
+                              treeRowClassName,
+                              "truncate",
                               isSelected
                                 ? "font-medium text-gray-1000"
                                 : "text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000",
