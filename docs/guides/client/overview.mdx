@@ -130,7 +130,7 @@ const session = client.sessions.attach("wrun_A");
 await session.cancel();
 ```
 
-`client.sessions` stores only the session ID and stream cursor. Every method calls an ID-addressed `/eve/v1/sessions/:sessionId/...` route; reset leaves the handle pinned to the retired ID rather than silently creating or following a replacement.
+`client.sessions` stores only the session ID and stream cursor. Reset leaves the handle pinned to the retired ID rather than silently creating or following a replacement.
 
 The continuation-addressed client surface remains available for callers that persist continuation tokens. Create a `ClientSession` for each conversation:
 
