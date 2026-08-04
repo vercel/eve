@@ -149,7 +149,7 @@ export const FileViewer = ({ files }: FileViewerProps) => {
     <div className="grid overflow-hidden rounded-lg border border-gray-alpha-400 bg-background-100 md:grid-cols-[200px_minmax(0,1fr)]">
       <nav
         aria-label="Template files"
-        className="border-gray-alpha-400 border-b px-3 py-2 md:border-r md:border-b-0 md:p-3"
+        className="border-gray-alpha-400 border-b p-3 md:border-r md:border-b-0"
       >
         <p className="px-2 pb-0.5 text-gray-800 text-label-13-mono md:pb-2">agent/</p>
         <ul className="space-y-0.5">
