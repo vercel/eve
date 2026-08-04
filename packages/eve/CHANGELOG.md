@@ -1,5 +1,20 @@
 # eve
 
+## 0.30.0
+
+### Minor Changes
+
+- f43b22d: `localDev()` now grants the synthetic local principal based on the deployment (an `eve dev` or `vercel dev` process) instead of the request URL host, so a request `Host` header can no longer obtain local-dev access on a self-hosted server. The previously exported `isLoopbackRequest` helper is removed. The default eve channel now falls back to `[vercelOidc(), localDev(), placeholderAuth()]`, which keeps local dev working and rejects all production traffic.
+
+### Patch Changes
+
+- 021dbbf: Add `/new` as an alias of `/clear` in the eve dev TUI. It clears model-message history while preserving the current session and its durable resources.
+- 136749f: Make `Ctrl+C` cooperatively cancel or steer a running turn like `Esc` in the eve dev TUI. At the idle prompt, the first `Ctrl+C` now shows an exit warning and a second consecutive press exits.
+- 13420ab: Allow dynamic subagent resolvers to return `defineRemoteAgent(...)`. Session and turn selections can now conditionally expose a remote deployment and change its runtime connection settings.
+- ee50ae7: Prevent the dev TUI from duplicating setup panels when an integration setup error includes multiline command output.
+- e1cd7b7: Move eve's internal integration catalog from the Vercel npm scope to `@eve/catalog`.
+- 56651ee: Update eve's bundled Workflow SDK packages to the latest 5.0.0 beta releases, keeping the core runtime and workflow worlds aligned.
+
 ## 0.29.5
 
 ### Patch Changes
