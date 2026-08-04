@@ -44,7 +44,7 @@ export interface TemplateManifestEntry {
 export const templateManifest: TemplateManifestEntry[] = [
   {
     slug: "eve-chat-template",
-    title: "Next.js chat agent template",
+    title: "Chat",
     setupPrompt:
       "Set up the eve chat template in my current workspace using https://github.com/vercel-labs/eve-chat-template/tree/main as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
@@ -69,7 +69,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "eve-design-template",
-    title: "Slack design agent template",
+    title: "Design",
     setupPrompt:
       "Set up the eve design agent template in my current workspace using https://github.com/vercel-labs/eve-design-template/tree/main as the source. Copy the project files, install its dependencies, and follow the repository README and BOOTSTRAP.md to configure it. Preserve the existing project if the workspace is not empty, tell me about any required environment variables or manual setup steps, and do not approve or publish the design corpus for me.",
     description:
@@ -96,7 +96,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "eve-slack-agent",
-    title: "Slack agent template",
+    title: "Slack",
     setupPrompt:
       "Set up the eve Slack agent template in my current workspace using https://github.com/vercel-labs/eve-slack-agent-template/tree/main as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
@@ -117,7 +117,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "kody-eve-template",
-    title: "GitHub maintainer agent template",
+    title: "GitHub maintainer",
     setupPrompt:
       "I want to build a GitHub maintainer agent with the eve framework, using the Kody template. Read the setup instructions at https://agent-resources.dev/kody-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
     description:
@@ -144,7 +144,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "marketing-team-eve-template",
-    title: "Marketing agent team template",
+    title: "Marketing team",
     setupPrompt:
       "I want to build a team of marketing agents with the eve framework, using the marketing team template. Read the setup instructions at https://agent-resources.dev/marketing-team-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
     description:
@@ -169,7 +169,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "sanity-copilot-eve-template",
-    title: "Sanity copilot agent template",
+    title: "Sanity copilot",
     setupPrompt:
       "I want to build a Slack agent with the eve framework, using the Sanity copilot template. Read the setup instructions at https://agent-resources.dev/sanity-copilot-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
     description:
@@ -195,7 +195,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "typefully-eve-template",
-    title: "Social media agent template",
+    title: "Social media",
     setupPrompt:
       "I want to build a Slack agent with the eve framework, using the Typefully social media agent template. Read the setup instructions at https://agent-resources.dev/typefully-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
     description:
@@ -222,7 +222,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "weather-agent-fixture",
-    title: "Weather agent example",
+    title: "Weather",
     setupPrompt:
       "Set up the eve weather agent in my current workspace using https://github.com/vercel/eve/tree/main/apps/fixtures/weather-agent as the source. Copy that fixture into a standalone project, install its dependencies, and make any minimal changes needed to run it outside the eve monorepo. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
