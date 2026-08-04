@@ -5,14 +5,22 @@ import type { Metadata } from "next";
 import { GeistdocsProvider } from "@/components/geistdocs/provider";
 import { config } from "@/lib/geistdocs/config";
 import { mono, sans } from "@/lib/geistdocs/fonts";
+import { staticOgImage } from "@/lib/geistdocs/og";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
   metadataBase: new URL(getSiteOrigin()),
+  openGraph: {
+    images: [staticOgImage],
+  },
   robots: {
     index: true,
     follow: true,
+  },
+  twitter: {
+    card: "summary_large_image",
+    images: [staticOgImage],
   },
 };
 
