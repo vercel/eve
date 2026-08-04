@@ -166,7 +166,7 @@ describe("turn cancellation descendant cascade", () => {
             createEveSessionCancelRoutePath(response.sessionId),
             { method: "POST" },
           );
-          expect(cancelResponse.status).toBe(200);
+          expect(cancelResponse.status).toBe(202);
           await expect(cancelResponse.json()).resolves.toMatchObject({
             ok: true,
             sessionId: response.sessionId,
