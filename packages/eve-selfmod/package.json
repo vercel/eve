@@ -55,18 +55,17 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scaffold.json --noEmit"
   },
   "dependencies": {
+    "just-bash": "3.1.0",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "eve": "workspace:*",
-    "just-bash": "3.1.0",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "eve": "workspace:*",
-    "just-bash": "^3.0.0"
+    "eve": "workspace:*"
   },
   "engines": {
     "node": ">=24"

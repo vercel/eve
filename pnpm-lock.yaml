@@ -1411,6 +1411,9 @@ importers:
 
   packages/eve-selfmod:
     dependencies:
+      just-bash:
+        specifier: 3.1.0
+        version: 3.1.0(supports-color@10.2.2)
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -1421,9 +1424,6 @@ importers:
       eve:
         specifier: workspace:*
         version: link:../eve
-      just-bash:
-        specifier: 3.1.0
-        version: 3.1.0(supports-color@10.2.2)
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
