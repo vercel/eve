@@ -10,11 +10,25 @@ import type { BuzzRoute, JsonRpcMessage } from "./types.js";
 
 interface ActiveTurn {
   cancelled: boolean;
-  publication: AbortController;
   route?: BuzzRoute;
   sessionId?: string;
   text: string;
 }
+
+interface AcpProcess {
+  readonly exitCode: number | null;
+  readonly stdin: Writable;
+  readonly stdout: Readable;
+  kill(signal?: NodeJS.Signals | number): boolean;
+  once(event: "error", listener: (error: Error) => void): this;
+  once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+}
+
+type SpawnAcpProcess = (
+  command: string,
+  args: readonly string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv },
+) => AcpProcess;
 
 export interface ProxyOptions {
   buzzCli: string;
@@ -27,18 +41,23 @@ export interface ProxyOptions {
   publicationStateDirectory: string;
   publishTimeoutMs: number;
   target?: string;
+  /** @internal Test seam. */
+  spawnProcess?: SpawnAcpProcess;
 }
 
 const keyForId = (id: JsonRpcMessage["id"]): string => `${typeof id}:${String(id)}`;
 
 export async function runProxy(options: ProxyOptions): Promise<void> {
-  const eve = spawn(
+  const spawnProcess: SpawnAcpProcess =
+    options.spawnProcess ??
+    ((command, args, spawnOptions) =>
+      spawn(command, [...args], { ...spawnOptions, stdio: ["pipe", "pipe", "inherit"] }));
+  const eve = spawnProcess(
     process.execPath,
     [options.eveBin, "acp", ...(options.target ? [options.target] : [])],
     {
       cwd: options.cwd,
       env: eveChildEnvironment(options.environment),
-      stdio: ["pipe", "pipe", "inherit"],
     },
   );
   const requests = new Map<string, string>();
@@ -59,50 +78,52 @@ export async function runProxy(options: ProxyOptions): Promise<void> {
     send(eve.stdin, message);
   };
 
+  let inputSettled = false;
+  const inputController = new AbortController();
   const inputTask = (async () => {
-    for await (let message of readJsonLines(options.input)) {
-      if (message.id !== undefined && message.method !== undefined) {
-        if (
-          options.modelId &&
-          isFixedModelRequest(message.method, message.params, options.modelId)
-        ) {
-          send(options.output, {
-            jsonrpc: "2.0",
-            id: message.id,
-            result: fixedModelResult(options.modelId),
-          });
-          continue;
+    try {
+      for await (let message of readJsonLines(options.input, inputController.signal)) {
+        if (message.id !== undefined && message.method !== undefined) {
+          if (
+            options.modelId &&
+            isFixedModelRequest(message.method, message.params, options.modelId)
+          ) {
+            send(options.output, {
+              jsonrpc: "2.0",
+              id: message.id,
+              result: fixedModelResult(options.modelId),
+            });
+            continue;
+          }
+          requests.set(keyForId(message.id), message.method);
         }
-        requests.set(keyForId(message.id), message.method);
-      }
 
-      if (message.method === "session/prompt" && message.id !== undefined) {
-        const text = promptText(message.params?.prompt);
-        turns.set(keyForId(message.id), {
-          cancelled: false,
-          publication: new AbortController(),
-          route: parseBuzzRoute(text),
-          sessionId:
-            typeof message.params?.sessionId === "string" ? message.params.sessionId : undefined,
-          text: "",
-        });
-        message = addReplySinkInstruction(message);
-      }
-      if (message.method === "session/cancel") {
-        const sessionId = message.params?.sessionId;
-        if (typeof sessionId === "string") {
-          for (const turn of turns.values()) {
-            if (turn.sessionId === sessionId) {
-              turn.cancelled = true;
-              turn.publication.abort();
+        if (message.method === "session/prompt" && message.id !== undefined) {
+          const text = promptText(message.params?.prompt);
+          turns.set(keyForId(message.id), {
+            cancelled: false,
+            route: parseBuzzRoute(text),
+            sessionId:
+              typeof message.params?.sessionId === "string" ? message.params.sessionId : undefined,
+            text: "",
+          });
+          message = addReplySinkInstruction(message);
+        }
+        if (message.method === "session/cancel") {
+          const sessionId = message.params?.sessionId;
+          if (typeof sessionId === "string") {
+            for (const turn of turns.values()) {
+              if (turn.sessionId === sessionId) turn.cancelled = true;
             }
           }
         }
+        sendToEve(message);
       }
-      sendToEve(message);
+      if (eveInputError) throw eveInputError;
+      if (!eve.stdin.destroyed && !eve.stdin.writableEnded) eve.stdin.end();
+    } finally {
+      inputSettled = true;
     }
-    if (eveInputError) throw eveInputError;
-    if (!eve.stdin.destroyed && !eve.stdin.writableEnded) eve.stdin.end();
   })();
 
   const outputTask = (async () => {
@@ -160,23 +181,29 @@ export async function runProxy(options: ProxyOptions): Promise<void> {
           send(options.output, message);
           continue;
         }
-        try {
-          await publishBuzzReply({
-            buzzCli: options.buzzCli,
-            environment: options.environment,
-            route: turn.route,
-            signal: turn.publication.signal,
-            text,
-            timeoutMs: options.publishTimeoutMs,
-          });
-          await reservation.commit();
-        } catch (error) {
-          if (turn.publication.signal.aborted) await reservation.commit();
-          else await reservation.release();
-          throw error;
+        if (reservation === "unknown") {
+          throw new Error(
+            "A previous Buzz publication has unknown delivery status; refusing an automatic retry",
+          );
         }
+        const outcome = await publishBuzzReply({
+          buzzCli: options.buzzCli,
+          environment: options.environment,
+          route: turn.route,
+          text,
+          timeoutMs: options.publishTimeoutMs,
+        });
+        if (outcome.kind === "not-delivered") {
+          await reservation.release();
+          throw new Error(outcome.reason);
+        }
+        if (outcome.kind === "unknown") {
+          await reservation.markUnknown();
+          throw new Error(outcome.reason);
+        }
+        await reservation.commit();
         console.error(
-          `[eve-buzz-acp-adapter] published ${text.length} characters to ${turn.route.channelId}`,
+          `[eve-buzz-acp-adapter] published ${text.length} characters as ${outcome.eventId} to ${turn.route.channelId}`,
         );
         turns.delete(requestKey);
         send(options.output, message);
@@ -208,12 +235,16 @@ export async function runProxy(options: ProxyOptions): Promise<void> {
       const [code] = await Promise.all([exitTask, outputTask]);
       if (code !== 0) throw new Error(`eve acp exited with status ${code}`);
     } else {
+      inputController.abort();
+      await inputTask.catch(() => undefined);
       const code = await exitTask;
       if (code !== 0) throw new Error(`eve acp exited with status ${code}`);
       await outputTask;
     }
   } finally {
+    if (!inputSettled) inputController.abort();
     if (eve.exitCode === null) eve.kill("SIGTERM");
+    await Promise.allSettled([inputTask, outputTask]);
   }
 }
 

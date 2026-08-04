@@ -70,6 +70,11 @@ export { runVercelEnvPull } from "./run-vercel-link.js";
 export { provisionSlackbot, reconcileSlackUid, type ProvisionSlackbotResult } from "./slackbot.js";
 export { runRemoteAuthFlow } from "../cli/dev/tui/remote-auth.js";
 export {
+  inspectVerifiedRemoteAgent,
+  type InspectVerifiedRemoteAgentDeps,
+  type VerifiedRemoteAgentInspection,
+} from "./verified-remote-agent.js";
+export {
   setupConnectionConnector,
   type SetupConnectionConnectorOptions,
   type SetupConnectionConnectorResult,

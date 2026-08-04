@@ -1,28 +1,23 @@
-import { runRemoteAuthFlow, WizardCancelledError, type Prompter } from "eve/setup";
 import {
-  readEveTargetInfo,
-  VercelDeploymentProtectionError,
-  type EveTargetInfo,
-} from "./eve-target.js";
+  inspectVerifiedRemoteAgent,
+  type Prompter,
+  type VerifiedRemoteAgentInspection,
+} from "eve/setup";
+import { parseEveTargetInfo, readEveTargetInfo, type EveTargetInfo } from "./eve-target.js";
 import type { InstallTarget } from "./install-flow.js";
 
-type RemoteAuthResult =
-  | { kind: "cancelled" }
-  | { kind: "failed"; message: string }
-  | {
-      kind: "prepared";
-      target: { deployment: { ownerId: string } };
-      resolveToken(): Promise<string>;
-    };
-
 interface RemoteTargetAuthDependencies {
+  inspectVerifiedRemoteAgent(input: {
+    serverUrl: string;
+    workspaceRoot: string;
+    prompter?: Prompter;
+  }): Promise<VerifiedRemoteAgentInspection>;
   readEveTargetInfo: typeof readEveTargetInfo;
-  runRemoteAuthFlow(input: Parameters<typeof runRemoteAuthFlow>[0]): Promise<RemoteAuthResult>;
 }
 
 const defaultDependencies: RemoteTargetAuthDependencies = {
+  inspectVerifiedRemoteAgent,
   readEveTargetInfo,
-  runRemoteAuthFlow,
 };
 
 export async function readInstallTargetInfo(options: {
@@ -33,48 +28,24 @@ export async function readInstallTargetInfo(options: {
   dependencies?: Partial<RemoteTargetAuthDependencies>;
 }): Promise<{ info: EveTargetInfo; vercelScope?: string }> {
   const dependencies = { ...defaultDependencies, ...options.dependencies };
-  const targetOptions = eveTargetOptions(options.target, options.eveBin);
-  try {
-    return { info: await dependencies.readEveTargetInfo(targetOptions) };
-  } catch (error) {
-    if (!(error instanceof VercelDeploymentProtectionError) || options.target.kind !== "remote") {
-      throw error;
-    }
-    if (!options.prompter) {
-      throw new Error(
-        "Vercel Deployment Protection requires authentication. Run the installer interactively or set VERCEL_AUTOMATION_BYPASS_SECRET.",
-      );
-    }
-
-    options.prompter.log.info("Authenticating the protected Vercel deployment...");
-    const authentication = await dependencies.runRemoteAuthFlow({
-      configureTrustedSources: true,
-      prompter: options.prompter,
-      serverUrl: options.target.url,
-      workspaceRoot: options.cwd,
-    });
-    if (authentication.kind === "cancelled") throw new WizardCancelledError();
-    if (authentication.kind === "failed") throw new Error(authentication.message);
-
-    const token = await authentication.resolveToken();
-    const info = await dependencies.readEveTargetInfo({
-      ...targetOptions,
-      headers: {
-        authorization: `Bearer ${token}`,
-        "x-vercel-trusted-oidc-idp-token": token,
-      },
-    });
+  if (options.target.kind === "local") {
     return {
-      info,
-      vercelScope: authentication.target.deployment.ownerId,
+      info: await dependencies.readEveTargetInfo({
+        cwd: options.target.directory,
+        eveBin: options.eveBin,
+      }),
     };
   }
-}
 
-function eveTargetOptions(
-  target: InstallTarget,
-  eveBin: string,
-): Parameters<typeof readEveTargetInfo>[0] {
-  if (target.kind === "remote") return { eveBin, target: target.url, cwd: process.cwd() };
-  return { eveBin, cwd: target.directory };
+  const inspectionOptions: Parameters<typeof dependencies.inspectVerifiedRemoteAgent>[0] = {
+    serverUrl: options.target.url,
+    workspaceRoot: options.cwd,
+  };
+  if (options.prompter !== undefined) inspectionOptions.prompter = options.prompter;
+  const inspection = await dependencies.inspectVerifiedRemoteAgent(inspectionOptions);
+  const result: { info: EveTargetInfo; vercelScope?: string } = {
+    info: parseEveTargetInfo(inspection.info),
+  };
+  if (inspection.vercelScope !== undefined) result.vercelScope = inspection.vercelScope;
+  return result;
 }

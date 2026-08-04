@@ -43,7 +43,8 @@ describe("publication state", () => {
       staleAfterMs: 1_000,
     });
     expect(reservation).not.toBe("published");
-    if (reservation === "published") return;
+    expect(reservation).not.toBe("unknown");
+    if (typeof reservation === "string") return;
 
     await expect(
       reservePublication({ directory: directories[0]!, key: "event", staleAfterMs: 1_000 }),
@@ -54,6 +55,23 @@ describe("publication state", () => {
     ).resolves.toBe("published");
   });
 
+  it("blocks retries whose delivery status is unknown", async () => {
+    const stateDirectory = await directory();
+    const reservation = await reservePublication({
+      directory: stateDirectory,
+      key: "event",
+      staleAfterMs: 1_000,
+    });
+    expect(reservation).not.toBe("published");
+    expect(reservation).not.toBe("unknown");
+    if (typeof reservation === "string") return;
+
+    await reservation.markUnknown();
+    await expect(
+      reservePublication({ directory: stateDirectory, key: "event", staleAfterMs: -1 }),
+    ).resolves.toBe("unknown");
+  });
+
   it("releases a failed publication for a later retry", async () => {
     const stateDirectory = await directory();
     const reservation = await reservePublication({
@@ -62,7 +80,8 @@ describe("publication state", () => {
       staleAfterMs: 1_000,
     });
     expect(reservation).not.toBe("published");
-    if (reservation === "published") return;
+    expect(reservation).not.toBe("unknown");
+    if (typeof reservation === "string") return;
 
     await reservation.release();
     await expect(

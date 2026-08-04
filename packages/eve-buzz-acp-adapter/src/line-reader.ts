@@ -4,8 +4,11 @@ import type { JsonRpcMessage } from "./types.js";
 
 const MAX_LINE_BYTES = 16 * 1024 * 1024;
 
-export async function* readJsonLines(input: Readable): AsyncGenerator<JsonRpcMessage> {
-  const lines = createInterface({ input, crlfDelay: Infinity });
+export async function* readJsonLines(
+  input: Readable,
+  signal?: AbortSignal,
+): AsyncGenerator<JsonRpcMessage> {
+  const lines = createInterface({ input, crlfDelay: Infinity, signal });
   for await (const line of lines) {
     if (Buffer.byteLength(line) > MAX_LINE_BYTES) throw new Error("ACP message exceeds 16 MiB");
     let value: unknown;
