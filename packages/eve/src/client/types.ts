@@ -156,6 +156,13 @@ export interface SendTurnPayload<TOutput = unknown> {
   readonly outputSchema?: StandardJSONSchemaV1<unknown, TOutput> | JsonObject;
 
   /**
+   * Makes the output schema mandatory for this turn. Eve permits ordinary
+   * tool iteration, then forces one final `final_output` call before failing
+   * the turn recoverably.
+   */
+  readonly outputSchemaRequired?: boolean;
+
+  /**
    * Reconnection policy for the response event stream. Omit to use the default
    * policy, or pass `{ reconnect: false }` when the caller owns cursor recovery.
    */

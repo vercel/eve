@@ -25,12 +25,14 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     b: b.context,
   });
   const outputSchema = b.outputSchema ?? a.outputSchema;
+  const outputSchemaRequired = b.outputSchemaRequired ?? a.outputSchemaRequired;
 
   const result: {
     inputResponses?: readonly InputResponse[];
     message?: string | UserContent;
     context?: readonly string[];
     outputSchema?: StepInput["outputSchema"];
+    outputSchemaRequired?: StepInput["outputSchemaRequired"];
   } = {};
 
   if (inputResponses !== undefined) {
@@ -47,6 +49,10 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 
   if (outputSchema !== undefined) {
     result.outputSchema = outputSchema;
+  }
+
+  if (outputSchemaRequired !== undefined) {
+    result.outputSchemaRequired = outputSchemaRequired;
   }
 
   return result;

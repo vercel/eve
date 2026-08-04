@@ -652,6 +652,10 @@ function createHandleMessageBody(input: {
     body.outputSchema = input.outputSchema;
   }
 
+  if (input.input.outputSchemaRequired !== undefined) {
+    body.outputSchemaRequired = input.input.outputSchemaRequired;
+  }
+
   if (input.session.continuationToken !== undefined) {
     body.continuationToken = input.session.continuationToken;
   }

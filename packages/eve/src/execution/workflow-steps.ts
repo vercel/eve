@@ -562,7 +562,11 @@ export function resolveEffectiveOutputSchema(input: {
   const { agentOutputSchema, input: stepInput, mode, session } = input;
 
   if (stepInput?.outputSchema !== undefined) {
-    return { ...session, outputSchema: stepInput.outputSchema };
+    return {
+      ...session,
+      outputSchema: stepInput.outputSchema,
+      outputSchemaRequired: stepInput.outputSchemaRequired,
+    };
   }
 
   if (mode === "task" && session.outputSchema === undefined && agentOutputSchema !== undefined) {

@@ -1659,6 +1659,127 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("forces one final_output call after required structured output ends in prose", async () => {
+    const proseResult = {
+      finishReason: "stop",
+      response: { messages: [{ content: "Here is the answer.", role: "assistant" }] },
+      text: "Here is the answer.",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 7, outputTokens: 3 },
+    };
+    setupMockAgent(proseResult);
+    const proseImplementation = vi.mocked(ToolLoopAgent).getMockImplementation();
+    setupMockAgent({
+      ...finalOutputResult("", { reply: "Here is the answer." }),
+      usage: { inputTokens: 11, outputTokens: 5 },
+    });
+    const finalOutputImplementation = vi.mocked(ToolLoopAgent).getMockImplementation();
+    vi.mocked(ToolLoopAgent)
+      .mockImplementationOnce(proseImplementation!)
+      .mockImplementationOnce(finalOutputImplementation!);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const result = await runStep(
+      createTestSession({
+        outputSchema: { type: "object" },
+        outputSchemaRequired: true,
+      }),
+      { message: "Hi" },
+    );
+
+    expect(result.next).toBeNull();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ result: { reply: "Here is the answer." } }),
+        type: "result.completed",
+      }),
+    );
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).toMatchObject({
+      toolChoice: undefined,
+    });
+    expect(vi.mocked(ToolLoopAgent).mock.calls[1]?.[0]).toMatchObject({
+      toolChoice: { type: "tool", toolName: "final_output" },
+    });
+    expect(result.session.outputSchema).toBeUndefined();
+    expect(result.session.outputSchemaRequired).toBeUndefined();
+    expect(getSessionTokenUsage(result.session)).toEqual({
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0,
+      inputTokens: 18,
+      outputTokens: 8,
+      sawCost: false,
+    });
+  });
+
+  it("emits a typed required-output failure after the forced call also misses", async () => {
+    const proseResult = {
+      finishReason: "stop",
+      response: { messages: [{ content: "Plain prose.", role: "assistant" }] },
+      text: "Plain prose.",
+      toolCalls: [],
+      toolResults: [],
+    };
+    setupMockAgent(proseResult);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const result = await runStep(
+      createTestSession({
+        outputSchema: { type: "object" },
+        outputSchemaRequired: true,
+      }),
+      { message: "Hi" },
+    );
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(2);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ code: "REQUIRED_OUTPUT_SCHEMA_NOT_FULFILLED" }),
+        type: "step.failed",
+      }),
+    );
+    expect(result.session.outputSchema).toBeUndefined();
+    expect(result.session.outputSchemaRequired).toBeUndefined();
+  });
+
+  it("honors session token limits before the forced final_output call", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Plain prose.", role: "assistant" }] },
+      text: "Plain prose.",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const result = await runStep(
+      createTestSession({
+        limits: { maxOutputTokensPerSession: 3 },
+        outputSchema: { type: "object" },
+        outputSchemaRequired: true,
+      }),
+      { message: "Hi" },
+    );
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          requests: expect.arrayContaining([expect.objectContaining({ kind: "session-limit" })]),
+        }),
+        type: "input.requested",
+      }),
+    );
+    expect(result.next).toBeNull();
+    expect(result.session.outputSchemaRequired).toBe(true);
+  });
+
   it("produces structured task output when a schema is in effect", async () => {
     const schema = {
       properties: { summary: { type: "string" } },

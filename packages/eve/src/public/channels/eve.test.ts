@@ -926,13 +926,14 @@ describe("eveChannel — create session (text)", () => {
       createJsonMessageRequest({
         message: "Summarize",
         outputSchema,
+        outputSchemaRequired: true,
       }),
     );
 
     expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload).toEqual({ message: "Summarize", outputSchema });
+    expect(payload).toEqual({ message: "Summarize", outputSchema, outputSchemaRequired: true });
   });
 
   it("rejects invalid create-session outputSchema values", async () => {
@@ -949,6 +950,23 @@ describe("eveChannel — create session (text)", () => {
     expect(handler.send).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: expect.stringContaining("outputSchema"),
+    });
+  });
+
+  it("rejects required output without a create-session outputSchema", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        message: "Summarize",
+        outputSchemaRequired: true,
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.send).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("requires 'outputSchema'"),
     });
   });
 
@@ -1337,13 +1355,14 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
         continuationToken: "http:existing",
         message: "Summarize",
         outputSchema,
+        outputSchemaRequired: true,
       }),
     );
 
     expect(response.status).toBe(200);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload).toEqual({ message: "Summarize", outputSchema });
+    expect(payload).toEqual({ message: "Summarize", outputSchema, outputSchemaRequired: true });
   });
 
   it("rejects invalid continue-session clientContext", async () => {

@@ -3,7 +3,7 @@ title: "Output Schema"
 description: "Request structured results from eve client turns and read typed data from MessageResult."
 ---
 
-Pass `outputSchema` on a client turn when the caller needs structured data instead of only assistant text. The runtime makes the model satisfy the schema before the turn settles, then emits the final payload as `result.completed`.
+Pass `outputSchema` on a client turn when the caller wants structured data instead of only assistant text. When the model supplies the structured result, Eve emits it as `result.completed`.
 
 ## JSON Schema
 
@@ -32,6 +32,7 @@ const session = client.session();
 const response = await session.send<Summary>({
   message: "Summarize this turn.",
   outputSchema,
+  outputSchemaRequired: true,
 });
 
 const result = await response.result();
@@ -41,6 +42,12 @@ console.log(result.data?.count);
 ```
 
 `result.data` is `undefined` when the turn did not produce a structured result.
+
+## Require structured settlement
+
+Set `outputSchemaRequired: true` when prose is not a valid terminal result. Eve still permits ordinary tool calls and iteration. If the model then ends in prose, Eve makes one final call with `final_output` selected. A second miss emits `REQUIRED_OUTPUT_SCHEMA_NOT_FULFILLED` and parks the conversation turn instead of silently treating prose as the structured result.
+
+`outputSchemaRequired` is run-scoped, must accompany `outputSchema` when a session is created, and is cleared with that schema after success or failure.
 
 ## Standard Schema
 

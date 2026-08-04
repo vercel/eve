@@ -2,7 +2,13 @@ import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
 
-const COALESCED_DELIVER_FIELDS = ["context", "inputResponses", "message", "outputSchema"] as const;
+const COALESCED_DELIVER_FIELDS = [
+  "context",
+  "inputResponses",
+  "message",
+  "outputSchema",
+  "outputSchemaRequired",
+] as const;
 
 /** Coalesces channel payloads while preserving turn input and adapter-specific fields. */
 export function coalesceDeliverPayloads(payloads: readonly DeliverPayload[]): DeliverPayload {

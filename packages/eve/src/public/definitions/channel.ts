@@ -257,6 +257,7 @@ export interface ChannelEvents<TCtx = void> {
   readonly "reasoning.appended"?: ChannelEventHandler<"reasoning.appended", TCtx>;
   readonly "reasoning.completed"?: ChannelEventHandler<"reasoning.completed", TCtx>;
   readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
+  readonly "step.failed"?: ChannelEventHandler<"step.failed", TCtx>;
   readonly "turn.failed"?: ChannelEventHandler<"turn.failed", TCtx>;
   readonly "turn.completed"?: ChannelEventHandler<"turn.completed", TCtx>;
   readonly "turn.cancelled"?: ChannelEventHandler<"turn.cancelled", TCtx>;
@@ -363,6 +364,7 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "reasoning.appended": null,
   "reasoning.completed": null,
   "input.requested": null,
+  "step.failed": null,
   "turn.failed": null,
   "turn.completed": null,
   "turn.cancelled": null,

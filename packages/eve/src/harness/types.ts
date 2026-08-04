@@ -68,6 +68,12 @@ export interface HarnessSession {
   readonly limits?: SessionLimits;
   readonly outputSchema?: JsonObject;
   /**
+   * Requires this turn to settle through `final_output`. When a terminal model
+   * response omits it, the harness makes one final schema-constrained call
+   * before emitting a typed recoverable failure.
+   */
+  readonly outputSchemaRequired?: boolean;
+  /**
    * Stable identifier of the top user-facing session in the dispatch
    * chain. For a top-level session this field is `undefined` and
    * `sessionId` itself is the root. For any delegated subagent session,
@@ -135,6 +141,7 @@ export interface StepInput {
    * present. Omitted continuations keep the existing schema.
    */
   readonly outputSchema?: JsonObject;
+  readonly outputSchemaRequired?: boolean;
   /**
    * Runtime-owned action results being resumed into the current turn.
    *

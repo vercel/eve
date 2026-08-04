@@ -192,6 +192,7 @@ export function defaultDeliverResult(payload: DeliverPayload): StepInput | undef
       message: payload.message,
       context: payload.context,
       outputSchema: payload.outputSchema,
+      outputSchemaRequired: payload.outputSchemaRequired,
     };
   }
 
@@ -200,15 +201,23 @@ export function defaultDeliverResult(payload: DeliverPayload): StepInput | undef
       inputResponses: payload.inputResponses,
       context: payload.context,
       outputSchema: payload.outputSchema,
+      outputSchemaRequired: payload.outputSchemaRequired,
     };
   }
 
   if (payload.context !== undefined && payload.context.length > 0) {
-    return { context: payload.context, outputSchema: payload.outputSchema };
+    return {
+      context: payload.context,
+      outputSchema: payload.outputSchema,
+      outputSchemaRequired: payload.outputSchemaRequired,
+    };
   }
 
   if (payload.outputSchema !== undefined) {
-    return { outputSchema: payload.outputSchema };
+    return {
+      outputSchema: payload.outputSchema,
+      outputSchemaRequired: payload.outputSchemaRequired,
+    };
   }
 
   return undefined;

@@ -31,6 +31,7 @@ export function createSendFn<TState = undefined>(
       inputResponses,
       context,
       outputSchema,
+      outputSchemaRequired,
     } = normalizeSendInput(input);
     const message = serializeUrlFilePartsInMessage(rawMessage);
 
@@ -39,7 +40,7 @@ export function createSendFn<TState = undefined>(
         auth,
         continuationToken,
         requestId: metadata.requestId,
-        payload: { inputResponses, message, context, outputSchema },
+        payload: { inputResponses, message, context, outputSchema, outputSchemaRequired },
       };
       const { sessionId } = await runtime.deliver(deliverInput);
 
@@ -69,7 +70,7 @@ export function createSendFn<TState = undefined>(
       channelName,
       callback,
       continuationToken,
-      input: { message: message ?? "", context, outputSchema },
+      input: { message: message ?? "", context, outputSchema, outputSchemaRequired },
       mode,
       requestId: metadata.requestId,
       title,

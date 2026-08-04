@@ -67,6 +67,8 @@ export interface SendPayload {
    * waits for more input; a task run (which cannot wait) finishes as an error.
    */
   readonly outputSchema?: JsonObject;
+  /** Require this turn to settle through the declared output schema. */
+  readonly outputSchemaRequired?: boolean;
 }
 
 /**
