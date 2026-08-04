@@ -1,5 +1,11 @@
 # eve
 
+## 0.30.6
+
+### Patch Changes
+
+- 7fa4d36: Accept unmodeled `SKILL.md` frontmatter when importing a skill from another runtime. These fields are no-ops in eve.
+
 ## 0.30.5
 
 ### Patch Changes
