@@ -155,17 +155,23 @@ async function compileSubagentDefinition(input: {
     };
   }
 
+  let agentConfigDefinition = definition;
+  if (dynamic !== undefined) {
+    const dynamicAgentConfig: {
+      build?: { readonly externalDependencies?: readonly string[] };
+      readonly model: string;
+    } = { model: DEFAULT_AGENT_MODEL_ID };
+    if (dynamic.build !== undefined) {
+      dynamicAgentConfig.build = dynamic.build;
+    }
+    agentConfigDefinition = dynamicAgentConfig;
+  }
+
   return {
     kind: "local",
     ...(await compileLocalSubagent({
       ...input,
-      agentConfigDefinition:
-        dynamic === undefined
-          ? definition
-          : {
-              ...(dynamic.build === undefined ? {} : { build: dynamic.build }),
-              model: DEFAULT_AGENT_MODEL_ID,
-            },
+      agentConfigDefinition,
       dynamic: dynamic?.definition,
     })),
   };
@@ -323,10 +329,16 @@ function normalizeDynamicSubagentDefinition(
     eventNames.push(eventName as DynamicToolEventName);
   }
 
-  return {
-    ...(build === undefined ? {} : { build }),
+  const normalized: {
+    build?: { readonly externalDependencies?: readonly string[] };
+    readonly definition: { readonly eventNames: readonly DynamicToolEventName[] };
+  } = {
     definition: { eventNames },
   };
+  if (build !== undefined) {
+    normalized.build = build;
+  }
+  return normalized;
 }
 
 function createSubagentConfigModuleSourceRef(
