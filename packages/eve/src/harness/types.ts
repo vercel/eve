@@ -11,7 +11,11 @@ import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
-import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
+import type {
+  AgentReasoningDefinition,
+  AgentTurnContinuationInput,
+  AgentTurnContinuationResult,
+} from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessInstrumentation } from "#harness/instrumentation-runtime.js";
 
@@ -278,6 +282,13 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
+  /**
+   * Called when the default harness would otherwise stop after a model step.
+   * Return a user message to append to history and continue this same turn.
+   */
+  readonly onStepWouldEndTurn?: (
+    input: AgentTurnContinuationInput,
+  ) => AgentTurnContinuationResult | Promise<AgentTurnContinuationResult>;
   readonly dispatchDynamicModelEvent?: (input: {
     readonly ctx: AlsContext;
     readonly event: UnstampedMessageStreamEvent;

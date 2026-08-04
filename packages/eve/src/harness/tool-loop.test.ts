@@ -29,6 +29,7 @@ import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
+import type { AgentTurnContinuationContent } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
 import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
@@ -372,7 +373,13 @@ type MockAgentConstructor =
     : never;
 type MockAgentInstance = ToolLoopAgent & Record<string, unknown>;
 
-function setupMockAgent(result: Record<string, unknown>): void {
+function setupMockAgent(
+  resultOrResults: Record<string, unknown> | readonly Record<string, unknown>[],
+): void {
+  const results = Array.isArray(resultOrResults) ? [...resultOrResults] : [resultOrResults];
+  let resultIndex = 0;
+  const takeResult = () => results[Math.min(resultIndex++, results.length - 1)]!;
+
   vi.mocked(ToolLoopAgent).mockImplementation(function (
     this: Record<string, unknown>,
     settings: MockAgentSettings,
@@ -380,6 +387,7 @@ function setupMockAgent(result: Record<string, unknown>): void {
     const { onStepFinish, prepareStep } = settings;
 
     this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+      const result = takeResult();
       if (prepareStep) {
         await prepareStep({
           messages: options.messages,
@@ -394,6 +402,7 @@ function setupMockAgent(result: Record<string, unknown>): void {
     });
 
     this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+      const result = takeResult();
       if (prepareStep) {
         await prepareStep({
           messages: options.messages,
@@ -635,6 +644,255 @@ describe("createToolLoopHarness", () => {
         { content: "Hello!", role: "assistant" },
       ]);
     }
+  });
+
+  it("continues the same turn when onStepWouldEndTurn returns a prompt", async () => {
+    setupMockAgent([
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "I stopped early.", role: "assistant" }] },
+        text: "I stopped early.",
+        toolCalls: [],
+        toolResults: [],
+      },
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "One todo still remains.", role: "assistant" }] },
+        text: "One todo still remains.",
+        toolCalls: [],
+        toolResults: [],
+      },
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "All work is now complete.", role: "assistant" }] },
+        text: "All work is now complete.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+
+    const onStepWouldEndTurn: NonNullable<ToolLoopHarnessConfig["onStepWouldEndTurn"]> = vi
+      .fn()
+      .mockResolvedValueOnce({ role: "user", content: "Todos remain incomplete. Continue." })
+      .mockResolvedValueOnce("One todo remains. Continue again.")
+      .mockResolvedValueOnce(null);
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { onStepWouldEndTurn }),
+    );
+
+    const first = await runStep(createTestSession(), { message: "Do the list" });
+
+    expect(first.next).toBe(runStep);
+    expect(onStepWouldEndTurn).toHaveBeenCalledWith({
+      lastStep: {
+        finishReason: "stop",
+        text: "I stopped early.",
+        toolCalls: [],
+      },
+      messages: [
+        { content: "Do the list", role: "user" },
+        { content: "I stopped early.", role: "assistant" },
+      ],
+    });
+    expect(first.session.history).toEqual([
+      { content: "Do the list", role: "user" },
+      { content: "I stopped early.", role: "assistant" },
+      { content: "Todos remain incomplete. Continue.", role: "user" },
+    ]);
+
+    const second = await runStep(first.session);
+
+    expect(second.next).toBe(runStep);
+    expect(second.session.history).toEqual([
+      { content: "Do the list", role: "user" },
+      { content: "I stopped early.", role: "assistant" },
+      { content: "Todos remain incomplete. Continue.", role: "user" },
+      { content: "One todo still remains.", role: "assistant" },
+      { content: "One todo remains. Continue again.", role: "user" },
+    ]);
+
+    const third = await runStep(second.session);
+
+    expect(third.next).toBeNull();
+    expect(onStepWouldEndTurn).toHaveBeenCalledTimes(3);
+    expect(third.session.history).toEqual([
+      { content: "Do the list", role: "user" },
+      { content: "I stopped early.", role: "assistant" },
+      { content: "Todos remain incomplete. Continue.", role: "user" },
+      { content: "One todo still remains.", role: "assistant" },
+      { content: "One todo remains. Continue again.", role: "user" },
+      { content: "All work is now complete.", role: "assistant" },
+    ]);
+  });
+
+  it("does not call onStepWouldEndTurn after final_output completes the turn", async () => {
+    const onStepWouldEndTurn = vi.fn().mockResolvedValue("Continue unexpectedly");
+    setupMockAgent(finalOutputResult("Done.", { summary: "Done" }));
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { onStepWouldEndTurn }),
+    );
+
+    const result = await runStep(createTestSession({ outputSchema: { type: "object" } }), {
+      message: "Return the result",
+    });
+
+    expect(result.next).toBeNull();
+    expect(onStepWouldEndTurn).not.toHaveBeenCalled();
+    expect(result.session.history).toEqual([
+      { content: "Return the result", role: "user" },
+      { content: '{"summary":"Done"}', role: "assistant" },
+    ]);
+  });
+
+  it("does not call onStepWouldEndTurn while the built-in tool loop continues", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [{ input: {}, toolCallId: "add-1", toolName: "add", type: "tool-call" }],
+            role: "assistant",
+          },
+          {
+            content: [{ output: "42", toolCallId: "add-1", toolName: "add", type: "tool-result" }],
+            role: "tool",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [{ input: {}, toolCallId: "add-1", toolName: "add", type: "tool-call" }],
+      toolResults: [
+        { input: {}, output: "42", toolCallId: "add-1", toolName: "add", type: "tool-result" },
+      ],
+    });
+    const onStepWouldEndTurn = vi.fn().mockResolvedValue("Continue unexpectedly");
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { onStepWouldEndTurn }),
+    );
+
+    const result = await runStep(createTestSession(), { message: "Add the numbers" });
+
+    expect(result.next).toBe(runStep);
+    expect(onStepWouldEndTurn).not.toHaveBeenCalled();
+  });
+
+  it("does not continue the turn when it is cancelled while onStepWouldEndTurn resolves", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "I stopped early.", role: "assistant" }] },
+      text: "I stopped early.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const abortController = new AbortController();
+    const cancellation = new TurnCancelledError();
+    let resolveContinuation!: (value: string) => void;
+    const onStepWouldEndTurn = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveContinuation = resolve;
+        }),
+    );
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        abortSignal: abortController.signal,
+        onStepWouldEndTurn,
+      }),
+    );
+
+    const pending = runStep(createTestSession(), { message: "Do the list" });
+    await vi.waitFor(() => expect(onStepWouldEndTurn).toHaveBeenCalledOnce());
+    abortController.abort(cancellation);
+    resolveContinuation("Continue unexpectedly");
+
+    await expect(pending).rejects.toBe(cancellation);
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it("stages FileParts returned by onStepWouldEndTurn before persisting history", async () => {
+    setupMockAgent([
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "I stopped early.", role: "assistant" }] },
+        text: "I stopped early.",
+        toolCalls: [],
+        toolResults: [],
+      },
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Inspected the file.", role: "assistant" }] },
+        text: "Inspected the file.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+
+    const attachmentBytes = Buffer.alloc(1024, 0x89);
+    const continuationContent: AgentTurnContinuationContent = [
+      { type: "text", text: "Todos remain. Continue with this evidence." },
+      {
+        data: attachmentBytes,
+        filename: "todos.png",
+        mediaType: "image/png",
+        type: "file",
+      },
+    ];
+    const onStepWouldEndTurn: NonNullable<ToolLoopHarnessConfig["onStepWouldEndTurn"]> = vi
+      .fn()
+      .mockResolvedValueOnce({ role: "user", content: continuationContent })
+      .mockResolvedValueOnce(null);
+    const sandbox = mockSandbox({ id: "sbx_turn_continuation" });
+    const ctx = new ContextContainer();
+    ctx.set(SandboxKey, sandbox.access);
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { onStepWouldEndTurn }),
+    );
+
+    const first = await contextStorage.run(ctx, () =>
+      runStep(createTestSession(), { message: "Do the list" }),
+    );
+
+    expect(first.next).toBe(runStep);
+    expect(sandbox.writes).toHaveLength(1);
+    expect((sandbox.writes[0]!.content as Buffer).equals(attachmentBytes)).toBe(true);
+
+    const continuationMessage = first.session.history.at(-1);
+    expect(continuationMessage?.role).toBe("user");
+    const persistedContent = continuationMessage?.content;
+    expect(Array.isArray(persistedContent)).toBe(true);
+    const persistedParts = persistedContent as Exclude<UserContent, string>;
+    const persistedFilePart = persistedParts.find(
+      (part) => (part as FilePart).type === "file",
+    ) as FilePart;
+    expect(isSandboxRefUrl(persistedFilePart.data)).toBe(true);
+    const persistedRef = decodeSandboxRef(persistedFilePart.data as URL);
+    expect(persistedRef.mediaType).toBe("image/png");
+    expect(persistedRef.size).toBe(attachmentBytes.byteLength);
+
+    const second = await contextStorage.run(ctx, () => runStep(first.session));
+
+    expect(second.next).toBeNull();
+    const secondAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    const secondModelCall = secondAgent.generate.mock.calls[0]?.[0] as {
+      messages: Array<{
+        content: Array<{ data?: unknown; type: string }>;
+        role: string;
+      }>;
+    };
+    const modelFacingContinuation = secondModelCall.messages.find((message) => {
+      if (message.role !== "user" || !Array.isArray(message.content)) {
+        return false;
+      }
+      return message.content.some((part) => part.type === "file");
+    });
+    const modelFilePart = modelFacingContinuation?.content.find((part) => part.type === "file") as
+      | FilePart
+      | undefined;
+    expect(modelFilePart).toBeDefined();
+    expect(Buffer.isBuffer(modelFilePart!.data)).toBe(true);
+    expect((modelFilePart!.data as Buffer).equals(attachmentBytes)).toBe(true);
   });
 
   it("parks without delivery when a terminal response contains the empty-delivery sentinel", async () => {

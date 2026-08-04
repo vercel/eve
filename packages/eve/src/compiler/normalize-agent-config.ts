@@ -82,6 +82,7 @@ export async function compileAgentConfig(
     experimental?: CompiledAgentDefinition["experimental"];
     model: CompiledRuntimeModelReference;
     name: string;
+    onStepWouldEndTurn?: CompiledAgentDefinition["onStepWouldEndTurn"];
     outputSchema?: JsonObject;
     reasoning?: CompiledAgentDefinition["reasoning"];
     source?: ModuleSourceRef;
@@ -129,6 +130,18 @@ export async function compileAgentConfig(
 
   if (definition.reasoning !== undefined) {
     compiledConfig.reasoning = definition.reasoning;
+  }
+
+  if (definition.onStepWouldEndTurn !== undefined) {
+    if (configModule === undefined) {
+      throw new Error("Expected turn continuation hooks to be authored in agent.ts.");
+    }
+    compiledConfig.onStepWouldEndTurn = {
+      exportName: configModule.exportName,
+      sourceKind: "module",
+      logicalPath: configModule.logicalPath,
+      sourceId: configModule.sourceId,
+    };
   }
 
   if (definition.limits !== undefined) {

@@ -86,6 +86,28 @@ function typeOnlyFixtures(): void {
   });
 
   defineAgent({
+    model: "anthropic/claude-sonnet-5",
+    onStepWouldEndTurn({ messages }) {
+      const latestRole: "system" | "user" | "assistant" | "tool" | undefined =
+        messages.at(-1)?.role;
+      return latestRole === "assistant"
+        ? {
+            content: [
+              { text: "Continue with the attachment.", type: "text" },
+              {
+                data: new Uint8Array([1, 2, 3]),
+                filename: "evidence.bin",
+                mediaType: "application/octet-stream",
+                type: "file",
+              },
+            ],
+            role: "user",
+          }
+        : null;
+    },
+  });
+
+  defineAgent({
     limits: {
       // @ts-expect-error Recursive delegation is root-only; this limit was removed.
       maxSubagentDepth: 4,

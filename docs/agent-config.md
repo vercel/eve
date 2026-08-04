@@ -179,6 +179,42 @@ grants without erasing lifetime usage. An authored child limit applies only
 when it is tighter than the parent's grant; an uncapped parent delegates
 uncapped children.
 
+## Continue a turn before it parks
+
+Use `onStepWouldEndTurn` when your app has authoritative state that says the
+agent should keep working even though the model just ended a step with no tool
+calls. The hook runs inside the same runtime context as tools, so it can read
+`defineState` handles and return a user message that is appended to history
+before eve immediately starts the next model step.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { defineState } from "eve/context";
+
+const todos = defineState("support.todos", () => ({
+  items: [] as { id: string; status: "open" | "done" }[],
+}));
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  onStepWouldEndTurn({ lastStep }) {
+    const hasOpenTodos = todos.get().items.some((todo) => todo.status === "open");
+
+    if (lastStep.finishReason === "stop" && hasOpenTodos) {
+      return {
+        role: "user",
+        content: "There is still open todo work in this session. Continue with the next todo.",
+      };
+    }
+
+    return null;
+  },
+});
+```
+
+Return `null` or `undefined` to keep the default behavior. A `final_output` tool
+call remains terminal, so structured task results are not reopened by this hook.
+
 ## Workflow world
 
 By default, eve selects the Workflow SDK world for the host: Vercel Workflow on
@@ -220,14 +256,15 @@ installed package must stay external in hosted output, list it in
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API](./reference/typescript-api).
 
-| Field          | Type                                    | Default          | Description                                                                                                                                                                                                   |
-| -------------- | --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                 |
-| `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                        |
-| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; token-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                   |
-| `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
-| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                    |
-| `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.      |
+| Field                | Type                                    | Default          | Description                                                                                                                                                                                                   |
+| -------------------- | --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reasoning`          | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                 |
+| `modelOptions`       | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                        |
+| `limits`             | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; token-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                   |
+| `onStepWouldEndTurn` | `AgentTurnContinuationResolver`         | none             | Runtime hook called before a model step would end the turn. Return a user message to continue the same turn, or `null`/`undefined` to park or finish normally.                                               |
+| `experimental`       | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
+| `outputSchema`       | Standard Schema or a JSON Schema object | none             | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                    |
+| `build`              | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.      |
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.
 

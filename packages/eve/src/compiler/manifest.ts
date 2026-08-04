@@ -434,6 +434,7 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
       .optional(),
     model: compiledRuntimeModelReferenceSchema,
     name: z.string(),
+    onStepWouldEndTurn: moduleSourceRefSchema.optional(),
     outputSchema: jsonObjectSchema.optional(),
     reasoning: z
       .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
@@ -837,6 +838,12 @@ export function createCompiledAgentNodeManifest(input: {
             },
       model: cloneCompiledRuntimeModelReference(input.config.model),
       name: input.config.name,
+      onStepWouldEndTurn:
+        input.config.onStepWouldEndTurn === undefined
+          ? undefined
+          : {
+              ...input.config.onStepWouldEndTurn,
+            },
       outputSchema: input.config.outputSchema,
       reasoning: input.config.reasoning,
       limits:

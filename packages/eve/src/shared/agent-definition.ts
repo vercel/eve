@@ -1,5 +1,6 @@
 import type { CallSettings, LanguageModel } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
@@ -190,6 +191,81 @@ export interface AgentLimitsDefinition {
   readonly maxOutputTokensPerSession?: number | false;
 }
 
+/** Text content returned by an agent turn-continuation hook. */
+export interface AgentTurnContinuationTextPart {
+  readonly type: "text";
+  readonly text: string;
+}
+
+/** File content returned by an agent turn-continuation hook. */
+export interface AgentTurnContinuationFilePart {
+  readonly type: "file";
+  readonly data: string | Uint8Array | ArrayBuffer | URL;
+  readonly filename?: string;
+  readonly mediaType: string;
+}
+
+/** eve-owned user content accepted from an agent turn-continuation hook. */
+export type AgentTurnContinuationContent =
+  | string
+  | Array<AgentTurnContinuationTextPart | AgentTurnContinuationFilePart>;
+
+/**
+ * Prompt injected when `onStepWouldEndTurn` decides the agent should take
+ * another model step before the turn parks or finishes.
+ */
+export type AgentTurnContinuationPrompt =
+  | AgentTurnContinuationContent
+  | {
+      readonly role: "user";
+      readonly content: AgentTurnContinuationContent;
+    };
+
+/** Value returned by an agent turn-continuation hook. */
+export type AgentTurnContinuationResult = AgentTurnContinuationPrompt | null | undefined | void;
+
+/** eve-owned reason the model stopped its most recent step. */
+export type AgentTurnContinuationFinishReason =
+  | "content-filter"
+  | "error"
+  | "length"
+  | "other"
+  | "stop"
+  | "tool-calls";
+
+/**
+ * Snapshot of the model step that would otherwise end the current turn.
+ */
+export interface AgentTurnContinuationStep {
+  readonly finishReason: AgentTurnContinuationFinishReason;
+  readonly text: string | null;
+  readonly toolCalls: readonly {
+    readonly toolCallId: string;
+    readonly toolName: string;
+  }[];
+}
+
+/** Read-only snapshot supplied to an agent turn-continuation hook. */
+export interface AgentTurnContinuationInput {
+  readonly lastStep: AgentTurnContinuationStep;
+  readonly messages: readonly AgentTurnContinuationMessage[];
+}
+
+/** eve-owned, read-only view of a model-history message passed to the hook. */
+export interface AgentTurnContinuationMessage {
+  readonly role: "system" | "user" | "assistant" | "tool";
+  readonly content: unknown;
+}
+
+/**
+ * Agent-level hook invoked after a model step when the default harness would
+ * otherwise stop looping. Return a user message to keep the same turn running.
+ */
+export type AgentTurnContinuationResolver = (
+  input: AgentTurnContinuationInput,
+  ctx: SessionContext,
+) => AgentTurnContinuationResult | Promise<AgentTurnContinuationResult>;
+
 /**
  * Experimental, opt-in agent capabilities authored in `agent.ts`.
  *
@@ -260,6 +336,7 @@ export type InternalAgentDefinition = {
   compaction?: InternalAgentCompactionDefinition;
   experimental?: AgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
+  onStepWouldEndTurn?: ModuleSourceRef;
   outputSchema?: JsonObject;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
@@ -312,6 +389,11 @@ export type PublicAgentDefinition = {
    * Framework-owned runtime limits for this agent's runs.
    */
   readonly limits?: AgentLimitsDefinition;
+  /**
+   * Called when a model step would otherwise end the current turn. Return a
+   * user message to append to history and immediately take another step.
+   */
+  readonly onStepWouldEndTurn?: AgentTurnContinuationResolver;
   /**
    * Optional structured return type used when this agent runs in task mode
    * (for example as a subagent, schedule, or remote job). Interactive

@@ -1,17 +1,24 @@
 import type { LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
+import { buildCallbackContext } from "#context/build-callback-context.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { createHarnessDelegationToolDefinition } from "#execution/delegation-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
+import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#shared/tool-schema.js";
+import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type {
+  AgentTurnContinuationInput,
+  AgentTurnContinuationResult,
+} from "#shared/agent-definition.js";
 import {
   resolveRuntimeModelReference,
   type RuntimeModelResolutionScope,
@@ -86,6 +93,13 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
           input.modelResolutionScope,
           input.node.turnAgent.dynamicModel,
         );
+  const onStepWouldEndTurn =
+    input.node.turnAgent.onStepWouldEndTurn === undefined
+      ? undefined
+      : createRuntimeTurnContinuationResolver(
+          input.modelResolutionScope,
+          input.node.turnAgent.onStepWouldEndTurn,
+        );
   const tools = createNodeHarnessTools({ node: input.node });
   const instrumentation = getInstrumentationRuntime();
   const step = createToolLoopHarness({
@@ -99,6 +113,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     instrumentation,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
+    onStepWouldEndTurn,
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
@@ -168,6 +183,33 @@ function createRuntimeDynamicModelEventDispatcher(
       messages: input.messages,
       scope,
     });
+}
+
+function createRuntimeTurnContinuationResolver(
+  scope: RuntimeModelResolutionScope,
+  source: NonNullable<ResolvedRuntimeAgentNode["turnAgent"]["onStepWouldEndTurn"]>,
+): NonNullable<Parameters<typeof createToolLoopHarness>[0]["onStepWouldEndTurn"]> {
+  return async (input: AgentTurnContinuationInput): Promise<AgentTurnContinuationResult> => {
+    const definition = await loadResolvedModuleExport({
+      definition: source,
+      kindLabel: "agent turn continuation hook",
+      moduleMap: scope.moduleMap,
+      nodeId: scope.nodeId,
+    });
+    const normalizedDefinition = normalizeAgentDefinition(
+      definition,
+      `Expected the authored agent config export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
+    );
+    const resolver = normalizedDefinition.onStepWouldEndTurn;
+
+    if (resolver === undefined) {
+      throw new Error(
+        `Expected the authored agent config export "${source.exportName ?? "default"}" from "${source.logicalPath}" to provide an onStepWouldEndTurn hook.`,
+      );
+    }
+
+    return resolver(input, buildCallbackContext());
+  };
 }
 
 /**
