@@ -1,5 +1,11 @@
 # eve
 
+## 0.30.2
+
+### Patch Changes
+
+- 512808c: Allow agents to select Exa or Parallel for the built-in `web_search` tool by exporting `webSearch({ provider })` from `agent/tools/web_search.ts`. Parallel remains the default for AI Gateway models.
+
 ## 0.30.1
 
 ### Patch Changes
