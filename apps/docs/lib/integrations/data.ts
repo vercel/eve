@@ -46,17 +46,21 @@ export interface ApiKeySpec {
 export interface ConnectionSpec {
   /** Vercel Connect connector UID; defaults to the integration slug. */
   connector?: string;
+  /** Auth-mode-specific connector UIDs when one service needs separate connectors. */
+  connectors?: Partial<Record<AuthMode, string>>;
   /** Service passed to `vercel connect create` when it differs from the connector UID. */
   connectorService?: string;
   /** Supported auth modes in display order; the first is the default. */
   authModes: AuthMode[];
   /** API-key wiring when `authModes` includes `apiKey`. */
   apiKey?: ApiKeySpec;
+  /** Optional MCP tool allow-list included in generated examples. */
+  toolAllow?: string[];
   /** Model-facing description; defaults to the integration tagline. */
   description?: string;
   mcp?: ConnectionIdentity["mcp"];
   openapi?: ConnectionIdentity["openapi"];
-  /** Optional one-line, provider-specific configure note. Keep it short. */
+  /** Optional provider-specific configure guidance, rendered as markdown. */
   configureNote?: string;
 }
 
@@ -115,7 +119,9 @@ interface ExtensionPresentation extends Presentation {
 interface ConnectionPresentation extends Presentation {
   authModes: AuthMode[];
   apiKey?: ApiKeySpec;
+  toolAllow?: string[];
   connector?: string;
+  connectors?: Partial<Record<AuthMode, string>>;
   connectorService?: string;
   configureNote?: string;
 }
@@ -1473,11 +1479,30 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     logo: "vercel",
     docsHref: "https://vercel.com/docs/agent-resources/vercel-mcp",
     keywords: ["mcp", "projects", "deployments", "logs", "oauth", "connect"],
-    authModes: ["user"],
+    authModes: ["user", "app"],
     connector: "vercel",
+    connectors: { app: "vercel/your-connector" },
     connectorService: "vercel",
-    configureNote:
-      "When the Connect form asks for a token authentication method, select None. Vercel MCP completes OAuth when the agent first calls an authenticated tool.",
+    toolAllow: [
+      "search_documentation",
+      "list_teams",
+      "list_projects",
+      "get_project",
+      "list_deployments",
+      "get_deployment",
+      "get_deployment_build_logs",
+      "get_runtime_logs",
+    ],
+    configureNote: `For **User** auth, select None when the Connect form asks for a token authentication method. Vercel MCP completes OAuth when each user first calls an authenticated tool.
+
+For **App** auth without per-user OAuth:
+
+1. Create a Vercel token that can access the team and projects the agent needs.
+2. In Vercel Connect, create an **API Key** connector and enter the Vercel token as its API key.
+3. Attach the connector to the Vercel project that runs the eve agent.
+4. Copy its connector UID (for example, \`vercel/coffee-bridge\`) and replace \`vercel/your-connector\` in the App example.
+
+Vercel tokens are always owned by a user, but Connect presents this shared credential to eve as the app principal, so agent users do not complete individual OAuth flows. Use a dedicated identity where practical, grant only the access the agent needs, and rotate the token as you would any long-lived secret.`,
   },
   linear: {
     logo: "linear",
@@ -1994,7 +2019,9 @@ function buildConnection(entry: IntegrationEntry): Integration {
     description: identity.description,
   };
   if (presentation.apiKey !== undefined) spec.apiKey = presentation.apiKey;
+  if (presentation.toolAllow !== undefined) spec.toolAllow = presentation.toolAllow;
   if (presentation.connector !== undefined) spec.connector = presentation.connector;
+  if (presentation.connectors !== undefined) spec.connectors = presentation.connectors;
   if (presentation.connectorService !== undefined) {
     spec.connectorService = presentation.connectorService;
   }

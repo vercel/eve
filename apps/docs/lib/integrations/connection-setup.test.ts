@@ -42,12 +42,20 @@ describe("Kernel extension setup", () => {
 });
 
 describe("Vercel MCP connection setup", () => {
-  it("uses Vercel's MCP endpoint and Connect service", () => {
+  it("offers user OAuth and shared app credential setup", () => {
     const integration = getIntegration("vercel")!;
-    const quickStart = buildConnectionSetup(integration).variants["mcp:user"];
+    const setup = buildConnectionSetup(integration);
+    const userQuickStart = setup.variants["mcp:user"];
+    const appQuickStart = setup.variants["mcp:app"];
 
-    expect(quickStart).toContain('url: "https://mcp.vercel.com"');
-    expect(quickStart).toContain('auth: connect("vercel")');
+    expect(setup.authModes).toEqual(["user", "app"]);
+    expect(userQuickStart).toContain('url: "https://mcp.vercel.com"');
+    expect(userQuickStart).toContain('auth: connect("vercel")');
+    expect(appQuickStart).toContain(
+      'auth: connect({ connector: "vercel/your-connector", principalType: "app" })',
+    );
+    expect(appQuickStart).toContain('"list_deployments"');
+    expect(appQuickStart).toContain('"get_runtime_logs"');
     const configure = buildConnectionConfigure(integration);
     expect(configure).toContain("vercel connect create vercel");
     expect(configure).not.toContain("vercel connect attach");
@@ -55,5 +63,8 @@ describe("Vercel MCP connection setup", () => {
       configure.indexOf("vercel connect create vercel"),
     );
     expect(configure).toContain("select None");
+    expect(configure).toContain("create an **API Key** connector");
+    expect(configure).toContain("Vercel tokens are always owned by a user");
+    expect(configure).toContain("vercel/coffee-bridge");
   });
 });

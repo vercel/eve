@@ -20,7 +20,8 @@ export interface ConnectionSetup {
 export const setupKey = (protocol: ConnectionProtocol, auth: AuthMode): string =>
   `${protocol}:${auth}`;
 
-const connectorOf = (slug: string, spec: ConnectionSpec): string => spec.connector ?? slug;
+const connectorOf = (slug: string, spec: ConnectionSpec, auth?: AuthMode): string =>
+  (auth === undefined ? undefined : spec.connectors?.[auth]) ?? spec.connector ?? slug;
 
 /** The TypeScript connection file for one (protocol, auth) combination. */
 const buildSnippet = (
@@ -32,7 +33,7 @@ const buildSnippet = (
   if (!spec) {
     return "";
   }
-  const connector = connectorOf(integration.slug, spec);
+  const connector = connectorOf(integration.slug, spec, auth);
   const description = spec.description ?? integration.tagline;
   const defineFn = protocol === "mcp" ? "defineMcpClientConnection" : "defineOpenAPIConnection";
   const transport = protocol === "mcp" ? spec.mcp : spec.openapi;
@@ -67,6 +68,16 @@ const buildSnippet = (
       `      return { type: "jwt-bearer", sub: email };`,
       `    },`,
       `  }),`,
+    );
+  }
+
+  if (protocol === "mcp" && spec.toolAllow !== undefined) {
+    fields.push(
+      `  tools: {`,
+      `    allow: [`,
+      ...spec.toolAllow.map((tool) => `      "${tool}",`),
+      `    ],`,
+      `  },`,
     );
   }
 
