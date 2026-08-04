@@ -32,6 +32,7 @@ interface CategoryStyle {
 const categoryStyles: Record<string, CategoryStyle> = {
   "agent.ts": { icon: SettingsIcon },
   "instructions.md": { icon: FileTextIcon },
+  "instructions.ts": { icon: FileTextIcon },
   channels: { icon: MessageSquareIcon },
   connections: { icon: PlugIcon },
   skills: { icon: FileTextIcon },
@@ -44,6 +45,7 @@ const defaultStyle: CategoryStyle = { icon: FileTextIcon };
 const categoryOrder = [
   "agent.ts",
   "instructions.md",
+  "instructions.ts",
   "channels",
   "connections",
   "skills",

@@ -2,10 +2,13 @@ export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing
 import { templateSourceFiles } from "./sources";
 
 export type TemplateIntegration =
+  | "GitHub"
   | "HTTP API"
   | "Linear"
   | "Notion"
+  | "Nuxt"
   | "Resend"
+  | "Sendblue"
   | "Sentry"
   | "Slack"
   | "Typefully"
@@ -77,6 +80,21 @@ export const templateEntries: TemplateEntry[] = [
     integrations: ["Slack"],
     source: "Vercel Templates",
     files: templateSourceFiles["eve-slack-agent"],
+  },
+  {
+    slug: "personal-agent",
+    title: "Personal",
+    setupPrompt:
+      "Set up the eve personal agent template in my current workspace using https://github.com/vercel-labs/personal-agent-template/tree/main as the source. Copy the project files, install its dependencies, and follow the repository README and docs/ENVIRONMENT.md to configure it, including the Nuxt web app, the Slack and Sendblue channels, and the GitHub and Linear connections. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
+    description:
+      "A personal assistant you reach from web chat, Slack, or iMessage, with long-term memory it only saves once you approve, plus GitHub and Linear on tap.",
+    sourceHref: "https://github.com/vercel-labs/personal-agent-template/tree/main",
+    sourceRevision: "ec986e56130167ccf0017000380735e65882849c",
+    category: "Chat",
+    model: "anthropic/claude-sonnet-4.6",
+    integrations: ["Web chat", "Nuxt", "Slack", "Sendblue", "GitHub", "Linear"],
+    source: "Vercel Templates",
+    files: templateSourceFiles["personal-agent"],
   },
   {
     slug: "marketing-team-eve-template",
