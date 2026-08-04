@@ -26,6 +26,7 @@ import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
 import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 
 const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set<DynamicToolEventName>([
   "session.started",
@@ -158,7 +159,13 @@ async function compileSubagentDefinition(input: {
     kind: "local",
     ...(await compileLocalSubagent({
       ...input,
-      agentConfigDefinition: dynamic === undefined ? definition : { model: DEFAULT_AGENT_MODEL_ID },
+      agentConfigDefinition:
+        dynamic === undefined
+          ? definition
+          : {
+              ...(dynamic.build === undefined ? {} : { build: dynamic.build }),
+              model: DEFAULT_AGENT_MODEL_ID,
+            },
       dynamic: dynamic?.definition,
     })),
   };
@@ -280,7 +287,12 @@ function compileRemoteAgent(input: {
 function normalizeDynamicSubagentDefinition(
   value: unknown,
   message: string,
-): { readonly definition: { readonly eventNames: readonly DynamicToolEventName[] } } | undefined {
+):
+  | {
+      readonly build?: { readonly externalDependencies?: readonly string[] };
+      readonly definition: { readonly eventNames: readonly DynamicToolEventName[] };
+    }
+  | undefined {
   if (!isDynamicSentinel(value)) {
     return undefined;
   }
@@ -291,8 +303,13 @@ function normalizeDynamicSubagentDefinition(
       `${message} Dynamic subagent definitions do not support "fallback". Return defineAgent(...) or defineRemoteAgent(...) from an event handler instead.`,
     );
   }
-  expectOnlyKnownKeys(record, ["events", "kind"], message);
+  expectOnlyKnownKeys(record, ["build", "events", "kind"], message);
 
+  const build =
+    record.build === undefined
+      ? undefined
+      : normalizeAgentDefinition({ build: record.build, model: DEFAULT_AGENT_MODEL_ID }, message)
+          .build;
   const rawEvents = expectObjectRecord(record.events, message);
   const eventNames: DynamicToolEventName[] = [];
 
@@ -307,6 +324,7 @@ function normalizeDynamicSubagentDefinition(
   }
 
   return {
+    ...(build === undefined ? {} : { build }),
     definition: { eventNames },
   };
 }

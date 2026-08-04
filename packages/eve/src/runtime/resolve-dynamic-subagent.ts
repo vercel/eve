@@ -46,7 +46,7 @@ export function normalizeResolvedDynamicSubagentDefinition(
 ): ResolvedDynamicSubagentDefinition {
   const message = `Expected the dynamic subagent export "${definition.exportName ?? "default"}" from "${definition.logicalPath}" to provide defineDynamic({ events }).`;
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["events", "kind"], message);
+  expectOnlyKnownKeys(record, ["build", "events", "kind"], message);
 
   if (record.kind !== "eve:dynamic") {
     throw new Error(message);

@@ -9,8 +9,8 @@ import {
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
-import { defineAgent } from "#public/definitions/agent.js";
-import { defineDynamic, experimental_workflow } from "#public/definitions/tool.js";
+import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
+import { experimental_workflow } from "#public/definitions/tool.js";
 import { webSearch } from "#public/tools/web-search.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
@@ -154,6 +154,49 @@ describe("compileAgentManifest", () => {
     expect(mocks.compileAgentConfig.mock.calls[1]?.[2]).toMatchObject({
       definition: { model: DEFAULT_AGENT_MODEL_ID },
     });
+  });
+
+  it("applies dynamic subagent build configuration before resolving events", async () => {
+    const dynamic = defineDynamic({
+      build: { externalDependencies: ["just-bash"] },
+      events: {
+        "session.started": () =>
+          defineAgent({
+            description: "Edit the request.",
+            model: "openai/gpt-5.5",
+          }),
+      },
+    });
+    const manifest = createManifestWithSubagent();
+    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
+      createConfig({ name: input.agentId }),
+    );
+    mocks.loadModuleBackedDefinition.mockResolvedValue(dynamic);
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.subagents[0]?.dynamic).toEqual({
+      eventNames: ["session.started"],
+    });
+    expect(mocks.compileAgentConfig.mock.calls[1]?.[2]).toMatchObject({
+      definition: {
+        build: { externalDependencies: ["just-bash"] },
+        model: DEFAULT_AGENT_MODEL_ID,
+      },
+    });
+  });
+
+  it("rejects invalid dynamic subagent build configuration", async () => {
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      build: { externalDependencies: "just-bash" },
+      events: { "session.started": () => null },
+      kind: "eve:dynamic",
+    });
+
+    await expect(compileAgentManifest(createManifestWithSubagent())).rejects.toThrow(
+      "Expected the dynamic subagent config export",
+    );
   });
 
   it("rejects fallback on a dynamic subagent", async () => {
