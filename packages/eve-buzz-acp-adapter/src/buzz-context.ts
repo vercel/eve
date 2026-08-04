@@ -70,13 +70,18 @@ function triggeringEventIds(block: string): string[] {
 
   const count = eventCount(block);
   if (count === undefined) return [];
-  const event = block.match(
-    new RegExp(
-      `^--- Event ${count} \\([^\\n]*\\) ---\\nEvent ID:\\s*(${EVENT_ID})\\nChannel:`,
-      "im",
+  const events = [
+    ...block.matchAll(
+      new RegExp(
+        `^--- Event (\\d+) \\([^\\n]*\\) ---\\nEvent ID:\\s*(${EVENT_ID})\\nChannel:`,
+        "gim",
+      ),
     ),
-  );
-  return event === null ? [] : [event[1]!];
+  ];
+  if (events.length !== count || events.some((event, index) => Number(event[1]) !== index + 1)) {
+    return [];
+  }
+  return [events.at(-1)![2]!];
 }
 
 function eventCount(block: string): number | undefined {
