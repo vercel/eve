@@ -16,7 +16,8 @@
     "registry:check": "pnpm run registry:build && pnpm run registry:validate && pnpm run registry:validate:channels && pnpm run registry:validate:instrumentation && tsc --project registry/tsconfig.json",
     "registry:validate": "tsx scripts/validate-connection-registry.ts",
     "registry:validate:channels": "tsx scripts/validate-channel-registry.ts",
-    "registry:validate:instrumentation": "tsx scripts/validate-instrumentation-registry.ts"
+    "registry:validate:instrumentation": "tsx scripts/validate-instrumentation-registry.ts",
+    "templates:sync": "tsx scripts/sync-templates.ts"
   },
   "dependencies": {
     "@eve/catalog": "workspace:*",
