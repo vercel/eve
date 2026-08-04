@@ -1099,12 +1099,12 @@ describe("slackChannel() inbound mention pipeline", () => {
     });
   });
 
-  it("binds onAppMention to an aligned conversation handle", async () => {
+  it("binds onAppMention to flat session operations", async () => {
     const clear = vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" });
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onAppMention(ctx) {
-        await ctx.conversation.clear();
+        await ctx.clear();
         return { auth: null };
       },
     });
@@ -1118,11 +1118,41 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(clear).toHaveBeenCalledWith("C_BOUND:1700000000.000300");
   });
 
+  it("sends from the flat message context with Slack-derived auth", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.send({ message: "Imperative follow-up" });
+        return null;
+      },
+    });
+    const { body } = buildMentionBody({
+      channel: "C_BOUND",
+      threadTs: "1700000000.000300",
+    });
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledWith("C_BOUND:1700000000.000300", {
+      auth: expect.objectContaining({
+        authenticator: "slack-webhook",
+        principalId: "slack:T01:U01",
+      }),
+      message: "Imperative follow-up",
+      state: {
+        channelId: "C_BOUND",
+        teamId: "T01",
+        threadTs: "1700000000.000300",
+        triggeringUserId: "U01",
+      },
+    });
+  });
+
   it("lets onAppMention cancel the active turn before dispatching its replacement", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onAppMention(ctx) {
-        await ctx.conversation.cancel({ turnId: "turn_observed" });
+        await ctx.cancel({ turnId: "turn_observed" });
         return { auth: null };
       },
     });
@@ -1145,7 +1175,7 @@ describe("slackChannel() inbound mention pipeline", () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onAppMention(ctx) {
-        await ctx.conversation.reset({ reason: "Slack user requested a fresh conversation" });
+        await ctx.reset({ reason: "Slack user requested a fresh conversation" });
         return { auth: null };
       },
     });
@@ -1694,12 +1724,10 @@ describe("slackChannel() generic Events API pipeline", () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
-        await ctx
-          .conversation({
-            channelId: "C01",
-            threadTs: "1700000000.000001",
-          })
-          .cancel({ turnId: "turn_observed" });
+        await ctx.cancel({
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
+          turnId: "turn_observed",
+        });
       },
     });
     const body = buildEventBody({ type: "reaction_added", user: "U01" });
@@ -1712,12 +1740,14 @@ describe("slackChannel() generic Events API pipeline", () => {
     });
   });
 
-  it("constructs aligned conversations for generic Slack events", async () => {
+  it("targets session operations from generic Slack events", async () => {
     const compact = vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" });
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
-        await ctx.conversation({ channelId: "C01", threadTs: "1700000000.000001" }).compact();
+        await ctx.compact({
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
+        });
       },
     });
 
@@ -1727,14 +1757,16 @@ describe("slackChannel() generic Events API pipeline", () => {
     expect(compact).toHaveBeenCalledWith("C01:1700000000.000001");
   });
 
-  it("binds Slack session state when a generic conversation send creates", async () => {
+  it("binds Slack session state when a generic event send creates", async () => {
     const send = vi.fn().mockResolvedValue({ id: "s1" });
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
-        await ctx
-          .conversation({ channelId: "C01", threadTs: "1700000000.000001" })
-          .send("follow up", { auth: null });
+        await ctx.send({
+          auth: null,
+          message: "follow up",
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
+        });
       },
     });
 
@@ -1757,12 +1789,10 @@ describe("slackChannel() generic Events API pipeline", () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
-        await ctx
-          .conversation({
-            channelId: "C01",
-            threadTs: "1700000000.000001",
-          })
-          .reset({ reason: "Reaction requested a fresh conversation" });
+        await ctx.reset({
+          reason: "Reaction requested a fresh conversation",
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
+        });
       },
     });
     const body = buildEventBody({ type: "reaction_added", user: "U01" });
@@ -1775,7 +1805,7 @@ describe("slackChannel() generic Events API pipeline", () => {
     });
   });
 
-  it("can start multiple turns through the pre-bound receive function", async () => {
+  it("can start multiple turns through the flat send function", async () => {
     const auth = {
       attributes: { source: "reaction" },
       authenticator: "test",
@@ -1784,15 +1814,15 @@ describe("slackChannel() generic Events API pipeline", () => {
     };
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
-      async onEvent({ receive }, event) {
+      async onEvent({ send }, event) {
         expect(event.type).toBe("reaction_added");
         await Promise.all([
-          receive({
+          send({
             auth,
             message: "Investigate the first message.",
             target: { channelId: "C01", threadTs: "1700000000.000001" },
           }),
-          receive({
+          send({
             auth: null,
             message: "Investigate the second message.",
             target: { channelId: "C02", threadTs: "1700000000.000002" },
@@ -1824,12 +1854,12 @@ describe("slackChannel() generic Events API pipeline", () => {
     expect(send.mock.calls[1]![1].auth).toBeNull();
   });
 
-  it("keeps detached receive calls alive through the handler waitUntil", async () => {
+  it("keeps detached send calls alive through the handler waitUntil", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       onEvent(ctx) {
         ctx.waitUntil(
-          ctx.receive({
+          ctx.send({
             auth: null,
             message: "Run detached work.",
             target: { channelId: "C01" },
@@ -2152,7 +2182,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       credentials: { botToken: "xoxb-test" },
       async onInteraction(action, ctx) {
         expect(action.actionId).toBe("stop");
-        await ctx.conversation.cancel({ turnId: "turn_observed" });
+        await ctx.cancel({ turnId: "turn_observed" });
       },
     });
 
@@ -2184,7 +2214,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       credentials: { botToken: "xoxb-test" },
       async onInteraction(action, ctx) {
         expect(action.actionId).toBe("new-conversation");
-        await ctx.conversation.reset({ reason: "New conversation button clicked" });
+        await ctx.reset({ reason: "New conversation button clicked" });
       },
     });
 

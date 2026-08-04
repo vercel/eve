@@ -100,15 +100,14 @@ export interface ClientOptions {
 }
 
 /**
- * Input payload for {@link ClientSession.send}. Pass a string as shorthand for
- * `{ message: string }`, or pass an object to include a message, HITL input
+ * Input object for {@link ClientSession.send}. Includes a message, HITL input
  * responses, one-turn client context, structured-output schema, abort signal,
  * and per-turn headers.
  */
-export type SendTurnInput<TOutput = unknown> = string | SendTurnPayload<TOutput>;
+export type SendTurnInput<TOutput = unknown> = SendTurnPayload<TOutput>;
 
 /**
- * Object form accepted by {@link ClientSession.send}.
+ * Object accepted by {@link ClientSession.send}.
  */
 export interface SendTurnPayload<TOutput = unknown> {
   /**

@@ -86,7 +86,7 @@ If more than one `result.completed` appears in the consumed event list, `result(
 
 ## Send payloads with output schema
 
-`outputSchema` works with string shorthand and object-form sends. Use object form when you need schema, headers, signal, context, attachments, or HITL responses:
+Pass `outputSchema` in the same input object as the message, headers, signal, context, attachments, or HITL responses:
 
 ```ts
 const response = await session.send<Summary>({
@@ -118,7 +118,7 @@ Client `outputSchema` is scoped to the turn that sends it. It doesn't become a p
 const response = await session.send({ message: "Return a structured summary.", outputSchema });
 await response.result();
 
-const followUpResponse = await session.send("Now answer normally.");
+const followUpResponse = await session.send({ message: "Now answer normally." });
 const followUp = await followUpResponse.result();
 
 console.log(followUp.data); // undefined unless this turn also requested a schema

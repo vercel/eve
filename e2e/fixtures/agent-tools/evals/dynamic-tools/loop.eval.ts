@@ -5,7 +5,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "Dynamic tools smoke: loop-generated tools keep per-iteration closures.",
   async test(t) {
-    await t.send("Call the `alpha` tool and tell me the name and index it returned.");
+    await t.send({ message: "Call the `alpha` tool and tell me the name and index it returned." });
 
     t.succeeded();
     t.calledTool("alpha", {

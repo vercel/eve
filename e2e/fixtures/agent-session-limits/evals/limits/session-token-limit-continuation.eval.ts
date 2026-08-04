@@ -15,12 +15,14 @@ export default defineEval({
   async test(t) {
     // The 1-token budget lets this first call finish (limits are checked
     // before the next call) but leaves the session over its input limit.
-    const first = await t.send('Reply with exactly the text "first ping" and nothing else.');
+    const first = await t.send({
+      message: 'Reply with exactly the text "first ping" and nothing else.',
+    });
     first.expectOk();
 
     // The next turn must park on the harness-authored prompt before any
     // model call happens.
-    await t.send('Reply with exactly the text "limit pong" and nothing else.');
+    await t.send({ message: 'Reply with exactly the text "limit pong" and nothing else.' });
     const request = t.requireInputRequest({
       display: "confirmation",
       optionIds: ["continue", "stop"],
@@ -33,12 +35,14 @@ export default defineEval({
     t.messageIncludes("limit pong");
 
     const stopSession = t.newSession();
-    const stopFirst = await stopSession.send(
-      'Reply with exactly the text "stop ping" and nothing else.',
-    );
+    const stopFirst = await stopSession.send({
+      message: 'Reply with exactly the text "stop ping" and nothing else.',
+    });
     stopFirst.expectOk();
 
-    await stopSession.send('Reply with exactly the text "stop pong" and nothing else.');
+    await stopSession.send({
+      message: 'Reply with exactly the text "stop pong" and nothing else.',
+    });
     const stopRequest = stopSession.requireInputRequest({
       display: "confirmation",
       optionIds: ["continue", "stop"],

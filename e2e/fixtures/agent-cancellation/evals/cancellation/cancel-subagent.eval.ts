@@ -47,7 +47,9 @@ export default defineEval({
     parentTurn.notEvent("turn.failed");
     parentTurn.notEvent("session.failed");
 
-    const followUp = await t.send("Reply with exactly CANCELLATION-SUBAGENT-FOLLOW-UP-OK.");
+    const followUp = await t.send({
+      message: "Reply with exactly CANCELLATION-SUBAGENT-FOLLOW-UP-OK.",
+    });
     followUp.expectOk();
     followUp.notEvent("turn.cancelled");
     followUp.messageIncludes(/CANCELLATION-SUBAGENT-FOLLOW-UP-OK/i);

@@ -19,7 +19,7 @@ interface ScheduleDefinition {
 }
 
 interface ScheduleHandlerArgs {
-  receive: CrossChannelReceiveFn; // hand the work off to a channel
+  send: ScheduleSendFn; // hand the work off to a channel
   waitUntil: (task: Promise<unknown>) => void; // keep the cron task alive past return
   appAuth: SessionAuthContext; // pre-built app principal
 }
@@ -56,7 +56,7 @@ Sweep stale workflow state.
 
 ## Handler form (`run`)
 
-Use a handler when the schedule needs to deliver to a channel, branch on conditions, or compute its arguments at fire time. The handler is in full control. It has no channel of its own, so it passes the work to one with `receive`.
+Use a handler when the schedule needs to deliver to a channel, branch on conditions, or compute its arguments at fire time. The handler is in full control. It has no channel of its own, so it passes the work to one with `send`.
 
 ```ts title="agent/schedules/critical-alerts.ts"
 import { defineSchedule } from "eve/schedules";
@@ -65,9 +65,9 @@ import slack from "../channels/slack";
 
 export default defineSchedule({
   cron: "* * * * *",
-  async run({ receive, waitUntil, appAuth }) {
+  async run({ send, waitUntil, appAuth }) {
     waitUntil(
-      receive(slack, {
+      send(slack, {
         message: "Check for new critical alerts. Report only when there are any.",
         target: { channelId: "C0123ABC" },
         auth: appAuth,
@@ -79,9 +79,9 @@ export default defineSchedule({
 
 The agent does not have to deliver a message on every run. When a prompt makes delivery conditional, as in the alert check above, eve tells the agent how to finish successfully without sending anything to the channel. Frequent polling schedules do not need a separate filter or delivery setting.
 
-- `receive(channel, { message, target, auth })`: starts a session on another channel. Same contract as a route handler's `args.receive`.
-- `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `receive` call in it.
-- `appAuth`: the app principal (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`). Pass it as `receive(..., { auth: appAuth })` for work the agent does on its own behalf.
+- `send(channel, { message, target, auth })`: starts a session on another channel. Same contract as a route handler's `args.receive`.
+- `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `send` call in it.
+- `appAuth`: the app principal (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`). Pass it as `send(..., { auth: appAuth })` for work the agent does on its own behalf.
 
 A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Only markdown task mode is barred from waiting.
 

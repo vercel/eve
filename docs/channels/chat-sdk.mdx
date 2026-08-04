@@ -177,7 +177,7 @@ chatSdkChannel({
 
 ### Proactive sessions
 
-Start a session without an inbound webhook through `channel.receive({ message, target, auth })` — from a schedule `run` handler, or `args.receive(channel, ...)` from another channel. The target is a serialized Chat SDK thread, or `{ threadId, adapterName }` when you only have a provider-native thread id:
+Start a session without an inbound webhook through `send(channel, { message, target, auth })` from a schedule `run` handler, or `args.receive(channel, ...)` from another channel. The target is a serialized Chat SDK thread, or `{ threadId, adapterName }` when you only have a provider-native thread id:
 
 ```ts
 await channel.receive({

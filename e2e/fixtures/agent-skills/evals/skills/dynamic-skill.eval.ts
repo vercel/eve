@@ -12,7 +12,9 @@ export default defineEval({
   tags: ["real-model"],
   description: "Skills smoke: dynamic single-skill resolution.",
   async test(t) {
-    await t.send("Please use the dynamic tenant policy skill and follow its instructions exactly.");
+    await t.send({
+      message: "Please use the dynamic tenant policy skill and follow its instructions exactly.",
+    });
 
     t.succeeded();
     t.loadedSkill("dynamic-tenant-policy", {

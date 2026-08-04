@@ -6,13 +6,13 @@ export default defineEval({
   tags: ["real-model"],
   description: "The model does not repeat an identical successful call after compaction.",
   async test(t) {
-    const turn = await t.send(
-      [
+    const turn = await t.send({
+      message: [
         "[case: redundant-tool-calls]",
         "Call inspect-repository exactly once with scope repository.",
         "After it succeeds, report REPOSITORY_INSPECTION_COMPLETE and call no more tools.",
       ].join("\n"),
-    );
+    });
 
     turn.expectOk();
     t.succeeded();

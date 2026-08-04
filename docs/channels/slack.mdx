@@ -108,7 +108,7 @@ Like `threadContext`, this helper calls `conversations.replies` and requires the
 
 #### Cancel an active turn
 
-Message hooks (`onMessage`, `onAppMention`, and `onDirectMessage`) receive a thread-bound `ctx.conversation` handle. Call `ctx.conversation.cancel({ turnId? })` before returning `{ auth }` to stop the current turn and queue the new Slack message as replacement input, producing a debounce-like experience:
+Message hooks (`onMessage`, `onAppMention`, and `onDirectMessage`) receive thread-bound session operations directly on `ctx`. Call `ctx.cancel({ turnId? })` before returning `{ auth }` to stop the current turn and queue the new Slack message as replacement input, producing a debounce-like experience:
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({
@@ -117,31 +117,33 @@ export default slackChannel({
     const shouldHandle = ctx.isBotMentioned() || (await ctx.isSubscribed());
     if (!shouldHandle || message.author?.isBot) return null;
 
-    await ctx.conversation.cancel();
+    await ctx.cancel();
     return { auth: null };
   },
 });
 ```
 
-`"accepted"` means the live thread session durably queued the cancellation request. A parked session consumes it as a no-op; `"no_active_turn"` means the thread has no active session owner. Both are successful outcomes, so the hook can still return `{ auth }` to deliver the replacement message. Cancellation never sends input itself. A custom `onInteraction` handler receives the same bound conversation handle, which is useful for a Stop button that should cancel without replacement input.
+`"accepted"` means the live thread session durably queued the cancellation request. A parked session consumes it as a no-op; `"no_active_turn"` means the thread has no active session owner. Both are successful outcomes, so the hook can still return `{ auth }` to deliver the replacement message. Cancellation never sends input itself. A custom `onInteraction` handler receives the same flat operations, which is useful for a Stop button that should cancel without replacement input.
 
-Message and interaction hooks also expose the bound `ctx.conversation` handle. It groups every current-owner operation for that Slack thread:
+Message and interaction hooks expose every current-owner operation directly on `ctx`:
 
 ```ts
 async onAppMention(ctx) {
-  await ctx.conversation.cancel();
-  await ctx.conversation.compact();
-  await ctx.conversation.clear();
-  await ctx.conversation.reset({ reason: "Start over" });
+  await ctx.send({ message: "Run a separate turn." });
+  await ctx.cancel();
+  await ctx.compact();
+  await ctx.clear();
+  await ctx.reset({ reason: "Start over" });
+  const session = await ctx.resolveSession();
   return { auth: null };
 }
 ```
 
-These calls are independent examples; a handler normally chooses one. `ctx.conversation.send()` is the only method that can create a session when the thread is unowned. Use `await ctx.conversation.resolveSession()` only when later work must stay pinned to the currently owning durable session ID.
+These calls are independent examples; a handler normally chooses one. `ctx.send()` is the only method that can create a session when the thread is unowned. It derives Slack auth from the inbound user unless `auth` is supplied explicitly. Use `await ctx.resolveSession()` only when later work must stay pinned to the currently owning durable session ID.
 
 #### Reset a conversation
 
-Use the thread-bound `ctx.conversation.reset({ reason? })` method when the conversation should start over instead. Reset terminally retires the session that currently owns the thread, including any in-flight turn. The next delivered message starts a new session with fresh history, state, and a new session-scoped sandbox:
+Use the thread-bound `ctx.reset({ reason? })` method when the conversation should start over instead. Reset terminally retires the session that currently owns the thread, including any in-flight turn. The next delivered message starts a new session with fresh history, state, and a new session-scoped sandbox:
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({
@@ -149,18 +151,18 @@ export default slackChannel({
   async onMessage(ctx, message) {
     if (message.text.trim() !== "/new") return null;
 
-    await ctx.conversation.reset({ reason: "Slack user requested /new" });
+    await ctx.reset({ reason: "Slack user requested /new" });
     await ctx.thread.post("Started a fresh conversation.");
     return null;
   },
 });
 ```
 
-Reset returns `{ status: "reset", previousSessionId }` when the thread had a session, or `{ status: "no_active_session" }` when it was already free. Both outcomes are successful. Returning `null` after reset consumes the triggering message as a command; return `{ auth }` instead to deliver that message as the first turn of the fresh session. Custom `onInteraction` handlers receive the same bound conversation handle, which is useful for a New conversation button.
+Reset returns `{ status: "reset", previousSessionId }` when the thread had a session, or `{ status: "no_active_session" }` when it was already free. Both outcomes are successful. Returning `null` after reset consumes the triggering message as a command; return `{ auth }` instead to deliver that message as the first turn of the fresh session. Custom `onInteraction` handlers receive the same flat operations, which is useful for a New conversation button.
 
 ### Other Events API callbacks
 
-Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. `ctx.receive(options)` is the current Slack channel's pre-bound form of the schedule API's `receive(slack, options)`: call it zero, one, or many times to start turns. Each call accepts `message`, `target`, and `auth`, and returns the resulting session.
+Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send({ message, target, auth })` zero, one, or many times to start turns. Each call returns the resulting session.
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -170,12 +172,12 @@ const onboardingChannels = ["C0123ABC", "C0456DEF"];
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  async onEvent({ receive }, event) {
+  async onEvent({ send }, event) {
     if (event.type !== "team_join") return;
 
     await Promise.all(
       onboardingChannels.map((channelId) =>
-        receive({
+        send({
           message: `A user joined the Slack workspace. Onboard them from this event:\n${JSON.stringify(event)}`,
           target: { channelId },
           auth: null,
@@ -186,9 +188,20 @@ export default slackChannel({
 });
 ```
 
-The webhook invocation already keeps an awaited `onEvent` handler alive. Use `ctx.waitUntil(promise)` for deliberately detached work, matching a handler-form schedule. `ctx.slack.request(operation, body)` provides workspace-scoped Slack Web API access, while `ctx.envelope` carries delivery metadata such as `team_id`, `event_id`, and `event_time`. Calls to `ctx.receive` automatically seed the callback's team id into Slack session state.
+The webhook invocation already keeps an awaited `onEvent` handler alive. Use `ctx.waitUntil(promise)` for deliberately detached work, matching a handler-form schedule. `ctx.slack.request(operation, body)` provides workspace-scoped Slack Web API access, while `ctx.envelope` carries delivery metadata such as `team_id`, `event_id`, and `event_time`. Calls to `ctx.send` automatically seed the callback's team id into Slack session state.
 
-Because a generic event is not necessarily tied to one thread, construct its bound handle explicitly with `ctx.conversation({ channelId, threadTs })`. It exposes `send`, `cancel`, `compact`, `clear`, `reset`, and `resolveSession` for that Slack thread. Pair a control with `ctx.receive(...)` when an event should deliver replacement input, or call it alone to stop or reset the thread.
+Because a generic event is not necessarily tied to one thread, put the target in each operation's input:
+
+```ts
+const target = { channelId, threadTs };
+
+await ctx.send({ auth: null, message: "Follow up", target });
+await ctx.cancel({ target, turnId });
+await ctx.compact({ target });
+await ctx.clear({ target });
+await ctx.reset({ reason: "Start over", target });
+const session = await ctx.resolveSession({ target });
+```
 
 `onEvent` is the raw fallback after the message hooks. If an event is not claimed by `onAppMention`, `onDirectMessage`, or `onMessage`, an authored `onEvent` receives it; otherwise eve applies the built-in mention/DM default or ignores it.
 
@@ -247,7 +260,7 @@ The default handlers reply in-thread and show progress. Typing indicators post a
 
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
 
-When a session starts without a `threadTs` (say, from a schedule or `receive(slack, ...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
+When a session starts without a `threadTs` (say, from a schedule's `send(slack, ...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
 
 The example below overrides `onAppMention` to gate on an authored message and posts the completed reply to the thread. Event handlers receive `(eventData, channel, ctx)`, with Slack platform handles on `channel.thread` and `channel.slack`:
 
@@ -286,7 +299,7 @@ events: {
 
 ### Proactive sessions
 
-Start a session without an inbound message through `receive(slack, { message, target, auth })` from a schedule `run` handler, or `args.receive(slack, ...)` from another channel. The proactive target shape is `{ channelId }`.
+Start a session without an inbound message through `send(slack, { message, target, auth })` from a schedule `run` handler, or `args.receive(slack, ...)` from another channel. The proactive target shape is `{ channelId }`.
 
 ### Attachments
 

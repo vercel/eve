@@ -9,18 +9,20 @@ import type {
 
 export type { InferReceiveTarget, TypedReceiveTarget } from "#channel/receive-target.js";
 
+/** Starts a session on a target channel from a schedule handler. */
+export type ScheduleSendFn = CrossChannelReceiveFn;
+
 /**
  * Arguments passed to a schedule's `run` handler. A tight subset of a route
- * handler's args: `receive` starts a session on another channel and `waitUntil`
- * extends the task lifetime. There is no `send` because a schedule has no
- * current channel.
+ * handler's args: `send` starts a session on another channel and `waitUntil`
+ * extends the task lifetime.
  */
 export interface ScheduleHandlerArgs {
   /**
    * Starts a session on another channel, using the same contract as a route
    * handler's `args.receive(channel, ...)`.
    */
-  readonly receive: CrossChannelReceiveFn;
+  readonly send: ScheduleSendFn;
   /**
    * Extends the cron task's lifetime past handler return so the runtime awaits
    * background work (the parked workflow session, in-flight fetches, etc.)
@@ -28,7 +30,7 @@ export interface ScheduleHandlerArgs {
    */
   readonly waitUntil: (task: Promise<unknown>) => void;
   /**
-   * Pre-built APP auth context. Pass this to `receive(channel, { auth })`
+   * Pre-built APP auth context. Pass this to `send(channel, { auth })`
    * for schedules that run on behalf of the agent itself.
    */
   readonly appAuth: SessionAuthContext;
@@ -36,7 +38,7 @@ export interface ScheduleHandlerArgs {
 
 /**
  * The `run` form of {@link ScheduleDefinition} invokes this handler when a
- * schedule's cron fires. It receives {@link ScheduleHandlerArgs} (`receive`,
+ * schedule's cron fires. It receives {@link ScheduleHandlerArgs} (`send`,
  * `waitUntil`, `appAuth`) and may return synchronously or as a promise.
  */
 export type ScheduleRunHandler = GenericScheduleRunHandler<ScheduleHandlerArgs>;
@@ -49,7 +51,7 @@ export type ScheduleRunHandler = GenericScheduleRunHandler<ScheduleHandlerArgs>;
  *   on the prompt and discards the output (equivalent to the `<name>.md`
  *   markdown form).
  * - `run`: full handler ({@link ScheduleRunHandler}). Receives
- *   `{ receive, waitUntil, appAuth }` and decides what to do.
+ *   `{ send, waitUntil, appAuth }` and decides what to do.
  *
  * Identity is derived from the file path under `agent/schedules/`; authored
  * definitions do not carry a `name` field.
@@ -69,8 +71,8 @@ export type ScheduleDefinition = GenericScheduleDefinition<ScheduleHandlerArgs>;
  *
  * export default defineSchedule({
  *   cron: "0 9 * * 1-5",
- *   async run({ receive, waitUntil, appAuth }) {
- *     waitUntil(receive(slack, {
+ *   async run({ send, waitUntil, appAuth }) {
+ *     waitUntil(send(slack, {
  *       message: "Post the daily standup summary.",
  *       target: { channelId: "C0123ABC" },
  *       auth: appAuth,

@@ -20,14 +20,14 @@ export default defineEval({
   tags: ["real-model"],
   description: "Static tools smoke: ten authored tool calls begin concurrently.",
   async test(t) {
-    const turn = await t.send(
-      [
+    const turn = await t.send({
+      message: [
         `Call the \`${TOOL_NAME}\` tool exactly ${FANOUT_SIZE} separate times in one tool-use step.`,
         `Use each label exactly once: ${LABELS.map((label) => `"${label}"`).join(", ")}.`,
         "Start every call before waiting for any result. Do not use any other tool.",
         "After every call returns, reply with exactly: authored fanout complete",
       ].join("\n"),
-    );
+    });
     turn.expectOk();
 
     t.succeeded();

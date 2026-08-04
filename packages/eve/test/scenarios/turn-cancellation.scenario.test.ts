@@ -117,12 +117,12 @@ describe("turn cancellation descendant cascade", () => {
 
         try {
           const parentClient = new Client({ host: parentServer.url });
-          const { session: parentSession, response } = await parentClient.sessions.create(
-            [
+          const { session: parentSession, response } = await parentClient.sessions.create({
+            message: [
               "Call tools in parallel: local-sleeper, remote-sleeper",
               'message: "Use wait-for-cancel."',
             ].join("\n"),
-          );
+          });
           const parentIterator = response[Symbol.asyncIterator]();
           const called = await readSubagentCalls({
             count: 2,
@@ -194,7 +194,9 @@ describe("turn cancellation descendant cascade", () => {
           expect(parentEvents.some((event) => event.type === "subagent.completed")).toBe(false);
 
           const followUp = await (
-            await parentSession.send("Reply with the exact string `still-alive` and nothing else.")
+            await parentSession.send({
+              message: "Reply with the exact string `still-alive` and nothing else.",
+            })
           ).result();
           expect(followUp.sessionId).toBe(response.sessionId);
           expect(followUp.status).toBe("waiting");

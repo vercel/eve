@@ -105,7 +105,7 @@ export default rows.map((row) =>
       expectedTool: row.expected_tool,
     },
     async test(t) {
-      await t.send(row.prompt);
+      await t.send({ message: row.prompt });
       t.succeeded();
     },
   }),

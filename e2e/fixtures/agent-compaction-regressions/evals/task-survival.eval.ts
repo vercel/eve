@@ -6,8 +6,8 @@ export default defineEval({
   tags: ["real-model"],
   description: "The verbatim task text survives compaction and reaches the model.",
   async test(t) {
-    const turn = await t.send(
-      [
+    const turn = await t.send({
+      message: [
         "[case: task-survival]",
         "Call inspect-repository once to generate context pressure, then confirm the task.",
         // Sized to a narrow window: long enough that a 280-char summarizer
@@ -17,7 +17,7 @@ export default defineEval({
         // mock never generates pressure.
         `Requirements: ${"handle the edge case exactly. ".repeat(12)}${TASK_TAIL_SENTINEL}`,
       ].join("\n"),
-    );
+    });
 
     turn.expectOk();
     t.succeeded();

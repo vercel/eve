@@ -43,7 +43,7 @@ export default defineEval({
     cancelledTurn.notEvent("step.failed");
     cancelledTurn.notEvent("session.failed");
 
-    const followUp = await t.send("Reply with exactly CANCELLATION-FOLLOW-UP-OK.");
+    const followUp = await t.send({ message: "Reply with exactly CANCELLATION-FOLLOW-UP-OK." });
     followUp.expectOk();
     followUp.notEvent("turn.cancelled");
     followUp.notEvent("turn.failed");
@@ -59,7 +59,9 @@ export default defineEval({
       ),
     );
 
-    const afterLateCancel = await t.send("Reply with exactly CANCELLATION-LATE-NOOP-OK.");
+    const afterLateCancel = await t.send({
+      message: "Reply with exactly CANCELLATION-LATE-NOOP-OK.",
+    });
     afterLateCancel.expectOk();
     afterLateCancel.notEvent("turn.cancelled");
     afterLateCancel.notEvent("turn.failed");

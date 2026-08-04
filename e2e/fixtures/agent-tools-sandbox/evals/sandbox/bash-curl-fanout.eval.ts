@@ -28,15 +28,15 @@ export default defineEval({
   tags: ["real-model"],
   description: "Sandbox Bash: at least ten curls reach a concurrency barrier.",
   async test(t) {
-    const turn = await t.send(
-      [
+    const turn = await t.send({
+      message: [
         `Call the \`${BASH_TOOL}\` tool at least ${MINIMUM_CURL_CALLS} separate times in one tool-use step.`,
         "Run every command below at least once. If you make extra calls, repeat a command below.",
         "Do not combine commands, use a loop, or background a process.",
         ...REQUESTS.map((request) => `${request.label}: \`${commandFor(request)}\``),
         "After all commands return, reply with exactly: curl fanout complete",
       ].join("\n"),
-    );
+    });
     turn.expectOk();
 
     t.log(formatCurlFanoutTrace(turn.events));

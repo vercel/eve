@@ -15,14 +15,14 @@ export default defineEval({
 
   async test(t) {
     // Drive a multi-step turn so the event log is long enough to split.
-    const turn = await t.send(
-      [
+    const turn = await t.send({
+      message: [
         "Follow these steps exactly:",
         "1. Call the `lookup-step-a` tool with topic 'demo'.",
         "2. Take the `stepKey` it returns and call the `lookup-step-b` tool with that exact stepKey.",
         "3. Reply with the final `value` from `lookup-step-b` verbatim, with no extra commentary.",
       ].join("\n"),
-    );
+    });
 
     const sessionId = turn.sessionId;
 

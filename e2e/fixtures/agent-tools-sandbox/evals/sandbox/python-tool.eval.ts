@@ -8,10 +8,11 @@ export default defineEval({
   tags: ["real-model"],
   description: "Sandbox: an authored tool runs real Python via ctx.getSandbox().",
   async test(t) {
-    await t.send(
-      "Use the `run_python` tool to compute the sum of these integers: 2, 3, and 4. " +
+    await t.send({
+      message:
+        "Use the `run_python` tool to compute the sum of these integers: 2, 3, and 4. " +
         "Reply with just the resulting number.",
-    );
+    });
 
     t.succeeded();
     t.calledTool("run_python", {

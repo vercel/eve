@@ -8,13 +8,15 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   description: "Dynamic model smoke: per-turn selection and null fallback in one session.",
   async test(t) {
-    const selected = await t.send(
-      '[model: mini] Reply with exactly the text "mini ping" and nothing else.',
-    );
+    const selected = await t.send({
+      message: '[model: mini] Reply with exactly the text "mini ping" and nothing else.',
+    });
     selected.expectOk();
     selected.messageIncludes("mini ping");
 
-    const fallback = await t.send('Reply with exactly the text "fallback again" and nothing else.');
+    const fallback = await t.send({
+      message: 'Reply with exactly the text "fallback again" and nothing else.',
+    });
     fallback.expectOk();
     fallback.messageIncludes("fallback again");
 

@@ -8,7 +8,7 @@ Every `ClientSession.send()` call posts the turn, then reads the session's NDJSO
 Once `send()` is accepted, the session exposes its assigned `sessionId` and can request cooperative cancellation with `session.cancel()`, even while the response stream is still running. The result status is `accepted` when the live session durably queued the command, including when a parked session consumes it as a no-op. An unknown or terminal session returns `no_active_turn`:
 
 ```ts
-const { session, response } = await client.sessions.create("Run the long operation.");
+const { session, response } = await client.sessions.create({ message: "Run the long operation." });
 
 const cancellation = await session.cancel();
 console.log(cancellation.status);
@@ -37,7 +37,7 @@ console.log(cleared.status);
 Use `result()` when you only need the final turn summary:
 
 ```ts
-const response = await session.send("Summarize the latest forecast.");
+const response = await session.send({ message: "Summarize the latest forecast." });
 const result = await response.result();
 
 console.log(result.status);
@@ -56,7 +56,7 @@ This consumes the stream until the current turn boundary:
 Use `for await...of` when you want to render progress:
 
 ```ts
-const response = await session.send("Draft a plan and show your work.");
+const response = await session.send({ message: "Draft a plan and show your work." });
 
 for await (const event of response) {
   if (event.type === "message.appended") {

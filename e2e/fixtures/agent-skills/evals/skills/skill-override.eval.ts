@@ -13,7 +13,9 @@ export default defineEval({
   tags: ["real-model"],
   description: "Skills smoke: a dynamic skill overrides a same-named authored skill.",
   async test(t) {
-    await t.send("Please use the house rules skill and follow its instructions exactly.");
+    await t.send({
+      message: "Please use the house rules skill and follow its instructions exactly.",
+    });
 
     t.succeeded();
     t.loadedSkill("house-rules", { output: new RegExp(HOUSE_RULES_OVERRIDE_TOKEN, "u") });

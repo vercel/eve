@@ -13,7 +13,9 @@ Pass a string to `send()` for plain text:
 import { Client } from "eve/client";
 
 const client = new Client({ host: "http://127.0.0.1:2000" });
-const { session, response } = await client.sessions.create("What is the weather in Brooklyn?");
+const { session, response } = await client.sessions.create({
+  message: "What is the weather in Brooklyn?",
+});
 
 // Metadata is available as soon as the POST succeeds.
 console.log(response.sessionId);
@@ -109,7 +111,7 @@ import type { InputRequest } from "eve/client";
 
 let pendingRequests: readonly InputRequest[] = [];
 
-const response = await session.send("Run the deployment checks.");
+const response = await session.send({ message: "Run the deployment checks." });
 
 for await (const event of response) {
   if (event.type === "input.requested") {

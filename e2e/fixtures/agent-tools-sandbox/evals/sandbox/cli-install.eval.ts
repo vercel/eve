@@ -10,9 +10,9 @@ export default defineEval({
   tags: ["real-model"],
   description: "Sandbox: a custom CLI installed in `bootstrap` is on the PATH for later sessions.",
   async test(t) {
-    await t.send(
-      `Run the bash command \`${SANDBOX_CLI_NAME} sandbox\` and reply with its output verbatim.`,
-    );
+    await t.send({
+      message: `Run the bash command \`${SANDBOX_CLI_NAME} sandbox\` and reply with its output verbatim.`,
+    });
 
     t.succeeded();
     t.calledTool("bash", {

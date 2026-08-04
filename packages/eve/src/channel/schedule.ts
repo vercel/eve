@@ -45,7 +45,7 @@ export interface ScheduleDispatchInput {
  *
  * For handler schedules: builds {@link ScheduleHandlerArgs} against the
  * request-scoped channel bundle and invokes the author's `run`. The
- * author owns control flow — `args.receive(channel, …)` hands work off
+ * author owns control flow — `args.send(channel, …)` hands work off
  * to a channel; `args.waitUntil(promise)` extends the task lifetime
  * so the dispatcher awaits in-flight work before settling.
  *
@@ -77,12 +77,15 @@ export class ScheduleDispatcher {
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const sessions: Session[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
-    const receive = createCrossChannelReceiveFn(this.runtime, toCrossChannelTargets(this.channels));
+    const receiveOnChannel = createCrossChannelReceiveFn(
+      this.runtime,
+      toCrossChannelTargets(this.channels),
+    );
 
     const args: ScheduleHandlerArgs = {
       appAuth: SCHEDULE_APP_AUTH,
-      receive: async (channel, options) => {
-        const session = await receive(channel, options);
+      send: async (channel, options) => {
+        const session = await receiveOnChannel(channel, options);
         sessions.push(session);
         return session;
       },

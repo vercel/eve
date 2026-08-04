@@ -25,7 +25,7 @@ describe("Client.sessions", () => {
       });
     const client = new Client({ host: "https://eve.test" });
 
-    const { response, session } = await client.sessions.create("hello");
+    const { response, session } = await client.sessions.create({ message: "hello" });
     await response.result();
 
     expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session");
@@ -61,7 +61,7 @@ describe("Client.sessions", () => {
 
     const session = client.sessions.attach("wrun_A");
     expect(requests).toHaveLength(0);
-    await session.send("follow-up");
+    await session.send({ message: "follow-up" });
     await session.cancel();
     await session.compact();
     await session.clear();

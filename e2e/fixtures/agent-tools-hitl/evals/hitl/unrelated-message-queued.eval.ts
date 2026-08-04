@@ -11,16 +11,18 @@ export default defineEval({
   tags: ["real-model"],
   description: "HITL smoke: unrelated message during approval is queued.",
   async test(t) {
-    const parked = await t.send('Call the guarded-echo tool with note "queued-approval".');
+    const parked = await t.send({
+      message: 'Call the guarded-echo tool with note "queued-approval".',
+    });
     parked.calledTool("guarded-echo", { status: "pending", count: 1 });
     const request = t.requireInputRequest({
       display: "confirmation",
       toolName: "guarded-echo",
     });
 
-    const queued = await t.send(
-      "After the pending approval is resolved, reply with exactly QUEUED-HITL-OK.",
-    );
+    const queued = await t.send({
+      message: "After the pending approval is resolved, reply with exactly QUEUED-HITL-OK.",
+    });
     queued.expectOk();
     queued.notEvent("action.result", {
       data: { result: { toolName: "guarded-echo" }, status: "rejected" },

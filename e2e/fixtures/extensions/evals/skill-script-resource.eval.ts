@@ -6,9 +6,10 @@ export default defineEval({
   tags: ["real-model"],
   description: "A dist-only extension preserves JavaScript files inside packaged skills.",
   async test(t) {
-    await t.send(
-      "Use the toolkit guide skill to perform its packaged skill resource smoke test. Read the referenced script and report its token exactly.",
-    );
+    await t.send({
+      message:
+        "Use the toolkit guide skill to perform its packaged skill resource smoke test. Read the referenced script and report its token exactly.",
+    });
 
     t.succeeded();
     t.loadedSkill("toolkit__toolkit-guide");

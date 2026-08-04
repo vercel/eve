@@ -35,7 +35,7 @@ import { scheduleStore } from "../lib/schedule-store";
 
 export default defineSchedule({
   cron: "* * * * *",
-  run({ receive, waitUntil }) {
+  run({ send, waitUntil }) {
     waitUntil(
       (async () => {
         const jobs = await scheduleStore.claimDue({
@@ -47,7 +47,7 @@ export default defineSchedule({
         await Promise.all(
           jobs.map(async (job) => {
             try {
-              await receive(slack, {
+              await send(slack, {
                 message: [
                   `Run dynamic schedule ${job.id}.`,
                   "Complete this tenant-owned task:",

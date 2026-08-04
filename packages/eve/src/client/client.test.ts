@@ -65,7 +65,7 @@ describe("Client request policy", () => {
     await client.info();
     await client.health();
     await client.fetch("/custom");
-    await (await client.sessions.create("hello")).response.result();
+    await (await client.sessions.create({ message: "hello" })).response.result();
 
     expect(fetchMock.mock.calls).toHaveLength(5);
     for (const [request] of fetchMock.mock.calls) {
@@ -92,7 +92,7 @@ describe("Client request policy", () => {
     await client.info();
     await client.health();
     await client.fetch("/custom", { redirect: "follow" });
-    await (await client.sessions.create("hello")).response.result();
+    await (await client.sessions.create({ message: "hello" })).response.result();
 
     expect(fetchMock.mock.calls).toHaveLength(5);
     for (const [, init] of fetchMock.mock.calls) {

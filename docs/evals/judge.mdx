@@ -10,7 +10,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   async test(t) {
-    await t.send("Explain quantum tunneling to a 10-year-old.");
+    await t.send({ message: "Explain quantum tunneling to a 10-year-old." });
     t.succeeded();
     t.judge.autoevals.closedQA("uses no math beyond arithmetic").atLeast(0.8);
   },
@@ -44,7 +44,7 @@ The reference or criteria is the positional argument. An options object follows:
 - `model` and `modelOptions` are a per-call judge override (see below).
 
 ```ts
-const draft = await t.send("Draft the welcome email.");
+const draft = await t.send({ message: "Draft the welcome email." });
 t.judge.autoevals.closedQA("professional tone", { on: draft.message }).atLeast(0.6);
 ```
 
@@ -86,7 +86,7 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   judge: { model: "anthropic/claude-opus-4.8" }, // a stronger judge for this eval
   async test(t) {
-    await t.send("Explain quantum tunneling to a 10-year-old.");
+    await t.send({ message: "Explain quantum tunneling to a 10-year-old." });
     t.judge.autoevals.factuality(reference).atLeast(0.7);
     t.judge.autoevals.closedQA("is concise", { model: "anthropic/claude-haiku-4.5" }); // cheaper, per-call
   },

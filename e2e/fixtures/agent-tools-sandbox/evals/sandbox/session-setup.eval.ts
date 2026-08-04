@@ -16,10 +16,11 @@ export default defineEval({
   tags: ["real-model"],
   description: "Sandbox: onSession marker and seeded workspace file are both present per session.",
   async test(t) {
-    await t.send(
-      `Run the bash command \`cat ${SESSION_MARKER_PATH} ${WORKSPACE_SEED_PATH}\` ` +
+    await t.send({
+      message:
+        `Run the bash command \`cat ${SESSION_MARKER_PATH} ${WORKSPACE_SEED_PATH}\` ` +
         "and reply with the combined file contents verbatim.",
-    );
+    });
 
     t.succeeded();
     t.calledTool("bash", {

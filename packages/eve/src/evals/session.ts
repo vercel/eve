@@ -4,12 +4,7 @@ import { basename, extname } from "node:path";
 import { createTextWithFileContent } from "#client/file-parts.js";
 import type { Client } from "#client/client.js";
 import type { ClientSession } from "#client/session.js";
-import type {
-  CancelSessionResult,
-  SendTurnInput,
-  SendTurnPayload,
-  ClientSessionState,
-} from "#client/types.js";
+import type { CancelSessionResult, ClientSessionState, SendTurnInput } from "#client/types.js";
 import type { MessageStreamEvent, TurnFailureStreamEvent } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
@@ -163,10 +158,14 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   async send(input: SendTurnInput): Promise<EveEvalTurn> {
-    return await (await this.start(input)).result();
+    return await (await this.#start(input)).result();
   }
 
-  async start(input: SendTurnInput): Promise<EveEvalLiveTurn> {
+  async start(message: string): Promise<EveEvalLiveTurn> {
+    return await this.#start({ message });
+  }
+
+  async #start(input: SendTurnInput): Promise<EveEvalLiveTurn> {
     const turnInput = attachSignal(input, this.#signal);
     let response;
     if (this.#session === undefined) {
@@ -563,13 +562,7 @@ export class EvalSessionManager {
 
 function attachSignal(input: SendTurnInput, signal: AbortSignal | undefined): SendTurnInput {
   if (signal === undefined) return input;
-
-  if (typeof input === "string") {
-    return { message: input, signal };
-  }
-
-  const payload = input as SendTurnPayload;
-  return payload.signal === undefined ? { ...payload, signal } : payload;
+  return input.signal === undefined ? { ...input, signal } : input;
 }
 
 function formatInputRequestFilter(filter: EveEvalInputRequestMatchOptions): string {

@@ -11,7 +11,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "HITL smoke: an approved once() grant persists for the session.",
   async test(t) {
-    const parked = await t.send('Call the guarded-echo tool with note "first-call".');
+    const parked = await t.send({ message: 'Call the guarded-echo tool with note "first-call".' });
     t.requireInputRequest({ toolName: "guarded-echo" });
     parked.calledTool("guarded-echo", { status: "pending", count: 1 });
 
@@ -31,7 +31,9 @@ export default defineEval({
 
     // A successful turn in an open session ends "waiting"; a re-park
     // would surface as pending input requests.
-    const second = await t.send('Call the guarded-echo tool again with note "second-call".');
+    const second = await t.send({
+      message: 'Call the guarded-echo tool again with note "second-call".',
+    });
     second.succeeded();
 
     t.succeeded();

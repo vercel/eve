@@ -9,14 +9,16 @@ export default defineEval({
   description:
     "HITL repro (#533): unrelated input does not replay an unresolved authored tool call.",
   async test(t) {
-    const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
+    const parked = await t.send({
+      message: `Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`,
+    });
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
     const approval = t.requireInputRequest({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
 
-    const unrelated = await t.send("Queue this unrelated note: ORBITAL-PINE-6C3R.");
+    const unrelated = await t.send({ message: "Queue this unrelated note: ORBITAL-PINE-6C3R." });
 
     unrelated.expectOk();
     unrelated.notEvent("action.result", {

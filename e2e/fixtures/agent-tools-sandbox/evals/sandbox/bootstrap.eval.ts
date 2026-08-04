@@ -9,9 +9,9 @@ export default defineEval({
   tags: ["real-model"],
   description: "Sandbox smoke: `defineSandbox({ bootstrap })` runs before the first bash call.",
   async test(t) {
-    await t.send(
-      `Run the bash command \`cat ${BOOTSTRAP_MARKER_PATH}\` and reply with the file contents verbatim.`,
-    );
+    await t.send({
+      message: `Run the bash command \`cat ${BOOTSTRAP_MARKER_PATH}\` and reply with the file contents verbatim.`,
+    });
 
     t.succeeded();
     t.calledTool("bash", {

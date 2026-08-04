@@ -26,16 +26,17 @@ export default defineEval({
   description:
     "Anthropic-direct prompt caching: input-cache rate stays above 99% across a multi-step tool session.",
   async test(t) {
-    const first = await t.send(
-      "Fetch archive pages 1, 2, and 3 using the fetch-archive-page tool, strictly one page per " +
+    const first = await t.send({
+      message:
+        "Fetch archive pages 1, 2, and 3 using the fetch-archive-page tool, strictly one page per " +
         'tool call, waiting for each result before the next call. Then reply with exactly "PAGES LOADED".',
-    );
+    });
     first.expectOk();
     first.calledTool("fetch-archive-page");
 
-    const second = await t.send(
-      'Now fetch archive page 4 the same way, then reply with exactly "DONE".',
-    );
+    const second = await t.send({
+      message: 'Now fetch archive page 4 the same way, then reply with exactly "DONE".',
+    });
     second.expectOk();
     second.calledTool("fetch-archive-page");
 

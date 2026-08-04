@@ -115,10 +115,10 @@ Per-request headers override client-level values with the same name. For example
 For an ID-addressed session, create it explicitly with the first message:
 
 ```ts
-const { session, response } = await client.sessions.create("Summarize account A.");
+const { session, response } = await client.sessions.create({ message: "Summarize account A." });
 await response.result();
 
-await (await session.send("Now list the risks.")).result();
+await (await session.send({ message: "Now list the risks." })).result();
 await session.compact();
 await session.clear();
 ```
@@ -132,7 +132,7 @@ const session = client.sessions.attach("wrun_A");
 The fixed client handle exposes the full lifecycle around that ID. The calls below show the available shapes independently:
 
 ```ts
-const response = await session.send("Continue the analysis.");
+const response = await session.send({ message: "Continue the analysis." });
 await response.result();
 
 await session.cancel({ turnId: "turn_123" });
@@ -151,10 +151,12 @@ await session.reset({ reason: "User requested a fresh session" });
 A client can own many independent fixed sessions at once:
 
 ```ts
-const { session: alice, response: aliceResponse } =
-  await client.sessions.create("Summarize account A.");
-const { session: bob, response: bobResponse } =
-  await client.sessions.create("Summarize account B.");
+const { session: alice, response: aliceResponse } = await client.sessions.create({
+  message: "Summarize account A.",
+});
+const { session: bob, response: bobResponse } = await client.sessions.create({
+  message: "Summarize account B.",
+});
 
 await Promise.all([aliceResponse.result(), bobResponse.result()]);
 ```

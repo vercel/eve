@@ -24,7 +24,7 @@ export default defineEval({
     });
     structured.expectOk();
 
-    const plain = await t.send("Reply normally without structured output.");
+    const plain = await t.send({ message: "Reply normally without structured output." });
     plain.expectOk();
     plain.notEvent("result.completed");
 

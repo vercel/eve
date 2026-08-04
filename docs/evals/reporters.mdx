@@ -32,7 +32,7 @@ import { Braintrust } from "eve/evals/reporters";
 export default defineEval({
   reporters: [Braintrust({ projectName: "weather-agent" })],
   async test(t) {
-    await t.send("What is the weather in Brooklyn?");
+    await t.send({ message: "What is the weather in Brooklyn?" });
     t.succeeded();
   },
 });

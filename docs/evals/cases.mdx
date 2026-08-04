@@ -23,7 +23,7 @@ import { includes } from "eve/evals/expect";
 
 export default defineEval({
   async test(t) {
-    await t.send("What is the weather in Brooklyn?");
+    await t.send({ message: "What is the weather in Brooklyn?" });
     t.succeeded();
     t.check(t.reply, includes("Sunny"));
   },
@@ -37,7 +37,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   async test(t) {
-    await t.send("Hello!");
+    await t.send({ message: "Hello!" });
     t.succeeded();
     t.notCalledTool("get_weather");
   },
@@ -68,11 +68,11 @@ import { includes } from "eve/evals/expect";
 
 export default defineEval({
   async test(t) {
-    const draft = await t.send("Draft the follow-up email.");
+    const draft = await t.send({ message: "Draft the follow-up email." });
     t.check(draft.message, includes("Best regards"));
     t.judge.autoevals.closedQA("professional tone", { on: draft.message }).atLeast(0.6);
 
-    await t.send("Now send it.");
+    await t.send({ message: "Now send it." });
     t.calledTool("send_email");
   },
 });
@@ -86,9 +86,9 @@ import { equals } from "eve/evals/expect";
 
 export default defineEval({
   async test(t) {
-    const first = await t.send("My favorite word is marigold.");
+    const first = await t.send({ message: "My favorite word is marigold." });
 
-    const second = await t.send("Thanks for remembering.");
+    const second = await t.send({ message: "Thanks for remembering." });
     await t.require(second.sessionId, equals(first.sessionId));
 
     t.succeeded();
@@ -101,8 +101,8 @@ export default defineEval({
 
 `t` drives the primary session; `t.newSession()` returns an independent `EveEvalSession` against the same target, whose events feed the same run-level assertions.
 
-- `t.send(input)` sends a turn and waits for it to settle. It accepts the same input as `ClientSession.send()` (a string or a structured message) and resolves to a turn carrying `.message` and `.expectOk()`.
-- `t.start(input)` starts a turn but returns as soon as the server accepts it. The returned live turn exposes `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()` for coordinating with work that is still running.
+- `t.send({ message, ... })` sends a turn and waits for it to settle. It accepts the same input object as `ClientSession.send()` and resolves to a turn carrying `.message` and `.expectOk()`.
+- `t.start(message)` starts a text turn but returns as soon as the server accepts it. The returned live turn exposes `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()` for coordinating with work that is still running.
 - `t.cancel()` requests cooperative cancellation of the primary session's active turn. Both `accepted` and `no_active_turn` are successful outcomes.
 - `t.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
 - `t.requireInputRequest(filter?)` records a gate, requires exactly one pending request, and returns it. Filters match tool name, action input, prompt, display, and option ids.
@@ -165,7 +165,7 @@ export default rows.map((row) =>
   defineEval({
     description: row.task,
     async test(t) {
-      await t.send(row.prompt);
+      await t.send({ message: row.prompt });
       t.succeeded();
       t.check(t.reply, equals(row.sql));
     },

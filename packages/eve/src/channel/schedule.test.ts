@@ -93,7 +93,7 @@ describe("ScheduleDispatcher", () => {
   });
 
   describe("run handler form", () => {
-    it("invokes the author's run() with { receive, waitUntil, appAuth }", async () => {
+    it("invokes the author's run() with { send, waitUntil, appAuth }", async () => {
       const runtime = createMockRuntime();
       vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
       vi.stubEnv("SLACK_SIGNING_SECRET", "test-secret");
@@ -108,10 +108,10 @@ describe("ScheduleDispatcher", () => {
 
         const result = await dispatcher.trigger({
           scheduleId: "daily-digest",
-          async run({ receive, waitUntil, appAuth }) {
+          async run({ send, waitUntil, appAuth }) {
             observed.hasAppAuth = appAuth.principalId === "eve:app";
             observed.hasWaitUntil = typeof waitUntil === "function";
-            await receive(definition, {
+            await send(definition, {
               message: "post the digest",
               target: { channelId: "C0123ABC" },
               auth: appAuth,
@@ -151,7 +151,7 @@ describe("ScheduleDispatcher", () => {
       expect(result.sessions).toHaveLength(0);
     });
 
-    it("throws when args.receive(channel) is called with an unregistered channel", async () => {
+    it("throws when args.send(channel) is called with an unregistered channel", async () => {
       const runtime = createMockRuntime();
       const dispatcher = new ScheduleDispatcher({ runtime, channels: [] });
       const stranger = {
@@ -163,8 +163,8 @@ describe("ScheduleDispatcher", () => {
       await expect(
         dispatcher.trigger({
           scheduleId: "stranger",
-          async run({ receive }) {
-            await receive(stranger, { message: "x", target: {}, auth: null });
+          async run({ send }) {
+            await send(stranger, { message: "x", target: {}, auth: null });
           },
         }),
       ).rejects.toThrow(/not registered in this agent/);

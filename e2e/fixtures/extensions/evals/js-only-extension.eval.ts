@@ -6,7 +6,9 @@ export default defineEval({
   tags: ["real-model"],
   description: "A JavaScript-only extension runs from its publisher-built dist tree.",
   async test(t) {
-    await t.send("Call the `javascript__js_ping` tool and report exactly what it returned.");
+    await t.send({
+      message: "Call the `javascript__js_ping` tool and report exactly what it returned.",
+    });
 
     t.succeeded();
     t.calledTool("javascript__js_ping", {

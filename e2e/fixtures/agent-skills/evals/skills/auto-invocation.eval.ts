@@ -12,7 +12,9 @@ export default defineEval({
   tags: ["real-model"],
   description: "Skills smoke: markdown skill auto-invocation via load_skill.",
   async test(t) {
-    await t.send("Please use the echo marker skill and follow its instructions exactly.");
+    await t.send({
+      message: "Please use the echo marker skill and follow its instructions exactly.",
+    });
 
     t.succeeded();
     t.loadedSkill("echo-marker");

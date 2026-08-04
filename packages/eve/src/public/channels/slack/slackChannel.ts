@@ -48,13 +48,14 @@ import {
   loadThreadContextMessages,
   type LoadThreadContextMessagesOptions,
 } from "#public/channels/slack/thread.js";
-import { slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
+import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
-  bindSlackConversation,
-  type SlackConversation,
-} from "#public/channels/slack/conversation.js";
+  bindSlackSessionOperations,
+  type SlackSendInput,
+  type SlackSessionOperations,
+} from "#public/channels/slack/session-operations.js";
 import {
   mergeUploadPolicy,
   type UploadPolicy,
@@ -64,7 +65,10 @@ import { verifySlackRequest, type SlackWebhookVerifier } from "#public/channels/
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { markEventHandled } from "./utils.js";
 
-export type { SlackConversation } from "#public/channels/slack/conversation.js";
+export type {
+  SlackSendInput,
+  SlackSessionOperations,
+} from "#public/channels/slack/session-operations.js";
 
 const log = createLogger("slack.channel");
 
@@ -244,7 +248,7 @@ export interface SlackChannelCredentials {
   readonly webhookVerifier?: SlackWebhookVerifier;
 }
 
-/** Target accepted by `receive(slack, { target })` for proactive sessions. */
+/** Target accepted by `send(slack, { target })` from schedule handlers. */
 export interface SlackReceiveTarget {
   readonly channelId: string;
   readonly threadTs?: string;
@@ -269,16 +273,16 @@ export interface SlackInitialMessage {
 
 /**
  * One imperative turn start requested by a generic Slack event handler.
- * The schedule API's `receive(slack, options)` payload with the Slack
+ * The schedule API's `send(slack, input)` payload with the Slack
  * channel already bound by the inbound webhook.
  */
-export type SlackEventReceiveOptions = CrossChannelReceiveOptions<SlackReceiveTarget>;
+export type SlackEventSendInput = CrossChannelReceiveOptions<SlackReceiveTarget>;
 
 /**
  * Starts a session on the current Slack channel from `onEvent`. Call it zero,
  * one, or many times; each invocation returns the resulting session.
  */
-export type SlackEventReceiveFn = (options: SlackEventReceiveOptions) => Promise<Session>;
+export type SlackEventSendFn = (input: SlackEventSendInput) => Promise<Session>;
 
 /**
  * Slack thread identity used by workspace-scoped inbound helpers.
@@ -291,16 +295,36 @@ export interface SlackSessionTarget {
 /**
  * Imperative surface handed to `slackChannel({ onEvent })`. Generic Events API
  * payloads are not necessarily tied to one thread, so the context exposes a
- * workspace API handle plus a Slack-bound `receive` function rather than the
+ * workspace API handle plus Slack-bound operations rather than the
  * thread-scoped {@link SlackContext} used by message handlers.
  */
 export interface SlackInboundEventContext {
-  /** Binds any Slack thread to the aligned current-owner operation surface. */
-  readonly conversation: (target: SlackSessionTarget) => SlackConversation;
+  /** Starts a turn on this Slack channel using the proactive send contract. */
+  readonly send: SlackEventSendFn;
+  /** Cancels the active turn for one Slack thread. */
+  cancel(input: {
+    readonly target: SlackSessionTarget;
+    readonly turnId?: string;
+  }): ReturnType<ChannelOperations<SlackChannelState>["cancel"]>;
+  /** Compacts the current session for one Slack thread. */
+  compact(input: {
+    readonly target: SlackSessionTarget;
+  }): ReturnType<ChannelOperations<SlackChannelState>["compact"]>;
+  /** Clears the current session for one Slack thread. */
+  clear(input: {
+    readonly target: SlackSessionTarget;
+  }): ReturnType<ChannelOperations<SlackChannelState>["clear"]>;
+  /** Resets the current session for one Slack thread. */
+  reset(input: {
+    readonly reason?: string;
+    readonly target: SlackSessionTarget;
+  }): ReturnType<ChannelOperations<SlackChannelState>["reset"]>;
+  /** Resolves the current session for one Slack thread. */
+  resolveSession(input: {
+    readonly target: SlackSessionTarget;
+  }): ReturnType<ChannelOperations<SlackChannelState>["resolveSession"]>;
   /** The complete signed Events API callback envelope. */
   readonly envelope: SlackEventEnvelope;
-  /** Starts a turn on this Slack channel using the proactive receive contract. */
-  readonly receive: SlackEventReceiveFn;
   /** Workspace-scoped Slack identity and raw Web API escape hatch. */
   readonly slack: SlackWorkspaceHandle;
   /** Keeps detached handler work alive after the Slack webhook is acknowledged. */
@@ -311,9 +335,7 @@ export interface SlackInboundEventContext {
  * Message-scoped context handed to `onMessage`, `onAppMention`, and
  * `onDirectMessage`.
  */
-export interface SlackInboundMessageContext extends SlackContext {
-  /** Current-owner session operations bound to this Slack thread. */
-  readonly conversation: SlackConversation;
+export interface SlackInboundMessageContext extends SlackContext, SlackSessionOperations {
   /** Returns whether this message belongs to a thread with an active eve session. */
   isSubscribed(): Promise<boolean>;
   /** Returns whether the inbound event explicitly mentions this bot. */
@@ -321,10 +343,7 @@ export interface SlackInboundMessageContext extends SlackContext {
 }
 
 /** Interaction-scoped context handed to `slackChannel({ onInteraction })`. */
-export interface SlackInteractionContext extends SlackContext {
-  /** Current-owner session operations bound to this interaction's Slack thread. */
-  readonly conversation: SlackConversation;
-}
+export interface SlackInteractionContext extends SlackContext, SlackSessionOperations {}
 
 export interface SlackInteractionAction {
   readonly actionId: string;
@@ -515,7 +534,7 @@ export interface SlackChannelConfig {
    * neither a specialized handler nor `onEvent` is authored, mentions and DMs
    * retain their built-in defaults and other event types are ignored.
    *
-   * The handler owns control flow. Call `ctx.receive(...)` zero, one, or many
+   * The handler owns control flow. Call `ctx.send(...)` zero, one, or many
    * times to start turns on Slack, and use `ctx.waitUntil(...)` for detached
    * work. The return value is ignored. Runs after the webhook has been
    * acknowledged through the host's `waitUntil` mechanism. Errors are caught
@@ -687,15 +706,17 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
 /**
  * Shared proactive Slack receive path used by both the channel's public
- * `receive` hook and the pre-bound function exposed to `onEvent`.
+ * `receive` hook and the pre-bound `send` function exposed to `onEvent`.
  */
 async function receiveOnSlack(
-  input: SlackEventReceiveOptions,
+  input: SlackEventSendInput,
   deps: {
     readonly operations: ChannelOperations<SlackChannelState>;
     readonly credentials: SlackChannelCredentials | undefined;
     /** Slack team id seeded into session state, when the trigger carried one. */
     readonly teamId?: string;
+    /** Slack user id seeded into session state, when the trigger carried one. */
+    readonly triggeringUserId?: string;
   },
 ): Promise<Session> {
   const receiveTarget = input.target as Partial<SlackReceiveTarget>;
@@ -741,7 +762,7 @@ async function receiveOnSlack(
       channelId,
       threadTs: threadTs || null,
       teamId: deps.teamId ?? null,
-      triggeringUserId: null,
+      triggeringUserId: deps.triggeringUserId ?? null,
     },
   });
 }
@@ -946,18 +967,35 @@ async function dispatchSlackMessage(input: {
     threadTs: input.message.threadTs,
     teamId: input.message.teamId,
   });
-  const conversation = bindSlackConversation(input.operations, continuationToken, {
-    channelId: input.message.channelId,
-    teamId: input.message.teamId ?? null,
-    threadTs: input.message.threadTs,
-    triggeringUserId: input.message.author?.userId ?? null,
+  const author = input.message.author;
+  const sessionOperations = bindSlackSessionOperations({
+    address: continuationToken,
+    defaultAuth:
+      author === undefined
+        ? null
+        : buildSlackAuthContext({
+            channelId: input.message.channelId,
+            fullName: author.fullName,
+            isBot: author.isBot,
+            teamId: input.message.teamId,
+            threadTs: input.message.threadTs,
+            userId: author.userId,
+            userName: author.userName,
+          }),
+    operations: input.operations,
+    state: {
+      channelId: input.message.channelId,
+      teamId: input.message.teamId ?? null,
+      threadTs: input.message.threadTs,
+      triggeringUserId: author?.userId ?? null,
+    },
   });
   const ctx: SlackInboundMessageContext = {
-    conversation,
+    ...sessionOperations,
     isBotMentioned: () =>
       input.kind === "app_mention" ||
       (input.botUserId !== undefined && input.message.text.includes(`<@${input.botUserId}`)),
-    isSubscribed: async () => (await conversation.resolveSession()) !== undefined,
+    isSubscribed: async () => (await sessionOperations.resolveSession()) !== undefined,
     slack,
     thread,
   };
@@ -978,14 +1016,14 @@ async function dispatchSlackMessage(input: {
     kind: input.kind,
     message: input.message,
     result,
-    conversation,
+    sessionOperations,
     thread,
     threadContext: input.threadContext,
     uploadPolicy: input.uploadPolicy,
   });
 }
 
-/** Runs a generic Events API handler with an imperative Slack receive surface. */
+/** Runs a generic Events API handler with an imperative Slack operation surface. */
 async function dispatchSlackEvent(input: {
   readonly operations: ChannelOperations<SlackChannelState>;
   readonly credentials: SlackChannelCredentials | undefined;
@@ -1001,20 +1039,27 @@ async function dispatchSlackEvent(input: {
         : undefined;
   const waitUntilTasks: Promise<unknown>[] = [];
   const ctx: SlackInboundEventContext = {
-    conversation: ({ channelId, threadTs }) =>
-      bindSlackConversation(input.operations, slackContinuationToken(channelId, threadTs), {
-        channelId,
-        teamId: teamId ?? null,
-        threadTs,
-        triggeringUserId:
-          typeof input.envelope.event.user === "string" ? input.envelope.event.user : null,
+    cancel: ({ target, turnId }) =>
+      input.operations.cancel(slackContinuationToken(target.channelId, target.threadTs), {
+        turnId,
       }),
+    clear: ({ target }) =>
+      input.operations.clear(slackContinuationToken(target.channelId, target.threadTs)),
+    compact: ({ target }) =>
+      input.operations.compact(slackContinuationToken(target.channelId, target.threadTs)),
     envelope: input.envelope,
-    receive: (options) =>
-      receiveOnSlack(options, {
+    reset: ({ reason, target }) =>
+      input.operations.reset(slackContinuationToken(target.channelId, target.threadTs), { reason }),
+    resolveSession: ({ target }) =>
+      input.operations.resolveSession(slackContinuationToken(target.channelId, target.threadTs)),
+    send: (sendInput) =>
+      receiveOnSlack(sendInput, {
         operations: input.operations,
         credentials: input.credentials,
         teamId,
+        ...(typeof input.envelope.event.user === "string"
+          ? { triggeringUserId: input.envelope.event.user }
+          : {}),
       }),
     slack: buildSlackWorkspaceHandle({
       botToken: input.credentials?.botToken,
@@ -1060,7 +1105,7 @@ async function verifyInbound(
 }
 
 async function deliverSlackMessage(input: {
-  readonly conversation: SlackConversation;
+  readonly sessionOperations: SlackSessionOperations;
   readonly credentials: SlackChannelCredentials | undefined;
   readonly kind: string;
   readonly message: SlackMessage;
@@ -1098,16 +1143,17 @@ async function deliverSlackMessage(input: {
     );
 
     const channelContext = input.result.context ?? [];
-
-    await input.conversation.send(
+    const sendInput: SlackSendInput =
       channelContext.length === 0
-        ? { message: turnMessage }
-        : { message: turnMessage, context: channelContext },
-      {
-        auth: input.result.auth,
-        title: message.markdown,
-      },
-    );
+        ? { auth: input.result.auth, message: turnMessage, title: message.markdown }
+        : {
+            auth: input.result.auth,
+            context: channelContext,
+            message: turnMessage,
+            title: message.markdown,
+          };
+
+    await input.sessionOperations.send(sendInput);
   } catch (error) {
     logError(log, `${input.kind} delivery failed`, error, { channelId: message.channelId });
   }

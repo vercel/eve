@@ -54,7 +54,7 @@ import type {
   SlackInteractionUser,
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelOperations } from "#channel/channel-operations.js";
-import { bindSlackConversation } from "#public/channels/slack/conversation.js";
+import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
 
 const log = createLogger("slack.interactions");
 
@@ -415,6 +415,7 @@ export async function handleInteractionPost(
   if (onInteraction) {
     const customActions = interaction.actions.filter((a) => !isHitlAction(a.actionId));
     if (customActions.length > 0) {
+      const actionUser = customActions[0]!.user;
       const { thread, slack } = buildSlackBinding({
         botToken: deps.config.credentials?.botToken,
         channelId: interaction.channelId,
@@ -422,11 +423,22 @@ export async function handleInteractionPost(
         teamId: interaction.teamId,
       });
       const slackCtx: SlackInteractionContext = {
-        conversation: bindSlackConversation(ctx.operations, continuationToken, {
-          channelId: interaction.channelId,
-          teamId: interaction.teamId ?? null,
-          threadTs: interaction.threadTs,
-          triggeringUserId: customActions[0]?.user.id ?? null,
+        ...bindSlackSessionOperations({
+          address: continuationToken,
+          defaultAuth: buildSlackAuthContext({
+            channelId: interaction.channelId,
+            teamId: interaction.teamId,
+            threadTs: interaction.threadTs,
+            userId: actionUser.id,
+            userName: actionUser.username ?? actionUser.name,
+          }),
+          operations: ctx.operations,
+          state: {
+            channelId: interaction.channelId,
+            teamId: interaction.teamId ?? null,
+            threadTs: interaction.threadTs,
+            triggeringUserId: actionUser.id,
+          },
         }),
         thread,
         slack,

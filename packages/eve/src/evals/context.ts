@@ -62,9 +62,9 @@ export function createEvalContext(deps: {
       lastPrompt = promptText(input);
       return primary().send(input);
     },
-    start: (input) => {
-      lastPrompt = promptText(input);
-      return primary().start(input);
+    start: (message) => {
+      lastPrompt = message;
+      return primary().start(message);
     },
     sendFile: (text, filePath, mediaType) => {
       lastPrompt = text;
@@ -138,8 +138,7 @@ async function evaluateAssertion(
 }
 
 function promptText(input: SendTurnInput): string {
-  if (typeof input === "string") return input;
-  const message = (input as { readonly message?: unknown }).message;
+  const message = input.message;
   return typeof message === "string" ? message : "";
 }
 

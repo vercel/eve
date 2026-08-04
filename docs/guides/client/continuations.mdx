@@ -13,7 +13,9 @@ Create the session with its first turn, then persist `session.state` after
 consuming the response:
 
 ```ts
-const { session, response } = await client.sessions.create("Create a launch checklist.");
+const { session, response } = await client.sessions.create({
+  message: "Create a launch checklist.",
+});
 
 await response.result();
 await saveSessionState(session.state);
@@ -43,7 +45,7 @@ const session = client.sessions.attach(saved.sessionId, {
   streamIndex: saved.streamIndex,
 });
 
-const response = await session.send("Now shorten it.");
+const response = await session.send({ message: "Now shorten it." });
 console.log((await response.result()).message);
 ```
 
@@ -58,7 +60,7 @@ explicitly with another `client.sessions.create(firstTurn)` call.
 
 ```ts
 const reset = await session.reset({ reason: "Start over" });
-const { session: fresh, response } = await client.sessions.create("Begin again.");
+const { session: fresh, response } = await client.sessions.create({ message: "Begin again." });
 ```
 
 The old `session` remains pinned to its retired ID; `fresh` owns a different ID.
@@ -68,10 +70,12 @@ The old `session` remains pinned to its retired ID; `fresh` owns a different ID.
 Create one handle per conversation:
 
 ```ts
-const { session: research, response: researchResponse } =
-  await client.sessions.create("Research competitors.");
-const { session: support, response: supportResponse } =
-  await client.sessions.create("Draft a support reply.");
+const { session: research, response: researchResponse } = await client.sessions.create({
+  message: "Research competitors.",
+});
+const { session: support, response: supportResponse } = await client.sessions.create({
+  message: "Draft a support reply.",
+});
 
 await Promise.all([researchResponse.result(), supportResponse.result()]);
 await save("research", research.state);

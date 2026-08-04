@@ -6,9 +6,10 @@ export default defineEval({
   tags: ["real-model"],
   description: "Two extensions' identically-named defineState do not collide within a session.",
   async test(t) {
-    await t.send(
-      "Bump the toolkit budget twice by calling `toolkit__toolkit_budget` two times, then bump the gizmo budget once by calling `gizmo__gizmo_budget`. Report each tool's returned count.",
-    );
+    await t.send({
+      message:
+        "Bump the toolkit budget twice by calling `toolkit__toolkit_budget` two times, then bump the gizmo budget once by calling `gizmo__gizmo_budget`. Report each tool's returned count.",
+    });
 
     t.succeeded();
     t.calledTool("toolkit__toolkit_budget", { output: { scope: "toolkit", count: 2 } });

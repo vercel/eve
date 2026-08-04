@@ -21,7 +21,7 @@ export default defineEval({
     "A descendant session-limit prompt reaches the root; continue resumes the child and stop leaves the root session reusable.",
   timeoutMs: 90_000,
   async test(t) {
-    await t.send(DELEGATE_PROMPT);
+    await t.send({ message: DELEGATE_PROMPT });
     const continueRequest = t.requireInputRequest({
       display: "confirmation",
       optionIds: ["continue", "stop"],
@@ -50,7 +50,7 @@ export default defineEval({
     t.noFailedActions();
 
     const stopSession = t.newSession();
-    await stopSession.send(DELEGATE_PROMPT);
+    await stopSession.send({ message: DELEGATE_PROMPT });
     const stopRequest = stopSession.requireInputRequest({
       display: "confirmation",
       optionIds: ["continue", "stop"],
@@ -68,9 +68,9 @@ export default defineEval({
     stopSession.event("turn.cancelled");
     t.check(stopped.status, equals("waiting"));
 
-    const recovered = await stopSession.send(
-      `Do not call any tool or subagent. Reply with exactly ${ROOT_RECOVERY_TOKEN} and nothing else.`,
-    );
+    const recovered = await stopSession.send({
+      message: `Do not call any tool or subagent. Reply with exactly ${ROOT_RECOVERY_TOKEN} and nothing else.`,
+    });
     recovered.expectOk();
     stopSession.succeeded();
     stopSession.calledSubagent("limited-worker", { count: 1, status: "pending" });

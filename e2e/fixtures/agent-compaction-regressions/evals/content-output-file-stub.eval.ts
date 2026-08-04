@@ -28,13 +28,13 @@ export default defineEval({
   tags: ["real-model"],
   description: "Compaction stubs a large inline file content part without losing its sibling text.",
   async test(t) {
-    const turn = await t.send(
-      [
+    const turn = await t.send({
+      message: [
         "[case: content-output-file-stub]",
         "Call emit-compaction-content exactly once.",
         "After compaction, report whether its completion evidence survived.",
       ].join("\n"),
-    );
+    });
 
     turn.expectOk();
     t.succeeded();

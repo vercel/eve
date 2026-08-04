@@ -6,17 +6,18 @@ export default defineEval({
   tags: ["real-model"],
   description: "Dynamic tools smoke: resolver I/O runs once and replays from the durable cache.",
   async test(t) {
-    const first = await t.send(
-      "Use the `get_io_count` tool and tell me the ioCallCount number from the result.",
-    );
+    const first = await t.send({
+      message: "Use the `get_io_count` tool and tell me the ioCallCount number from the result.",
+    });
     first.expectOk();
     first.calledTool("get_io_count", {
       output: { ioCallCount: 1 },
     });
 
-    const second = await t.send(
-      "Use the `get_io_count` tool again right now and tell me the ioCallCount value from the result.",
-    );
+    const second = await t.send({
+      message:
+        "Use the `get_io_count` tool again right now and tell me the ioCallCount value from the result.",
+    });
     second.calledTool("get_io_count", {
       output: { ioCallCount: 1 },
     });

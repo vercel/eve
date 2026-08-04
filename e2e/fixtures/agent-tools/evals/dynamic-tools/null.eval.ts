@@ -6,9 +6,10 @@ export default defineEval({
   tags: ["real-model"],
   description: "Dynamic tools smoke: a null-returning resolver registers no tools.",
   async test(t) {
-    await t.send(
-      "List every tool you have access to. Is there a tool called 'dynamic-null'? Answer yes or no.",
-    );
+    await t.send({
+      message:
+        "List every tool you have access to. Is there a tool called 'dynamic-null'? Answer yes or no.",
+    });
 
     t.succeeded();
     t.notCalledTool("dynamic-null");

@@ -51,13 +51,12 @@ export class ClientSession {
     context: ClientSessionContext,
     input: SendTurnInput<TOutput>,
   ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
-    const payload = normalizeSendTurnInput(input);
-    const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, payload, true);
+    const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true);
     const sessionId = await readSessionId(response);
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
 
     return {
-      response: session.#messageResponse<TOutput>(response, payload, 0),
+      response: session.#messageResponse<TOutput>(response, input, 0),
       session,
     };
   }
@@ -89,19 +88,18 @@ export class ClientSession {
 
   /** Sends a turn to this exact session ID. */
   async send<TOutput = unknown>(input: SendTurnInput<TOutput>): Promise<MessageResponse<TOutput>> {
-    const payload = normalizeSendTurnInput(input);
     const initialStreamIndex = this.#state.streamIndex;
     const response = await postTurn(
       this.#context,
       createEveSessionRoutePath(this.#state.sessionId),
-      payload,
+      input,
       false,
     );
     const responseSessionId = await readSessionId(response, this.#state.sessionId);
     if (responseSessionId !== this.#state.sessionId) {
       throw new Error("Message route returned a different session id.");
     }
-    return this.#messageResponse<TOutput>(response, payload, initialStreamIndex);
+    return this.#messageResponse<TOutput>(response, input, initialStreamIndex);
   }
 
   /** Requests cooperative cancellation of this session's active turn. */
@@ -260,10 +258,6 @@ async function readSessionId(response: Response, expected?: string): Promise<str
     expected;
   if (!sessionId) throw new Error("Message route did not return a session id.");
   return sessionId;
-}
-
-function normalizeSendTurnInput<TOutput>(input: SendTurnInput<TOutput>): SendTurnPayload<TOutput> {
-  return typeof input === "string" ? { message: input } : input;
 }
 
 function createMessageBody(

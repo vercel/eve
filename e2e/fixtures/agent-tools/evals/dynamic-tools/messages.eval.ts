@@ -7,15 +7,16 @@ export default defineEval({
   tags: ["real-model"],
   description: "Dynamic tools smoke: step.started resolver sees accumulated message history.",
   async test(t) {
-    const first = await t.send(
-      "Use the `check_messages` tool with label 'turn1' and tell me the messageCount.",
-    );
+    const first = await t.send({
+      message: "Use the `check_messages` tool with label 'turn1' and tell me the messageCount.",
+    });
     first.expectOk();
     const firstOutput = first.requireToolCall("check_messages").output;
 
-    const second = await t.send(
-      "Use the `check_messages` tool again with label 'turn2' and tell me the messageCount.",
-    );
+    const second = await t.send({
+      message:
+        "Use the `check_messages` tool again with label 'turn2' and tell me the messageCount.",
+    });
     const secondOutput = second.requireToolCall("check_messages").output;
     t.check(
       [firstOutput, secondOutput],

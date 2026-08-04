@@ -4,9 +4,9 @@ import quietSink from "../channels/quiet-sink";
 
 export default defineSchedule({
   cron: "* * * * *",
-  run({ receive, waitUntil, appAuth }) {
+  run({ send, waitUntil, appAuth }) {
     waitUntil(
-      receive(quietSink, {
+      send(quietSink, {
         auth: appAuth,
         message: [
           "Call the `check-alerts` tool exactly once with an empty object.",

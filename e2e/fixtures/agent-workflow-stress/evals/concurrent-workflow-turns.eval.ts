@@ -12,10 +12,10 @@ export default defineEval({
   async test(t) {
     const sessions = Array.from({ length: SESSION_COUNT }, () => t.newSession());
     const firstTurns = await Promise.all(
-      sessions.map((session, index) => session.send(markerFor(index, 1))),
+      sessions.map((session, index) => session.send({ message: markerFor(index, 1) })),
     );
     const secondTurns = await Promise.all(
-      sessions.map((session, index) => session.send(markerFor(index, 2))),
+      sessions.map((session, index) => session.send({ message: markerFor(index, 2) })),
     );
 
     for (let index = 0; index < SESSION_COUNT; index += 1) {

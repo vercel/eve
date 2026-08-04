@@ -288,8 +288,8 @@ export interface EveEvalSessionDriver {
   respondAll(optionId: string): Promise<EveEvalTurn>;
   /** Send one turn through this session. */
   send(input: SendTurnInput): Promise<EveEvalTurn>;
-  /** Start one turn and return as soon as its session is accepted. */
-  start(input: SendTurnInput): Promise<EveEvalLiveTurn>;
+  /** Start one text turn and return as soon as its session is accepted. */
+  start(message: string): Promise<EveEvalLiveTurn>;
   /** Send one text turn with a local file attached as a data URL. */
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
 }

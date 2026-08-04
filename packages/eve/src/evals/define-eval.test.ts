@@ -13,7 +13,7 @@ describe("defineEval", () => {
   it("returns a tagged eval from a valid `test` function", () => {
     const evaluation = defineEval({
       async test(t) {
-        await t.send("hello");
+        await t.send({ message: "hello" });
       },
     });
 
@@ -25,7 +25,7 @@ describe("defineEval", () => {
     const evaluation = defineEval({
       judge: { model: TEST_MODEL },
       async test(t) {
-        await t.send("hello");
+        await t.send({ message: "hello" });
       },
     });
 
@@ -96,7 +96,7 @@ describe("defineEval", () => {
     const evaluation = defineEval({
       description: "A test eval",
       async test(t) {
-        await t.send("hello");
+        await t.send({ message: "hello" });
       },
       timeoutMs: 30000,
       tags: ["tag1"],
@@ -116,7 +116,7 @@ function typeOnlyFixtures(): void {
 
   defineEval({
     async test(t) {
-      await t.send("hello");
+      await t.send({ message: "hello" });
     },
   });
 }

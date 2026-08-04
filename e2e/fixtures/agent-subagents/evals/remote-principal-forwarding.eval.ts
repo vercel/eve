@@ -26,7 +26,7 @@ export default defineEval({
   description:
     "Dynamic remote-agent selection and principal forwarding: the child session runs as the parent's end user, with the distinct initiator preserved and the forwarder stamped.",
   async test(t) {
-    await t.send("Reply with the single word: ready.");
+    await t.send({ message: "Reply with the single word: ready." });
 
     await t.send({
       headers: { authorization: "Bearer e2e-principal-forwarding-second-user" },

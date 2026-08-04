@@ -11,9 +11,10 @@ export default defineEval({
   tags: ["real-model"],
   description: "Local subagent delegation smoke: child output reaches the parent reply verbatim.",
   async test(t) {
-    await t.send(
-      "Use the echo-marker subagent with message 'ping'. Once it returns, reply with the subagent's exact output included verbatim.",
-    );
+    await t.send({
+      message:
+        "Use the echo-marker subagent with message 'ping'. Once it returns, reply with the subagent's exact output included verbatim.",
+    });
 
     t.succeeded();
     t.calledSubagent("echo-marker", { output: /SUBAGENT_TOKEN=echo-marker-9F2X/ });
