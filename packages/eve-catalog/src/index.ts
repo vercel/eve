@@ -552,6 +552,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "natural",
+    name: "Natural",
+    kind: "connection",
+    tagline: "Send, request, and manage payments with Natural.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Natural: agentic payments — send and request payments, check balances, and move funds.",
+      mcp: { url: "https://mcp.natural.com/mcp" },
+    },
+  },
+  {
     slug: "netlify",
     name: "Netlify",
     kind: "connection",

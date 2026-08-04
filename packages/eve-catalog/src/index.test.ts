@@ -104,4 +104,10 @@ describe("integration catalog", () => {
       "https://api.browser-use.com/v3/mcp",
     );
   });
+
+  it("uses Natural's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("natural")!.connection!.mcp!.url).toBe(
+      "https://mcp.natural.com/mcp",
+    );
+  });
 });

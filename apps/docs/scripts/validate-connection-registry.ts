@@ -42,6 +42,7 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   notion: "mcp.notion.com",
   datadog: "mcp.datadoghq.com",
   honeycomb: "mcp.honeycomb.io",
+  natural: "mcp.natural.com",
 };
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {

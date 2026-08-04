@@ -646,6 +646,31 @@
       ]
     },
     {
+      "name": "connection/natural",
+      "type": "registry:item",
+      "title": "Natural",
+      "description": "Send, request, and manage payments with Natural.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "natural", "mcp.natural.com", "natural"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/natural.ts",
+          "type": "registry:file",
+          "target": "agent/connections/natural.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/netlify",
       "type": "registry:item",
       "title": "Netlify",

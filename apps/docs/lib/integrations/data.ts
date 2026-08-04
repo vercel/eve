@@ -1614,6 +1614,14 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     keywords: ["mcp", "events", "funnels", "insights", "analytics", "oauth", "connect"],
     authModes: ["user"],
   },
+  natural: {
+    logo: "natural",
+    docsHref: "/docs/connections/mcp",
+    keywords: ["mcp", "payments", "wallets", "transfers", "oauth", "connect"],
+    authModes: ["user"],
+    configureNote:
+      "Natural moves real money. Add an approval gate or tool filters before allowing unattended payment actions.",
+  },
   netlify: {
     logo: "netlify",
     docsHref: "/docs/connections/mcp",

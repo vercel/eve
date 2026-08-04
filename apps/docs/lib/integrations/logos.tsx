@@ -307,6 +307,17 @@ export const manufactLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const naturalLogo = (props: LogoProps) => (
+  // Cropped to the square mark; the source asset is a full wordmark lockup
+  // that renders illegibly small at icon sizes.
+  <svg fill="none" viewBox="0 0 17.5 18" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M0.773438 17.7891H16.6289C17.1211 17.7891 17.4023 17.543 17.4023 17.0156V0.914062C17.4023 0.421875 17.1211 0.140625 16.6289 0.140625H0.773438C0.246094 0.140625 0 0.421875 0 0.914062V17.0156C0 17.543 0.246094 17.7891 0.773438 17.7891Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 export const mem0Logo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" {...props}>
     <rect fill="#CBB2FF" height="100" rx="12" width="100" />
@@ -632,6 +643,7 @@ export const logos = {
   mem0: mem0Logo,
   miro: miroLogo,
   mixpanel: mixpanelLogo,
+  natural: naturalLogo,
   netlify: netlifyLogo,
   oreilly: oreillyLogo,
   planetscale: planetscaleLogo,
