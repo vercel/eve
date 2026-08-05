@@ -5,13 +5,14 @@ A development-only source editing subagent for [eve](https://eve.dev).
 Install the package and scaffold a declared subagent from the eve registry:
 
 ```sh
-eve add eve-selfmod
+eve add experimental/selfmod
 ```
 
-The command creates:
+The command creates one selfmod configuration and thin filesystem entrypoints:
 
 ```text
 agent/subagents/selfmod/
+├── config.ts
 ├── agent.ts
 ├── sandbox.ts
 └── extensions/
@@ -19,16 +20,23 @@ agent/subagents/selfmod/
 ```
 
 ```ts
+// agent/subagents/selfmod/config.ts
+import { defineSelfmod } from "eve-selfmod";
+
+export const selfmod = defineSelfmod({
+  model: "anthropic/claude-sonnet-5",
+});
+
 // agent/subagents/selfmod/agent.ts
-export { default } from "eve-selfmod/agent";
+import { selfmod } from "./config";
+export default selfmod.agent;
 
 // agent/subagents/selfmod/sandbox.ts
-export { default } from "eve-selfmod/sandbox";
+import { selfmod } from "./config";
+export default selfmod.sandbox;
 
 // agent/subagents/selfmod/extensions/selfmod.ts
 export { default } from "eve-selfmod";
 ```
 
-The sandbox mounts the application's authored `agent/` directory read-write at `/source`. The subagent can inspect and edit that source directly with eve's default bash and filesystem tools during development.
-
-The mounted extension provides the source-editing instructions. Future tools, skills, and other extension contributions can ship from `eve-selfmod` without changing the registry scaffold.
+`defineSelfmod` returns the coordinated subagent, sandbox, and extension definitions. Set `model` in the shared configuration to choose the selfmod subagent's model; it defaults to `anthropic/claude-sonnet-5`. The extension entrypoint remains a direct package mount so eve can discover its extension contributions statically. With no configuration it preserves the development-only behavior: the sandbox mounts the application's authored `agent/` directory read-write at `/source`, where the subagent can inspect and edit it with eve's default bash and filesystem tools.

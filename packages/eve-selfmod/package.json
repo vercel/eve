@@ -41,6 +41,10 @@
       "import": "./scaffold/sandbox.js",
       "default": "./scaffold/sandbox.js"
     },
+    "./extension": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
     "./tools": {
       "types": "./dist/tools/index.d.ts",
       "default": "./dist/tools/index.mjs"
@@ -50,8 +54,9 @@
     "access": "public"
   },
   "scripts": {
-    "build": "eve extension build && tsc -p tsconfig.scaffold.json",
+    "build": "eve extension build && tsc -p tsconfig.scaffold.json && node scripts/add-selfmod-export.mjs",
     "prepare": "pnpm run build",
+    "test:unit": "vitest run src",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scaffold.json --noEmit"
   },
   "dependencies": {
@@ -60,7 +65,8 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "eve": "workspace:*",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "eve": "workspace:*"
