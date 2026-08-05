@@ -367,7 +367,7 @@ On any other stack, wire it up by hand: run the agent as its own service and pro
 npm install --global @eve/buzz-acp-adapter
 \`\`\`
 
-> **Note:** The adapter must be installed globally because Buzz uses it whenever it interfaces with eve.`,
+The adapter must be installed globally because Buzz uses it whenever it interfaces with eve.`,
     quickStart: `From an eve application directory, run the interactive installer:
 
 \`\`\`bash
