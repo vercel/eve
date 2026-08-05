@@ -241,6 +241,11 @@
       "import": "./dist/src/public/channels/photon/index.js",
       "default": "./dist/src/public/channels/photon/index.js"
     },
+    "./channels/resend": {
+      "types": "./dist/src/public/channels/resend/index.d.ts",
+      "import": "./dist/src/public/channels/resend/index.js",
+      "default": "./dist/src/public/channels/resend/index.js"
+    },
     "./channels/github": {
       "types": "./dist/src/public/channels/github/index.d.ts",
       "import": "./dist/src/public/channels/github/index.js",

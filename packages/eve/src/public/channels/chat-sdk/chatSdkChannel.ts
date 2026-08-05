@@ -63,6 +63,8 @@ const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-w
  */
 export interface ChatSdkChannelState extends Record<string, unknown> {
   thread: SerializedThread | null;
+  /** Adapter-specific JSON captured at inbound dispatch for durable restoration. */
+  adapterContext?: unknown;
   /** Message id of the in-flight streamed assistant post (edit fallback). */
   anchorMessageId?: string | null;
   /**
@@ -176,6 +178,19 @@ export interface ChatSdkChannelConfig<
   /** Optional Eve event handlers. Supplied handlers replace built-in defaults. */
   readonly events?: ChatSdkChannelEvents<TAdapters>;
   /**
+   * Restores adapter-owned transient context from eve's durable serialized
+   * thread before an outbound workflow event uses the reconstructed thread.
+   */
+  readonly captureAdapterContext?: (input: {
+    readonly adapter: Adapter;
+    readonly thread: SerializedThread;
+  }) => unknown;
+  readonly restoreAdapterContext?: (input: {
+    readonly adapter: Adapter;
+    readonly context: unknown;
+    readonly thread: SerializedThread;
+  }) => void;
+  /**
    * Prefix for default Eve HITL button action ids. Change this if your Chat SDK
    * app already uses the `eve_input:` prefix.
    */
@@ -267,6 +282,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     }
     await bridgeSend(
       bot,
+      config.captureAdapterContext,
       { inputResponses: [response] },
       {
         auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
@@ -290,7 +306,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         state,
         streaming,
         streamingEditIntervalMs,
-        thread: threadFromState(bot, state),
+        thread: threadFromState(bot, state, config.restoreAdapterContext),
       };
     },
     // Register both methods on each adapter's webhook path. Providers such as X
@@ -331,7 +347,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     bot,
     channel,
     send(input, options) {
-      return bridgeSend(bot, input, options);
+      return bridgeSend(bot, config.captureAdapterContext, input, options);
     },
   };
 }
@@ -544,6 +560,7 @@ async function postFailure(
 
 async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
+  captureAdapterContext: ChatSdkChannelConfig<TAdapters>["captureAdapterContext"],
   input: ChatSdkSendInput,
   options: ChatSdkSendOptions,
 ): Promise<Session> {
@@ -554,10 +571,12 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
     );
   }
   const thread = serializeThread(bot, options.thread, options.adapterName);
+  const adapter = bot.getAdapter(thread.adapterName);
+  const adapterContext = captureAdapterContext?.({ adapter, thread });
   const sendOptions: SendOptions<ChatSdkChannelState> = {
     auth: options.auth ?? null,
     continuationToken: thread.id,
-    state: { thread },
+    state: adapterContext === undefined ? { thread } : { adapterContext, thread },
   };
   if (options.callback) {
     sendOptions.callback = options.callback;
@@ -594,12 +613,15 @@ function metadataFromState(state: ChatSdkChannelState): ChatSdkInstrumentationMe
 function threadFromState<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
   state: ChatSdkChannelState,
+  restoreAdapterContext: ChatSdkChannelConfig<TAdapters>["restoreAdapterContext"],
 ): Thread | null {
   if (!state.thread) return null;
   try {
     const serialized = state.thread;
+    const adapter = bot.getAdapter(serialized.adapterName);
+    restoreAdapterContext?.({ adapter, context: state.adapterContext, thread: serialized });
     return new ThreadImpl({
-      adapter: bot.getAdapter(serialized.adapterName),
+      adapter,
       channelId: serialized.channelId,
       channelVisibility: serialized.channelVisibility,
       currentMessage: serialized.currentMessage
