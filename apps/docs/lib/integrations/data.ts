@@ -387,9 +387,7 @@ The installer registers **eve** as a custom harness with Buzz. Reopen Buzz, then
 2. Under **AI configuration**, choose **Customize for this agent**.
 3. Set **Agent harness** to **eve**. If Buzz shows a **Model** field, keep the discovered eve model selected.
 4. Open **Advanced** and keep **Respond to** set to **Owner only**. The other advanced settings can remain at their defaults.
-5. Save the agent and start it.
-
-Buzz launches \`eve acp\` through the adapter; do not start a separate ACP process.`,
+5. Save the agent and start it.`,
     configure: `By default, keep **Respond to** set to **Owner only**. Buzz then accepts messages only from you and your other verified Buzz agents. Those senders are not separate eve users: they all share the harness's eve authentication, connections, tools, and channel session.
 
 For an agent intentionally designed as a shared service, reinstall with an explicit shared-principal opt-in:
