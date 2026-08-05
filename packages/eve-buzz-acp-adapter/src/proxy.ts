@@ -99,6 +99,13 @@ export async function runProxy(options: ProxyOptions): Promise<void> {
           requests.set(keyForId(message.id), message.method);
         }
 
+        if (message.method === "session/new" && options.target === undefined) {
+          message = {
+            ...message,
+            params: { ...message.params, cwd: options.cwd },
+          };
+        }
+
         if (message.method === "session/prompt" && message.id !== undefined) {
           const prompt = message.params?.prompt;
           turns.set(keyForId(message.id), {
