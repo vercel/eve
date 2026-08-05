@@ -1082,10 +1082,10 @@ See the [Beeper Matrix adapter documentation](https://chat-sdk.dev/adapters/vend
       "transactional email",
       "attachments",
     ],
-    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/resend.ts\` and installs Chat SDK and its adapter dependencies:
+    install: `Run eve's guided setup. It can provision a generic Vercel Connect API-key connector, deploy the agent, and reconcile the Resend webhook, or scaffold portable environment credentials:
 
 \`\`\`bash
-eve add channel/chat-sdk-resend
+eve add channel/resend
 \`\`\``,
     quickStart: `Create \`agent/channels/resend.ts\`:
 

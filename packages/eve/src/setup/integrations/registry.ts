@@ -1,6 +1,7 @@
 import { DISCORD_SETUP } from "./discord/setup.js";
 import { LINEAR_SETUP } from "./linear/setup.js";
 import { PHOTON_SETUP } from "./photon/setup.js";
+import { RESEND_SETUP } from "./resend/setup.js";
 import { SLACK_SETUP } from "./slack/setup.js";
 import type { SetupIntegration } from "./types.js";
 import { WEB_SETUP } from "./web/setup.js";
@@ -12,6 +13,7 @@ export const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   DISCORD_SETUP,
   LINEAR_SETUP,
   PHOTON_SETUP,
+  RESEND_SETUP,
 ];
 
 /** Resolves one built-in setup integration by its registry setup name. */

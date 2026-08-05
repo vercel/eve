@@ -38,6 +38,10 @@ describe("setup integrations", () => {
     });
   });
 
+  it("registers guided Resend setup", () => {
+    expect(setupIntegration("resend")).toMatchObject({ kind: "resend", label: "Resend" });
+  });
+
   it("rejects an unknown integration", () => {
     expect(() => setupIntegration("unknown")).toThrow(
       'Integration setup "unknown" is not available',

@@ -1769,23 +1769,27 @@
       }
     },
     {
-      "name": "channel/chat-sdk-resend",
+      "name": "channel/resend",
       "type": "registry:item",
       "title": "Resend",
       "description": "Send and receive threaded email through Resend via the Chat SDK.",
-      "dependencies": ["chat", "@resend/chat-sdk-adapter", "@chat-adapter/state-memory"],
-      "envVars": {
-        "RESEND_API_KEY": "",
-        "RESEND_WEBHOOK_SECRET": "",
-        "RESEND_FROM_ADDRESS": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/chat-sdk-resend.ts",
-          "type": "registry:file",
-          "target": "agent/channels/resend.ts"
+      "dependencies": [
+        "chat",
+        "@resend/chat-sdk-adapter",
+        "@chat-adapter/state-memory",
+        "@vercel/connect"
+      ],
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "resend"]
+          },
+          "requires": ">=0.30.0"
         }
-      ]
+      }
     },
     {
       "name": "instrumentation/braintrust",
