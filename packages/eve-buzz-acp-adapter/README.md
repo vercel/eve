@@ -15,6 +15,8 @@ npm install --global @eve/buzz-acp-adapter
 eve-buzz-acp-adapter install
 ```
 
+The global installation is intentional. The installer writes its absolute executable path into Buzz's persistent custom harness definition so Buzz can launch the adapter later without relying on the shell's `PATH`. Do not run the installer through `npx`: that would record a path inside npm's disposable `_npx` cache, and clearing or replacing the cache would leave Buzz unable to start the harness. Reinstall the global package and rerun `install` when moving or replacing the Node installation that owns the recorded path.
+
 The interactive installer asks whether the eve application is local or deployed, validates the selected target, discovers its authored model, locates Buzz Desktop, and confirms before writing the custom harness. For a protected Vercel deployment, it reuses eve's Vercel login and Trusted Sources flow; the harness stores no Vercel credential.
 
 The installed harness requires the Buzz agent's **Respond to** setting to remain **Owner only**. Buzz verifies inbound Nostr events and applies that author gate before sending a prompt to the adapter. In Buzz, owner-only includes the agent's owner and cryptographically verified sibling agents belonging to that owner. The adapter fails before starting eve if Buzz reports another mode or does not expose the mode.
