@@ -65,9 +65,25 @@ const fitLogo = (node: ReactNode, maxWidth: number, maxHeight: number): ReactNod
 
 interface RasterizedLogo {
   height: number;
+  inkCoverage: number;
   src: string;
   width: number;
 }
+
+interface SizedLogo {
+  height: number;
+  src: string;
+  width: number;
+}
+
+const pixelInk = (image: PNG, offset: number): number => {
+  const red = image.data[offset];
+  const green = image.data[offset + 1];
+  const blue = image.data[offset + 2];
+  const alpha = image.data[offset + 3];
+  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  return (alpha * luminance) / 255;
+};
 
 const cropLogo = (image: PNG): PNG => {
   let minX = image.width;
@@ -77,8 +93,8 @@ const cropLogo = (image: PNG): PNG => {
 
   for (let y = 0; y < image.height; y += 1) {
     for (let x = 0; x < image.width; x += 1) {
-      const alpha = image.data[(y * image.width + x) * 4 + 3];
-      if (alpha <= 8) continue;
+      const offset = (y * image.width + x) * 4;
+      if (pixelInk(image, offset) <= 8) continue;
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
       maxX = Math.max(maxX, x);
@@ -100,6 +116,7 @@ const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
     <div
       style={{
         alignItems: "center",
+        color: "white",
         display: "flex",
         height: "100%",
         justifyContent: "center",
@@ -112,14 +129,16 @@ const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
   );
   const image = PNG.sync.read(Buffer.from(await response.arrayBuffer()));
   const cropped = cropLogo(image);
-  const aspectRatio = cropped.width / cropped.height;
-  const width = Math.min(180, 132 * aspectRatio);
-  const height = width / aspectRatio;
+  let ink = 0;
+  for (let offset = 0; offset < cropped.data.length; offset += 4) {
+    ink += pixelInk(cropped, offset) / 255;
+  }
 
   return {
-    height,
+    height: cropped.height,
+    inkCoverage: ink / (cropped.width * cropped.height),
     src: `data:image/png;base64,${PNG.sync.write(cropped).toString("base64")}`,
-    width,
+    width: cropped.width,
   };
 };
 
@@ -168,6 +187,31 @@ const recolorLogo = (node: ReactNode, preserveTones: boolean): ReactNode => {
   );
 };
 
+const balanceLogoWeight = (logo: RasterizedLogo, referenceCoverage: number): SizedLogo => {
+  const aspectRatio = logo.width / logo.height;
+  const fittedWidth = Math.min(180, 132 * aspectRatio);
+  const fittedHeight = fittedWidth / aspectRatio;
+  if (logo.inkCoverage <= 0) {
+    return { height: fittedHeight, src: logo.src, width: fittedWidth };
+  }
+
+  // Dampened density normalization keeps solid marks from overpowering the
+  // wordmark without making compact logos feel disproportionately small.
+  const densityScale = Math.min(1, (referenceCoverage / logo.inkCoverage) ** 0.25);
+  return {
+    height: fittedHeight * densityScale,
+    src: logo.src,
+    width: fittedWidth * densityScale,
+  };
+};
+
+let eveInkCoverage: Promise<number> | undefined;
+
+const getEveInkCoverage = (): Promise<number> => {
+  eveInkCoverage ??= rasterizeLogo(resolveLogo(<LogoEve />)).then((logo) => logo.inkCoverage);
+  return eveInkCoverage;
+};
+
 const rasterizedLogos = new Map<string, Promise<RasterizedLogo>>();
 
 const getRasterizedLogo = (integration: Integration): Promise<RasterizedLogo> => {
@@ -185,7 +229,11 @@ const getRasterizedLogo = (integration: Integration): Promise<RasterizedLogo> =>
 export const createIntegrationOgImage = async (
   integration: Integration,
 ): Promise<ImageResponse> => {
-  const integrationLogo = await getRasterizedLogo(integration);
+  const [rasterizedLogo, referenceCoverage] = await Promise.all([
+    getRasterizedLogo(integration),
+    getEveInkCoverage(),
+  ]);
+  const integrationLogo = balanceLogoWeight(rasterizedLogo, referenceCoverage);
 
   return new ImageResponse(
     <div
