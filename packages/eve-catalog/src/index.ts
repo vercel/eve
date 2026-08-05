@@ -704,6 +704,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "tinybird",
+    name: "Tinybird",
+    kind: "connection",
+    tagline: "Query pipes and data sources in your Tinybird Workspace.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Tinybird: query pipes and data sources, and run SQL. A token grants one Workspace, so add a connection per Workspace.",
+      mcp: { url: "https://mcp.tinybird.co" },
+    },
+  },
+  {
     slug: "todoist",
     name: "Todoist",
     kind: "connection",

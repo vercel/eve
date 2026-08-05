@@ -1020,6 +1020,31 @@
       ]
     },
     {
+      "name": "connection/tinybird",
+      "type": "registry:item",
+      "title": "Tinybird",
+      "description": "Query pipes and data sources in your Tinybird Workspace.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "tinybird", "tinybird", "tinybird"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/tinybird.ts",
+          "type": "registry:file",
+          "target": "agent/connections/tinybird.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/todoist",
       "type": "registry:item",
       "title": "Todoist",
