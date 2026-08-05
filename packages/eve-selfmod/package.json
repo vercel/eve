@@ -29,6 +29,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.mjs"
     },
+    "./config": {
+      "types": "./scaffold/index.d.ts",
+      "default": "./scaffold/index.js"
+    },
     "./agent": {
       "eve-source": "./src/agent.ts",
       "types": "./scaffold/agent.d.ts",
@@ -54,7 +58,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "eve extension build && tsc -p tsconfig.scaffold.json && node scripts/add-selfmod-export.mjs",
+    "build": "eve extension build && tsc -p tsconfig.scaffold.json",
     "prepare": "pnpm run build",
     "test:unit": "vitest run src",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scaffold.json --noEmit"

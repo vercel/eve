@@ -21,7 +21,7 @@ agent/subagents/selfmod/
 
 ```ts
 // agent/subagents/selfmod/config.ts
-import { defineSelfmod } from "eve-selfmod";
+import { defineSelfmod } from "eve-selfmod/config";
 
 export const selfmod = defineSelfmod({
   model: "anthropic/claude-sonnet-5",
