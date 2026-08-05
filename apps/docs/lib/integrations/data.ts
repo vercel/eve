@@ -287,7 +287,7 @@ export default githubChannel({
   credentials: connectGitHubCredentials("github/my-agent"),
 });
 \`\`\``,
-    configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the GitHub App, and attach its verified webhook trigger to \`/eve/v1/github\`. Deploy, install the app from Vercel Connect, then mention it in an issue, pull request, or review comment. See the [GitHub channel docs](/docs/channels/github) for permissions and events.`,
+    configure: `Sign in to Vercel, then let the guided flow create or link a project, provision the GitHub App, and attach its verified webhook trigger to \`/eve/v1/github\`. Deploy, install the app from Vercel Connect, then add its \`@handle\` invocation token to a new issue, pull request, or review comment. GitHub may not autocomplete or render the token as a linked mention. See the [GitHub channel docs](/docs/channels/github) for permissions and events.`,
   },
   "linear-agent": {
     logo: "linear",

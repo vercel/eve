@@ -32,13 +32,13 @@ const GITHUB_EVENT_OPTIONS = [
     id: "issue_comment",
     label: "New issue and pull request comments",
     value: "issue_comment",
-    hint: "Start a turn when a new timeline comment @mentions the app.",
+    hint: "Start a turn when a new timeline comment includes the app's invocation token.",
   },
   {
     id: "pull_request_review_comment",
     label: "New inline pull request review comments",
     value: "pull_request_review_comment",
-    hint: "Start a turn when a new inline review comment @mentions the app.",
+    hint: "Start a turn when a new inline review comment includes the app's invocation token.",
   },
   {
     id: "issues",
@@ -175,7 +175,7 @@ export async function setupGitHub(
     const dashboardUrl = "https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Open+Vercel+Connect";
     context.ui.nextSteps([
       "Deploy the agent, then open the GitHub App in Vercel Connect and install it in the organization or account where you want to use it.",
-      `Mention @${connector.appSlug} in an issue, pull request, or review comment to start a conversation.`,
+      `Add @${connector.appSlug} to a new issue, pull request, or review comment to invoke the agent. GitHub may not autocomplete or render the token as a linked mention.`,
     ]);
     return {
       kind: "done",
