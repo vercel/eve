@@ -105,4 +105,14 @@ export interface GenericChannelDefinition<
    * for stateful ones.
    */
   readonly kindHint?: string;
+
+  /** @internal Channel status lifecycle across durable workflow waits. */
+  readonly statusKeepalive?: {
+    readonly suspend: (state: NonNullable<TState>, session: SessionHandle) => number | undefined;
+    readonly refresh: (
+      state: NonNullable<TState>,
+      session: SessionHandle,
+    ) => Promise<number | undefined>;
+    readonly resume: (state: NonNullable<TState>, session: SessionHandle) => void;
+  };
 }

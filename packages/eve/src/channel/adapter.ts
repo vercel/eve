@@ -171,6 +171,13 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
   readonly instrumentation?: {
     readonly metadata?: ChannelInstrumentationMetadataProjector;
   };
+
+  /** Framework-owned channel status lifecycle across durable waits. */
+  readonly statusKeepalive?: {
+    readonly suspend: (ctx: TCtx) => number | undefined;
+    readonly refresh: (ctx: TCtx) => number | undefined | Promise<number | undefined>;
+    readonly resume: (ctx: TCtx) => void;
+  };
 } & ChannelEventHandlers<TCtx>;
 
 // ---------------------------------------------------------------------------

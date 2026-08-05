@@ -41,6 +41,7 @@ const ADAPTER_NON_EVENT_FIELDS: ReadonlySet<string> = new Set([
   "createAdapterContext",
   "fetchFile",
   "instrumentation",
+  "statusKeepalive",
 ]);
 
 /**

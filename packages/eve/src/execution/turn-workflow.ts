@@ -18,6 +18,7 @@ import {
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { refreshChannelStatusStep } from "#execution/refresh-channel-status-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import {
   createTurnCancellationControl,
@@ -177,6 +178,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         await cursor.adopt(dispatchResult);
 
         const results = await waitForRuntimeActionResults({
+          statusKeepaliveDelayMs: dispatchResult.statusKeepaliveDelayMs,
           bufferedDeliveries,
           cancellation,
           cursor,
@@ -271,6 +273,7 @@ async function waitForRuntimeActionResults(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly cancellation: TurnCancellationControl | undefined;
   readonly cursor: TurnExecutionCursor;
+  readonly statusKeepaliveDelayMs?: number;
   readonly inboxToken: string;
   readonly initialResults: readonly RuntimeActionResult[];
   readonly iterator: AsyncIterator<TurnInboxPayload>;
@@ -279,6 +282,12 @@ async function waitForRuntimeActionResults(input: {
 }): Promise<readonly RuntimeActionResult[] | "cancelled" | "cancel-turn"> {
   let pendingDeliveryRequest: string | undefined;
   const results: RuntimeActionResult[] = [...input.initialResults];
+  let nextPromise = input.iterator.next();
+  nextPromise.catch(() => {});
+  let statusRefresh =
+    input.statusKeepaliveDelayMs === undefined
+      ? undefined
+      : workflowSleep(input.statusKeepaliveDelayMs);
 
   while (true) {
     const ready = resolveRuntimeActionResultsForKeys({
@@ -307,14 +316,12 @@ async function waitForRuntimeActionResults(input: {
       });
     }
 
-    const nextPromise = input.iterator.next();
-    // When a cancel wins the race, the dangling inbox `next()` is dropped
-    // by disposal in teardown; pre-attach a handler so a late rejection
-    // never surfaces as unhandled.
-    nextPromise.catch(() => {});
+    const inbox = nextPromise.then((next) => ({ kind: "inbox" as const, next }));
+    const refresh = statusRefresh?.then(() => ({ kind: "refresh" as const }));
+    const pending = refresh === undefined ? [inbox] : [inbox, refresh];
     const next = await (input.cancellation === undefined
-      ? nextPromise
-      : Promise.race([nextPromise, input.cancellation.requested]));
+      ? Promise.race(pending)
+      : Promise.race([...pending, input.cancellation.requested]));
     if (next === "cancel") {
       if (pendingDeliveryRequest !== undefined) {
         // Release the raced public input back to the driver so it stays
@@ -326,9 +333,23 @@ async function waitForRuntimeActionResults(input: {
       }
       return "cancelled";
     }
-    if (next.done) throw new Error("Turn inbox closed before runtime actions completed.");
+    if (next.kind === "refresh") {
+      const refreshed = await refreshChannelStatusStep({
+        serializedContext: input.cursor.serializedContext,
+      });
+      await input.cursor.adopt({
+        ...refreshed,
+        sessionState: input.cursor.sessionState,
+      });
+      statusRefresh =
+        refreshed.delayMs === undefined ? undefined : workflowSleep(refreshed.delayMs);
+      continue;
+    }
+    if (next.next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
-    const value = next.value;
+    const value = next.next.value;
+    nextPromise = input.iterator.next();
+    nextPromise.catch(() => {});
     if (value.kind === "runtime-action-result") {
       // The inbox token is shared by every callee in the batch, so an inbox
       // subagent result must bind to a running agent handle in the adopted

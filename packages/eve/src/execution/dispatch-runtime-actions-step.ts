@@ -125,6 +125,7 @@ export async function dispatchRuntimeActionsStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<{
+  readonly statusKeepaliveDelayMs?: number;
   readonly results: readonly RuntimeSubagentResult[];
   readonly sessionState: DurableSessionState;
 }> {
@@ -134,7 +135,10 @@ export async function dispatchRuntimeActionsStep(input: {
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) {
-    return { results: [], sessionState: input.sessionState };
+    return {
+      results: [],
+      sessionState: input.sessionState,
+    };
   }
 
   const ctx = await deserializeContext(input.serializedContext);
@@ -154,6 +158,7 @@ export async function dispatchRuntimeActionsStep(input: {
   const initiatorAuth = ctx.get(InitiatorAuthKey) ?? null;
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
+  const statusKeepaliveDelayMs = adapter.statusKeepalive?.suspend(adapterCtx);
   // Read here, not in the child: trace state is scoped to one session's
   // context, so this is the last place the parent's window is visible.
   const parentTraceContext = readSessionTraceContext(input.serializedContext, session.sessionId);
@@ -269,6 +274,7 @@ export async function dispatchRuntimeActionsStep(input: {
   return {
     results,
     sessionState: nextState,
+    statusKeepaliveDelayMs,
   };
 }
 

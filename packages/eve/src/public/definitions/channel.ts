@@ -383,7 +383,8 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   const hasFetchFile = definition.fetchFile !== undefined;
   const metadata = definition.metadata;
   const hasMetadata = metadata !== undefined;
-  const hasBehavior = hasState || hasContext || hasMetadata;
+  const statusKeepalive = definition.statusKeepalive;
+  const hasBehavior = hasState || hasContext || hasMetadata || statusKeepalive !== undefined;
 
   const eventHandlers: Record<string, unknown> = {};
   let hasEventHandlers = false;
@@ -448,6 +449,18 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     deliver(payload: DeliverPayload) {
       return defaultDeliverResult(payload);
     },
+
+    statusKeepalive:
+      statusKeepalive === undefined
+        ? undefined
+        : {
+            suspend: (adapterCtx: any) =>
+              statusKeepalive.suspend(adapterCtx.state, adapterCtx.session),
+            refresh: (adapterCtx: any) =>
+              statusKeepalive.refresh(adapterCtx.state, adapterCtx.session),
+            resume: (adapterCtx: any) =>
+              statusKeepalive.resume(adapterCtx.state, adapterCtx.session),
+          },
 
     ...eventHandlers,
   } as ChannelAdapter<any>;

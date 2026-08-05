@@ -32,8 +32,8 @@ import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat
 
 import { createLogger, logError } from "#internal/logging.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
-import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
+import { createSlackThreadStatusController } from "#public/channels/slack/thread-status.js";
 
 const log = createLogger("slack.api");
 
@@ -364,6 +364,7 @@ export function buildSlackWorkspaceHandle(input: {
 interface SlackBinding {
   readonly thread: SlackThread;
   readonly slack: SlackHandle;
+  readonly status: ReturnType<typeof createSlackThreadStatusController>;
 }
 
 /**
@@ -385,6 +386,11 @@ export function buildSlackBinding(input: {
   readonly threadTs: string;
   readonly teamId: string | undefined;
   readonly onThreadTsChanged?: (ts: string) => void;
+  /** Keeps non-empty thread statuses alive until explicitly stopped. Defaults to true. */
+  readonly statusKeepalive?: boolean;
+  readonly statusKeepaliveState?: {
+    statusKeepaliveStatus?: string | null;
+  };
 }): SlackBinding {
   const request = createSlackRequester(input.botToken);
   let messages: readonly SlackThreadMessage[] = [];
@@ -392,6 +398,7 @@ export function buildSlackBinding(input: {
   let refreshInFlight: Promise<void> | undefined;
 
   function handleMessageTs(ts: string): void {
+    statusController.handleAnchor(ts);
     if (currentThreadTs || ts === currentThreadTs) return;
     currentThreadTs = ts;
     input.onThreadTsChanged?.(ts);
@@ -403,12 +410,16 @@ export function buildSlackBinding(input: {
   ): Promise<SlackUploadFilesResult> {
     const channelId = options?.channelId ?? input.channelId;
     const threadTs = options?.threadTs ?? currentThreadTs;
-    return uploadSlackFiles(files.map(toSlackFileUpload), {
+    const result = await uploadSlackFiles(files.map(toSlackFileUpload), {
       ...createSlackApiOptions(input.botToken),
       channelId: channelId || undefined,
       initialComment: options?.initialComment,
       threadTs: threadTs || undefined,
     });
+    if (channelId === input.channelId && threadTs === currentThreadTs) {
+      statusController.clear();
+    }
+    return result;
   }
 
   function refreshMessages(): Promise<void> {
@@ -447,6 +458,15 @@ export function buildSlackBinding(input: {
     refreshInFlight = refresh;
     return refresh;
   }
+
+  const statusController = createSlackThreadStatusController({
+    channelId: input.channelId,
+    enabled: input.statusKeepalive !== false,
+    getThreadTs: () => currentThreadTs,
+    logger: log,
+    request,
+    state: input.statusKeepaliveState,
+  });
 
   const thread: SlackThread = {
     get recentMessages() {
@@ -518,28 +538,7 @@ export function buildSlackBinding(input: {
       );
       return { id: response.id, raw: response.raw };
     },
-    async startTyping(status) {
-      if (!input.channelId || !currentThreadTs) return;
-      try {
-        const normalizedStatus = status === undefined ? "" : truncateTypingStatus(status);
-        const body: Record<string, unknown> = {
-          channel_id: input.channelId,
-          thread_ts: currentThreadTs,
-          status: normalizedStatus,
-        };
-        if (normalizedStatus.length > 0) {
-          body.loading_messages = [normalizedStatus];
-        }
-        const response = await request("assistant.threads.setStatus", body);
-        if (response.ok !== true) {
-          log.warn("assistant.threads.setStatus returned not-ok", {
-            error: response.error,
-          });
-        }
-      } catch (error) {
-        logError(log, "startTyping threw — swallowed", error, { channelId: input.channelId });
-      }
-    },
+    startTyping: (status) => statusController.start(status),
     refresh() {
       return refreshMessages();
     },
@@ -558,7 +557,7 @@ export function buildSlackBinding(input: {
     uploadFiles,
   };
 
-  return { thread, slack };
+  return { thread, slack, status: statusController };
 }
 
 /**

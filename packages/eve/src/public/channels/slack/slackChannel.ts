@@ -49,6 +49,7 @@ import {
 } from "#public/channels/slack/thread.js";
 import { slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
+import { stopSlackStatusKeepalive } from "#public/channels/slack/status-keepalive.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
   mergeUploadPolicy,
@@ -196,6 +197,8 @@ export interface SlackChannelState {
    */
   lastReasoningTypingAtMs?: number | null;
   lastReasoningTypingStatus?: string | null;
+  /** Latest non-empty status eligible for durable workflow refresh. */
+  statusKeepaliveStatus?: string | null;
   /**
    * Connection name to Slack message ts. Each entry is the public
    * link-free status post created by the default
@@ -491,6 +494,13 @@ export interface SlackChannelConfig {
   readonly credentials?: SlackChannelCredentials;
   readonly botName?: string;
 
+  /**
+   * Periodically refreshes non-empty thread statuses before Slack expires
+   * them. Defaults to `true`. Set to `false` when the agent owns a custom
+   * status keepalive.
+   */
+  readonly statusKeepalive?: boolean;
+
   /** Override the default webhook route path (`/eve/v1/slack`). */
   readonly route?: string;
 
@@ -606,13 +616,15 @@ export interface SlackChannelConfig {
 function rebuildSlackContext(
   state: SlackChannelState,
   session: SessionHandle,
-  credentials: SlackChannelCredentials | undefined,
+  config: Pick<SlackChannelConfig, "credentials" | "statusKeepalive">,
 ): SlackChannelContext {
   const { thread, slack } = buildSlackBinding({
-    botToken: credentials?.botToken,
+    botToken: config.credentials?.botToken,
     channelId: state.channelId ?? "",
     threadTs: state.threadTs ?? "",
     teamId: state.teamId ?? undefined,
+    statusKeepalive: config.statusKeepalive,
+    statusKeepaliveState: state,
     onThreadTsChanged(ts) {
       state.threadTs = ts;
       if (state.channelId) {
@@ -621,6 +633,27 @@ function rebuildSlackContext(
     },
   });
   return { thread, slack, state };
+}
+
+function createSlackStatusBinding(
+  state: SlackChannelState,
+  config: Pick<SlackChannelConfig, "credentials" | "statusKeepalive">,
+) {
+  return buildSlackBinding({
+    botToken: config.credentials?.botToken,
+    channelId: state.channelId ?? "",
+    threadTs: state.threadTs ?? "",
+    teamId: state.teamId ?? undefined,
+    statusKeepalive: config.statusKeepalive,
+    statusKeepaliveState: state,
+  });
+}
+
+function stopThreadStatusKeepalive(channel: SlackEventContext): void {
+  channel.state.statusKeepaliveStatus = null;
+  if (channel.slack.channelId && channel.slack.threadTs) {
+    stopSlackStatusKeepalive(`${channel.slack.channelId}:${channel.slack.threadTs}`);
+  }
 }
 
 /**
@@ -649,15 +682,42 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
   const authorizationRequiredOverride = config.events?.["authorization.required"];
   const turnStartedHandler = config.events?.["turn.started"] ?? defaultEvents["turn.started"]!;
+  const turnCompletedHandler = config.events?.["turn.completed"] ?? defaultEvents["turn.completed"];
+  const turnFailedHandler = config.events?.["turn.failed"] ?? defaultEvents["turn.failed"];
+  const turnCancelledHandler = config.events?.["turn.cancelled"] ?? defaultEvents["turn.cancelled"];
+  const sessionCompletedHandler =
+    config.events?.["session.completed"] ?? defaultEvents["session.completed"];
+  const sessionFailedHandler = config.events?.["session.failed"] ?? defaultEvents["session.failed"];
   const mergedEvents: SlackChannelInternalEvents = {
     ...defaultEvents,
     ...config.events,
     async "turn.started"(data, channel, ctx) {
+      stopThreadStatusKeepalive(channel);
       const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
       if (triggeringUserId !== undefined) {
         channel.state.triggeringUserId = triggeringUserId;
       }
       await turnStartedHandler(data, channel, ctx);
+    },
+    async "turn.completed"(data, channel, ctx) {
+      stopThreadStatusKeepalive(channel);
+      await turnCompletedHandler?.(data, channel, ctx);
+    },
+    async "turn.failed"(data, channel, ctx) {
+      stopThreadStatusKeepalive(channel);
+      await turnFailedHandler?.(data, channel, ctx);
+    },
+    async "turn.cancelled"(data, channel, ctx) {
+      stopThreadStatusKeepalive(channel);
+      await turnCancelledHandler?.(data, channel, ctx);
+    },
+    async "session.completed"(data, channel, ctx) {
+      stopThreadStatusKeepalive(channel);
+      await sessionCompletedHandler?.(data, channel, ctx);
+    },
+    async "session.failed"(data, channel) {
+      stopThreadStatusKeepalive(channel);
+      await sessionFailedHandler?.(data, channel);
     },
     "input.requested": config.events?.["input.requested"] ?? defaultInputRequestedHandler(),
     "authorization.required":
@@ -685,6 +745,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       pendingToolCallMessage: null,
       lastReasoningTypingAtMs: null,
       lastReasoningTypingStatus: null,
+      statusKeepaliveStatus: null,
       pendingAuthMessageTs: {},
     },
     fetchFile: slackFetchFile,
@@ -698,8 +759,17 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     },
 
     context(state, session) {
-      return rebuildSlackContext(state, session, config.credentials);
+      return rebuildSlackContext(state, session, config);
     },
+
+    statusKeepalive:
+      config.statusKeepalive === false
+        ? undefined
+        : {
+            suspend: (state) => createSlackStatusBinding(state, config).status.suspend(),
+            refresh: async (state) => createSlackStatusBinding(state, config).status.refresh(),
+            resume: (state) => createSlackStatusBinding(state, config).status.resume(),
+          },
 
     routes: [
       POST<SlackChannelState>(
@@ -894,6 +964,7 @@ async function handleEventPost(input: {
             resolveActiveSession: input.resolveActiveSession,
             reset: input.reset,
             send: input.send,
+            statusKeepalive: config.statusKeepalive,
             threadContext: config.threadContext,
             uploadPolicy: input.uploadPolicy,
           });
@@ -912,6 +983,7 @@ async function handleEventPost(input: {
             resolveActiveSession: input.resolveActiveSession,
             reset: input.reset,
             send: input.send,
+            statusKeepalive: config.statusKeepalive,
             threadContext: config.threadContext,
             uploadPolicy: input.uploadPolicy,
           });
@@ -941,6 +1013,7 @@ async function handleEventPost(input: {
             resolveActiveSession: input.resolveActiveSession,
             reset: input.reset,
             send: input.send,
+            statusKeepalive: config.statusKeepalive,
             threadContext: config.threadContext,
             uploadPolicy: input.uploadPolicy,
           });
@@ -1006,6 +1079,7 @@ async function dispatchSlackMessage(input: {
   readonly handler: NonNullable<SlackChannelConfig["onMessage"]>;
   readonly kind: "app_mention" | "channel_message" | "direct_message";
   readonly message: SlackMessage;
+  readonly statusKeepalive: boolean | undefined;
   readonly resolveActiveSession: (options: {
     readonly continuationToken: string;
   }) => Promise<{ readonly sessionId: string } | undefined>;
@@ -1022,6 +1096,7 @@ async function dispatchSlackMessage(input: {
     channelId: input.message.channelId,
     threadTs: input.message.threadTs,
     teamId: input.message.teamId,
+    statusKeepalive: input.statusKeepalive,
   });
   const ctx: SlackInboundMessageContext = {
     cancel: (options = {}) =>

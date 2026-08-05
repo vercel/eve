@@ -24,6 +24,7 @@ import {
   SLACK_SECTION_TEXT_MAX_LENGTH,
 } from "#public/channels/slack/limits.js";
 import { defaultSlackAuth } from "#public/channels/slack/index.js";
+import { setSlackStatusKeepaliveTestSeams } from "#public/channels/slack/status-keepalive.js";
 import {
   constrainAuthorizationRequired,
   slackChannel,
@@ -308,6 +309,7 @@ describe("slackChannel() default event handlers", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
   afterEach(() => {
+    setSlackStatusKeepaliveTestSeams();
     vi.useRealTimers();
   });
 
@@ -656,6 +658,98 @@ describe("slackChannel() default event handlers", () => {
       status: "Working...",
       loading_messages: ["Working..."],
     });
+  });
+
+  it("refreshes a status without polling thread replies", async () => {
+    const sleepers: Array<() => void> = [];
+    setSlackStatusKeepaliveTestSeams({
+      sleep: () =>
+        new Promise<void>((resolve) => {
+          sleepers.push(resolve);
+        }),
+    });
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("turn.started", { sequence: 0, stepIndex: 0, turnId: "t1" }),
+      ctx,
+    );
+    await vi.waitFor(() => expect(sleepers).toHaveLength(1));
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    sleepers.shift()!();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      "https://slack.com/api/assistant.threads.setStatus",
+    );
+    expect(parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit).status).toBe(
+      "Working...",
+    );
+  });
+
+  it("terminal events stop status keepalives before custom handlers run", async () => {
+    const sleepers: Array<() => void> = [];
+    const onTurnCompleted = vi.fn(async () => {});
+    setSlackStatusKeepaliveTestSeams({
+      sleep: () =>
+        new Promise<void>((resolve) => {
+          sleepers.push(resolve);
+        }),
+    });
+    const adapter = withState(
+      getAdapter(
+        slackChannel({
+          credentials: { botToken: "xoxb-test" },
+          events: { "turn.completed": onTurnCompleted },
+        }),
+      ),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("turn.started", { sequence: 0, stepIndex: 0, turnId: "t1" }),
+      ctx,
+    );
+    await vi.waitFor(() => expect(sleepers).toHaveLength(1));
+    await callEvent(
+      adapter,
+      makeEvent("turn.completed", { sequence: 0, stepIndex: 0, turnId: "t1" }),
+      ctx,
+    );
+    fetchMock.mockClear();
+    sleepers.shift()!();
+    await Promise.resolve();
+
+    expect(onTurnCompleted).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("can disable status keepalives", async () => {
+    const sleep = vi.fn(() => new Promise<void>(() => {}));
+    setSlackStatusKeepaliveTestSeams({ sleep });
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" }, statusKeepalive: false })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("turn.started", { sequence: 0, stepIndex: 0, turnId: "t1" }),
+      ctx,
+    );
+    await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it("refreshes triggeringUserId from the current Slack caller on every turn", async () => {
@@ -1046,6 +1140,10 @@ describe("slackChannel() inbound mention pipeline", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
 
+  afterEach(() => {
+    setSlackStatusKeepaliveTestSeams();
+  });
+
   afterAll(() => {
     if (ORIGINAL_SIGNING_SECRET === undefined) {
       delete process.env.SLACK_SIGNING_SECRET;
@@ -1398,6 +1496,24 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(typingCall).toBeDefined();
     const sent = parseSlackRequestBody(typingCall![1] as RequestInit);
     expect(sent.status).toBe("Thinking...");
+  });
+
+  it("does not start an inbound status keepalive when disabled", async () => {
+    const sleep = vi.fn(() => new Promise<void>(() => {}));
+    setSlackStatusKeepaliveTestSeams({ sleep });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      statusKeepalive: false,
+    });
+    const { body } = buildMentionBody();
+
+    await firePost(channel, buildSignedRequest({ body }));
+
+    const typingCalls = fetchMock.mock.calls.filter((call) =>
+      String(call[0]).includes("assistant.threads.setStatus"),
+    );
+    expect(typingCalls).toHaveLength(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it("returns 200 OK without dispatching for non-app_mention events", async () => {

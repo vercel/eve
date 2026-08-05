@@ -254,13 +254,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
     resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
   } else if (input.input?.kind === "runtime-action-result") {
+    adapter.statusKeepalive?.resume(adapterCtx);
     recordSubagentUsageSpans(input.input.results);
     resolved = { runtimeActionResults: input.input.results };
   }
 
   // Pin adapter-state mutations back onto ctx so they survive the
   // step boundary.
-  if (input.input?.kind === "deliver") {
+  if (input.input?.kind === "deliver" || input.input?.kind === "runtime-action-result") {
     const updatedAdapter = { ...adapter, state: { ...adapterCtx.state } };
     setChannelContext(ctx, updatedAdapter);
   }

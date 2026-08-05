@@ -168,12 +168,14 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
   };
 }
 
-function createSerializedContext(): Record<string, unknown> {
+function createSerializedContext(
+  adapter: ChannelAdapter = threadContextAdapter,
+): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, {
     adapterRegistry: {
-      adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      adaptersByKind: new Map([[adapter.kind, adapter]]),
     },
     compiledArtifactsSource: {} as never,
     graph: {
@@ -189,7 +191,7 @@ function createSerializedContext(): Record<string, unknown> {
     toolRegistry: {},
     turnAgent: TestTurnAgent,
   } as never);
-  ctx.set(ChannelKey, threadContextAdapter);
+  ctx.set(ChannelKey, adapter);
   ctx.set(ContinuationTokenKey, "http:thread-context");
   ctx.set(ModeKey, "conversation");
   ctx.set(SessionIdKey, "session-1");
@@ -452,7 +454,7 @@ describe("dispatchRuntimeActionsStep", () => {
       sessionState,
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       results: [
         {
           callId: "call-2",
@@ -893,7 +895,7 @@ describe("dispatchRuntimeActionsStep", () => {
         serializedContext: createSerializedContext(),
         sessionState,
       }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       results: [
         {
           callId: "call-1",
@@ -990,7 +992,7 @@ describe("dispatchRuntimeActionsStep", () => {
         serializedContext: createSerializedContext(),
         sessionState,
       }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       results: [
         {
           callId: "call-dynamic",
@@ -1304,6 +1306,46 @@ describe("turnStep", () => {
     expect(createDurableSessionState).toHaveBeenLastCalledWith({
       session: expect.objectContaining({ sessionId: "turn-step-session" }),
     });
+  });
+
+  it("resumes local channel status before processing runtime-action results", async () => {
+    const resume = vi.fn();
+    const adapter = {
+      ...threadContextAdapter,
+      statusKeepalive: { suspend: vi.fn(), refresh: vi.fn(), resume },
+    };
+    const compiledBundle = {
+      adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    const serializedContext = createSerializedContext(adapter);
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: { done: true, output: "ok" },
+        session: stepSession,
+      });
+    });
+
+    await turnStep({
+      input: { kind: "runtime-action-result", results: [] },
+      parentWritable: createTestWritable(),
+      serializedContext,
+      sessionState: createStubSessionState(),
+    });
+
+    expect(resume).toHaveBeenCalledOnce();
   });
 
   it("projects a requested sleep onto the durable step result", async () => {

@@ -12,12 +12,15 @@ import {
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { refreshChannelStatusStep } from "#execution/refresh-channel-status-step.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 
 const resumeHookMock = vi.fn();
 const createHookMock = vi.fn();
-const sleepMock = vi.fn(async (_duration: unknown) => {});
+const sleepMock = vi.fn((duration: unknown) =>
+  duration === 75_000 ? new Promise<void>(() => {}) : Promise.resolve(),
+);
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
@@ -31,6 +34,10 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
 
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
+}));
+
+vi.mock("./refresh-channel-status-step.js", () => ({
+  refreshChannelStatusStep: vi.fn(),
 }));
 
 vi.mock("./subagent-event-proxy-step.js", () => ({
@@ -62,7 +69,11 @@ describe("turnWorkflow", () => {
     vi.clearAllMocks();
     resumeHookMock.mockReset();
     createHookMock.mockReset();
-    sleepMock.mockClear();
+    sleepMock.mockReset();
+    sleepMock.mockImplementation((duration: unknown) =>
+      duration === 75_000 ? new Promise<void>(() => {}) : Promise.resolve(),
+    );
+    vi.mocked(refreshChannelStatusStep).mockResolvedValue({ serializedContext: {} });
   });
 
   it("notifies the driver when a turn completes", async () => {
@@ -631,6 +642,142 @@ describe("turnWorkflow", () => {
         action: expect.objectContaining({ kind: "dispatch-runtime-actions" }),
       }),
     );
+    expect(sleepMock).not.toHaveBeenCalledWith(75_000);
+    expect(refreshChannelStatusStep).not.toHaveBeenCalled();
+  });
+
+  it("durably refreshes channel status while retaining one pending inbox read", async () => {
+    const pendingState = withRunningChildren(createSessionState(), [
+      { callId: "call-1", sessionId: "child-session" },
+    ]);
+    let deliverResult: ((value: IteratorResult<unknown>) => void) | undefined;
+    const next = vi.fn(
+      () =>
+        new Promise<IteratorResult<unknown>>((resolve) => {
+          deliverResult = resolve;
+        }),
+    );
+    const inbox = createInboxMock([], { stayOpen: true });
+    const hook = inbox.hook as { [Symbol.asyncIterator](): AsyncIterator<unknown> };
+    hook[Symbol.asyncIterator] = () => ({ next });
+    installHookDispatch([inbox]);
+    let wakeRefresh: (() => void) | undefined;
+    sleepMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          wakeRefresh = resolve;
+        }),
+    );
+    vi.mocked(refreshChannelStatusStep).mockResolvedValue({
+      delayMs: 75_000,
+      serializedContext: { state: "refreshed" },
+    });
+    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
+      statusKeepaliveDelayMs: 75_000,
+      results: [],
+      sessionState: pendingState,
+    });
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+        serializedContext: { state: "pending" },
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: { state: "done" },
+        sessionState: pendingState,
+      });
+
+    const { input } = createInput({
+      driverCapabilities: { turnInbox: true },
+      sessionState: pendingState,
+    });
+    const workflow = turnWorkflow(input);
+    await vi.waitFor(() => expect(wakeRefresh).toBeDefined());
+    wakeRefresh?.();
+    await vi.waitFor(() => expect(refreshChannelStatusStep).toHaveBeenCalledOnce());
+    expect(next).toHaveBeenCalledOnce();
+
+    deliverResult?.({
+      done: false,
+      value: {
+        kind: "runtime-action-result",
+        results: [
+          { callId: "call-1", kind: "subagent-result", output: "ok", subagentName: "delegate" },
+        ],
+      },
+    });
+    await workflow;
+
+    expect(next).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].serializedContext).toEqual({
+      state: "refreshed",
+    });
+  });
+
+  it("keeps the original status timer across intermediate inbox events", async () => {
+    const pendingState = createSessionState();
+    installInbox(
+      [
+        {
+          callId: "call-1",
+          childSessionId: "child",
+          event: { type: "authorization.required", data: {} },
+          kind: "subagent-authorization-event",
+          subagentName: "delegate",
+        },
+        {
+          callId: "call-1",
+          childSessionId: "child",
+          event: { type: "authorization.completed", data: {} },
+          kind: "subagent-authorization-event",
+          subagentName: "delegate",
+        },
+      ],
+      { stayOpen: true },
+    );
+    let wakeRefresh: (() => void) | undefined;
+    sleepMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          wakeRefresh = resolve;
+        }),
+    );
+    vi.mocked(refreshChannelStatusStep).mockResolvedValue({ serializedContext: {} });
+    vi.mocked(runProxySubagentEventStep).mockResolvedValue({
+      serializedContext: { state: "proxied" },
+      sessionState: pendingState,
+    });
+    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
+      statusKeepaliveDelayMs: 75_000,
+      results: [],
+      sessionState: pendingState,
+    });
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "park",
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+      serializedContext: { state: "pending" },
+      sessionState: pendingState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { turnInbox: true },
+      sessionState: pendingState,
+    });
+    const workflow = turnWorkflow(input);
+    await vi.waitFor(() => expect(runProxySubagentEventStep).toHaveBeenCalledTimes(2));
+    expect(sleepMock).toHaveBeenCalledTimes(1);
+    wakeRefresh?.();
+    await vi.waitFor(() => expect(refreshChannelStatusStep).toHaveBeenCalledOnce());
+
+    void workflow.catch(() => {});
   });
 
   it("waits for dispatch adoption before cascading a cancellation", async () => {
@@ -638,11 +785,16 @@ describe("turnWorkflow", () => {
     const pendingState = createSessionState({ continuationToken: "http:parent:turn" });
     const adoptedState = createSessionState({ continuationToken: "http:parent:turn:adopted" });
     let finishDispatch:
-      | ((value: { results: readonly []; sessionState: DurableSessionState }) => void)
+      | ((value: {
+          results: readonly [];
+          sessionState: DurableSessionState;
+          statusKeepaliveDelayMs?: number;
+        }) => void)
       | undefined;
     const dispatchResult = new Promise<{
       results: readonly [];
       sessionState: DurableSessionState;
+      statusKeepaliveDelayMs?: number;
     }>((resolve) => {
       finishDispatch = resolve;
     });
@@ -672,7 +824,10 @@ describe("turnWorkflow", () => {
     await vi.waitFor(() => expect(dispatchRuntimeActionsStep).toHaveBeenCalledOnce());
     expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
 
-    finishDispatch?.({ results: [], sessionState: adoptedState });
+    finishDispatch?.({
+      results: [],
+      sessionState: adoptedState,
+    });
     await workflow;
 
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].abortSignal?.aborted).toBe(true);

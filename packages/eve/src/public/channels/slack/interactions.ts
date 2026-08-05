@@ -424,6 +424,7 @@ export async function handleInteractionPost(
         channelId: interaction.channelId,
         threadTs: interaction.threadTs,
         teamId: interaction.teamId,
+        statusKeepalive: deps.config.statusKeepalive,
       });
       const slackCtx: SlackInteractionContext = {
         cancel: (options = {}) =>

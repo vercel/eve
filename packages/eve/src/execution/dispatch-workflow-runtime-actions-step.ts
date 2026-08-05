@@ -33,6 +33,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<{
+  readonly statusKeepaliveDelayMs?: number;
   readonly results: readonly RuntimeSubagentResult[];
   readonly sessionState: DurableSessionState;
 }> {
@@ -40,10 +41,10 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   const durableSession = await readDurableSession(input.sessionState);
   const pending = getPendingWorkflowInterrupt(durableSession.state);
-  if (pending === undefined) return { results: [], sessionState: input.sessionState };
+  if (pending === undefined) return emptyDispatchResult(input);
 
   const actions = buildRuntimeActionsFromWorkflowInterrupt(pending.interrupt);
-  if (actions.length === 0) return { results: [], sessionState: input.sessionState };
+  if (actions.length === 0) return emptyDispatchResult(input);
 
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
@@ -68,7 +69,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   });
 
   if (plan.allowed.length === 0) {
-    return { results: blockedResults, sessionState: input.sessionState };
+    return { ...emptyDispatchResult(input), results: blockedResults };
   }
 
   const session = hydrateDurableSession({
@@ -99,8 +100,18 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   }
 
   return {
+    ...dispatched,
     results: [...dispatched.results, ...blockedResults],
-    sessionState: dispatched.sessionState,
+  };
+}
+
+function emptyDispatchResult(input: {
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}) {
+  return {
+    results: [] as readonly RuntimeSubagentResult[],
+    sessionState: input.sessionState,
   };
 }
 
