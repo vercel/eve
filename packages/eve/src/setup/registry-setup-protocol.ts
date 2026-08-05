@@ -8,7 +8,7 @@ import type {
   SingleSelectOptions,
 } from "./prompter.js";
 
-export const REGISTRY_SETUP_PROTOCOL_VERSION = 2;
+export const REGISTRY_SETUP_PROTOCOL_VERSION = 1;
 
 export type RegistrySetupFact = {
   label: string;

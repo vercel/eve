@@ -86,7 +86,7 @@ describe("runRegistrySetupCommand", () => {
         env: expect.objectContaining({
           EVE_SETUP: "1",
           EVE_SETUP_ITEM: "channel/slack",
-          EVE_SETUP_PROTOCOL: "2",
+          EVE_SETUP_PROTOCOL: "1",
         }),
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       }),
@@ -155,6 +155,39 @@ describe("runRegistrySetupCommand", () => {
         options(),
       ),
     ).rejects.toThrow("Photon approval was denied.\nat setupPhoton");
+  });
+
+  it("preserves additive deployment metadata on protocol v1", async () => {
+    const child = protocolChild(0, null, (running) => {
+      running.emit("message", {
+        type: "result",
+        outcome: {
+          kind: "completed",
+          facts: [],
+          deployment: {
+            required: true,
+            productionDestinations: [{ label: "Open Linear", url: "https://linear.app" }],
+          },
+        },
+      });
+    });
+    spawn.mockReturnValue(child);
+
+    await expect(
+      runRegistrySetupCommand(
+        "/project",
+        { package: "@acme/slack", bin: "acme-slack", args: [] },
+        "channel/linear",
+        options(),
+      ),
+    ).resolves.toEqual({
+      kind: "completed",
+      facts: [],
+      deployment: {
+        required: true,
+        productionDestinations: [{ label: "Open Linear", url: "https://linear.app" }],
+      },
+    });
   });
 
   it("returns durable setup notes with successful completion", async () => {
