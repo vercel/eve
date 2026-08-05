@@ -19,7 +19,7 @@ The global installation is intentional. The installer writes its absolute execut
 
 The interactive installer asks whether the eve application is local or deployed, validates the selected target, discovers its authored model, locates Buzz Desktop, and confirms before writing the custom harness. For a protected Vercel deployment, it reuses eve's Vercel login and Trusted Sources flow; the harness stores no Vercel credential.
 
-The installed harness requires the Buzz agent's **Respond to** setting to remain **Owner only**. Buzz verifies inbound Nostr events and applies that author gate before sending a prompt to the adapter. In Buzz, owner-only includes the agent's owner and cryptographically verified sibling agents belonging to that owner. The adapter fails before starting eve if Buzz reports another mode or does not expose the mode.
+The installed harness requires **Who can talk to this agent** to remain on its default owner-only selection. Buzz verifies inbound Nostr events and applies that author gate before sending a prompt to the adapter. In Buzz, owner-only includes the agent's owner and cryptographically verified sibling agents belonging to that owner. The adapter fails before starting eve if Buzz reports another mode or does not expose the mode.
 
 A positional target may be a working directory or URL. Deployed hostnames without a protocol default to HTTPS:
 
@@ -43,7 +43,7 @@ eve-buzz-acp-adapter install --url https://agent.example.com --allow-shared-prin
 
 This is an authorization decision, not a compatibility flag. It records `EVE_BUZZ_ALLOW_SHARED_PRINCIPAL=1` in Buzz's machine-wide custom harness definition for eve. Every Buzz agent using that harness can then use a broader author gate, and every sender accepted by Buzz uses the same eve authentication, connections, tools, and session state. Reinstall without the flag to restore the owner-only requirement.
 
-Reopen Buzz, create or edit an agent, and select **eve** as its harness. Use the harness defaults, save the agent, and start it. The connector launches `eve acp`; do not start a separate ACP process.
+Reopen Buzz, create or edit an agent, and select **eve** as its harness. Buzz currently requires a model value but does not prefill one for custom harnesses. Enter the authored model printed by the installer or `doctor`; the harness pins that model independently. For a local application, set **Parallelism** to `1` and add any credentials it does not already load from an env file, such as `AI_GATEWAY_API_KEY`, under Buzz's advanced settings. Leave **Who can talk to this agent** on its default owner-only selection, save the agent, and start it. The connector launches `eve acp`; do not start a separate ACP process.
 
 To inspect the selected target before installation:
 
@@ -62,6 +62,18 @@ node packages/eve-buzz-acp-adapter/dist/cli.js install apps/fixtures/weather-age
 ```
 
 Without a target, the installer defaults the local-directory prompt to the current directory.
+
+## Troubleshooting
+
+### Buzz shows typing but never replies
+
+Open the Buzz agent log and look for the error returned by eve. If it says `AI Gateway received no credentials`, add `AI_GATEWAY_API_KEY` to the agent's advanced environment variables or configure the local eve application to load credentials from an env file. Buzz Desktop does not necessarily inherit variables exported in a terminal.
+
+For a local eve application, keep **Parallelism** at `1`. Higher values make Buzz launch multiple ACP processes for the same application, but a local eve dev server has a single owner. Messages still run through the surviving process, while the others repeatedly report `A dev server is already running for this eve agent`.
+
+### The model list only offers Custom model
+
+Buzz's model-discovery subprocess does not currently identify itself as an inert request, so the adapter's author-gate check safely rejects it before starting eve. Select **Custom model** and enter the authored model printed by `install` or `doctor`. The adapter pins the installed model independently and does not let the Buzz field switch it.
 
 ## Direct use
 

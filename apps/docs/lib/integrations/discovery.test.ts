@@ -41,9 +41,12 @@ describe("integration discovery", () => {
     expect(markdown).toContain("eve-buzz-acp-adapter install");
     expect(markdown).toContain("Customize for this agent");
     expect(markdown).toContain("Agent harness** to **eve");
-    expect(markdown).toContain("Respond to** set to **Owner only");
-    expect(markdown).toContain("rerun the installer");
-    expect(markdown).toContain("--allow-shared-principal");
+    expect(markdown).toContain("does not prefill one for custom harnesses");
+    expect(markdown).toContain("Who can talk to this agent");
+    expect(markdown).toContain("AI_GATEWAY_API_KEY");
+    expect(markdown).toContain("Parallelism** to `1`");
+    expect(markdown).toContain("Accepted senders share one eve identity");
+    expect(markdown).toContain("## Configure");
     expect(integrationSearchText(buzz!)).toContain("acp");
   });
 

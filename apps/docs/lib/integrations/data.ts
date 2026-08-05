@@ -381,26 +381,16 @@ eve-buzz-acp-adapter install ./path/to/eve-app
 eve-buzz-acp-adapter install https://agent.example.com
 \`\`\`
 
-The installer registers **eve** as a custom harness with Buzz. Reopen Buzz, then create or edit an agent:
+The installer registers **eve** as a custom harness with Buzz.`,
+    configure: `Reopen Buzz, then create or edit an agent:
 
 1. Enter an **Agent name** and, optionally, **Agent instructions** for Buzz-specific behavior.
 2. Under **AI configuration**, choose **Customize for this agent**.
-3. Set **Agent harness** to **eve**. If Buzz shows a **Model** field, keep the discovered eve model selected.
-4. Open **Advanced** and keep **Respond to** set to **Owner only**. The other advanced settings can remain at their defaults.
-5. Save the agent and start it.`,
-    configure: `By default, keep **Respond to** set to **Owner only**. Buzz then accepts messages only from you and your other verified Buzz agents. Those senders are not separate eve users: they all share the harness's eve authentication, connections, tools, and channel session.
+3. Set **Agent harness** to **eve**. Buzz currently requires a **Model** value but does not prefill one for custom harnesses.
+4. Open **Advanced**. Leave **Who can talk to this agent** on its default owner-only selection. For a local application, set **Parallelism** to \`1\` and add any credentials that the application does not already load from an env file, such as \`AI_GATEWAY_API_KEY\`.
+5. Save the agent and start it.
 
-For an agent intentionally designed as a shared service, reinstall with an explicit shared-principal opt-in:
-
-\`\`\`bash
-eve-buzz-acp-adapter install --url https://agent.example.com --allow-shared-principal
-\`\`\`
-
-This permits Buzz's **Allowlist** or **Anyone** modes for every agent using the machine-wide eve harness. Use dedicated least-privilege credentials and assume every sender Buzz accepts can exercise every capability available to the agent. Reinstall without the flag to restore the owner-only requirement.
-
-Every Buzz agent that selects **eve** uses the target and model recorded by the installer. Rerun the installer to point the harness at a different eve application or pick up a changed authored model. In Buzz's advanced settings, use **Environment variables** only for credentials or runtime configuration the local eve application needs. To change the target, model, or author gate, rerun the installer instead of overriding its variables manually.
-
-For a protected Vercel deployment, the installer reuses eve's Vercel login and Trusted Sources flow without storing a Vercel credential in the harness. Inspect a target and its discovered model at any time with \`eve-buzz-acp-adapter doctor [target]\`. See the [adapter documentation](https://github.com/vercel/eve/tree/main/packages/eve-buzz-acp-adapter#readme) for identity boundaries, delivery guarantees, and current compatibility limits.`,
+Accepted senders share one eve identity and its capabilities.`,
   },
   "chat-sdk-gchat": {
     logo: "googlechat",
