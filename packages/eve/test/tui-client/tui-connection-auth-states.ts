@@ -121,7 +121,7 @@ const firstTurn: UnstampedMessageStreamEvent[] = [
   },
   {
     type: "session.waiting",
-    data: { wait: "next-user-message" },
+    data: { continuationToken: "session-id", wait: "next-user-message" },
   },
 ];
 
@@ -142,7 +142,7 @@ const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
   },
   {
     type: "session.waiting",
-    data: { wait: "next-user-message" },
+    data: { continuationToken: "session-id", wait: "next-user-message" },
   },
 ];
 
@@ -170,7 +170,7 @@ const secondTurn: UnstampedMessageStreamEvent[] = [
   },
   {
     type: "session.waiting",
-    data: { wait: "next-user-message" },
+    data: { continuationToken: "session-id", wait: "next-user-message" },
   },
 ];
 
@@ -192,7 +192,7 @@ const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
   },
   {
     type: "session.waiting",
-    data: { wait: "next-user-message" },
+    data: { continuationToken: "session-id", wait: "next-user-message" },
   },
 ];
 

@@ -434,7 +434,7 @@ describe("deriveRunFacts", () => {
       { type: "turn.completed", data: { sequence: 1, turnId: "t1" } },
       {
         type: "session.waiting",
-        data: { wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ] as UnstampedMessageStreamEvent[];
 
@@ -453,7 +453,7 @@ describe("deriveRunFacts", () => {
       { type: "turn.completed", data: { sequence: 3, turnId: "t1" } },
       {
         type: "session.waiting",
-        data: { wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ] as UnstampedMessageStreamEvent[];
 

@@ -123,7 +123,7 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A/reset \
 
 After reset, the old ID cannot accept another message. Start a replacement explicitly with `POST /eve/v1/session`.
 
-The control routes never create sessions. `compact`, `clear`, and `reset` return `"no_active_session"` when the ID is already inactive. None of the session routes accepts or returns a continuation token.
+The control routes never create sessions. `compact`, `clear`, and `reset` return `"no_active_session"` when the ID is already inactive. Session message and control request/response bodies do not accept or return continuation tokens. For compatibility, the streamed `session.waiting` event retains `data.continuationToken`: it is the channel-local token for a channel-addressed session and the immutable session ID for an ID-only session. New clients should continue through their fixed session handle instead of reading this field.
 
 See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for the complete event set, operation results, and cursor behavior.
 

@@ -28,7 +28,7 @@ function buildSerializedContext(overrides: {
   auth?: Record<string, unknown>;
   channelKind: string;
   channelState?: Record<string, unknown>;
-  continuationToken: string;
+  continuationToken?: string;
   mode: string;
   parent?: {
     readonly callId: string;
@@ -44,9 +44,11 @@ function buildSerializedContext(overrides: {
     "eve.auth": overrides.auth ?? null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
     "eve.channel": { kind: overrides.channelKind, state: overrides.channelState ?? {} },
-    "eve.continuationToken": overrides.continuationToken,
     "eve.mode": overrides.mode,
   };
+  if (overrides.continuationToken !== undefined) {
+    context["eve.continuationToken"] = overrides.continuationToken;
+  }
   if (overrides.parent !== undefined) {
     context["eve.parentSession"] = overrides.parent;
   }
@@ -260,7 +262,10 @@ describe("workflowEntry integration", () => {
         const firstTurn = await stream.nextTurn();
 
         expect(hook.token).toBe(continuationToken);
-        expect(firstTurn.at(-1)?.type).toBe("session.waiting");
+        expect(firstTurn.at(-1)).toMatchObject({
+          data: { continuationToken: "workflow-entry-conversation" },
+          type: "session.waiting",
+        });
         expect(firstTurn.every((event) => typeof event.meta?.at === "string")).toBe(true);
         expect(
           firstTurn.some(
@@ -291,6 +296,33 @@ describe("workflowEntry integration", () => {
               event.data.message?.includes("follow up") === true,
           ),
         ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("publishes the session ID as the waiting address for an ID-only session", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-id-only" } });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "hello there" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        expect((await stream.nextTurn()).at(-1)).toMatchObject({
+          data: { continuationToken: run.runId },
+          type: "session.waiting",
+        });
       } finally {
         stream.dispose();
         await run.cancel();

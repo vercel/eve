@@ -45,7 +45,10 @@ describe("stream following over real sockets", () => {
       { type: "step.started", data: {} },
       { type: "step.completed", data: {} },
       { type: "step.started", data: {} },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
     ];
     let connections = 0;
     const host = await listen(

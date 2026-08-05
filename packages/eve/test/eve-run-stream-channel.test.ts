@@ -133,7 +133,7 @@ describe("eveChannel GET stream", () => {
       },
       {
         type: "session.waiting",
-        data: { wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ]);
     const attachSession = createMockAttachSession(createEvents(events));

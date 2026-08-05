@@ -91,7 +91,10 @@ function reasoningEvent(delta: string, index = 0): MessageStreamEvent {
 
 function boundaryEvent(index: number): MessageStreamEvent {
   return stampTestEvent(
-    { type: "session.waiting", data: { wait: "next-user-message" } } as UnstampedMessageStreamEvent,
+    {
+      type: "session.waiting",
+      data: { continuationToken: "session-id", wait: "next-user-message" },
+    } as UnstampedMessageStreamEvent,
     index,
   );
 }

@@ -707,7 +707,7 @@ function turnCompleted(turnId: string): UnstampedMessageStreamEvent {
 
 function sessionWaiting(): UnstampedMessageStreamEvent {
   return {
-    data: { wait: "next-user-message" },
+    data: { continuationToken: "session-id", wait: "next-user-message" },
     type: "session.waiting",
   };
 }

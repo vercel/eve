@@ -130,7 +130,7 @@ describe("ClientSession", () => {
         { type: "turn.started", data: { turnId: "turn_1" } },
         {
           type: "session.waiting",
-          data: { wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ];
       return createBoundedStreamResponse(events);
@@ -460,7 +460,7 @@ describe("ClientSession", () => {
       return createStreamResponse([
         {
           type: "session.waiting",
-          data: { wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]);
     });
@@ -489,7 +489,7 @@ describe("ClientSession", () => {
           encoder.encode(
             `${JSON.stringify({
               type: "session.waiting",
-              data: { wait: "next-user-message" },
+              data: { continuationToken: "session-id", wait: "next-user-message" },
             })}\n`,
           ),
         );
@@ -568,7 +568,7 @@ describe("ClientSession", () => {
         },
         {
           type: "session.waiting",
-          data: { wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]);
     });
@@ -588,7 +588,7 @@ describe("ClientSession", () => {
       return createStreamResponse([
         {
           type: "session.waiting",
-          data: { wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]);
     });
@@ -627,7 +627,7 @@ describe("ClientSession", () => {
                 encoder.encode(
                   `${JSON.stringify({
                     type: "session.waiting",
-                    data: { wait: "next-user-message" },
+                    data: { continuationToken: "session-id", wait: "next-user-message" },
                   })}\n`,
                 ),
               );
@@ -765,7 +765,7 @@ describe("ClientSession", () => {
       return createStreamResponse([
         {
           type: "session.waiting",
-          data: { wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]);
     });
@@ -837,7 +837,7 @@ describe("ClientSession", () => {
         return createStreamResponse([
           {
             type: "session.waiting",
-            data: { wait: "next-user-message" },
+            data: { continuationToken: "session-id", wait: "next-user-message" },
           },
         ]);
       }

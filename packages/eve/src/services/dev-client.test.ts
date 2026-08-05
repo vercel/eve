@@ -297,7 +297,7 @@ function createDevFetchMock(input: {
           controller.enqueue(
             encoder.encode(
               `${JSON.stringify({
-                data: { wait: "next-user-message" },
+                data: { continuationToken: "session-id", wait: "next-user-message" },
                 type: "session.waiting",
               })}\n`,
             ),

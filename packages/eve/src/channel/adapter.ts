@@ -232,13 +232,14 @@ export async function callAdapterEventHandler(
   event: UnstampedMessageStreamEvent,
   ctx: ChannelAdapterContext,
 ): Promise<UnstampedMessageStreamEvent> {
+  const eventForHandler = withWaitingContinuationToken(event, ctx);
   const handler = adapter[event.type] as
     | ((data: unknown, ctx: ChannelAdapterContext) => void | Promise<void>)
     | undefined;
 
   if (handler !== undefined) {
     try {
-      await handler("data" in event ? event.data : undefined, ctx);
+      await handler("data" in eventForHandler ? eventForHandler.data : undefined, ctx);
     } catch (error) {
       log.error("adapter event handler threw — event swallowed", {
         adapterKind: getAdapterKind(adapter),
@@ -248,5 +249,19 @@ export async function callAdapterEventHandler(
     }
   }
 
-  return event;
+  return withWaitingContinuationToken(eventForHandler, ctx);
+}
+
+function withWaitingContinuationToken(
+  event: UnstampedMessageStreamEvent,
+  ctx: ChannelAdapterContext,
+): UnstampedMessageStreamEvent {
+  if (event.type !== "session.waiting") return event;
+  return {
+    ...event,
+    data: {
+      ...event.data,
+      continuationToken: ctx.session.continuation?.token ?? ctx.session.id,
+    },
+  };
 }

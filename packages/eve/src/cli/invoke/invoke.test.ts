@@ -79,7 +79,7 @@ describe("runInvoke", () => {
       { type: "input.requested", data: { requests: [request] } },
       {
         type: "session.waiting",
-        data: { wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ]);
 
@@ -110,7 +110,7 @@ describe("runInvoke", () => {
         },
         {
           type: "session.waiting",
-          data: { wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]),
     ).resolves.toMatchObject({
@@ -132,7 +132,7 @@ describe("runInvoke", () => {
           },
           {
             type: "session.waiting",
-            data: { wait: "next-user-message" },
+            data: { continuationToken: "session-id", wait: "next-user-message" },
           },
         ],
         {
@@ -161,7 +161,7 @@ describe("runInvoke", () => {
           },
           {
             type: "session.waiting",
-            data: { wait: "next-user-message" },
+            data: { continuationToken: "session-id", wait: "next-user-message" },
           },
         ],
         {
@@ -188,7 +188,7 @@ describe("runInvoke", () => {
         },
         {
           type: "session.waiting",
-          data: { wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]),
     ).resolves.toEqual({
@@ -208,7 +208,7 @@ describe("runInvoke", () => {
         },
         {
           type: "session.waiting",
-          data: { wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]),
     );

@@ -221,7 +221,7 @@ describe("sendDevelopmentMessage", () => {
         type: "turn.completed",
       },
       {
-        data: { wait: "next-user-message" },
+        data: { continuationToken: "", wait: "next-user-message" },
         type: "session.waiting",
       },
     ]);
@@ -416,7 +416,7 @@ describe("sendDevelopmentMessage", () => {
         type: "turn.completed",
       },
       {
-        data: { wait: "next-user-message" },
+        data: { continuationToken: "", wait: "next-user-message" },
         type: "session.waiting",
       },
     ]);

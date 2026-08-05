@@ -584,7 +584,7 @@ describe("EveTUIRunner development session continuity", () => {
                   `${JSON.stringify(
                     stampTestEvent({
                       type: "session.waiting",
-                      data: { wait: "next-user-message" },
+                      data: { continuationToken: "session-id", wait: "next-user-message" },
                     } as UnstampedMessageStreamEvent),
                   )}\n`,
                 ),
@@ -670,7 +670,7 @@ describe("EveTUIRunner development session continuity", () => {
       (async function* () {
         yield stampTestEvent(
           {
-            data: { wait: "next-user-message" },
+            data: { continuationToken: "session-id", wait: "next-user-message" },
             type: "session.waiting",
           },
           0,
@@ -712,7 +712,7 @@ describe("EveTUIRunner development session continuity", () => {
         (async function* () {
           yield stampTestEvent(
             {
-              data: { wait: "next-user-message" },
+              data: { continuationToken: "session-id", wait: "next-user-message" },
               type: "session.waiting",
             },
             0,
@@ -754,7 +754,7 @@ describe("EveTUIRunner development session continuity", () => {
       (async function* () {
         yield stampTestEvent(
           {
-            data: { wait: "next-user-message" },
+            data: { continuationToken: "session-id", wait: "next-user-message" },
             type: "session.waiting",
           },
           0,
@@ -1136,9 +1136,17 @@ describe("EveTUIRunner native continuation state", () => {
             ],
           },
         },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
       ],
-      [{ type: "session.waiting", data: { wait: "next-user-message" } }],
+      [
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ],
     ]);
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
@@ -1198,9 +1206,17 @@ describe("EveTUIRunner native continuation state", () => {
               ],
             },
           },
-          { type: "session.waiting", data: { wait: "next-user-message" } },
+          {
+            type: "session.waiting",
+            data: { continuationToken: "session-id", wait: "next-user-message" },
+          },
         ],
-        [{ type: "session.waiting", data: { wait: "next-user-message" } }],
+        [
+          {
+            type: "session.waiting",
+            data: { continuationToken: "session-id", wait: "next-user-message" },
+          },
+        ],
       ]);
       const readToolApproval = vi.fn(async () => ({ approved: true }));
       const readInputQuestion = vi.fn(async () => ({ optionId: chosenOptionId }));
@@ -1269,7 +1285,7 @@ describe("EveTUIRunner connection authorization", () => {
       } as UnstampedMessageStreamEvent);
       yield stampTestEvent({
         type: "session.waiting",
-        data: { wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       } as UnstampedMessageStreamEvent);
     });
     const renderer: AgentTUIRenderer = {
@@ -1355,7 +1371,10 @@ describe("EveTUIRunner failure rendering", () => {
           turnId: "t0",
         },
       },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
     ]);
 
     const renderer: AgentTUIRenderer = {
@@ -1433,7 +1452,10 @@ describe("EveTUIRunner reused step indexes", () => {
         },
       },
       { type: "turn.completed", data: { sequence: 0, turnId: "t0" } },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
     ]);
 
     const renderer: AgentTUIRenderer = {
@@ -1493,7 +1515,10 @@ describe("EveTUIRunner replay guards", () => {
       },
       { type: "step.started", data: { sequence: 1, stepIndex: 0, turnId: "turn_0" } },
       appended,
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
     ]);
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
@@ -1664,7 +1689,10 @@ describe("EveTUIRunner replay guards", () => {
           turnId: "turn_0",
         },
       },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
     ]);
 
     const renderer: AgentTUIRenderer = {
@@ -1720,7 +1748,10 @@ describe("EveTUIRunner replay guards", () => {
           turnId: "turn_0",
         },
       })),
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
     ]);
 
     const renderer: AgentTUIRenderer = {
@@ -1783,7 +1814,10 @@ describe("EveTUIRunner replay guards", () => {
           turnId: "turn_0",
         },
       },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
     ]);
 
     const renderer: AgentTUIRenderer = {
@@ -1848,7 +1882,10 @@ describe("EveTUIRunner replay guards", () => {
           turnId: "turn_0",
         },
       },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
     ]);
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
@@ -2260,7 +2297,7 @@ describe("EveTUIRunner renderer teardown", () => {
         yield stampTestEvent(
           {
             type: "session.waiting",
-            data: { wait: "next-user-message" },
+            data: { continuationToken: "session-id", wait: "next-user-message" },
           } as UnstampedMessageStreamEvent,
           1,
         );
@@ -2314,7 +2351,10 @@ describe("EveTUIRunner renderer teardown", () => {
         // The parent stream never reports subagent.completed — the child's
         // own boundary must finish the section.
         { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
       ]),
     });
 
@@ -2343,7 +2383,7 @@ describe("EveTUIRunner renderer teardown", () => {
           yield stampTestEvent(
             {
               type: "session.waiting",
-              data: { wait: "next-user-message" },
+              data: { continuationToken: "session-id", wait: "next-user-message" },
             } as UnstampedMessageStreamEvent,
             1,
           );
@@ -2378,7 +2418,10 @@ describe("EveTUIRunner renderer teardown", () => {
           },
         },
         { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
       ]),
     });
 
@@ -2539,7 +2582,10 @@ describe("EveTUIRunner gateway-auth failure rendering", () => {
     const emitted: AgentTUIStreamEvent[] = [];
     const session = sessionYielding([
       { type: "step.failed", data: { ...gatewayFailure, sequence: 0, stepIndex: 0, turnId: "t0" } },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
     ]);
 
     const renderer: AgentTUIRenderer = {

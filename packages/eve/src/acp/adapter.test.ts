@@ -175,7 +175,10 @@ describe("EveAcpAdapter", () => {
           turnId: "t1",
         },
       },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
     ];
     const { adapter, session } = adapterWith([events]);
     const sessionId = await createSession(adapter);
@@ -233,9 +236,17 @@ describe("EveAcpAdapter", () => {
             turnId: "t1",
           },
         },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
       ],
-      [{ type: "session.waiting", data: { wait: "next-user-message" } }],
+      [
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ],
     ]);
     const request = vi.fn(async (_method: string, params: any) => ({
       outcome: { outcome: "selected", optionId: params.options[0].optionId },
@@ -294,9 +305,17 @@ describe("EveAcpAdapter", () => {
             turnId: "turn-1",
           },
         },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
       ],
-      [{ type: "session.waiting", data: { wait: "next-user-message" } }],
+      [
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ],
     ]);
     adapter.initialize({
       clientCapabilities: { elicitation: { form: {} } },
@@ -355,7 +374,10 @@ describe("EveAcpAdapter", () => {
             turnId: "turn-1",
           },
         },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
       ],
     ]);
     let requestStarted!: () => void;
@@ -414,7 +436,7 @@ describe("EveAcpAdapter", () => {
         } as HandleMessageStreamEvent;
         yield {
           type: "session.waiting",
-          data: { wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         } as HandleMessageStreamEvent;
       })();
     });
@@ -460,7 +482,7 @@ describe("EveAcpAdapter", () => {
         } as HandleMessageStreamEvent;
         yield {
           type: "session.waiting",
-          data: { wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         } as HandleMessageStreamEvent;
       })();
     });
@@ -523,7 +545,10 @@ describe("EveAcpAdapter", () => {
             turnId: "turn-1",
           },
         },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
       ],
     ]);
     const sessionId = await createSession(adapter);
@@ -548,7 +573,10 @@ describe("EveAcpAdapter", () => {
             turnId: "turn-1",
           },
         },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
       ],
     ]);
     const sessionId = await createSession(adapter);
@@ -579,7 +607,12 @@ describe("EveAcpAdapter", () => {
   });
 
   it("resets owned eve sessions when an ACP session or connection closes", async () => {
-    const waitingTurn = [{ type: "session.waiting", data: { wait: "next-user-message" } }] as const;
+    const waitingTurn = [
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
+    ] as const;
     const { adapter, session } = adapterWith([waitingTurn, waitingTurn]);
     const first = await createSession(adapter);
     await adapter.prompt(textPrompt(first), acpClient().client, new AbortController().signal);
@@ -598,7 +631,12 @@ describe("EveAcpAdapter", () => {
 
   it("keeps whole-connection cleanup best-effort when reset fails", async () => {
     const { adapter, session } = adapterWith([
-      [{ type: "session.waiting", data: { wait: "next-user-message" } }],
+      [
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ],
     ]);
     const sessionId = await createSession(adapter);
     await adapter.prompt(textPrompt(sessionId), acpClient().client, new AbortController().signal);

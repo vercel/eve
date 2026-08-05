@@ -19,7 +19,7 @@ describe("emitCancelledTurn", () => {
       type: "turn.cancelled",
     });
     expect(events[1]).toEqual({
-      data: { wait: "next-user-message" },
+      data: { continuationToken: "", wait: "next-user-message" },
       type: "session.waiting",
     });
     expect(next).toEqual({ sessionStarted: true, sequence: 4, stepIndex: 0, turnId: "" });
