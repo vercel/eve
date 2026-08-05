@@ -263,6 +263,16 @@ export const supabaseLogo = (props: LogoProps) => <SiSupabase color="default" {.
 
 export const ticktickLogo = (props: LogoProps) => <SiTicktick color="default" {...props} />;
 
+export const tinybirdLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 26 26" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M25 2.64 17.195.5 14.45 6.635zm-7.465 15.13-7.145-2.555L6.195 25.5z"
+      fill="currentColor"
+    />
+    <path d="m0 11.495 17.535 6.275L20.41 4.36z" fill="currentColor" />
+  </svg>
+);
+
 export const todoistLogo = (props: LogoProps) => <SiTodoist color="default" {...props} />;
 
 export const webflowLogo = (props: LogoProps) => <SiWebflow color="default" {...props} />;
@@ -676,6 +686,7 @@ export const logos = {
   supabase: supabaseLogo,
   "ticket-tailor": ticketTailorLogo,
   ticktick: ticktickLogo,
+  tinybird: tinybirdLogo,
   todoist: todoistLogo,
   webflow: webflowLogo,
   wix: wixLogo,

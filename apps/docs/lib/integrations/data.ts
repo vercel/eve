@@ -1750,6 +1750,12 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     keywords: ["mcp", "tasks", "habits", "todo", "oauth", "connect"],
     authModes: ["user"],
   },
+  tinybird: {
+    logo: "tinybird",
+    docsHref: "/docs/connections/mcp",
+    keywords: ["mcp", "sql", "analytics", "pipes", "datasources", "queries", "connect"],
+    authModes: ["app"],
+  },
   todoist: {
     logo: "todoist",
     docsHref: "/docs/connections/mcp",
