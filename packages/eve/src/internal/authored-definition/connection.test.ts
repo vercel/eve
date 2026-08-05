@@ -325,16 +325,25 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(result.approval).toBe(fn);
     });
 
+    it("accepts request and response approval policies", () => {
+      const approval = {
+        request: () => "user-approval" as const,
+        response: () => ({ status: "allowed" as const }),
+      };
+      const result = normalizeMcpClientConnectionDefinition(validInput({ approval }), MSG);
+      expect(result.approval).toEqual(approval);
+    });
+
     it("rejects a non-function approval", () => {
       expect(() =>
         normalizeMcpClientConnectionDefinition(validInput({ approval: "never" }), MSG),
-      ).toThrow(/must be a function/);
+      ).toThrow();
     });
 
     it("rejects a boolean approval", () => {
       expect(() =>
         normalizeMcpClientConnectionDefinition(validInput({ approval: true }), MSG),
-      ).toThrow(/must be a function/);
+      ).toThrow();
     });
   });
 

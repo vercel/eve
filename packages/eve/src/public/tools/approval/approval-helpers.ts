@@ -1,10 +1,10 @@
-import type { Approval } from "#public/definitions/approval.js";
+import type { ApprovalPolicy } from "#public/definitions/approval.js";
 
 /**
  * Returns an `approval` callback that always requires user approval before
  * the tool executes.
  */
-export function always<TInput = unknown>(): Approval<TInput> {
+export function always<TInput = unknown>(): ApprovalPolicy<TInput> {
   return () => "user-approval";
 }
 
@@ -12,7 +12,7 @@ export function always<TInput = unknown>(): Approval<TInput> {
  * Returns an `approval` callback that never requires user approval before
  * the tool executes.
  */
-export function never<TInput = unknown>(): Approval<TInput> {
+export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
   return () => "not-applicable";
 }
 
@@ -23,7 +23,7 @@ export function never<TInput = unknown>(): Approval<TInput> {
  * responding) leaves it unrecorded, so the next call prompts again. Keys off
  * the bare tool name, so it ignores compound approval keys.
  */
-export function once<TInput = unknown>(): Approval<TInput> {
+export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
   return ({ approvedTools, toolName }) =>
     approvedTools.has(toolName) ? "not-applicable" : "user-approval";
 }

@@ -1,7 +1,11 @@
 import type { ModelMessage } from "ai";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { ApprovalContext } from "#public/definitions/approval.js";
+import {
+  resolveApprovalPolicy,
+  type ApprovalContext,
+  type ApprovalResponseContext,
+} from "#public/definitions/approval.js";
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { UnstampedMessageStreamEvent, SessionStartedStreamEvent } from "#protocol/message.js";
 import {
@@ -309,12 +313,24 @@ async function resolveToolsFromEvent(
       }
 
       let approvalStepFnName: string | undefined;
+      let approvalResponseStepFnName: string | undefined;
       if (entry.approval !== undefined) {
         approvalStepFnName = `eve:dynamic-tool-approval:${resolver.slug}:${entryKey}`;
-        const originalApproval = entry.approval.bind(entry);
+        const originalApproval = resolveApprovalPolicy(entry.approval).bind(entry);
         registerStepFunction(approvalStepFnName, (_closureVars: unknown, approvalCtx: unknown) =>
           originalApproval(approvalCtx as ApprovalContext),
         );
+
+        const responsePolicy =
+          typeof entry.approval === "function" ? undefined : entry.approval.response;
+        if (responsePolicy !== undefined) {
+          approvalResponseStepFnName = `eve:dynamic-tool-approval-response:${resolver.slug}:${entryKey}`;
+          registerStepFunction(
+            approvalResponseStepFnName,
+            (_closureVars: unknown, responseCtx: unknown) =>
+              responsePolicy(responseCtx as ApprovalResponseContext),
+          );
+        }
       }
 
       metadata.push({
@@ -326,6 +342,7 @@ async function resolveToolsFromEvent(
         entryKey,
         executeStepFnName,
         approvalStepFnName,
+        approvalResponseStepFnName,
         closureVars: serializedClosureVars,
       });
     }

@@ -16,6 +16,7 @@ import {
   serializeOutputSchema,
   type ToolSchemaSource,
 } from "#shared/tool-schema.js";
+import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import {
   isDynamicSentinel,
   rejectDynamicSentinelFallback,
@@ -116,7 +117,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
    * the module export and attaches them to the ResolvedToolDefinition.
    */
   if (record.approval !== undefined) {
-    expectFunction(record.approval, message);
+    normalizeApproval(record.approval, message);
   }
 
   if (record.toModelOutput !== undefined) {

@@ -158,6 +158,20 @@ describe("normalizeToolDefinition", () => {
     expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
   });
 
+  it("accepts explicit request and response approval policies", () => {
+    const tool = defineTool({
+      approval: {
+        request: () => "user-approval",
+        response: () => ({ status: "allowed" }),
+      },
+      description: "Uses response authorization.",
+      execute: () => null,
+      inputSchema: z.object({ city: z.string() }),
+    });
+
+    expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
   it("accepts generic approval helpers on schema-typed tools", () => {
     const tool = defineTool({
       description: "Uses a reusable approval helper.",
