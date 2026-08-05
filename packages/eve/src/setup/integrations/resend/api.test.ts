@@ -4,6 +4,7 @@ import {
   createResendWebhook,
   listResendWebhooks,
   sameResendEndpoint,
+  suggestResendFromAddress,
   validateResendApiKey,
 } from "./api.js";
 
@@ -22,6 +23,49 @@ describe("Resend API", () => {
     expect(fetch.mock.calls[0]?.[1]).toMatchObject({
       headers: { Authorization: "Bearer re_secret" },
     });
+  });
+
+  it("suggests eve on a custom receiving domain before the default Resend domain", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      response({
+        data: [
+          {
+            name: "phipelaan.resend.app",
+            capabilities: { sending: "enabled", receiving: "enabled" },
+          },
+          {
+            name: "example.com",
+            capabilities: { sending: "enabled", receiving: "enabled" },
+          },
+          {
+            name: "send-only.example",
+            capabilities: { sending: "enabled", receiving: "disabled" },
+          },
+        ],
+      }),
+    );
+
+    await expect(suggestResendFromAddress("re_secret", undefined, { fetch })).resolves.toBe(
+      "eve@example.com",
+    );
+    expect(fetch.mock.calls[0]?.[0]).toBe("https://api.resend.com/domains");
+  });
+
+  it("does not suggest the managed receiving-only Resend domain", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      response({
+        data: [
+          {
+            name: "phipelaan.resend.app",
+            capabilities: { sending: "enabled", receiving: "enabled" },
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      suggestResendFromAddress("re_secret", undefined, { fetch }),
+    ).resolves.toBeUndefined();
   });
 
   it("creates only an email.received webhook", async () => {

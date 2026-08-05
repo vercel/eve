@@ -8,6 +8,19 @@ const WebhookSchema = z.object({
   signing_secret: z.string().min(1).optional(),
 });
 const WebhookListSchema = z.object({ data: z.array(WebhookSchema) });
+const DomainListSchema = z.object({
+  data: z.array(
+    z.object({
+      name: z.string().min(1),
+      capabilities: z
+        .object({
+          receiving: z.string(),
+          sending: z.string(),
+        })
+        .optional(),
+    }),
+  ),
+});
 const CreatedWebhookSchema = z.object({
   id: z.string().min(1),
   signing_secret: z.string().min(1),
@@ -65,6 +78,24 @@ export async function validateResendApiKey(
   deps: ResendApiDeps = { fetch },
 ): Promise<void> {
   WebhookListSchema.parse(await request(apiKey, "/webhooks", { method: "GET", signal }, deps));
+}
+
+/** Suggests an agent address on a receiving-enabled Resend domain. */
+export async function suggestResendFromAddress(
+  apiKey: string,
+  signal?: AbortSignal,
+  deps: ResendApiDeps = { fetch },
+): Promise<string | undefined> {
+  const parsed = DomainListSchema.safeParse(
+    await request(apiKey, "/domains", { method: "GET", signal }, deps),
+  );
+  if (!parsed.success) throw new Error("Resend returned an invalid domain list.");
+  const receivingDomains = parsed.data.data.filter(
+    (domain) =>
+      domain.capabilities?.receiving === "enabled" && domain.capabilities.sending === "enabled",
+  );
+  const domain = receivingDomains.find((candidate) => !candidate.name.endsWith(".resend.app"));
+  return domain === undefined ? undefined : `eve@${domain.name}`;
 }
 
 /** Lists account webhooks without exposing credentials in request URLs. */

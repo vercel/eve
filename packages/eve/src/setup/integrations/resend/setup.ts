@@ -19,6 +19,7 @@ import {
   deleteResendWebhook,
   listResendWebhooks,
   sameResendEndpoint,
+  suggestResendFromAddress,
   validateResendApiKey,
 } from "./api.js";
 import { provisionResendConnector } from "./connect.js";
@@ -33,6 +34,7 @@ export interface ResendSetupDeps {
   listWebhooks: typeof listResendWebhooks;
   provisionConnector: typeof provisionResendConnector;
   runVercel: typeof runVercel;
+  suggestFromAddress: typeof suggestResendFromAddress;
   validateApiKey: typeof validateResendApiKey;
   writeTextFile: typeof writeTextFile;
 }
@@ -47,6 +49,7 @@ const defaultDeps: ResendSetupDeps = {
   listWebhooks: listResendWebhooks,
   provisionConnector: provisionResendConnector,
   runVercel,
+  suggestFromAddress: suggestResendFromAddress,
   validateApiKey: validateResendApiKey,
   writeTextFile,
 };
@@ -62,7 +65,7 @@ function channelTemplate(input: {
   fromName: string;
 }): string {
   const apiKey = input.connectorUid
-    ? `() => getToken(${JSON.stringify(input.connectorUid)}, { subject: { type: "app" } })`
+    ? `connectResendApiKey(${JSON.stringify(input.connectorUid)})`
     : `() => {
         const apiKey = process.env.RESEND_API_KEY;
         if (!apiKey) throw new Error("RESEND_API_KEY is required.");
@@ -70,7 +73,7 @@ function channelTemplate(input: {
       }`;
   return `import { createMemoryState } from "@chat-adapter/state-memory";
 import { createResendAdapter } from "@resend/chat-sdk-adapter";
-${input.connectorUid ? 'import { getToken } from "@vercel/connect";\n' : ""}import type { Message, Thread } from "chat";
+${input.connectorUid ? 'import { connectResendApiKey } from "@vercel/connect/eve";\n' : ""}import type { Message, Thread } from "chat";
 import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
@@ -164,22 +167,35 @@ export async function setupResend(
         text({ key: "resend-api-key", message: "Resend API key", required: true, sensitive: true }),
       )
     ).trim();
-    const fromAddress = (
-      await context.ui.asker.ask(
-        text({
-          key: "resend-from-address",
-          message: "From address",
-          required: true,
-          validate: validateEmail,
-        }),
-      )
-    ).trim();
+    await deps.validateApiKey(apiKey, context.signal);
+    const suggestedFromAddress = await deps.suggestFromAddress(apiKey, context.signal);
+    const defaultFromAddress = suggestedFromAddress ?? "onboarding@resend.dev";
+    if (suggestedFromAddress === undefined) {
+      const senderInstructions = [
+        "Resend's managed *.resend.app domain receives email but cannot send replies.",
+        "For this test, onboarding@resend.dev is prefilled. It can send only to your Resend account email, may go to spam, and may not preserve normal reply behavior.",
+        "For real conversations, add and verify a custom sending domain in Resend, then enter an address on that domain.",
+        "Configure domains: https://resend.com/domains",
+      ];
+      context.ui.prompter.note(
+        senderInstructions.join("\n"),
+        "Warning: No custom Resend sending domain found",
+        { tone: "warning" },
+      );
+    }
+    const fromAddressQuestion = text({
+      key: "resend-from-address",
+      message: "Agent email address",
+      detected: defaultFromAddress,
+      required: true,
+      validate: validateEmail,
+    });
+    const fromAddress = (await context.ui.asker.ask(fromAddressQuestion)).trim();
     const fromName = (
       await context.ui.asker.ask(
         text({ key: "resend-from-name", message: "From name (optional)", required: false }),
       )
     ).trim();
-    await deps.validateApiKey(apiKey, context.signal);
 
     if (destination === "portable") {
       await deps.appendEnv(join(context.appRoot, ".env.local"), { RESEND_API_KEY: apiKey });
