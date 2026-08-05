@@ -21,6 +21,13 @@ Fill in the repository template. Write for a reviewer:
 - link the prior issue with `Closes #N`, `Related to #N`, or equivalent
 - keep the detail proportional to the change
 
+Keep the description concise and reviewer-focused. Prefer plain language; omit
+unnecessary implementation detail and technical jargon, but include either when
+needed to understand behavior, risk, scope, or a non-obvious decision. Do not
+restate the issue, template guidance, or checklist. For a small, low-risk
+change, prefer a single Summary sentence; use bullets only when they improve
+clarity.
+
 Under validation, list exact checks actually run and useful manual coverage. State
 limitations honestly. Do not infer results or claim checks that only CI will
 run.
