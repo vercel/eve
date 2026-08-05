@@ -63,21 +63,29 @@ describe("TurnControlReceiver", () => {
     expect(bufferedDeliveries).toEqual([delivery]);
   });
 
-  it("re-buffers an unresolved forwarded delivery when the turn terminates", async () => {
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "hello" }] };
+  it("keeps earlier remainders ahead of an unresolved delivery when the turn terminates", async () => {
+    const outstanding: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "outstanding" }],
+    };
+    const earlierRemainder: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "earlier remainder" }],
+    };
     installControlHook([
       deliveryRequest("req-1"),
       {
         action: { kind: "done", output: "bye", serializedContext: {}, sessionState: createState() },
+        bufferedDeliveries: [earlierRemainder],
         kind: "turn-result",
       },
     ]);
-    const bufferedDeliveries: DeliverHookPayload[] = [delivery];
+    const bufferedDeliveries: DeliverHookPayload[] = [outstanding];
 
     const action = await runReceiver(bufferedDeliveries);
 
     expect(action).toMatchObject({ kind: "done", output: "bye" });
-    expect(bufferedDeliveries).toEqual([delivery]);
+    expect(bufferedDeliveries).toEqual([earlierRemainder, outstanding]);
   });
 
   it("hands the turn's remainders back ahead of existing buffered deliveries", async () => {

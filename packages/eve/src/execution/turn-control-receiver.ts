@@ -222,8 +222,8 @@ export class TurnControlReceiver {
   /**
    * Waits for the active turn to resolve a forwarded delivery. The turn either
    * accepts it (consumed) or releases it on cancellation or termination, in
-   * which case the delivery returns to the buffer ahead of the turn's own
-   * remainders so the next parent turn still observes it in arrival order.
+   * which case the delivery returns behind remainders from earlier deliveries
+   * accepted by the turn and ahead of deliveries that arrived later.
    */
   private async awaitForwardedDelivery(
     requestId: string,
