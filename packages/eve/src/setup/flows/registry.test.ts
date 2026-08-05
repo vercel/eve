@@ -29,7 +29,10 @@ function deps(overrides: Partial<RegistryFlowDeps> = {}): RegistryFlowDeps {
       envVars: { AGENT_BROWSER_TOKEN: "" },
       files: [{ target: "agent/extensions/browser.ts" }],
     })),
-    installRegistryItem: vi.fn(async () => []),
+    installRegistryItem: vi.fn(async () => ({ output: [] })),
+    detectDeployment: vi.fn(async () => ({ state: "unlinked" as const })),
+    openUrl: vi.fn(),
+    runDeployFlow: vi.fn(async () => ({ kind: "deployed" as const })),
     ...overrides,
   };
 }
@@ -48,7 +51,12 @@ describe("runRegistryFlow", () => {
 
     await expect(
       runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps }),
-    ).resolves.toEqual({ kind: "done", addedItems: ["extension/agent-browser"] });
+    ).resolves.toEqual({
+      kind: "done",
+      addedItems: ["extension/agent-browser"],
+      facts: [],
+      output: [],
+    });
     expect(flowDeps.installRegistryItem).toHaveBeenCalledWith(
       APP_ROOT,
       "extension/agent-browser",
@@ -274,13 +282,70 @@ describe("runRegistryFlow", () => {
     );
   });
 
+  it("collects deployable setups, adds another, then deploys once", async () => {
+    const answers = [
+      "category:channel",
+      "item:0",
+      "add",
+      "add-more",
+      "category:channel",
+      "item:0",
+      "add",
+      "production",
+      "0",
+    ];
+    const fake = createFakePrompter({ single: () => answers.shift()! });
+    const flowDeps = deps({
+      browseRegistryCatalog: vi.fn(async () => ({
+        items: [{ address: "channel/slack", name: "channel/slack", source: "Vercel" }],
+        total: 1,
+        errors: [],
+      })),
+      detectDeployment: vi.fn(async () => ({ state: "linked" as const, projectId: "prj_1" })),
+      installRegistryItem: vi.fn(async () => ({
+        output: [],
+        setup: {
+          facts: [{ label: "Workspace", value: "Acme" }],
+          deployment: {
+            required: true as const,
+            productionDestinations: [{ label: "Open Slack", url: "https://slack.com/app" }],
+          },
+        },
+      })),
+    });
+
+    await expect(
+      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps }),
+    ).resolves.toMatchObject({
+      kind: "done",
+      addedItems: ["channel/slack", "channel/slack"],
+      deployed: "production",
+      facts: [
+        { label: "Workspace", value: "Acme" },
+        { label: "Open Slack", value: "https://slack.com/app", kind: "url" },
+        { label: "Workspace", value: "Acme" },
+      ],
+    });
+    expect(flowDeps.runDeployFlow).toHaveBeenCalledTimes(1);
+    expect(flowDeps.openUrl).toHaveBeenCalledWith("https://slack.com/app");
+  });
+
+  it("does not offer another item or deployment after a non-deployable setup", async () => {
+    const answers = ["category:extension", "item:0", "add"];
+    const fake = createFakePrompter({ single: () => answers.shift()! });
+
+    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() });
+
+    expect(fake.selectMessages).not.toContain("What would you like to do next?");
+  });
+
   it("returns to the category hub from a registry list", async () => {
     const answers = ["category:channel", "action:back", "action:done"];
     const fake = createFakePrompter({ single: () => answers.shift()! });
 
     await expect(
       runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() }),
-    ).resolves.toEqual({ kind: "done", addedItems: [] });
+    ).resolves.toEqual({ kind: "done", addedItems: [], facts: [], output: [] });
 
     expect(fake.selectMessages).toEqual([
       "Add an integration",

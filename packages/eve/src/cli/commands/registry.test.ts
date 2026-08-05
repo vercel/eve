@@ -132,7 +132,7 @@ describe("registry commands", () => {
     "installs the official %s item before running its declared setup",
     async (kind) => {
       const logger = createLogger();
-      const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+      const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
       getRegistryItems.mockResolvedValue([
         {
           name: `channel/${kind}`,
@@ -475,7 +475,7 @@ describe("registry commands", () => {
 
   it("skips setup in non-interactive use and prints the resume command", async () => {
     const logger = createLogger();
-    const runSetup = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    const runSetup = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
     getRegistryItems.mockResolvedValue([
       {
         meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
@@ -501,7 +501,7 @@ describe("registry commands", () => {
 
   it("asks before setup and prints the resume command when declined", async () => {
     const logger = createLogger();
-    const runSetup = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    const runSetup = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
     const fake = createFakePrompter({ single: () => "no" });
     getRegistryItems.mockResolvedValue([
       {
@@ -555,7 +555,7 @@ describe("registry commands", () => {
 
   it("runs setup directly without installing the item", async () => {
     const logger = createLogger();
-    const runSetup = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    const runSetup = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
     getRegistryItems.mockResolvedValue([
       {
         meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
@@ -629,7 +629,7 @@ describe("registry commands", () => {
 
   it("does not infer setup from the item address", async () => {
     const logger = createLogger();
-    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
     getRegistryItems.mockResolvedValue([{ name: "channel/web", type: "registry:item" }]);
 
     await runAddCommand(
@@ -648,7 +648,7 @@ describe("registry commands", () => {
 
   it("does not execute setup metadata from a URL item", async () => {
     const logger = createLogger();
-    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
     getRegistryItems.mockResolvedValue([
       {
         name: "channel/web",

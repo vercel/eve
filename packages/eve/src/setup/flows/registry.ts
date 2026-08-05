@@ -6,6 +6,13 @@ import type {
   SelectOption,
   SingleSelectOptions,
 } from "#setup/prompter.js";
+import { runDeployFlow } from "#setup/flows/deploy.js";
+import { openUrl } from "#setup/primitives/open-url.js";
+import { detectDeployment } from "#setup/project-resolution.js";
+import type {
+  RegistrySetupDestination,
+  RegistrySetupFact,
+} from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { withSpinner } from "#setup/with-spinner.js";
 
@@ -56,12 +63,21 @@ const REGISTRY_CATEGORIES: ReadonlyArray<{
 
 export interface RegistryFlowDeps {
   browseRegistryCatalog: (typeof import("#cli/commands/registry.js"))["browseRegistryCatalog"];
+  detectDeployment: typeof detectDeployment;
   getRegistryItemManifest: (typeof import("#cli/commands/registry.js"))["getRegistryItemManifest"];
   installRegistryItem: (typeof import("#cli/commands/registry.js"))["installRegistryItem"];
+  openUrl: typeof openUrl;
+  runDeployFlow: typeof runDeployFlow;
 }
 
 export type RegistryFlowResult =
-  | { kind: "done"; addedItems: readonly string[]; output?: readonly string[] }
+  | {
+      kind: "done";
+      addedItems: readonly string[];
+      facts: readonly RegistrySetupFact[];
+      output?: readonly string[];
+      deployed?: "production" | "preview";
+    }
   | { kind: "cancelled" };
 
 function itemLabel(item: RegistryCatalogItem): string {
@@ -178,7 +194,14 @@ async function inspectItem(
   item: RegistryCatalogItem,
   resolvedManifest?: Record<string, unknown>,
   signal?: AbortSignal,
-): Promise<{ kind: "added"; output: readonly string[] } | { kind: "back" }> {
+): Promise<
+  | {
+      kind: "added";
+      output: readonly string[];
+      setup?: Awaited<ReturnType<RegistryFlowDeps["installRegistryItem"]>>["setup"];
+    }
+  | { kind: "back" }
+> {
   const manifest =
     resolvedManifest ??
     manifestRecord(
@@ -209,8 +232,8 @@ async function inspectItem(
           prompter,
           signal,
         });
-      const output = await (prompter.withExclusiveTerminal?.(install) ?? install());
-      return { kind: "added", output };
+      const result = await (prompter.withExclusiveTerminal?.(install) ?? install());
+      return { kind: "added", ...result };
     } finally {
       spinner?.stop();
     }
@@ -254,10 +277,18 @@ export async function runRegistryFlow(input: {
   }
   const deps: RegistryFlowDeps = {
     browseRegistryCatalog: input.deps?.browseRegistryCatalog ?? loaded!.browseRegistryCatalog,
+    detectDeployment: input.deps?.detectDeployment ?? detectDeployment,
     getRegistryItemManifest: input.deps?.getRegistryItemManifest ?? loaded!.getRegistryItemManifest,
     installRegistryItem: input.deps?.installRegistryItem ?? loaded!.installRegistryItem,
+    openUrl: input.deps?.openUrl ?? openUrl,
+    runDeployFlow: input.deps?.runDeployFlow ?? runDeployFlow,
   };
   let notices: SelectNotice[] = [];
+  const addedItems: string[] = [];
+  const facts: RegistrySetupFact[] = [];
+  const output: string[] = [];
+  const productionDestinations: RegistrySetupDestination[] = [];
+  let deploymentPending = false;
 
   try {
     while (true) {
@@ -279,7 +310,7 @@ export async function runRegistryFlow(input: {
         notices,
       });
       notices = [];
-      if (selectedCategory === DONE) return { kind: "done", addedItems: [] };
+      if (selectedCategory === DONE) return { kind: "done", addedItems, facts, output };
 
       const categoryItems = itemsForCategory(catalog.items, selectedCategory);
       const rows = itemRows(categoryItems);
@@ -315,15 +346,82 @@ export async function runRegistryFlow(input: {
         "manifest" in resolved ? resolved.manifest : undefined,
         input.signal,
       );
-      if (inspected.kind === "added") {
-        return inspected.output.length === 0
-          ? { kind: "done", addedItems: [resolved.item.address] }
-          : {
-              kind: "done",
-              addedItems: [resolved.item.address],
-              output: inspected.output,
-            };
+      if (inspected.kind !== "added") continue;
+
+      addedItems.push(resolved.item.address);
+      output.push(...inspected.output);
+      facts.push(...(inspected.setup?.facts ?? []));
+      if (inspected.setup?.deployment !== undefined) {
+        deploymentPending = true;
+        const destinations = inspected.setup.deployment.productionDestinations ?? [];
+        productionDestinations.push(...destinations);
+        facts.push(
+          ...destinations
+            .filter(
+              (destination) =>
+                !facts.some((fact) => fact.kind === "url" && fact.value === destination.url),
+            )
+            .map((destination) => ({
+              label: destination.label,
+              value: destination.url,
+              kind: "url" as const,
+            })),
+        );
       }
+      if (!deploymentPending) return { kind: "done", addedItems, facts, output };
+
+      const deployment = await deps.detectDeployment(input.appRoot, { signal: input.signal });
+      const canDeploy = deployment.state === "linked" || deployment.state === "deployed";
+      const action = await input.prompter.select<"production" | "preview" | "add-more" | "finish">({
+        message: "What would you like to do next?",
+        options: [
+          ...(canDeploy
+            ? [
+                { value: "production" as const, label: "Deploy to production" },
+                { value: "preview" as const, label: "Deploy a preview" },
+              ]
+            : []),
+          { value: "add-more", label: "Add another integration" },
+          { value: "finish", label: "Finish without deploying" },
+        ],
+      });
+      if (action === "add-more") continue;
+      if (action === "finish") return { kind: "done", addedItems, facts, output };
+
+      const deployResult = await deps.runDeployFlow({
+        appRoot: input.appRoot,
+        prompter: input.prompter,
+        signal: input.signal,
+        interactive: true,
+        target: action,
+      });
+      const deployed = deployResult.kind === "deployed" ? action : undefined;
+      if (deployed === "production" && productionDestinations.length > 0) {
+        const destination = await input.prompter.select<string>({
+          message: "Open a destination?",
+          options: [
+            ...productionDestinations.map((candidate, index) => ({
+              value: String(index),
+              label: candidate.label,
+              hint: candidate.url,
+            })),
+            { value: "none", label: "Not now" },
+          ],
+          initialValue: "none",
+        });
+        if (destination !== "none") {
+          const selectedDestination = productionDestinations[Number(destination)];
+          if (selectedDestination !== undefined) deps.openUrl(selectedDestination.url);
+        }
+      }
+      const result: Extract<RegistryFlowResult, { kind: "done" }> = {
+        kind: "done",
+        addedItems,
+        facts,
+        output,
+      };
+      if (deployed !== undefined) result.deployed = deployed;
+      return result;
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };

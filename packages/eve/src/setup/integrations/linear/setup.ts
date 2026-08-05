@@ -163,6 +163,8 @@ export async function setupLinear(
             "Delegate an issue or mention the agent in an Agent Session to start a conversation.",
         },
       ],
+      deploymentRequired: true,
+      productionDestinations: [{ label: "Open Linear", url: "https://linear.app" }],
     };
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };

@@ -10,6 +10,7 @@ import { clipVisible, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 import semver from "#compiled/semver/index.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
+import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 import { isEveProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 
@@ -45,7 +46,7 @@ export interface RegistrySearchCommandOptions extends RegistryCommandOptions {
   limit?: number;
 }
 
-type SetupCommandOptions = Pick<AddCommandOptions, "yes"> & {
+type SetupCommandOptions = Pick<AddCommandOptions, "yes" | "silent"> & {
   prompter?: Prompter;
   signal?: AbortSignal;
 };
@@ -175,23 +176,24 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function runRegistryAction(
+async function runRegistryAction<T>(
   logger: RegistryCommandLogger,
   appRoot: string,
-  action: () => Promise<void>,
-): Promise<void> {
+  action: () => Promise<T>,
+): Promise<T | undefined> {
   if (!(await isEveProject(appRoot))) {
     logger.error(NOT_AN_AGENT_MESSAGE);
     process.exitCode = 1;
-    return;
+    return undefined;
   }
 
   try {
-    await action();
+    return await action();
   } catch (error) {
-    if (error instanceof WizardCancelledError) return;
+    if (error instanceof WizardCancelledError) return undefined;
     logger.error(errorMessage(error));
     process.exitCode = 1;
+    return undefined;
   }
 }
 
@@ -455,8 +457,9 @@ async function runDeclaredSetups(
   setups: NonNullable<ReturnType<typeof eveMetadataFromRegistryItem>>["setup"],
   options: SetupCommandOptions,
   dependencies: RegistrySetupDependencies,
-): Promise<boolean> {
-  if (setups === undefined) return true;
+): Promise<RegistrySetupCompletion | false> {
+  const completion: RegistrySetupCompletion = { facts: [] };
+  if (setups === undefined) return completion;
   const runSetupCommand = await dependencies.loadSetupCommandRunner();
   const prompter = options.prompter ?? createPrompter();
   try {
@@ -471,9 +474,19 @@ async function runDeclaredSetups(
         logger.log(setupReminder(item, "cancelled"));
         return false;
       }
-      for (const line of result.output) logger.log(line);
+      if (options.silent !== true) {
+        for (const fact of result.facts) logger.log(`${fact.label}: ${fact.value}`);
+      }
+      completion.facts = [...completion.facts, ...result.facts];
+      if (result.deployment !== undefined) {
+        completion.deployment ??= { required: true };
+        completion.deployment.productionDestinations = [
+          ...(completion.deployment.productionDestinations ?? []),
+          ...(result.deployment.productionDestinations ?? []),
+        ];
+      }
     }
-    return true;
+    return completion;
   } catch (error) {
     throw new Error(`${errorMessage(error)} Try again with \`${setupResumeCommand(item)}\`.`);
   }
@@ -485,7 +498,7 @@ export async function installRegistryItem(
   item: string,
   options: AddCommandOptions & { prompter?: Prompter; signal?: AbortSignal } = {},
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
-): Promise<readonly string[]> {
+): Promise<{ output: readonly string[]; setup?: RegistrySetupCompletion }> {
   let failure: string | undefined;
   const output: string[] = [];
   const logger: RegistryCommandLogger = {
@@ -495,7 +508,7 @@ export async function installRegistryItem(
     log: (message) => output.push(message),
   };
   const previousExitCode = process.exitCode;
-  await runAddCommand(
+  const setup = await runAddCommand(
     logger,
     appRoot,
     item,
@@ -504,7 +517,9 @@ export async function installRegistryItem(
   );
   process.exitCode = previousExitCode;
   if (failure !== undefined) throw new Error(failure);
-  return output;
+  const result: { output: readonly string[]; setup?: RegistrySetupCompletion } = { output };
+  if (setup !== undefined) result.setup = setup;
+  return result;
 }
 
 /** Installs an official, configured, or URL-addressed registry item. */
@@ -514,8 +529,8 @@ export async function runAddCommand(
   item: string,
   options: AddCommandOptions & { prompter?: Prompter; signal?: AbortSignal },
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
-): Promise<void> {
-  await runRegistryAction(logger, appRoot, async () => {
+): Promise<RegistrySetupCompletion | undefined> {
+  return runRegistryAction(logger, appRoot, async () => {
     const config = await readEveRegistryConfig(appRoot);
     const address = itemAddress(item);
     if (options.skipInstall === true) {
@@ -540,7 +555,7 @@ export async function runAddCommand(
     if (eveMetadata?.components !== undefined) {
       if (!isOfficialItemAddress(address))
         throw new Error("Registry packages require the official eve registry.");
-      await runRegistryPackage({
+      const completion = await runRegistryPackage({
         logger,
         appRoot,
         item,
@@ -564,15 +579,22 @@ export async function runAddCommand(
           setupReminder: (packageItem) => setupReminder(packageItem, "skipped"),
         },
       });
-      return;
+      return completion === false ? undefined : completion;
     }
 
     if (options.skipInstall === true) {
       if (eveMetadata?.setup === undefined) {
         throw new Error(`Registry item "${item}" does not declare a setup flow.`);
       }
-      await runDeclaredSetups(logger, appRoot, item, eveMetadata.setup, options, dependencies);
-      return;
+      const completion = await runDeclaredSetups(
+        logger,
+        appRoot,
+        item,
+        eveMetadata.setup,
+        options,
+        dependencies,
+      );
+      return completion === false ? undefined : completion;
     }
 
     await addRegistryItems([address], {
@@ -616,7 +638,15 @@ export async function runAddCommand(
       }
     }
 
-    await runDeclaredSetups(logger, appRoot, item, eveMetadata.setup, options, dependencies);
+    const completion = await runDeclaredSetups(
+      logger,
+      appRoot,
+      item,
+      eveMetadata.setup,
+      options,
+      dependencies,
+    );
+    return completion === false ? undefined : completion;
   });
 }
 

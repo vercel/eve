@@ -8,12 +8,25 @@ import type {
   SingleSelectOptions,
 } from "./prompter.js";
 
-export const REGISTRY_SETUP_PROTOCOL_VERSION = 1;
+export const REGISTRY_SETUP_PROTOCOL_VERSION = 2;
 
 export type RegistrySetupFact = {
   label: string;
   value: string;
   kind?: "text" | "url" | "phone";
+};
+
+export type RegistrySetupDestination = {
+  label: string;
+  url: string;
+};
+
+export type RegistrySetupCompletion = {
+  facts: readonly RegistrySetupFact[];
+  deployment?: {
+    required: true;
+    productionDestinations?: readonly RegistrySetupDestination[];
+  };
 };
 
 export type RegistrySetupError = {
@@ -22,7 +35,7 @@ export type RegistrySetupError = {
 };
 
 export type RegistrySetupOutcome =
-  | { kind: "completed"; facts: readonly RegistrySetupFact[] }
+  | ({ kind: "completed" } & RegistrySetupCompletion)
   | { kind: "cancelled" }
   | { kind: "failed"; error: RegistrySetupError };
 

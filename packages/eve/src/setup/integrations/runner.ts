@@ -10,6 +10,7 @@ import {
 } from "./shared/environment.js";
 import { createIntegrationSetupUi } from "./shared/ui.js";
 import { setupIntegration } from "./registry.js";
+import type { RegistrySetupDestination } from "#setup/registry-setup-protocol.js";
 
 /** Inputs shared by every registry-owned integration setup flow. */
 export interface RunIntegrationSetupOptions {
@@ -33,7 +34,12 @@ const defaultDeps: IntegrationSetupRunnerDeps = {
 /** Outcome returned by one registry-owned integration setup flow. */
 export type IntegrationSetupOutcome =
   | { kind: "cancelled" }
-  | { kind: "done"; facts?: readonly RegistrySetupFact[] };
+  | {
+      kind: "done";
+      facts?: readonly RegistrySetupFact[];
+      deploymentRequired?: boolean;
+      productionDestinations?: readonly RegistrySetupDestination[];
+    };
 
 /** Runs one built-in integration setup flow selected by its registry setup name. */
 export async function runIntegrationSetup(
@@ -51,7 +57,7 @@ export async function runIntegrationSetup(
   const project = projectResolutionFromDeployment(deployment);
   const environment = integrationSetupEnvironment(authStatus, project);
   options.prompter.log.info(describeIntegrationSetupEnvironment(environment));
-  const result = await integration.setup({
+  const context = {
     environment,
     appRoot: options.appRoot,
     ui: createIntegrationSetupUi({
@@ -60,6 +66,6 @@ export async function runIntegrationSetup(
     }),
     yes: options.yes,
     signal: options.signal,
-  });
-  return result;
+  };
+  return integration.setup(context);
 }

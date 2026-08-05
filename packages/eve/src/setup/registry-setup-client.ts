@@ -10,7 +10,7 @@ import { WizardCancelledError } from "./step.js";
 import {
   REGISTRY_SETUP_PROTOCOL_VERSION,
   type RegistrySetupChildMessage,
-  type RegistrySetupFact,
+  type RegistrySetupCompletion,
   type RegistrySetupOutcome,
   type RegistrySetupParentMessage,
   type RegistrySetupPrompt,
@@ -46,7 +46,7 @@ function registrySetupError(error: unknown): { message: string; details?: readon
 export interface RegistrySetupClient {
   prompter: Prompter;
   signal: AbortSignal;
-  complete(facts?: readonly RegistrySetupFact[]): void;
+  complete(completion?: RegistrySetupCompletion): void;
   cancel(): void;
   fail(error: unknown): void;
 }
@@ -212,7 +212,7 @@ export function createRegistrySetupClient(
   return {
     prompter,
     signal: controller.signal,
-    complete: (facts = []) => finish({ kind: "completed", facts }),
+    complete: (completion = { facts: [] }) => finish({ kind: "completed", ...completion }),
     cancel: () => finish({ kind: "cancelled" }),
     fail: (error) => finish({ kind: "failed", error: registrySetupError(error) }),
   };

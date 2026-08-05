@@ -106,6 +106,27 @@ describe("runDeployFlow", () => {
     );
   });
 
+  it("creates a preview deployment when requested", async () => {
+    const fake = createFakePrompter({});
+    const deployDeps = createDeployProjectDeps();
+
+    await runDeployFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      interactive: true,
+      target: "preview",
+      deps: {
+        detectDeployment: vi.fn(async () => LINKED),
+        deployProject: deployDeps,
+      },
+    });
+
+    expect(deployDeps.runVercel).toHaveBeenCalledWith(
+      ["deploy", "--yes"],
+      expect.objectContaining({ cwd: APP_ROOT }),
+    );
+  });
+
   it("refuses an unlinked non-interactive run before any effect", async () => {
     const fake = createFakePrompter({});
     const deployDeps = createDeployProjectDeps();

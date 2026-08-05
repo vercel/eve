@@ -116,6 +116,19 @@ describe("deployProject box", () => {
     );
   });
 
+  it("creates a preview deployment without --prod", async () => {
+    const deps = createDeps();
+    const box = deployProject({ prompter: createPrompter(), deps, target: "preview" });
+
+    await runInteractive([box], pendingState(), silentSink);
+
+    expect(deps.runVercel).toHaveBeenNthCalledWith(
+      1,
+      ["deploy", "--yes"],
+      expect.objectContaining({ cwd: "/tmp/project", nonInteractive: false }),
+    );
+  });
+
   it("deploys with --yes but keeps stdin interactive on an interactive run", async () => {
     const deps = createDeps();
     const box = deployProject({ prompter: createPrompter(), deps });

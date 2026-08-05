@@ -38,7 +38,7 @@ describe("createRegistrySetupClient", () => {
     const processStub = new SetupProcessStub();
     const setup = client(processStub);
 
-    setup.complete([{ label: "Connector", value: "linear/agent" }]);
+    setup.complete({ facts: [{ label: "Connector", value: "linear/agent" }] });
 
     expect(processStub.sent.at(-1)).toEqual({
       type: "result",

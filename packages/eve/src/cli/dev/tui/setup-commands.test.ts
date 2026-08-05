@@ -57,6 +57,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
     runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
       kind: "done",
       addedItems: [],
+      facts: [],
     })),
     runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => ({
       kind: "deployed",
@@ -96,6 +97,7 @@ describe("runTuiSetupCommand", () => {
     const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
       kind: "done",
       addedItems: [],
+      facts: [],
     }));
 
     await run({ command: "add", flows: fakeFlows({ runRegistryFlow }), renderer });
@@ -329,10 +331,10 @@ describe("runTuiSetupCommand", () => {
   it.each([
     [
       "added",
-      { kind: "done", addedItems: ["extension/browser"] },
+      { kind: "done", addedItems: ["extension/browser"], facts: [] },
       "Registry items added: extension/browser.",
     ],
-    ["empty", { kind: "done", addedItems: [] }, "No registry items added."],
+    ["empty", { kind: "done", addedItems: [], facts: [] }, "No registry items added."],
     ["cancelled", { kind: "cancelled" }, "/add dismissed."],
   ] as const)("reports a %s registry flow", async (_case, result, message) => {
     const runRegistryFlow = vi.fn(async () => result);

@@ -236,6 +236,7 @@ async function executeSetupCommand(
             message: [
               `Registry items added: ${result.addedItems.join(", ")}.`,
               ...(result.output ?? []),
+              ...result.facts.map((fact) => `${fact.label}: ${fact.value}`),
             ].join("\n"),
             tone: "success",
             preserveFlowDiagnostics: true,

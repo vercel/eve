@@ -55,6 +55,6 @@ export const WEB_SETUP: SetupIntegration = {
       projectPath: context.appRoot,
       signal: context.signal,
     });
-    return { kind: "done" };
+    return { kind: "done", deploymentRequired: true };
   },
 };

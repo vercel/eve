@@ -11,6 +11,7 @@ import {
   isRegistrySetupChildMessage,
   REGISTRY_SETUP_PROTOCOL_VERSION,
   type RegistrySetupChildMessage,
+  type RegistrySetupCompletion,
   type RegistrySetupParentMessage,
 } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
@@ -22,7 +23,7 @@ export interface RegistrySetupCommand {
 }
 
 export type RegistrySetupCommandResult =
-  | { kind: "completed"; output: readonly string[] }
+  | ({ kind: "completed" } & RegistrySetupCompletion)
   | { kind: "cancelled" };
 
 export interface RegistrySetupCommandOptions {
@@ -277,10 +278,12 @@ export async function runRegistrySetupCommand(
           );
           return;
         }
-        resolveResult({
+        const result: RegistrySetupCommandResult = {
           kind: "completed",
-          output: outcome.facts.map((fact) => `${fact.label}: ${fact.value}`),
-        });
+          facts: outcome.facts,
+        };
+        if (outcome.deployment !== undefined) result.deployment = outcome.deployment;
+        resolveResult(result);
         return;
       }
       if (outcome?.kind === "cancelled") {

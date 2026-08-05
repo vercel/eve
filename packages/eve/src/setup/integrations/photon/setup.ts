@@ -21,6 +21,7 @@ export const PHOTON_SETUP: SetupIntegration = {
     if (result.kind === "cancelled") return result;
     return {
       kind: "done",
+      deploymentRequired: true,
       facts: [
         ...(result.assignedPhoneNumber === undefined
           ? []

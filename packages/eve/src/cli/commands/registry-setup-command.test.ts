@@ -76,7 +76,7 @@ describe("runRegistrySetupCommand", () => {
         "channel/slack",
         options(),
       ),
-    ).resolves.toEqual({ kind: "completed", output: [] });
+    ).resolves.toEqual({ kind: "completed", facts: [] });
 
     expect(spawn).toHaveBeenCalledWith(
       process.execPath,
@@ -86,7 +86,7 @@ describe("runRegistrySetupCommand", () => {
         env: expect.objectContaining({
           EVE_SETUP: "1",
           EVE_SETUP_ITEM: "channel/slack",
-          EVE_SETUP_PROTOCOL: "1",
+          EVE_SETUP_PROTOCOL: "2",
         }),
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       }),
@@ -185,9 +185,13 @@ describe("runRegistrySetupCommand", () => {
       ),
     ).resolves.toEqual({
       kind: "completed",
-      output: [
-        "Text your agent: +15550000000",
-        "Photon project: https://app.photon.codes/dashboard/project-id",
+      facts: [
+        { label: "Text your agent", value: "+15550000000", kind: "phone" },
+        {
+          label: "Photon project",
+          value: "https://app.photon.codes/dashboard/project-id",
+          kind: "url",
+        },
       ],
     });
   });
