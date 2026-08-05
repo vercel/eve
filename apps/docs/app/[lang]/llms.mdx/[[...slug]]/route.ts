@@ -2,6 +2,7 @@ import { createDocsMarkdownRoute } from "@vercel/geistdocs/routes/llms";
 import {
   analyticsEvents,
   countMarkdownSuggestions,
+  getAnalyticsPathname,
   getCountBucket,
   getDocsSurface,
   getMarkdownFormat,
@@ -28,6 +29,7 @@ export const GET: typeof markdownRoute.GET = async (request, context) => {
     const body = await response.clone().text();
     trackServerEvent(request, analyticsEvents.smartMarkdownNotFound, {
       format: getMarkdownFormat(pathname, request.headers.get("accept")),
+      path: getAnalyticsPathname(request.url),
       suggestions: getCountBucket(countMarkdownSuggestions(body)),
       surface: getDocsSurface(pathname),
     });
