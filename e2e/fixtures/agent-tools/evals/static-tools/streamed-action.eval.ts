@@ -1,4 +1,8 @@
-import type { ActionResultStreamEvent, MessageStreamEvent } from "eve/client";
+import type {
+  ActionPartialStreamEvent,
+  ActionResultStreamEvent,
+  MessageStreamEvent,
+} from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "streamed-action";
@@ -40,6 +44,41 @@ function streamedBeforeLocalExecutionCompletes(events: readonly MessageStreamEve
   );
 }
 
+function streamsPreliminaryToolOutput(events: readonly MessageStreamEvent[]): boolean {
+  const matchingRequests = events.flatMap((event) => {
+    if (event.type !== "actions.requested") return [];
+
+    return event.data.actions.filter(
+      (action) => action.kind === "tool-call" && action.toolName === TOOL_NAME,
+    );
+  });
+  const [request] = matchingRequests;
+  if (request === undefined || matchingRequests.length !== 1 || request.kind !== "tool-call") {
+    return false;
+  }
+
+  const partialIndex = events.findIndex(
+    (event): event is ActionPartialStreamEvent & MessageStreamEvent =>
+      event.type === "action.partial" &&
+      event.data.result.callId === request.callId &&
+      event.data.result.toolName === TOOL_NAME,
+  );
+  const partial = events[partialIndex];
+  const resultIndex = events.findIndex(
+    (event) =>
+      event.type === "action.result" &&
+      event.data.result.kind === "tool-result" &&
+      event.data.result.callId === request.callId,
+  );
+  return (
+    partialIndex !== -1 &&
+    partial !== undefined &&
+    partial.type === "action.partial" &&
+    hasPhase(partial.data.result.output, "waiting") &&
+    partialIndex < resultIndex
+  );
+}
+
 function parseTimestamp(value: string): number | undefined {
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? timestamp : undefined;
@@ -61,12 +100,23 @@ function readExecutionCompletedAt(output: unknown): number | undefined {
     : undefined;
 }
 
+function hasPhase(output: unknown, phase: string): boolean {
+  return (
+    typeof output === "object" &&
+    output !== null &&
+    !Array.isArray(output) &&
+    "phase" in output &&
+    output.phase === phase
+  );
+}
+
 // The AI SDK can begin local execution just before its tool-call stream part is
 // consumed. The tool waits before completing, so post-execution batch emission
 // still cannot satisfy this relation.
 export default defineEval({
   tags: ["real-model"],
-  description: "Static tools smoke: a local action request streams while execution is pending.",
+  description:
+    "Static tools smoke: a local generator streams preliminary output before its result.",
   async test(t) {
     const turn = await t.send(
       `Call the \`${TOOL_NAME}\` tool exactly once with label "${LABEL}". ` +
@@ -82,6 +132,10 @@ export default defineEval({
     turn.eventsSatisfy(
       "local action request precedes execution completion",
       streamedBeforeLocalExecutionCompletes,
+    );
+    turn.eventsSatisfy(
+      "local generator emits a preliminary tool-output snapshot",
+      streamsPreliminaryToolOutput,
     );
   },
 });

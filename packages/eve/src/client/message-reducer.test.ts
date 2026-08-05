@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
+  createActionPartialEvent,
   createActionResultEvent,
   createActionsRequestedEvent,
   createAuthorizationCompletedEvent,
@@ -31,6 +32,85 @@ function reduceServerEvents(
 }
 
 describe("defaultMessageReducer", () => {
+  it("replaces tool-generator snapshots and ignores a late partial after the terminal result", () => {
+    const reducer = defaultMessageReducer();
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_1",
+            input: { project: "eve" },
+            kind: "tool-call",
+            toolName: "build_report",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createActionPartialEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { phase: "collecting" },
+          toolName: "build_report",
+        },
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createActionPartialEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { phase: "writing" },
+          toolName: "build_report",
+        },
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(findToolPart(data, "call_1")).toMatchObject({
+      output: { phase: "writing" },
+      partial: true,
+      state: "output-available",
+    });
+
+    data = reduceServerEvents(reducer, data, [
+      createActionResultEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { phase: "complete" },
+          toolName: "build_report",
+        },
+        sequence: 4,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createActionPartialEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { phase: "stale" },
+          toolName: "build_report",
+        },
+        sequence: 5,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    const terminal = findToolPart(data, "call_1");
+    expect(terminal).toMatchObject({
+      output: { phase: "complete" },
+      state: "output-available",
+    });
+    expect(terminal).not.toHaveProperty("partial");
+  });
+
   it("projects messages, reasoning, and actions into UIMessage-compatible parts", () => {
     const reducer = defaultMessageReducer();
     let data = reducer.initial();
@@ -841,3 +921,12 @@ describe("defaultMessageReducer", () => {
     expect(userMessage?.parts).toEqual([{ state: "done", text: "hello there", type: "text" }]);
   });
 });
+
+function findToolPart(
+  data: ReturnType<ReturnType<typeof defaultMessageReducer>["initial"]>,
+  toolCallId: string,
+) {
+  return data.messages
+    .flatMap((message) => message.parts)
+    .find((part) => part.type === "dynamic-tool" && part.toolCallId === toolCallId);
+}

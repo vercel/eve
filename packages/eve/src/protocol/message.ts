@@ -8,7 +8,11 @@ import {
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createEventId } from "#protocol/event-id.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
+import type {
+  RuntimeActionRequest,
+  RuntimeActionResult,
+  RuntimeToolResultActionResult,
+} from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -19,7 +23,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "20";
+export const EVE_MESSAGE_STREAM_VERSION = "21";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -252,6 +256,20 @@ export interface ActionResultStreamEvent {
     turnId: string;
   };
   type: "action.result";
+}
+
+/**
+ * Stream event emitted for a preliminary snapshot from a locally executed
+ * tool generator. The final snapshot is emitted as `action.result`.
+ */
+export interface ActionPartialStreamEvent {
+  data: {
+    result: RuntimeToolResultActionResult;
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "action.partial";
 }
 
 /**
@@ -631,6 +649,7 @@ export type UnstampedMessageStreamEvent =
   | SubagentStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
+  | ActionPartialStreamEvent
   | ActionResultStreamEvent
   | ReasoningCompletedStreamEvent
   | StepCompletedStreamEvent
@@ -1079,6 +1098,24 @@ export function createActionResultEvent(input: {
       turnId: input.turnId,
     },
     type: "action.result",
+  };
+}
+
+/** Creates an `action.partial` event for one preliminary tool-result snapshot. */
+export function createActionPartialEvent(input: {
+  readonly result: RuntimeToolResultActionResult;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}): ActionPartialStreamEvent {
+  return {
+    data: {
+      result: input.result,
+      sequence: input.sequence,
+      stepIndex: input.stepIndex,
+      turnId: input.turnId,
+    },
+    type: "action.partial",
   };
 }
 

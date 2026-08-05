@@ -21,6 +21,7 @@ import {
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import { isAsyncIterable } from "#shared/async-iterable.js";
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
@@ -164,22 +165,53 @@ export function buildToolSetFromDefinitions(input: {
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
-): ((input: any, options: ToolExecuteOptions) => Promise<any>) | undefined {
+): ((input: any, options: ToolExecuteOptions) => Promise<any> | AsyncIterable<any>) | undefined {
   const execute = definition.execute;
   if (execute === undefined) return undefined;
-  return async (input, options) => {
-    const output = await execute(input, options);
-    if (isAuthorizationSignal(output)) {
-      stashToolInterrupt(loadContext(), options.toolCallId, output);
-      return modelFacingAuthorizationOutput(output);
+
+  return (input, options) => {
+    let output: unknown;
+    try {
+      output = execute(input, options);
+    } catch (error) {
+      return Promise.reject(error);
     }
-    return normalizeToolJsonOutput({
-      boundary: "execute",
-      output,
-      toolCallId: options.toolCallId,
-      toolName: definition.name,
-    });
+
+    if (isAsyncIterable(output)) {
+      return normalizeToolExecuteIterable(output, definition.name, options);
+    }
+
+    return Promise.resolve(output).then((value) =>
+      normalizeToolExecuteOutput(value, definition.name, options),
+    );
   };
+}
+
+async function* normalizeToolExecuteIterable(
+  output: AsyncIterable<unknown>,
+  toolName: string,
+  options: ToolExecuteOptions,
+): AsyncIterable<unknown> {
+  for await (const value of output) {
+    yield normalizeToolExecuteOutput(value, toolName, options);
+  }
+}
+
+function normalizeToolExecuteOutput(
+  output: unknown,
+  toolName: string,
+  options: ToolExecuteOptions,
+): unknown {
+  if (isAuthorizationSignal(output)) {
+    stashToolInterrupt(loadContext(), options.toolCallId, output);
+    return modelFacingAuthorizationOutput(output);
+  }
+  return normalizeToolJsonOutput({
+    boundary: "execute",
+    output,
+    toolCallId: options.toolCallId,
+    toolName,
+  });
 }
 
 /**

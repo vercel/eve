@@ -132,6 +132,7 @@ type GitHubSessionFailedHandler = (
  * that key rather than running alongside it.
  */
 export interface GitHubChannelEvents {
+  readonly "action.partial"?: GitHubEventHandler<"action.partial">;
   readonly "action.result"?: GitHubEventHandler<"action.result">;
   readonly "actions.requested"?: GitHubEventHandler<"actions.requested">;
   readonly "authorization.completed"?: GitHubEventHandler<"authorization.completed">;

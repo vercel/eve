@@ -160,6 +160,7 @@ type TwilioSessionFailedHandler = (
 export interface TwilioChannelEvents {
   readonly "turn.started"?: TwilioEventHandler<"turn.started">;
   readonly "actions.requested"?: TwilioEventHandler<"actions.requested">;
+  readonly "action.partial"?: TwilioEventHandler<"action.partial">;
   readonly "action.result"?: TwilioEventHandler<"action.result">;
   readonly "message.completed"?: TwilioEventHandler<"message.completed">;
   readonly "message.appended"?: TwilioEventHandler<"message.appended">;

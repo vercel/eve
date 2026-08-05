@@ -381,7 +381,7 @@ describe("emitStreamContent action requests", () => {
     });
   });
 
-  it("projects local and provider tool results at the same stream position", async () => {
+  it("emits local preliminary results and drops provider preliminary results", async () => {
     const tools = new Map<string, HarnessToolDefinition>([
       [
         "web_search",
@@ -440,8 +440,24 @@ describe("emitStreamContent action requests", () => {
     const localEvents = vi.mocked(localEmit).mock.calls.map(([event]) => event);
     const providerEvents = vi.mocked(providerEmit).mock.calls.map(([event]) => event);
 
-    expect(localEvents).toEqual(providerEvents);
     expect(localEvents.map((event) => event.type)).toEqual([
+      "message.appended",
+      "message.completed",
+      "actions.requested",
+      "action.partial",
+      "action.result",
+      "message.appended",
+      "message.completed",
+    ]);
+    expect(localEvents[3]).toMatchObject({
+      data: { result: { output: { results: ["partial"] } } },
+      type: "action.partial",
+    });
+    expect(localEvents[4]).toMatchObject({
+      data: { result: { output: { results: ["eve"] } } },
+      type: "action.result",
+    });
+    expect(providerEvents.map((event) => event.type)).toEqual([
       "message.appended",
       "message.completed",
       "actions.requested",
@@ -449,10 +465,6 @@ describe("emitStreamContent action requests", () => {
       "message.appended",
       "message.completed",
     ]);
-    expect(localEvents[3]).toMatchObject({
-      data: { result: { output: { results: ["eve"] } } },
-      type: "action.result",
-    });
   });
 
   it("projects local and provider tool failures at the same stream position", async () => {

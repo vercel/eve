@@ -5,6 +5,7 @@ import { encodeSandboxRef } from "#internal/attachments/sandbox-refs.js";
 import { serializeUrlFilePart } from "#internal/attachments/url-refs.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
+  createActionPartialEvent,
   createActionResultEvent,
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
@@ -22,7 +23,36 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("20");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("21");
+  });
+
+  it("creates preliminary tool-result snapshots", () => {
+    expect(
+      createActionPartialEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { phase: "collecting" },
+          toolName: "build_report",
+        },
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ).toEqual({
+      data: {
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { phase: "collecting" },
+          toolName: "build_report",
+        },
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      },
+      type: "action.partial",
+    });
   });
 
   it("publishes the channel-local continuation token on session.waiting", () => {

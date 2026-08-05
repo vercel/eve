@@ -128,6 +128,7 @@ type TelegramSessionFailedHandler = (
 export interface TelegramChannelEvents {
   readonly "turn.started"?: TelegramEventHandler<"turn.started">;
   readonly "actions.requested"?: TelegramEventHandler<"actions.requested">;
+  readonly "action.partial"?: TelegramEventHandler<"action.partial">;
   readonly "action.result"?: TelegramEventHandler<"action.result">;
   readonly "message.completed"?: TelegramEventHandler<"message.completed">;
   readonly "message.appended"?: TelegramEventHandler<"message.appended">;

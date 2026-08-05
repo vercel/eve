@@ -11,7 +11,7 @@ export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
 export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   input: TInput,
   options: ToolExecuteOptions,
-) => Promise<TOutput> | TOutput;
+) => Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
 
 interface ToolDefinitionBase {
   readonly description: string;

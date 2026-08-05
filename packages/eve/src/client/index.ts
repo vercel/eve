@@ -90,6 +90,7 @@ export type {
 // ---------------------------------------------------------------------------
 
 export type {
+  ActionPartialStreamEvent,
   ActionResultStreamEvent,
   ActionsRequestedStreamEvent,
   AssistantStepFinishReason,

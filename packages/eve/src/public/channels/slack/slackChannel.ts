@@ -450,6 +450,7 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
 export interface SlackChannelEvents {
   readonly "turn.started"?: SlackEventHandler<"turn.started">;
   readonly "actions.requested"?: SlackEventHandler<"actions.requested">;
+  readonly "action.partial"?: SlackEventHandler<"action.partial">;
   readonly "action.result"?: SlackEventHandler<"action.result">;
   readonly "message.completed"?: SlackEventHandler<"message.completed">;
   readonly "message.appended"?: SlackEventHandler<"message.appended">;
