@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Add product-level registry packages with selectable default components, and make `eve add linear` install the Linear Agent channel, Linear tools, or both through one guided flow.
+Add a single `eve add linear` flow that installs and configures both the Linear Agent channel and Linear tools connection.
