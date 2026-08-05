@@ -29,6 +29,45 @@
       }
     },
     {
+      "name": "experimental/selfmod",
+      "type": "registry:item",
+      "title": "selfmod (Experimental)",
+      "description": "Add an experimental, development-only source editing subagent to an eve project.",
+      "dependencies": ["@eve/selfmod"],
+      "files": [
+        {
+          "path": "registry/experimental/selfmod/config.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/selfmod/config.ts"
+        },
+        {
+          "path": "registry/experimental/selfmod/agent.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/selfmod/agent.ts"
+        },
+        {
+          "path": "registry/experimental/selfmod/sandbox.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/selfmod/sandbox.ts"
+        },
+        {
+          "path": "registry/experimental/selfmod/extension.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/selfmod/extensions/selfmod.ts"
+        },
+        {
+          "path": "registry/experimental/selfmod/bash.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/selfmod/tools/bash.ts"
+        },
+        {
+          "path": "registry/experimental/selfmod/replace-in-file.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/selfmod/tools/replace_in_file.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/agent-browser",
       "type": "registry:item",
       "title": "agent-browser",
