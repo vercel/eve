@@ -1,6 +1,6 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
-import type { SessionCapabilities } from "#channel/types.js";
+import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
 import type { UnstampedMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -124,7 +124,11 @@ export interface SessionLimits {
  */
 export interface StepInput {
   readonly inputResponses?: readonly InputResponse[];
+  /** Internal actor attribution aligned by index with `inputResponses`. */
+  readonly inputResponseAuth?: readonly (SessionAuthContext | null | undefined)[];
   readonly message?: string | UserContent;
+  /** Internal actor attribution for `message`. */
+  readonly messageAuth?: SessionAuthContext | null;
   /**
    * Context strings from the channel delivery. Each entry is appended
    * as a `role: "user"` message to `session.history` before the
@@ -287,6 +291,12 @@ export interface ToolLoopHarnessConfig {
    * handles injected into each model call.
    */
   readonly persistentSubagentSessions?: boolean;
+  /** Resolves step-scoped dynamic tools before approval response policy work. */
+  readonly refreshStepDynamicTools?: (input: {
+    readonly ctx: AlsContext;
+    readonly event: UnstampedMessageStreamEvent;
+    readonly messages: readonly ModelMessage[];
+  }) => Promise<void>;
   readonly dispatchDynamicModelEvent?: (input: {
     readonly ctx: AlsContext;
     readonly event: UnstampedMessageStreamEvent;

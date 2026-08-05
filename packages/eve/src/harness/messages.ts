@@ -1,6 +1,6 @@
 import type { ModelMessage, TextPart, UserContent } from "ai";
 
-import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import type { DurableDeliverPayload, SessionAuthContext } from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { StepInput } from "#harness/types.js";
 
@@ -16,6 +16,10 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     a: a.inputResponses,
     b: b.inputResponses,
   });
+  const inputResponseAuth = [
+    ...(a.inputResponseAuth ?? a.inputResponses?.map(() => undefined) ?? []),
+    ...(b.inputResponseAuth ?? b.inputResponses?.map(() => undefined) ?? []),
+  ];
   const message = coalesceMessage({
     a: a.message,
     b: b.message,
@@ -28,17 +32,21 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 
   const result: {
     inputResponses?: readonly InputResponse[];
+    inputResponseAuth?: StepInput["inputResponseAuth"];
     message?: string | UserContent;
+    messageAuth?: StepInput["messageAuth"];
     context?: readonly string[];
     outputSchema?: StepInput["outputSchema"];
   } = {};
 
   if (inputResponses !== undefined) {
     result.inputResponses = inputResponses;
+    result.inputResponseAuth = inputResponseAuth;
   }
 
   if (message !== undefined) {
     result.message = message;
+    result.messageAuth = b.message !== undefined ? b.messageAuth : a.messageAuth;
   }
 
   if (context !== undefined) {
@@ -216,12 +224,13 @@ function toUserContentArray(value: string | UserContent): UserContentArray {
 interface DeliverLike {
   readonly auth?: SessionAuthContext | null;
   readonly kind: "deliver";
-  readonly payloads: readonly DeliverPayload[];
+  readonly payloads: readonly DurableDeliverPayload[];
 }
 
 /**
  * Coalesces an array of deliver-like items into a single item by
- * collecting all payloads and keeping the most recent auth value.
+ * collecting all payloads. New deliveries carry per-payload attribution;
+ * outer auth is retained only for persisted legacy deliveries.
  *
  * Used by the workflow runtime to batch follow-up deliveries that
  * arrived while a turn or subagent delegation was in progress. Each
@@ -235,15 +244,11 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
     throw new Error("Cannot coalesce an empty delivery batch.");
   }
 
-  let auth = first.auth;
   const payloads = [...first.payloads];
 
   for (const item of rest) {
-    if (item.auth !== undefined) {
-      auth = item.auth;
-    }
     payloads.push(...item.payloads);
   }
 
-  return { ...first, auth, payloads };
+  return { ...first, payloads };
 }

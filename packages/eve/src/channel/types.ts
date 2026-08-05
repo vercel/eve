@@ -180,20 +180,47 @@ export interface DeliverPayload {
 // Hook payload
 // ---------------------------------------------------------------------------
 
-/**
- * Deliver payload sent through the workflow `resumeHook`.
- *
- * Wraps the raw {@link DeliverPayload} with optional auth and turn-caller
- * metadata so both cross the durable hook boundary outside adapter-owned data.
- */
+/** One delivery payload paired with the actor that originated it. */
+export interface AttributedDeliverPayload {
+  readonly auth?: SessionAuthContext | null;
+  readonly kind: "attributed-deliver-payload";
+  readonly payload: DeliverPayload;
+}
+
+export type DurableDeliverPayload = DeliverPayload | AttributedDeliverPayload;
+
+/** Returns the raw payload and its per-delivery actor, falling back to legacy outer auth. */
+export function unwrapDeliverPayload(
+  value: DurableDeliverPayload,
+  legacyAuth?: SessionAuthContext | null,
+): AttributedDeliverPayload {
+  if (isAttributedDeliverPayload(value)) {
+    return value;
+  }
+  return { auth: legacyAuth, kind: "attributed-deliver-payload", payload: value };
+}
+
+function isAttributedDeliverPayload(
+  value: DurableDeliverPayload,
+): value is AttributedDeliverPayload {
+  return value.kind === "attributed-deliver-payload";
+}
+
+/** Deliver payload sent through the workflow `resumeHook`. */
 export interface DeliverHookPayload {
+  /** Legacy batch-level attribution for persisted pre-attribution deliveries. */
   readonly auth?: SessionAuthContext | null;
   /** Delegated caller waiting for this turn's settled result. */
   readonly caller?: TurnCaller;
   /** Inbound channel request id used only for workflow attributes. */
   readonly requestId?: string;
   readonly kind: "deliver";
-  readonly payloads: readonly DeliverPayload[];
+  readonly payloads: readonly DurableDeliverPayload[];
+}
+
+/** Internal wake-up that asks the coordinator to expire due approval candidates. */
+export interface ApprovalCandidateExpiryHookPayload {
+  readonly kind: "approval-candidate-expiry";
 }
 
 /** Internal deadline signal sent through the session's delivery hook. */
@@ -276,6 +303,7 @@ export interface SubagentAuthorizationEventHookPayload {
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
+  | ApprovalCandidateExpiryHookPayload
   | ClearSessionHookPayload
   | CompactSessionHookPayload
   | DeliverHookPayload

@@ -120,7 +120,7 @@ describe("createWorkflowRuntime#deliver", () => {
     expect(resumeHookMock).toHaveBeenCalledWith("test:token", {
       auth: null,
       kind: "deliver",
-      payloads: [{ message: "hello" }],
+      payloads: [{ auth: null, kind: "attributed-deliver-payload", payload: { message: "hello" } }],
       requestId: "req_deliver",
     });
   });
@@ -141,7 +141,8 @@ describe("createWorkflowRuntime#deliver", () => {
     expect(resumeHookMock).toHaveBeenCalledWith("test:active-hook", {
       auth: null,
       kind: "deliver",
-      payloads: [{ message: "hello" }],
+      payloads: [{ auth: null, kind: "attributed-deliver-payload", payload: { message: "hello" } }],
+      requestId: undefined,
     });
   });
 });

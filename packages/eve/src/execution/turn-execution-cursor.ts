@@ -21,6 +21,7 @@ type TurnTerminalAction =
       readonly usage?: TokenUsage;
     }
   | {
+      readonly approvalCandidateExpiresAt?: number;
       readonly authorizationNames?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";

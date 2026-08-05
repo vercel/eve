@@ -53,7 +53,7 @@ vi.mock("./create-session-step.js", () => ({
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads }) => ({
     kind: "continue",
-    remainder: payloads[0],
+    remainder: payloads,
   })),
 }));
 
@@ -117,6 +117,7 @@ interface DeliveryHookConfig {
 interface AuthHookConfig {
   readonly dispose?: () => void;
   readonly return?: () => Promise<IteratorResult<HookPayload>>;
+  readonly values?: readonly HookPayload[];
 }
 
 describe("workflowEntry", () => {
@@ -565,6 +566,97 @@ describe("workflowEntry", () => {
     });
   });
 
+  it("accepts an ordinary delivery while OAuth authorization is pending", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      authHook: { values: [] },
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [{ kind: "deliver", payloads: [{ message: "cancel while waiting" }] }],
+        },
+      ],
+      turnControls: [
+        turnResult({ action: "park", authorizationNames: ["github"], sessionState }),
+        turnResult({ action: "done", output: "cancelled", sessionState }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "cancelled" });
+
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual(
+      expect.objectContaining({ kind: "deliver" }),
+    );
+  });
+
+  it("accepts an OAuth callback while ordinary delivery remains pending", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    const callback = {
+      kind: "deliver",
+      payloads: [{ authorizationCallback: { connectionName: "github" } }],
+    } satisfies HookPayload;
+    installHookMocks({
+      authHook: { values: [callback] },
+      deliveryHooks: [{ token: "http:test", values: [] }],
+      turnControls: [
+        turnResult({ action: "park", authorizationNames: ["github"], sessionState }),
+        turnResult({ action: "done", output: "authorized", sessionState }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "authorized" });
+
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual(callback);
+  });
+
+  it("starts a durable wake-up for the nearest approval candidate expiry", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    const expiryControl = createTimeoutControl();
+    vi.mocked(createSessionTimeoutControl)
+      .mockReturnValueOnce(createTimeoutControl())
+      .mockReturnValueOnce(expiryControl);
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [{ kind: "approval-candidate-expiry" }],
+        },
+      ],
+      turnControls: [
+        turnResult({ action: "park", approvalCandidateExpiresAt: 1234, sessionState }),
+        turnResult({ action: "done", output: "expired", sessionState }),
+      ],
+    });
+
+    await workflowEntry({
+      input: { message: "hello" },
+      serializedContext: createSerializedContext(),
+    });
+
+    expect(createSessionTimeoutControl).toHaveBeenNthCalledWith(2, {
+      deadline: new Date(1234),
+      signalKind: "approval-candidate-expiry",
+    });
+    expect(expiryControl.rekey).toHaveBeenCalledWith("http:test");
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+      kind: "deliver",
+      payloads: [],
+    });
+  });
+
   it("supplies a requested public delivery to the active turn inbox", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
@@ -928,8 +1020,10 @@ describe("workflowEntry", () => {
     expect(result).toEqual({ output: "" });
     expect(nonTurnHookTokens()).toEqual(["slack:C01:", "slack:C01:1800000000.123456"]);
     expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+      auth: undefined,
       kind: "deliver",
       payloads: [{ message: "follow up" }],
+      requestId: undefined,
     });
     expect(oldReturn).not.toHaveBeenCalled();
     expect(oldDispose).toHaveBeenCalledTimes(1);
@@ -1028,6 +1122,8 @@ function createBaseSessionState(overrides: Partial<DurableSessionState> = {}): D
 
 function turnResult(input: {
   readonly action: "done" | "park";
+  readonly approvalCandidateExpiresAt?: number;
+  readonly authorizationNames?: readonly string[];
   readonly output?: string;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -1046,6 +1142,8 @@ function turnResult(input: {
   }
   return {
     action: {
+      approvalCandidateExpiresAt: input.approvalCandidateExpiresAt,
+      authorizationNames: input.authorizationNames,
       kind: "park",
       serializedContext,
       sessionState: input.sessionState,
@@ -1079,7 +1177,7 @@ function installHookMocks(input: {
         dispose: input.authHook?.dispose,
         return: input.authHook?.return,
         token,
-        values: [],
+        values: input.authHook?.values ?? [],
       }) as never;
     }
 

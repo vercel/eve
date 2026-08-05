@@ -21,6 +21,7 @@ interface SessionDeliveryHookState {
 
 /** Reads and rekeys the public delivery hook for one session driver. */
 export interface SessionDeliveryHook {
+  consumeApprovalCandidateExpiry(): boolean;
   consumeSessionControl(): "clear" | "compact" | undefined;
   consumeNext(): void;
   consumeSessionTimeout(): boolean;
@@ -50,6 +51,7 @@ export function createSessionDeliveryHook(
   let nextOrder = 0;
   let offered: Promise<IteratorResult<HookPayload>> | null = null;
   let offeredRead: HookRead | undefined;
+  let approvalCandidateExpired = false;
   let sessionTimedOut = false;
   const pendingSessionControls = new Set<"clear" | "compact">();
   let wake: (() => void) | undefined;
@@ -120,6 +122,8 @@ export function createSessionDeliveryHook(
       } else {
         if (read.result.value.kind === "deliver") {
           bufferedDeliveries.push(read.result.value);
+        } else if (read.result.value.kind === "approval-candidate-expiry") {
+          approvalCandidateExpired = true;
         } else if (read.result.value.kind === "session-timeout") {
           sessionTimedOut = true;
         } else if (read.result.value.kind === "clear" || read.result.value.kind === "compact") {
@@ -133,6 +137,12 @@ export function createSessionDeliveryHook(
   };
 
   return {
+    consumeApprovalCandidateExpiry(): boolean {
+      const expired = approvalCandidateExpired;
+      approvalCandidateExpired = false;
+      return expired;
+    },
+
     consumeSessionControl(): "clear" | "compact" | undefined {
       for (const control of pendingSessionControls) {
         pendingSessionControls.delete(control);
@@ -146,6 +156,12 @@ export function createSessionDeliveryHook(
         throw new Error("Cannot consume a public delivery before it resolves.");
       }
 
+      if (
+        !offeredRead.result.done &&
+        offeredRead.result.value.kind === "approval-candidate-expiry"
+      ) {
+        approvalCandidateExpired = true;
+      }
       if (!offeredRead.result.done && offeredRead.result.value.kind === "session-timeout") {
         sessionTimedOut = true;
       }

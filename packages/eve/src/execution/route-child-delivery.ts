@@ -1,33 +1,42 @@
-import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
-import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
+import {
+  type DurableDeliverPayload,
+  type SessionAuthContext,
+  unwrapDeliverPayload,
+} from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { routeProxiedDeliverStep, type RoutedDeliverResult } from "#execution/workflow-steps.js";
+import { routeProxiedDeliverStep } from "#execution/workflow-steps.js";
 
-/**
- * Coalesces inbound deliver payloads and routes any descendant-bound input
- * responses down to the owning child. A descendant session-limit Stop is
- * returned as parent-owned turn control after the child consumes the answer.
- *
- * Short-circuits via `hasProxyInputRequests` so the common no-active-descendant
- * path skips a durable step boundary. Lives in its own non-step module so both
- * the driver and the active turn can share it (a `"use step"` module cannot
- * re-export plain helpers into a workflow body).
- */
+export type RoutedAttributedDeliverResult =
+  | { readonly kind: "cancel-turn" }
+  | {
+      readonly kind: "continue";
+      readonly remainder: readonly DurableDeliverPayload[] | undefined;
+    };
+
+/** Routes descendant-bound responses without discarding each payload's actor. */
 export async function routeDeliverToChildren(input: {
   readonly auth?: SessionAuthContext | null;
   readonly parentWritable: WritableStream<Uint8Array>;
-  readonly payloads: readonly DeliverPayload[];
+  readonly payloads: readonly DurableDeliverPayload[];
   readonly sessionState: DurableSessionState;
-}): Promise<RoutedDeliverResult> {
-  const payload = coalesceDeliverPayloads(input.payloads);
+}): Promise<RoutedAttributedDeliverResult> {
   if (!input.sessionState.hasProxyInputRequests) {
-    return { kind: "continue", remainder: payload };
+    return { kind: "continue", remainder: input.payloads };
   }
 
-  return await routeProxiedDeliverStep({
-    auth: input.auth,
-    parentWritable: input.parentWritable,
-    payload,
-    sessionState: input.sessionState,
-  });
+  const remainder: DurableDeliverPayload[] = [];
+  for (const attributed of input.payloads) {
+    const { auth, payload } = unwrapDeliverPayload(attributed, input.auth);
+    const routed = await routeProxiedDeliverStep({
+      auth,
+      parentWritable: input.parentWritable,
+      payload,
+      sessionState: input.sessionState,
+    });
+    if (routed.kind === "cancel-turn") return routed;
+    if (routed.remainder !== undefined) {
+      remainder.push({ auth, kind: "attributed-deliver-payload", payload: routed.remainder });
+    }
+  }
+  return { kind: "continue", remainder: remainder.length === 0 ? undefined : remainder };
 }

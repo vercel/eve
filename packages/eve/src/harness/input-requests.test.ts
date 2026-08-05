@@ -891,7 +891,8 @@ describe("resolvePendingInput", () => {
 describe("coordinateApprovalDelivery", () => {
   async function completeApprovalDelivery(input: Parameters<typeof coordinateApprovalDelivery>[0]) {
     let result = await coordinateApprovalDelivery(input);
-    for (let pass = 0; result.kind === "continue-coordination" && pass < 3; pass += 1) {
+    for (let pass = 0; pass < 4; pass += 1) {
+      if (result.kind !== "continue-coordination" && result.kind !== "policy-work-required") break;
       result = await coordinateApprovalDelivery({
         ...input,
         session: result.session,
@@ -963,6 +964,63 @@ describe("coordinateApprovalDelivery", () => {
     return contextStorage.run(ctx, run);
   }
 
+  it("consumes unauthenticated approval responses with explicit feedback", async () => {
+    const result = await coordinateApprovalDelivery({
+      now: 100,
+      session: pendingSession(),
+      stepInput: {
+        inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+        inputResponseAuth: [null],
+      },
+    });
+
+    expect(result.feedback).toEqual(["Authentication is required to respond to this approval."]);
+    expect(result.stepInput).toEqual({ inputResponses: [] });
+    expect(getApprovalAuditState(result.session.state).activeCandidates).toEqual([]);
+    expect(resolvePendingInput({ session: result.session }).outcome).toBe("unresolved");
+  });
+
+  it("authorizes batched responses as their attributed responders", async () => {
+    const bob = {
+      attributes: {},
+      authenticator: "slack-webhook",
+      issuer: "slack:T1",
+      principalId: "UBOB",
+      principalType: "user",
+    } as const;
+    let seenResponder: string | undefined;
+
+    const result = await approvalContext(() =>
+      completeApprovalDelivery({
+        now: 100,
+        session: pendingSession(),
+        stepInput: {
+          inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+          inputResponseAuth: [bob],
+          message: "Alice's later message",
+          messageAuth: {
+            ...bob,
+            principalId: "UALICE",
+          },
+        },
+        tools: new Map([
+          [
+            "create_issue",
+            approvalTool("create_issue", ({ responder }) => {
+              seenResponder = responder.principalId;
+              return { status: "allowed" };
+            }),
+          ],
+        ]),
+      }),
+    );
+
+    expect(seenResponder).toBe("UBOB");
+    expect(getApprovalAuditState(result.session.state).settlements).toEqual([
+      expect.objectContaining({ actor: expect.objectContaining({ principalId: "UBOB" }) }),
+    ]);
+  });
+
   it("fails closed when a required authorizer is missing", async () => {
     const result = await approvalContext(() =>
       completeApprovalDelivery({
@@ -982,6 +1040,25 @@ describe("coordinateApprovalDelivery", () => {
         status: "failed",
       }),
     ]);
+    expect(resolvePendingInput({ session: result.session }).outcome).toBe("unresolved");
+  });
+
+  it("fails closed when a response policy returns a malformed decision", async () => {
+    const result = await approvalContext(() =>
+      completeApprovalDelivery({
+        now: 100,
+        session: pendingSession(),
+        stepInput: {
+          inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+        },
+        tools: new Map([["create_issue", approvalTool("create_issue", () => undefined as never)]]),
+      }),
+    );
+
+    expect(getApprovalAuditState(result.session.state).candidateHistory).toEqual([
+      expect.objectContaining({ status: "failed" }),
+    ]);
+    expect(getApprovalAuditState(result.session.state).settlements).toEqual([]);
     expect(resolvePendingInput({ session: result.session }).outcome).toBe("unresolved");
   });
 

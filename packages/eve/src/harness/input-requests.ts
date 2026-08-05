@@ -284,6 +284,7 @@ export function normalizePendingInputResponses(input: {
   return compactStepInput({
     ...stepInput,
     inputResponses: responses,
+    inputResponseAuth: responses.map(() => stepInput.messageAuth),
     messageConsumed: true,
     message: undefined,
   });
@@ -299,7 +300,9 @@ function compactStepInput(
   const result: {
     context?: StepInput["context"];
     inputResponses?: StepInput["inputResponses"];
+    inputResponseAuth?: StepInput["inputResponseAuth"];
     message?: StepInput["message"];
+    messageAuth?: StepInput["messageAuth"];
     messageConsumed?: boolean;
     outputSchema?: StepInput["outputSchema"];
   } = {};
@@ -309,9 +312,11 @@ function compactStepInput(
   }
   if ((input.inputResponses?.length ?? 0) > 0) {
     result.inputResponses = input.inputResponses;
+    result.inputResponseAuth = input.inputResponseAuth;
   }
   if (input.message !== undefined) {
     result.message = input.message;
+    result.messageAuth = input.messageAuth;
   }
   if (input.messageConsumed === true) {
     result.messageConsumed = true;

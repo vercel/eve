@@ -2,7 +2,6 @@ import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflo
 
 import type {
   DeliverHookPayload,
-  DeliverPayload,
   HookPayload,
   RunInput,
   SessionCapabilities,
@@ -71,6 +70,10 @@ type DriverLoopOutcome =
     };
 
 type NextSessionAction =
+  | {
+      readonly kind: "authorization";
+      readonly result: IteratorResult<HookPayload>;
+    }
   | { readonly kind: "clear" }
   | { readonly kind: "compact" }
   | {
@@ -210,6 +213,7 @@ async function runDriverLoop(input: {
     token: `${input.sessionState.sessionId}:auth`,
   });
   const authIterator: AsyncIterator<HookPayload> = authHook[Symbol.asyncIterator]();
+  let pendingAuthRead: Promise<IteratorResult<HookPayload>> | undefined;
   // Fast descendant resumes can start the next turn before the prior
   // control hook disposal is persisted by the Workflow SDK, so each
   // turn needs its own session-scoped token.
@@ -223,6 +227,7 @@ async function runDriverLoop(input: {
     input.sessionTimeoutDeadline === undefined
       ? undefined
       : createSessionTimeoutControl({ deadline: input.sessionTimeoutDeadline });
+  let approvalExpiry: ReturnType<typeof createSessionTimeoutControl> | undefined;
 
   // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
@@ -304,33 +309,34 @@ async function runDriverLoop(input: {
       await deliveryHook.rekey(action.sessionState.continuationToken);
       await sessionTimeout?.rekey(action.sessionState.continuationToken);
 
-      if (action.authorizationNames && action.authorizationNames.length > 0) {
-        const expected = action.authorizationNames.length;
-        const allPayloads: DeliverPayload[] = [];
+      await approvalExpiry?.dispose();
+      approvalExpiry =
+        action.approvalCandidateExpiresAt === undefined
+          ? undefined
+          : createSessionTimeoutControl({
+              deadline: new Date(action.approvalCandidateExpiresAt),
+              signalKind: "approval-candidate-expiry",
+            });
+      await approvalExpiry?.rekey(action.sessionState.continuationToken);
 
-        while (allPayloads.length < expected) {
-          const next = await authIterator.next();
-          if (next.done) break;
-          if (next.value.kind === "deliver") {
-            allPayloads.push(...next.value.payloads);
-          }
+      const waitingForAuthorization = (action.authorizationNames?.length ?? 0) > 0;
+      const nextAction = await waitForNextSessionAction({
+        authRead: waitingForAuthorization ? (pendingAuthRead ??= authIterator.next()) : undefined,
+        bufferedDeliveries,
+        deliveryHook,
+      });
+      if (nextAction.kind === "authorization") {
+        pendingAuthRead = undefined;
+        if (nextAction.result.done) {
+          continue;
         }
-
         action = await runTurn({
-          delivery: {
-            kind: "deliver",
-            payloads: allPayloads,
-          },
+          delivery: nextAction.result.value,
           serializedContext: action.serializedContext,
           sessionState: action.sessionState,
         });
         continue;
       }
-
-      const nextAction = await waitForNextSessionAction({
-        bufferedDeliveries,
-        deliveryHook,
-      });
 
       if (nextAction.kind === "expired") {
         return {
@@ -387,7 +393,15 @@ async function runDriverLoop(input: {
         delivery: {
           auth: nextDeliver.auth,
           kind: "deliver",
-          payloads: [routed.remainder],
+          payloads: Array.isArray(routed.remainder)
+            ? routed.remainder
+            : [
+                {
+                  auth: nextDeliver.auth,
+                  kind: "attributed-deliver-payload",
+                  payload: routed.remainder,
+                },
+              ],
           requestId: nextDeliver.requestId,
         },
         serializedContext: action.serializedContext,
@@ -396,6 +410,7 @@ async function runDriverLoop(input: {
     }
   } finally {
     await disposeSettledTurnControl?.();
+    await approvalExpiry?.dispose();
     await sessionTimeout?.dispose();
     await deliveryHook.dispose();
     // Dispose without closing the iterator: a session cancelled while
@@ -406,11 +421,15 @@ async function runDriverLoop(input: {
 }
 
 async function waitForNextSessionAction(input: {
+  readonly authRead?: Promise<IteratorResult<HookPayload>>;
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly deliveryHook: SessionDeliveryHook;
 }): Promise<NextSessionAction> {
   if (input.deliveryHook.consumeSessionTimeout()) {
     return { kind: "expired" };
+  }
+  if (input.deliveryHook.consumeApprovalCandidateExpiry()) {
+    return { delivery: { kind: "deliver", payloads: [] }, kind: "delivery" };
   }
 
   const pendingSessionControl = input.deliveryHook.consumeSessionControl();
@@ -426,7 +445,16 @@ async function waitForNextSessionAction(input: {
   }
 
   while (true) {
-    const first = await input.deliveryHook.next();
+    const first =
+      input.authRead === undefined
+        ? await input.deliveryHook.next()
+        : await Promise.race([
+            input.deliveryHook.next(),
+            input.authRead.then((result) => ({ authResult: result })),
+          ]);
+    if ("authResult" in first) {
+      return { kind: "authorization", result: first.authResult };
+    }
     input.deliveryHook.consumeNext();
 
     if (first.done) {
@@ -435,6 +463,9 @@ async function waitForNextSessionAction(input: {
 
     if (first.value.kind === "session-timeout") {
       return { kind: "expired" };
+    }
+    if (first.value.kind === "approval-candidate-expiry") {
+      return { delivery: { kind: "deliver", payloads: [] }, kind: "delivery" };
     }
 
     if (first.value.kind === "clear" || first.value.kind === "compact") {

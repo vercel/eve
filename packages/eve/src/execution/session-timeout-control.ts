@@ -12,6 +12,7 @@ export interface SessionTimeoutControl {
 /** Creates a timer controller that preserves one absolute session deadline across hook rekeys. */
 export function createSessionTimeoutControl(input: {
   readonly deadline: Date;
+  readonly signalKind?: "approval-candidate-expiry" | "session-timeout";
 }): SessionTimeoutControl {
   let active: { readonly runId: string; readonly token: string } | undefined;
 
@@ -32,6 +33,7 @@ export function createSessionTimeoutControl(input: {
 
       const { runId } = await startSessionTimeoutStep({
         deadline: input.deadline,
+        signalKind: input.signalKind,
         token,
       });
       active = { runId, token };

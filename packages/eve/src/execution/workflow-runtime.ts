@@ -224,7 +224,9 @@ export function createWorkflowRuntime(config: {
       const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
         auth: input.auth,
         kind: "deliver",
-        payloads: [input.payload],
+        payloads: [
+          { auth: input.auth, kind: "attributed-deliver-payload", payload: input.payload },
+        ],
         requestId: input.requestId,
       };
       try {

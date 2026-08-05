@@ -46,6 +46,7 @@ import {
   createCompactionRequestedEvent,
   createContextClearedEvent,
   createInputRequestedEvent,
+  createMessageCompletedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
   createStepStartedEvent,
@@ -682,16 +683,49 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ? { ...effectiveStepInput, message: staleConversion.displayMessage }
         : effectiveStepInput;
 
-    const responseAuthorizationTools = buildResponseAuthorizationTools({
-      authoredTools: config.tools,
-      context: contextStorage.getStore(),
-    });
-    const coordinated = await coordinateApprovalDelivery({
+    let stepStartedEmitted = false;
+    let coordinated = await coordinateApprovalDelivery({
       session,
       stepInput: effectiveStepInput,
-      tools: responseAuthorizationTools,
     });
+    if (coordinated.kind === "policy-work-required") {
+      const approvalContext = contextStorage.getStore();
+      if (emit !== undefined) {
+        await emitStepStarted(emit, emissionState, resolvedRuntimeActions.messages);
+        stepStartedEmitted = true;
+      } else if (approvalContext !== undefined && config.refreshStepDynamicTools !== undefined) {
+        await config.refreshStepDynamicTools({
+          ctx: approvalContext,
+          event: createStepStartedEvent({
+            sequence: emissionState.sequence,
+            stepIndex: emissionState.stepIndex,
+            turnId: emissionState.turnId,
+          }),
+          messages: resolvedRuntimeActions.messages,
+        });
+      }
+      coordinated = await coordinateApprovalDelivery({
+        session: coordinated.session,
+        stepInput: coordinated.stepInput,
+        tools: buildResponseAuthorizationTools({
+          authoredTools: config.tools,
+          context: approvalContext,
+        }),
+      });
+    }
     session = coordinated.session;
+    if (emit !== undefined) {
+      for (const message of coordinated.feedback) {
+        await emit(
+          createMessageCompletedEvent({
+            message,
+            sequence: emissionState.sequence,
+            stepIndex: emissionState.stepIndex,
+            turnId: emissionState.turnId,
+          }),
+        );
+      }
+    }
     if (coordinated.kind === "continue-coordination") {
       const continuedSession =
         coordinated.stepInput === undefined
@@ -1253,7 +1287,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // Emit step.started before building the toolset so dynamic tool
     // resolvers subscribed to step.started write to LiveStepToolsKey.
-    if (emit) {
+    if (emit && !stepStartedEmitted) {
       await emitStepStarted(emit, emissionState, messages);
     }
 

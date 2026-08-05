@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import { type DeliverHookPayload, type HookPayload, unwrapDeliverPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
@@ -83,10 +83,13 @@ describe("TurnControlReceiver", () => {
 
     await runReceiver(bufferedDeliveries);
 
-    expect(bufferedDeliveries.map((item) => item.payloads[0]?.message)).toEqual([
-      "from-turn",
-      "earlier",
-    ]);
+    expect(
+      bufferedDeliveries.map((item) =>
+        item.payloads[0]
+          ? unwrapDeliverPayload(item.payloads[0], item.auth).payload.message
+          : undefined,
+      ),
+    ).toEqual(["from-turn", "earlier"]);
   });
 
   it("rethrows a rebuilt error when the turn reports a failure", async () => {
@@ -125,6 +128,7 @@ function parkResult(): Extract<TurnControlPayload, { readonly kind: "turn-result
 
 function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): SessionDeliveryHook {
   return {
+    consumeApprovalCandidateExpiry: vi.fn(() => false),
     consumeSessionControl: vi.fn(() => undefined),
     consumeNext: vi.fn(),
     consumeSessionTimeout: vi.fn(() => false),

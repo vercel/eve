@@ -24,11 +24,14 @@ export async function startSessionTimeoutStep(
 }
 
 /** Resumes the owning driver when its durable timer elapses. */
-export async function signalSessionTimeoutStep(input: { readonly token: string }): Promise<void> {
+export async function signalSessionTimeoutStep(input: {
+  readonly kind?: "approval-candidate-expiry" | "session-timeout";
+  readonly token: string;
+}): Promise<void> {
   "use step";
 
   try {
-    await resumeHook(input.token, { kind: "session-timeout" });
+    await resumeHook(input.token, { kind: input.kind ?? "session-timeout" });
   } catch (error) {
     if (!isInactiveTimeoutTarget(error)) {
       throw error;
