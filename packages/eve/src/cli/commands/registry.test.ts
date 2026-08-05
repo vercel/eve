@@ -4,6 +4,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 import {
   browseRegistryCatalog,
+  installRegistryItem,
   runAddCommand,
   runRegistryAddCommand,
   runRegistryListCommand,
@@ -276,6 +277,53 @@ describe("registry commands", () => {
     expect(logger.errors).toEqual([]);
     expect(addRegistryItems).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it("keeps registry package setup interactive when called from the TUI", async () => {
+    const fake = createFakePrompter({
+      multiple: () => ["channel/linear-agent", "connection/linear"],
+      single: () => "yes",
+    });
+    const runSetupCommand = vi.fn(
+      async (
+        _appRoot: string,
+        _setup: RegistrySetupCommand,
+        _item: string,
+        _options?: RegistrySetupCommandOptions,
+      ) => ({ kind: "completed" as const, output: [] }),
+    );
+    getRegistryItems
+      .mockResolvedValueOnce([
+        {
+          meta: {
+            eve: {
+              components: [
+                { item: "channel/linear-agent", label: "Linear Agent", default: true },
+                { item: "connection/linear", label: "Linear tools", default: true },
+              ],
+            },
+          },
+        },
+      ])
+      .mockResolvedValueOnce([
+        { meta: { eve: { setup: [{ package: "eve", bin: "eve", args: ["channel-setup"] }] } } },
+        { meta: { eve: { setup: [{ package: "eve", bin: "eve", args: ["connection-setup"] }] } } },
+      ]);
+
+    await installRegistryItem(
+      "/project",
+      "linear",
+      { prompter: fake.prompter },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(fake.selectMessages).toEqual(["Add linear"]);
+    expect(runSetupCommand).toHaveBeenCalledTimes(2);
+    expect(runSetupCommand.mock.calls[0]?.[1]).toEqual({
+      package: "eve",
+      bin: "eve",
+      args: ["channel-setup"],
+    });
   });
 
   it("installs a registry package's default components with --yes", async () => {

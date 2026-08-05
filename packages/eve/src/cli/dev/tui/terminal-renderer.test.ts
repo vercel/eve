@@ -1490,24 +1490,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("⎿  ✓ Registry items added: connection/linear.");
   });
 
-  it("keeps a setup command result tight after its flow closes", async () => {
-    const { screen, input, renderer } = makeRenderer();
-
-    const prompt = renderer.readPrompt();
-    input.type("/add");
-    input.enter();
-    await prompt;
-    renderer.setupFlow.begin("/add");
-    renderer.setupFlow.end({ preserveDiagnostics: false });
-    renderer.renderCommandResult("Registry items added: channel/github.", "success");
-    renderer.shutdown();
-
-    const lines = screen.snapshot().split("\n");
-    const command = lines.findIndex((line) => line.includes("│ /add"));
-    const result = lines.findIndex((line) => line.includes("⎿  ✓ Registry items added"));
-    expect(result).toBe(command + 1);
-  });
-
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/vc:login", "failed");

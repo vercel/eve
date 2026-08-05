@@ -522,7 +522,13 @@ export async function installRegistryItem(
     log: (message) => output.push(message),
   };
   const previousExitCode = process.exitCode;
-  await runAddCommand(logger, appRoot, item, { ...options, yes: true }, dependencies);
+  await runAddCommand(
+    logger,
+    appRoot,
+    item,
+    { ...options, yes: options.prompter === undefined ? true : options.yes },
+    dependencies,
+  );
   process.exitCode = previousExitCode;
   if (failure !== undefined) throw new Error(failure);
   return output;
@@ -614,7 +620,9 @@ export async function runAddCommand(
     if (!options.yes) {
       try {
         const prompter =
-          dependencies.createPrompter?.() ?? defaultAddCommandDependencies.createPrompter!();
+          options.prompter ??
+          dependencies.createPrompter?.() ??
+          defaultAddCommandDependencies.createPrompter!();
         const shouldRun = await prompter.select({
           message: `Set up ${item} now?`,
           initialValue: "yes",
