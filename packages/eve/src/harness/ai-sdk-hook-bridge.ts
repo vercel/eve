@@ -1,6 +1,7 @@
 import type { Telemetry } from "ai";
 
 import type {
+  InstrumentationActionKind,
   InstrumentationAttemptScope,
   InstrumentationAttemptStartedEvent,
   InstrumentationContentPart,
@@ -17,8 +18,15 @@ import type {
 
 type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telemetry[TKey]>>[0];
 
+/**
+ * Reports what eve dispatches one tool name as. The AI SDK only knows the
+ * name, so the kind has to come back from the harness.
+ */
+export type ActionKindResolver = (toolName: string) => InstrumentationActionKind;
+
 interface AttemptState {
   readonly modelIds: Map<string, string>;
+  readonly resolveActionKind: ActionKindResolver;
   readonly scope: InstrumentationAttemptScope;
   readonly toolIds: Map<string, string>;
   operation?: InstrumentationOperationRef;
@@ -31,9 +39,11 @@ export function createAiSdkHookBridge(
   scope: InstrumentationAttemptScope,
   hooks: InstrumentationHooks,
   runInContext: InstrumentationContextRunner = directRunInContext,
+  resolveActionKind: ActionKindResolver = defaultResolveActionKind,
 ): Telemetry {
   const state: AttemptState = {
     modelIds: new Map(),
+    resolveActionKind,
     scope,
     toolIds: new Map(),
   };
@@ -122,6 +132,8 @@ export function createAiSdkHookBridge(
 }
 
 const directRunInContext: InstrumentationContextRunner = (_operation, execute) => execute();
+
+const defaultResolveActionKind: ActionKindResolver = () => "tool-call";
 
 function toAttemptStarted(state: AttemptState): InstrumentationAttemptStartedEvent | undefined {
   if (state.operation === undefined || state.stepNumber === undefined) return undefined;
@@ -226,6 +238,7 @@ function toToolCallStarted(
     callId: source.toolCall.toolCallId,
     id,
     input: source.toolCall.input,
+    kind: state.resolveActionKind(source.toolCall.toolName),
     scope: state.scope,
     toolName: source.toolCall.toolName,
     type: "tool.call.started",

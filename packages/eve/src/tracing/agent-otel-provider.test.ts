@@ -7,7 +7,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it } from "vitest";
 
-import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
+import { createAiSdkHookBridge, type ActionKindResolver } from "#harness/ai-sdk-hook-bridge.js";
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
 import {
   InMemoryAgentTraceStateStore,
@@ -48,6 +48,7 @@ async function emitAttempt(input: {
   readonly hooks: InstrumentationHooks;
   readonly runInContext: InstrumentationContextRunner;
   readonly providerMetadata?: Readonly<Record<string, unknown>>;
+  readonly resolveActionKind?: ActionKindResolver;
   readonly sessionId: string;
   readonly toolError?: Error;
   readonly turnAlreadyStarted?: boolean;
@@ -66,7 +67,12 @@ async function emitAttempt(input: {
     await publishTurnStarted(input);
   }
 
-  const bridge = createAiSdkHookBridge(scope, input.hooks, input.runInContext);
+  const bridge = createAiSdkHookBridge(
+    scope,
+    input.hooks,
+    input.runInContext,
+    input.resolveActionKind,
+  );
   Reflect.apply(bridge.onStart!, bridge, [
     {
       callId: "call-1",
@@ -256,10 +262,29 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.usage.cache_read.input_tokens": 4,
     });
     expect(action.attributes).toMatchObject({
-      "agent.action.kind": "tool",
+      "agent.action.kind": "tool-call",
       "agent.action.name": "weather",
       "agent.framework.name": "eve",
       "agent.root.session.id": "session-1",
+    });
+  });
+
+  it("labels a subagent action by its kind, not as a plain tool", async () => {
+    const runtime = createRuntime();
+    await emitAttempt({
+      hooks: runtime.hooks,
+      resolveActionKind: () => "subagent-call",
+      runInContext: runtime.runInContext,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const action = runtime.exporter.getFinishedSpans().find((span) => span.name === "agent.action");
+    expect(action?.attributes).toMatchObject({
+      "agent.action.kind": "subagent-call",
+      "agent.action.name": "weather",
     });
   });
 

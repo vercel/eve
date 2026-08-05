@@ -314,6 +314,7 @@ describe("createAiSdkHookBridge", () => {
         callId: "tool-1",
         id: `${scope.attemptId}:tool:tool-1:0`,
         input: { q: "eve" },
+        kind: "tool-call",
         scope,
         toolName: "search",
         type: "tool.call.started",
@@ -326,6 +327,25 @@ describe("createAiSdkHookBridge", () => {
       });
     },
   );
+
+  it("labels a tool call with the kind the harness resolves", async () => {
+    const started = vi.fn();
+    const hooks = createInstrumentationHooks([{ events: { "tool.call.started": started } }]);
+    const bridge = createAiSdkHookBridge(scope, hooks, undefined, (toolName) =>
+      toolName === "research" ? "subagent-call" : "tool-call",
+    );
+
+    for (const toolName of ["research", "search"]) {
+      await Reflect.apply(bridge.onToolExecutionStart!, bridge, [
+        { callId: `call-${toolName}`, toolCall: { input: {}, toolCallId: toolName, toolName } },
+      ]);
+    }
+
+    expect(started.mock.calls.map(([event]) => [event.toolName, event.kind])).toEqual([
+      ["research", "subagent-call"],
+      ["search", "tool-call"],
+    ]);
+  });
 
   it("keeps each provider's state to itself", async () => {
     const observed = new Map<string, unknown>();

@@ -9340,6 +9340,7 @@ describe("createToolLoopHarness", () => {
         }),
         hooks,
         runInContext,
+        expect.any(Function),
       );
       const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
@@ -9360,6 +9361,36 @@ describe("createToolLoopHarness", () => {
           type: "attempt.completed",
         }),
       );
+    });
+
+    it("resolves each action kind from the harness tool map", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentation: {
+            hooks: createInstrumentationHooks([]),
+            runInContext: (_operation, execute) => execute(),
+          },
+          tools: createDelegationToolMap(),
+        }),
+      );
+
+      await runStep(createTestSession(), { message: "hi" });
+
+      const resolveActionKind = mockCreateAiSdkHookBridge.mock.calls[0]![3] as (
+        toolName: string,
+      ) => string;
+      expect(resolveActionKind("delegate")).toBe("subagent-call");
+      expect(resolveActionKind("add")).toBe("tool-call");
+      // A name the harness never registered — a dynamic subagent resolved after
+      // the map was built lands here rather than throwing.
+      expect(resolveActionKind("absent")).toBe("tool-call");
     });
 
     it("composes lifecycle hooks with existing authored OTel", async () => {

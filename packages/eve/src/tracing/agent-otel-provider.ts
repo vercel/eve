@@ -332,7 +332,7 @@ export function createAgentOtelInstrumentation(
       {
         attributes: {
           "agent.action.call_id": event.callId,
-          "agent.action.kind": "tool",
+          "agent.action.kind": event.kind,
           "agent.action.name": event.toolName,
           "agent.framework.name": "eve",
           "agent.framework.version": input.frameworkVersion,

@@ -164,7 +164,7 @@ describe("eve traces", () => {
       root,
       TRACE_ONE,
       span(action, "agent.action", 30, 80, step, {
-        "agent.action.kind": "tool",
+        "agent.action.kind": "tool-call",
         "agent.action.name": "\u001B[31mweather\u001B[0m",
         "agent.session.id": "session-one",
       }),
@@ -179,7 +179,7 @@ describe("eve traces", () => {
 
     expect(output.out[0]).toContain("agent.turn [turn-1]");
     expect(output.out[0]).toContain("└─ agent.step [step 0, attempt 0]");
-    expect(output.out[0]).toContain("└─ agent.action [tool: weather]");
+    expect(output.out[0]).toContain("└─ agent.action [tool-call: weather]");
     expect(output.out[0]).toContain("failed  10ms ERROR");
     expect(output.out[0]).not.toContain("\u001B");
   });

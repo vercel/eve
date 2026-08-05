@@ -107,7 +107,7 @@ import {
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-context.js";
-import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
+import { createAiSdkHookBridge, type ActionKindResolver } from "#harness/ai-sdk-hook-bridge.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
 import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
 import { resolveParentLineage } from "#harness/parent-lineage.js";
@@ -509,6 +509,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   }
   const tracer = telemetryConfig !== undefined ? trace.getTracer("eve") : undefined;
   const agentName = config.runtimeIdentity?.agentName;
+
+  // Resolved the same way `createRuntimeActionRequestFromToolCall` resolves it,
+  // so a trace and an `actions.requested` event name one call the same kind.
+  const resolveActionKind: ActionKindResolver = (toolName) =>
+    config.tools.get(toolName)?.runtimeAction?.kind ?? "tool-call";
 
   async function runStep(
     initialSession: Readonly<Parameters<StepFn>[0]>,
@@ -1016,6 +1021,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               attemptScope,
               instrumentationHooks,
               config.instrumentation?.runInContext,
+              resolveActionKind,
             );
 
       const hooks = buildStepHooks({
