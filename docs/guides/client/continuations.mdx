@@ -37,7 +37,7 @@ interface SessionState {
 
 The continuation token resumes the conversation. The session ID and stream index let the client reconnect to the right stream position without replaying events it already consumed.
 
-`SessionState` is a cursor, not a chat transcript. If your app shows historical messages, persist the stream events separately and store them under your own chat or thread ID. On reload, pass the saved `SessionState` back to `client.session(savedState)` or `useEveAgent({ initialSession })`, and pass the saved events to your renderer or `useEveAgent({ initialEvents })`.
+`SessionState` is a cursor, not a chat transcript. If your app shows historical messages, persist the stream events separately and store them under your own chat or thread ID. On reload, pass the saved `SessionState` back to `client.session(savedState)` or `useEveAgent({ initialSession })`, and pass the saved events to your renderer or `useEveAgent({ initialEvents })`. [Persistence](../persistence) covers the full storage story, schema included.
 
 ## Resume a saved session
 
