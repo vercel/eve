@@ -76,3 +76,4 @@ Every [subagent](../subagents) starts with its own fresh state, whether it's a b
 - Read state inside dynamic resolvers → [Dynamic capabilities](./dynamic-capabilities)
 - How step durability works → [Execution model & durability](../concepts/execution-model-and-durability)
 - The `ctx` accessors available alongside state → [TypeScript API](../reference/typescript-api)
+- Tenant-scoped long-term memory in your own store → [Multi-tenant memory](../patterns/multi-tenant-memory)

@@ -125,3 +125,4 @@ From your own frontend, read the pending request off the latest message and answ
 - [Default harness](/docs/concepts/default-harness): the built-in tools, including `ask_question`
 - [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming): the event and resume contract behind the pause
 - [Building a frontend](/docs/guides/frontend/overview): render and answer requests from your own UI
+- [Multi-tenant approvals](/docs/patterns/multi-tenant-approvals): resolve per-tenant approval policy for authored and connection tools
