@@ -1050,4 +1050,93 @@ describe("development runtime artifact snapshots", () => {
       join(canonicalSnapshotSourceRoot, "packages", "acme-extension"),
     );
   });
+
+  it("mounts dependencies of workspace packages nested inside the app root", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-nested-workspace-");
+    const agentRoot = join(appRoot, "agent");
+    const packageRoot = join(appRoot, "packages", "nested");
+    const installedPackageRoot = join(packageRoot, "node_modules", "external-value");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const manifestPath = join(compileDirectoryPath, "compiled-agent-manifest.json");
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(join(packageRoot, "dist"), { recursive: true });
+    await mkdir(installedPackageRoot, { recursive: true });
+    await mkdir(join(appRoot, "node_modules", "@repo"), { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    // The app root is also the workspace root, so workspace packages live
+    // inside the copied app tree.
+    await writeFile(join(appRoot, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+    await writeFile(
+      join(appRoot, "package.json"),
+      JSON.stringify(
+        {
+          dependencies: {
+            "@repo/nested": "workspace:*",
+          },
+          name: "agent-app",
+          type: "module",
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify(
+        {
+          dependencies: {
+            "external-value": "1.0.0",
+          },
+          exports: "./dist/index.js",
+          name: "@repo/nested",
+          type: "module",
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(installedPackageRoot, "package.json"),
+      '{"name":"external-value","version":"1.0.0","type":"module","exports":"./index.js"}\n',
+    );
+    await writeFile(join(installedPackageRoot, "index.js"), 'export const value = "nested";\n');
+    await writeFile(
+      join(packageRoot, "dist", "index.js"),
+      'import { value } from "external-value";\nexport const message = value;\n',
+    );
+    await symlink(packageRoot, join(appRoot, "node_modules", "@repo", "nested"), "junction");
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(manifestPath, `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`);
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    // A copied workspace package keeps the dependency mounts its snapshot
+    // copy resolves through.
+    expect(
+      existsSync(join(snapshot.snapshotSourceRoot, "packages", "nested", "dist", "index.js")),
+    ).toBe(true);
+    const nestedDependencyMount = join(
+      snapshot.snapshotSourceRoot,
+      "packages",
+      "nested",
+      "node_modules",
+      "external-value",
+    );
+    await expect(
+      lstat(nestedDependencyMount).then((stats) => stats.isSymbolicLink()),
+    ).resolves.toBe(true);
+    await expect(realpath(nestedDependencyMount)).resolves.toBe(
+      await realpath(installedPackageRoot),
+    );
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(snapshot.snapshotSourceRoot, "packages", "nested", "dist", "index.js"),
+    );
+
+    expect(moduleNamespace.message).toBe("nested");
+  });
 });

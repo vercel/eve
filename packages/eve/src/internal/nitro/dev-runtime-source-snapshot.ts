@@ -136,7 +136,12 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
     await addDependencyMountsForRoot(state, resolvedLocalRoot);
   }
 
-  const copyRoots = normalizeCopyRoots([...state.processedLocalRoots]);
+  // Discovery walks every reachable root so the dependency-mount topology and
+  // tsconfig collection match a full copy; only the directory copies are
+  // narrowed to roots that host runtime-hydrated authored source.
+  const copyRoots = normalizeCopyRoots(
+    [...state.processedLocalRoots].filter((root) => state.authoredLocalRoots.has(root)),
+  );
   const copyFiles = [...state.copyFiles]
     .filter((path) => isPathInsideOrEqual(path, sourceRoot))
     .sort((left, right) => left.localeCompare(right));
@@ -242,6 +247,7 @@ async function addAuthoredSourceRoots(
     const localRoot =
       (await resolveNearestPackageRoot(resolvedRoot, state.sourceRoot)) ?? resolvedRoot;
 
+    state.authoredLocalRoots.add(localRoot);
     enqueueLocalRoot(state, localRoot);
   }
 }
@@ -264,6 +270,9 @@ async function addTsConfigDependenciesForRoot(
       configPath: tsconfigPath,
       sourceRoot: state.sourceRoot,
     })) {
+      // Path-alias targets host authored source that runtime hydration can
+      // read back from the snapshot, so they stay copies.
+      state.authoredLocalRoots.add(localRoot);
       enqueueLocalRoot(state, localRoot);
     }
   }
@@ -408,9 +417,10 @@ async function addDependencyMount(state: SnapshotPlanState, mountPath: string): 
 /**
  * Workspace dependency packages are mounted in place rather than copied: the
  * dev runtime resolves their contents through the real tree, the same way
- * installed dependencies already resolve (vercel/eve#652). Only roots that
- * host runtime-hydrated authored source — the app, extension mounts, and
- * tsconfig path-alias targets — stay copies.
+ * installed dependencies already resolve (vercel/eve#652). Their dependency
+ * closure is still discovered — packages nested inside a copied root keep
+ * their mounts — but only roots that host runtime-hydrated authored source
+ * (the app, extension mounts, tsconfig path-alias targets) stay copies.
  */
 async function addWorkspaceDependencyMount(input: {
   readonly mountPath: string;
@@ -423,7 +433,10 @@ async function addWorkspaceDependencyMount(input: {
     return;
   }
 
-  input.state.dependencyMountsByPath.set(resolve(input.mountPath), {
+  const { state } = input;
+
+  enqueueLocalRoot(state, packageRoot);
+  state.dependencyMountsByPath.set(resolve(input.mountPath), {
     mountPath: resolve(input.mountPath),
     sourceKind: "workspace",
     sourcePath: packageRoot,
@@ -452,15 +465,10 @@ async function resolveDependencySourcePathCandidates(mountPath: string): Promise
 function enqueueLocalRoot(state: SnapshotPlanState, localRoot: string): void {
   const resolvedLocalRoot = resolve(localRoot);
 
-  if (!isAuthoredSourcePath(resolvedLocalRoot, state.sourceRoot)) {
-    return;
-  }
-
-  state.authoredLocalRoots.add(resolvedLocalRoot);
-
   if (
     state.processedLocalRoots.has(resolvedLocalRoot) ||
-    state.localRootsToProcess.includes(resolvedLocalRoot)
+    state.localRootsToProcess.includes(resolvedLocalRoot) ||
+    !isAuthoredSourcePath(resolvedLocalRoot, state.sourceRoot)
   ) {
     return;
   }
