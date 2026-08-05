@@ -356,6 +356,44 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
 On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`host\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
     configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend/overview), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), and [SvelteKit](/docs/guides/frontend/sveltekit).`,
   },
+  buzz: {
+    logo: "buzz",
+    docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-buzz-acp-adapter#readme",
+    badge: "ACP",
+    keywords: ["chat", "messaging", "desktop", "acp", "nostr", "agents"],
+    install: `Install [Buzz Desktop](https://buzz.xyz), then install eve's compatibility adapter globally:
+
+\`\`\`bash
+npm install --global @eve/buzz-acp-adapter
+\`\`\`
+
+The global installation is required because the installer records the adapter's absolute executable path in Buzz's persistent harness definition. Do not run the installer through \`npx\`: its disposable cache path can disappear and leave Buzz unable to start the harness.`,
+    quickStart: `From an eve application directory, run the interactive installer:
+
+\`\`\`bash
+eve-buzz-acp-adapter install
+\`\`\`
+
+You can also provide a local application or deployed URL explicitly:
+
+\`\`\`bash
+eve-buzz-acp-adapter install ./path/to/eve-app
+eve-buzz-acp-adapter install https://agent.example.com
+\`\`\`
+
+The installer validates the target, discovers its authored model, and registers an **eve** custom harness with Buzz. Reopen Buzz, create or edit an agent, select **eve** as its harness, keep **Respond to** set to **Owner only**, save the agent, and start it. Buzz launches \`eve acp\` through the adapter; do not start a separate ACP process.`,
+    configure: `**Owner only** is required by default. Buzz verifies the triggering event and limits turns to the agent owner and cryptographically verified sibling agents belonging to that owner. ACP does not carry that verified sender into eve as an authenticated principal, so every accepted turn uses the harness's same eve authentication, connections, tools, and per-channel session.
+
+For an agent intentionally designed as a shared service, reinstall with an explicit shared-principal opt-in:
+
+\`\`\`bash
+eve-buzz-acp-adapter install --url https://agent.example.com --allow-shared-principal
+\`\`\`
+
+This permits Buzz's **Allowlist** or **Anyone** modes for every agent using the machine-wide eve harness. Use dedicated least-privilege credentials and assume every sender Buzz accepts can exercise every capability available to the agent. Reinstall without the flag to restore the owner-only requirement.
+
+For a protected Vercel deployment, the installer reuses eve's Vercel login and Trusted Sources flow without storing a Vercel credential in the harness. Inspect a target and its discovered model at any time with \`eve-buzz-acp-adapter doctor [target]\`. See the [adapter documentation](https://github.com/vercel/eve/tree/main/packages/eve-buzz-acp-adapter#readme) for identity boundaries, delivery guarantees, and current compatibility limits.`,
+  },
   "chat-sdk-gchat": {
     logo: "googlechat",
     docsHref: "/docs/channels/chat-sdk",

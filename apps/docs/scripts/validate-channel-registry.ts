@@ -90,15 +90,15 @@ const targetSlugsByCatalogSlug: Readonly<Record<string, string>> = {
 const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
 const items = registry.items.filter((item) => item.name.startsWith("channel/"));
-const galleryEntries = channelEntries().filter((entry) => entry.surfaces.gallery);
-const expectedSlugs = galleryEntries.map(
+const registryEntries = channelEntries().filter((entry) => entry.surfaces.registry);
+const expectedSlugs = registryEntries.map(
   (entry) => registrySlugsByCatalogSlug[entry.slug] ?? entry.slug,
 );
 const actualSlugs = items.map((item) => item.name.slice("channel/".length));
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
-    `Channel registry entries do not match the gallery.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
+    `Channel registry entries do not match the catalog.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
   );
 }
 
@@ -124,7 +124,7 @@ for (const [index, item] of items.entries()) {
     );
   }
 
-  const entry = galleryEntries[index];
+  const entry = registryEntries[index];
   if (entry === undefined) throw new Error(`Unexpected channel registry item "${item.name}".`);
   const registrySlug = expectedSlugs[index];
 

@@ -32,6 +32,18 @@ describe("integration discovery", () => {
     expect(markdown).toContain("eve add channel/slack");
   });
 
+  it("renders Buzz as an ACP channel with explicit authorization guidance", () => {
+    const buzz = getIntegration("buzz");
+    expect(buzz).toBeDefined();
+
+    const markdown = integrationMarkdown(buzz!);
+    expect(markdown).toContain("npm install --global @eve/buzz-acp-adapter");
+    expect(markdown).toContain("eve-buzz-acp-adapter install");
+    expect(markdown).toContain("Respond to** set to **Owner only");
+    expect(markdown).toContain("--allow-shared-principal");
+    expect(integrationSearchText(buzz!)).toContain("acp");
+  });
+
   it("renders the Web Chat setup for every host framework it documents", () => {
     const web = getIntegration("eve");
     expect(web).toBeDefined();

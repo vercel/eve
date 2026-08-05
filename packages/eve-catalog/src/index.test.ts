@@ -25,6 +25,12 @@ describe("integration catalog", () => {
     ).toBe(INTEGRATIONS.length);
   });
 
+  it("makes every scaffoldable integration available through the registry", () => {
+    for (const entry of INTEGRATIONS.filter((candidate) => candidate.surfaces.scaffoldable)) {
+      expect(entry.surfaces.registry).toBe(true);
+    }
+  });
+
   it("gives every connection a transport and description", () => {
     for (const entry of connectionEntries()) {
       expect(entry.connection).toBeDefined();
@@ -96,6 +102,13 @@ describe("integration catalog", () => {
   it("exposes Hindsight as an extension", () => {
     expect(getIntegrationEntry("hindsight")?.kind).toBe("extension");
     expect(getIntegrationEntry("hindsight")?.connection).toBeUndefined();
+  });
+
+  it("exposes Buzz as a gallery-only channel", () => {
+    expect(getIntegrationEntry("buzz")).toMatchObject({
+      kind: "channel",
+      surfaces: { scaffoldable: false, registry: false, gallery: true },
+    });
   });
 
   it("exposes GitHub Tools as an extension distinct from the GitHub channel", () => {
