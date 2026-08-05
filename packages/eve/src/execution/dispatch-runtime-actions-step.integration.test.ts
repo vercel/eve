@@ -423,8 +423,8 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     });
 
     expect(result.results).toEqual([]);
-    expect(mocks.run).toHaveBeenCalledTimes(1);
-    expect(mocks.deliver).not.toHaveBeenCalled();
+    expect(mocks.createSession).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchSession).not.toHaveBeenCalled();
     // The fallback dispatches through the normal start path: the fresh
     // child is owned by a confirmed running handle, not the stale id.
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
@@ -532,9 +532,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       session: createBaseSession(LOCAL_PARKED_HANDLE),
     });
     installContext(session);
-    mocks.deliver.mockRejectedValue(
-      new RuntimeNoActiveSessionError(LOCAL_CHILD_CONTINUATION_TOKEN),
-    );
+    mocks.dispatchSession.mockResolvedValue({ status: "session_not_active" });
 
     const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
@@ -543,8 +541,8 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       sessionState: BASE_STATE,
     });
 
-    expect(mocks.deliver).toHaveBeenCalledTimes(1);
-    expect(mocks.run).not.toHaveBeenCalled();
+    expect(mocks.dispatchSession).toHaveBeenCalledTimes(1);
+    expect(mocks.createSession).not.toHaveBeenCalled();
     expect(result.results).toEqual([
       expect.objectContaining({
         isError: true,
