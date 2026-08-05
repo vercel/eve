@@ -30,45 +30,27 @@ const defaultDeps: GitHubSetupDeps = {
 const GITHUB_EVENT_OPTIONS = [
   {
     id: "issue_comment",
-    label: "New issue and pull request comments",
+    label: "New issue and PR comments",
     value: "issue_comment",
-    hint: "Start a turn when a new timeline comment includes the app's invocation token.",
+    hint: "Reply when a new timeline comment includes `@<bot-name>`.",
   },
   {
     id: "pull_request_review_comment",
-    label: "New inline pull request review comments",
+    label: "New inline PR review comments",
     value: "pull_request_review_comment",
-    hint: "Start a turn when a new inline review comment includes the app's invocation token.",
+    hint: "Reply when a new inline review comment includes `@<bot-name>`.",
   },
   {
     id: "issues",
     label: "New issues",
     value: "issues",
-    hint: "Start a turn when an issue is opened. Other issue changes are ignored.",
+    hint: "Add comments to new issues.",
   },
   {
     id: "pull_request",
-    label: "New pull requests",
+    label: "New PRs",
     value: "pull_request",
-    hint: "Start a turn when a pull request is opened. Other pull request changes are ignored.",
-  },
-  {
-    id: "check_suite",
-    label: "Completed check suites",
-    value: "check_suite",
-    hint: "Start a turn when a check suite completes for a pull request, including successful and failed suites.",
-  },
-  {
-    id: "check_run",
-    label: "Completed check runs",
-    value: "check_run",
-    hint: "Start a turn when a check run completes for a pull request, including successful and failed runs.",
-  },
-  {
-    id: "workflow_run",
-    label: "Completed GitHub Actions workflow runs",
-    value: "workflow_run",
-    hint: "Start a turn when a GitHub Actions workflow run completes for a pull request, including successful and failed runs.",
+    hint: "Add comments to new pull requests.",
   },
 ] as const;
 
@@ -81,8 +63,7 @@ const DEFAULT_GITHUB_EVENTS: readonly GitHubWebhookEvent[] = [
 
 const githubEventsQuestion: MultiSelectQuestion<GitHubWebhookEvent> = {
   key: "github-events",
-  message:
-    "Which GitHub webhook events should this app subscribe to? The generated channel starts turns only for the conditions described below.",
+  message: "What should this GitHub App respond to?",
   options: GITHUB_EVENT_OPTIONS,
   recommended: DEFAULT_GITHUB_EVENTS,
   requireSelection: true,
@@ -103,24 +84,6 @@ function connectTemplate(
     events.includes("pull_request")
       ? `  onPullRequest(ctx, pullRequest) {
     if (pullRequest.action !== "opened") return null;
-    return { auth: defaultGitHubAuth(ctx) };
-  },`
-      : undefined,
-    events.includes("check_suite")
-      ? `  onCheckSuite(ctx, checkSuite) {
-    if (checkSuite.action !== "completed") return null;
-    return { auth: defaultGitHubAuth(ctx) };
-  },`
-      : undefined,
-    events.includes("check_run")
-      ? `  onCheckRun(ctx, checkRun) {
-    if (checkRun.action !== "completed") return null;
-    return { auth: defaultGitHubAuth(ctx) };
-  },`
-      : undefined,
-    events.includes("workflow_run")
-      ? `  onWorkflowRun(ctx, workflowRun) {
-    if (workflowRun.action !== "completed") return null;
     return { auth: defaultGitHubAuth(ctx) };
   },`
       : undefined,

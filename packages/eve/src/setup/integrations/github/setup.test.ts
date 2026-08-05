@@ -31,7 +31,7 @@ describe("GitHub setup", () => {
   it("provisions Connect, routes the selected webhooks, and scaffolds matching handlers", async () => {
     const fake = createFakePrompter();
     const effects = deps();
-    const selectedEvents = ["issue_comment", "issues", "workflow_run"];
+    const selectedEvents = ["issue_comment", "issues", "pull_request"];
 
     await expect(
       setupGitHub(
@@ -55,8 +55,7 @@ describe("GitHub setup", () => {
     const scaffold = vi.mocked(effects.writeTextFile).mock.calls[0]?.[1] ?? "";
     expect(scaffold).toContain('botName: "agent"');
     expect(scaffold).toContain("onIssue(ctx, issue)");
-    expect(scaffold).toContain("onWorkflowRun(ctx, workflowRun)");
-    expect(scaffold).not.toContain("onPullRequest(ctx, pullRequest)");
+    expect(scaffold).toContain("onPullRequest(ctx, pullRequest)");
   });
 
   it("recommends comment events that the default scaffold handles", async () => {
