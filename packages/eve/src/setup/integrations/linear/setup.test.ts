@@ -51,6 +51,16 @@ describe("Linear setup", () => {
           value: "https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Open+Vercel+Connect",
           kind: "url",
         },
+        {
+          label: "Next step",
+          value:
+            "Deploy the agent, then open the Linear app in Vercel Connect and install it in the workspace where you want to delegate issues and comments.",
+        },
+        {
+          label: "In Linear",
+          value:
+            "Delegate an issue or mention the agent in an Agent Session to start a conversation.",
+        },
       ],
     });
 
