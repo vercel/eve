@@ -102,7 +102,6 @@ const LOCAL_PARKED_HANDLE: AgentHandle = {
 const REMOTE_PARKED_HANDLE: AgentHandle = {
   address: {
     callbackBaseUrl: "https://caller.example.com",
-    continuationToken: "remote-token",
     kind: "agent/remote",
     sessionId: "remote-session-123456789012",
     url: "https://remote.example.com",
@@ -581,13 +580,12 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
 
     expect(mocks.continueRemoteAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        continuationToken: REMOTE_PARKED_HANDLE.address.continuationToken,
         message: "continue with raw input",
         remote: expect.objectContaining({
           nodeId: REMOTE_PARKED_HANDLE.identity.nodeId,
           url: "https://remote.example.com",
         }),
-        sessionId: REMOTE_PARKED_HANDLE.address.sessionId,
+        sessionId: "remote-session-123456789012",
       }),
     );
     expect(result.results[0]).toMatchObject({

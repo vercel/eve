@@ -228,16 +228,6 @@ async function deliverToAgentHandle(input: {
   const { address, identity } = handle;
 
   if (address.kind === "agent/remote") {
-    // A remote deployment old enough to omit a continuationToken cannot
-    // receive continuations; no retry can change that.
-    if (address.continuationToken === undefined) {
-      return err({
-        cause: new Error(
-          `Remote agent "${identity.name}" returned no continuationToken at start; its deployment does not support continuations.`,
-        ),
-        permanent: true,
-      });
-    }
     let resolvedRemote;
     try {
       resolvedRemote = resolveRemoteAgentForAction({
@@ -261,7 +251,6 @@ async function deliverToAgentHandle(input: {
             createEveCallbackRoutePath(input.parentToken),
           ),
         },
-        continuationToken: address.continuationToken,
         message: readSubagentMessage(action),
         outputSchema: normalizeRequestedOutputSchema(action.input.outputSchema),
         remote: { ...resolvedRemote, url: address.url },

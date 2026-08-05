@@ -1,7 +1,11 @@
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { AgentHandleError } from "#protocol/agent-handle-error.js";
-import { createEveCallbackRoutePath, createEveSessionCancelRoutePath } from "#protocol/routes.js";
+import {
+  createEveCallbackRoutePath,
+  createEveSessionCancelRoutePath,
+  createEveSessionRoutePath,
+} from "#protocol/routes.js";
 import type { CancelTurnResult, SessionAuthContext } from "#channel/types.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import type { HeadersValue } from "#client/types.js";
@@ -135,7 +139,7 @@ export async function startRemoteAgentSession(input: {
   return { sessionId: parsed.data.sessionId };
 }
 
-/** Continues one remote-agent session via agentId. */
+/** Continues one remote-agent session by its immutable session ID. */
 export async function continueRemoteAgentSession(input: {
   readonly callback: {
     readonly callId: string;
@@ -143,7 +147,6 @@ export async function continueRemoteAgentSession(input: {
     readonly token: string;
     readonly url: string;
   };
-  readonly continuationToken: string;
   readonly message: string;
   readonly outputSchema?: JsonObject;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
@@ -152,7 +155,6 @@ export async function continueRemoteAgentSession(input: {
   const response = await fetch(createRemoteAgentContinueUrl(input.remote, input.sessionId), {
     body: JSON.stringify({
       callback: input.callback,
-      continuationToken: input.continuationToken,
       message: input.message,
       outputSchema: input.outputSchema,
     }),
@@ -410,7 +412,7 @@ function createRemoteAgentContinueUrl(
   remote: ResolvedRuntimeRemoteAgentNode,
   sessionId: string,
 ): string {
-  return createRemoteAgentRouteUrl(remote.url, `/eve/v1/session/${encodeURIComponent(sessionId)}`);
+  return createRemoteAgentRouteUrl(remote.url, createEveSessionRoutePath(sessionId));
 }
 
 function createRemoteAgentRouteUrl(baseUrl: string, routePath: string): string {

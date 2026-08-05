@@ -105,15 +105,14 @@ function makeIdentity(id: string): { id: string; name: string; nodeId: string } 
 }
 
 function makeAddress(kind: AddressKind, sessionId: string) {
-  const base = { continuationToken: `${sessionId}:token`, sessionId };
   return kind === "agent/remote"
     ? {
-        ...base,
         callbackBaseUrl: "https://parent.example.com",
         kind,
+        sessionId,
         url: "https://remote.example.com",
       }
-    : { ...base, kind };
+    : { continuationToken: `${sessionId}:token`, kind, sessionId };
 }
 
 function runningHandle(input: {

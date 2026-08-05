@@ -257,7 +257,7 @@ async function runScriptedParentSession(input: {
   const client = new Client({ host: input.serverUrl });
   const parentEvents = await collectStreamToEnd({
     label: "parent task completion",
-    stream: client.session({ sessionId: parentSessionId, streamIndex: 0 }).stream(),
+    stream: client.sessions.attach(parentSessionId).stream(),
   });
   const calls = filterEventsByType(parentEvents, "subagent.called");
 
@@ -295,9 +295,7 @@ async function expectRetainedChildConversation(input: {
 }): Promise<void> {
   const childEvents = await collectStreamToEnd({
     label: "persisted child events",
-    stream: input.client
-      .session({ sessionId: input.childSessionId, streamIndex: 0 })
-      .stream({ follow: false }),
+    stream: input.client.sessions.attach(input.childSessionId).stream({ follow: false }),
   });
   const childTurnStarts = indexesOf(childEvents, "turn.started");
   const childWaits = indexesOf(childEvents, "session.waiting");
