@@ -12,7 +12,11 @@ const integrationOgImageSize = {
 type LogoElementProps = Record<string, unknown> & {
   children?: ReactNode;
   fill?: string;
+  height?: number;
+  preserveAspectRatio?: string;
   stroke?: string;
+  viewBox?: string;
+  width?: number;
 };
 
 const resolveLogo = (node: ReactNode): ReactNode => {
@@ -30,6 +34,32 @@ const resolveLogo = (node: ReactNode): ReactNode => {
   }
 
   return cloneElement(element, element.props, Children.map(element.props.children, resolveLogo));
+};
+
+const fitLogo = (node: ReactNode, maxWidth: number, maxHeight: number): ReactNode => {
+  if (!isValidElement(node)) return node;
+
+  const element = node as ReactElement<LogoElementProps>;
+  const viewBox = element.props.viewBox
+    ?.trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  if (!viewBox || viewBox.length !== 4 || viewBox.some((value) => !Number.isFinite(value))) {
+    return cloneElement(element, { ...element.props, height: maxHeight, width: maxWidth });
+  }
+
+  const [, , viewBoxWidth, viewBoxHeight] = viewBox;
+  if (viewBoxWidth <= 0 || viewBoxHeight <= 0) return element;
+
+  const aspectRatio = viewBoxWidth / viewBoxHeight;
+  const width = Math.min(maxWidth, maxHeight * aspectRatio);
+  const height = width / aspectRatio;
+  return cloneElement(element, {
+    ...element.props,
+    height,
+    preserveAspectRatio: "xMidYMid meet",
+    width,
+  });
 };
 
 const collectLogoColors = (node: ReactNode, colors = new Set<string>()): Set<string> => {
@@ -79,8 +109,9 @@ const recolorLogo = (node: ReactNode, preserveTones: boolean): ReactNode => {
 
 export const createIntegrationOgImage = (integration: Integration): ImageResponse => {
   const Logo = logos[integration.logo];
-  const resolvedLogo = resolveLogo(<Logo aria-hidden height={132} width={180} />);
-  const integrationLogo = recolorLogo(resolvedLogo, collectLogoColors(resolvedLogo).size > 1);
+  const resolvedLogo = resolveLogo(<Logo aria-hidden />);
+  const recoloredLogo = recolorLogo(resolvedLogo, collectLogoColors(resolvedLogo).size > 1);
+  const integrationLogo = fitLogo(recoloredLogo, 180, 132);
 
   return new ImageResponse(
     <div
