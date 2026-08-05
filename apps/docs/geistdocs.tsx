@@ -70,4 +70,4 @@ export const eveAgent = {
 
 export const basePath: string | undefined = undefined;
 
-export const siteId: string | undefined = "agent-framework";
+export const siteId: string | undefined = "eve-docs";
