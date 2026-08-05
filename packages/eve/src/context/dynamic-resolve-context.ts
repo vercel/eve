@@ -41,10 +41,7 @@ export function buildResolveContext(
     },
     channel: {
       kind: channelAdapter !== undefined ? getAdapterKind(channelAdapter) : undefined,
-      continuation:
-        continuationToken === undefined || continuationToken.length === 0
-          ? undefined
-          : { token: continuationToken },
+      continuationToken,
       metadata: channelInstrumentation?.metadata,
     },
     messages,

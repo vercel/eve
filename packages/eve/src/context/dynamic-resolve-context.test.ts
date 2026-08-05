@@ -31,7 +31,7 @@ describe("buildResolveContext", () => {
 
     const resolveCtx = buildResolveContext(ctx, []);
 
-    expect(resolveCtx.channel.continuation).toEqual({ token: "token-1" });
+    expect(resolveCtx.channel.continuationToken).toBe("token-1");
     expect(resolveCtx.channel.metadata).toEqual({
       threadTs: "1234.5678",
       userId: "U123",
@@ -47,13 +47,13 @@ describe("buildResolveContext", () => {
     expect(resolveCtx.channel.metadata).toBeUndefined();
   });
 
-  it("omits continuation for an ID-only session", () => {
+  it("omits continuation token for an ID-only session", () => {
     const ctx = new ContextContainer();
     ctx.set(SessionIdKey, "sess-1");
     ctx.set(AuthKey, null);
     ctx.set(InitiatorAuthKey, null);
 
-    expect(buildResolveContext(ctx, []).channel.continuation).toBeUndefined();
+    expect(buildResolveContext(ctx, []).channel.continuationToken).toBeUndefined();
   });
 
   it("sets metadata to empty object when projection has no metadata", () => {

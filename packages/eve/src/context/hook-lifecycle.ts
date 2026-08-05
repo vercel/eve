@@ -50,10 +50,7 @@ function buildHookContext(ctx: ContextContainer): HookContext {
     },
     channel: {
       kind,
-      continuation:
-        continuationToken === undefined || continuationToken.length === 0
-          ? undefined
-          : { token: continuationToken },
+      continuationToken,
     },
   };
 }

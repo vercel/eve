@@ -60,7 +60,7 @@ describe("dispatchStreamEventHooks", () => {
       hook("audit", {
         events: {
           "session.completed": async (_event, hookContext) => {
-            expect(hookContext.channel.continuation).toEqual({ token: "test:continuation" });
+            expect(hookContext.channel.continuationToken).toBe("test:continuation");
             calls.push("typed");
           },
         },
