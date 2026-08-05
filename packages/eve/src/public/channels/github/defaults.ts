@@ -9,7 +9,7 @@ import {
   type GitHubComment,
 } from "#public/channels/github/inbound.js";
 import type {
-  GitHubChannelEvents,
+  GitHubChannelEventHandlers,
   GitHubInboundContext,
   GitHubInboundResult,
   GitHubProgressConfig,
@@ -78,7 +78,9 @@ export interface GitHubDefaultEventOptions {
 }
 
 /** Builds GitHub's built-in event handlers for acknowledgement and terminal output. */
-export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): GitHubChannelEvents {
+export function createDefaultEvents(
+  options: GitHubDefaultEventOptions = {},
+): GitHubChannelEventHandlers {
   return {
     async "turn.started"(_event, channel, ctx) {
       if (options.progress?.reactions !== false) {
@@ -124,7 +126,7 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
 }
 
 async function checkoutRepositoryForTurn(
-  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1],
+  channel: Parameters<NonNullable<GitHubChannelEventHandlers["turn.started"]>>[1],
   ctx: SessionContext,
   options: GitHubDefaultEventOptions,
 ): Promise<void> {
@@ -154,7 +156,7 @@ async function checkoutRepositoryForTurn(
 }
 
 async function postCommentChunks(
-  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1],
+  channel: Parameters<NonNullable<GitHubChannelEventHandlers["turn.started"]>>[1],
   body: string,
 ): Promise<void> {
   for (const chunk of splitGitHubCommentBody(body)) {
@@ -163,7 +165,7 @@ async function postCommentChunks(
 }
 
 async function postFailure(
-  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1],
+  channel: Parameters<NonNullable<GitHubChannelEventHandlers["turn.started"]>>[1],
   message: string,
 ): Promise<void> {
   await postCommentChunks(channel, message);

@@ -239,6 +239,118 @@ type ChannelSessionFailedHandler<TCtx> = (
   channel: ChannelContext<TCtx>,
 ) => void | Promise<void>;
 
+const CHANNEL_EVENT_COMPOSITION_KIND = "eve:channel-event-composition";
+
+/** Ordering policy for a configured handler relative to a built-in default. */
+export type ChannelEventCompositionMode = "after-default" | "before-default" | "replace";
+
+/** A handler paired with its ordering policy relative to the built-in default. */
+export interface ChannelEventComposition<THandler> {
+  readonly handler: THandler;
+  readonly kind: typeof CHANNEL_EVENT_COMPOSITION_KIND;
+  readonly mode: ChannelEventCompositionMode;
+}
+
+/** A bare event handler or an explicitly ordered event-handler composition. */
+export type ChannelEventConfig<THandler> = THandler | ChannelEventComposition<THandler>;
+
+/** Maps an event-handler object to its configurable composition form. */
+export type ChannelEventConfigMap<TEvents> = {
+  readonly [K in keyof TEvents]?: NonNullable<TEvents[K]> extends (...args: any[]) => unknown
+    ? ChannelEventConfig<NonNullable<TEvents[K]>>
+    : never;
+};
+
+/** Marks a handler to run after and only after the built-in handler succeeds. */
+export function afterDefault<THandler extends (...args: any[]) => unknown>(
+  handler: THandler,
+): ChannelEventComposition<THandler> {
+  return channelEventComposition("after-default", handler);
+}
+
+/** Marks a handler to run before the built-in handler. */
+export function beforeDefault<THandler extends (...args: any[]) => unknown>(
+  handler: THandler,
+): ChannelEventComposition<THandler> {
+  return channelEventComposition("before-default", handler);
+}
+
+/** Marks a handler to replace the built-in handler for the same event. */
+export function replaceDefault<THandler extends (...args: any[]) => unknown>(
+  handler: THandler,
+): ChannelEventComposition<THandler> {
+  return channelEventComposition("replace", handler);
+}
+
+/**
+ * Resolves configured event handlers against built-in defaults.
+ *
+ * Bare handlers run after defaults. Composed handlers are awaited in order;
+ * if the first rejects, the second is not invoked.
+ */
+export function composeChannelEvents<TEvents extends object>(
+  defaultEvents: TEvents,
+  configuredEvents: ChannelEventConfigMap<TEvents> | undefined,
+): TEvents {
+  const merged = { ...defaultEvents };
+  if (configuredEvents === undefined) return merged;
+
+  for (const eventType of Object.keys(configuredEvents) as Array<keyof TEvents>) {
+    const entry = configuredEvents[eventType];
+    if (entry === undefined) continue;
+
+    const defaultHandler = defaultEvents[eventType];
+    const normalized = normalizeChannelEventConfig(entry);
+    const handler = normalized.handler;
+
+    if (
+      normalized.mode === "replace" ||
+      typeof defaultHandler !== "function" ||
+      typeof handler !== "function"
+    ) {
+      merged[eventType] = handler as TEvents[typeof eventType];
+      continue;
+    }
+
+    const first = normalized.mode === "before-default" ? handler : defaultHandler;
+    const second = normalized.mode === "before-default" ? defaultHandler : handler;
+    merged[eventType] = (async (...args: unknown[]) => {
+      await (first as (...innerArgs: unknown[]) => unknown)(...args);
+      await (second as (...innerArgs: unknown[]) => unknown)(...args);
+    }) as TEvents[typeof eventType];
+  }
+
+  return merged;
+}
+
+function channelEventComposition<THandler extends (...args: any[]) => unknown>(
+  mode: ChannelEventCompositionMode,
+  handler: THandler,
+): ChannelEventComposition<THandler> {
+  return { handler, kind: CHANNEL_EVENT_COMPOSITION_KIND, mode };
+}
+
+function normalizeChannelEventConfig<THandler>(
+  entry: ChannelEventConfig<THandler>,
+): ChannelEventComposition<THandler> {
+  if (isChannelEventComposition(entry)) return entry;
+  return {
+    handler: entry,
+    kind: CHANNEL_EVENT_COMPOSITION_KIND,
+    mode: "after-default",
+  };
+}
+
+function isChannelEventComposition<THandler>(
+  value: ChannelEventConfig<THandler>,
+): value is ChannelEventComposition<THandler> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === CHANNEL_EVENT_COMPOSITION_KIND
+  );
+}
+
 /**
  * Optional handlers keyed by session lifecycle event name. Each handler receives
  * the event `data`, the {@link ChannelContext}, and a {@link SessionContext}

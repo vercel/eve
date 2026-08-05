@@ -38,6 +38,25 @@ The eve channel is the framework's default HTTP session API, the routes the term
 
 When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel declares route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and a `send` call inside a handler to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel hand-off, channel metadata, continuation tokens, and file uploads.
 
+## Compose built-in channel events
+
+Built-in channels can provide default event handlers for delivery, progress, or setup behavior. A bare handler in a channel's `events` map runs after the corresponding default and both handlers are awaited in order. Use the helpers from `eve/channels` when you need different behavior:
+
+```ts
+import { beforeDefault, replaceDefault } from "eve/channels";
+
+const events = {
+  "turn.started": beforeDefault(async (event, channel, ctx) => {
+    // Run before the built-in handler.
+  }),
+  "message.completed": replaceDefault(async (event, channel, ctx) => {
+    // Take full ownership; the built-in handler will not run.
+  }),
+};
+```
+
+`afterDefault(handler)` is the explicit equivalent of a bare handler. If the first composed handler throws or rejects, the second does not run.
+
 ## Relationship to the Chat SDK
 
 eve uses the Chat SDK's **card-builder components** (Cards, Buttons, Actions, etc.) for composing rich Slack messages. When you build a card with the [Slack channel](./slack), the underlying primitives come from the Chat SDK and get converted to Slack Block Kit at post time.

@@ -102,6 +102,37 @@ The CI hooks expose normalized `action`, `status`, `conclusion`, `app.slug`, `he
 
 When a turn starts, the channel adds an `eyes` reaction to the triggering comment (turn this off with `progress: { reactions: false }`). The reply comes back as a comment, on the timeline or in the review thread, and splits across multiple comments when it runs long. If the turn fails, you get a short error comment carrying an error id.
 
+### Custom event handlers
+
+GitHub owns default event handlers for native side effects: `turn.started` reacts and checks out the repository, `message.completed` posts the final reply, and `turn.failed`/`session.failed` post error comments. A bare handler in `events` runs after the matching default, so status customization does not accidentally disable checkout or replies:
+
+```ts title="agent/channels/github.ts"
+import { githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  events: {
+    async "turn.started"(_event, channel) {
+      await channel.thread.post("Starting deeper triage.");
+    },
+  },
+});
+```
+
+Use `beforeDefault(handler)` to run first, or `replaceDefault(handler)` when you intentionally want to take over the built-in side effect:
+
+```ts title="agent/channels/github.ts"
+import { replaceDefault } from "eve/channels";
+import { githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  events: {
+    "message.completed": replaceDefault(async (event, channel) => {
+      if (event.message) await channel.thread.post(`Custom reply:\n\n${event.message}`);
+    }),
+  },
+});
+```
+
 ### Human-in-the-loop (HITL)
 
 GitHub comments have no interactive button or card affordance. A human-in-the-loop (HITL) `input.requested` event is posted as a comment prompt, and the user's reply comment maps back to the pending input request. Declare an `events["input.requested"]` handler to customize the prompt.
