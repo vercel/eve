@@ -381,7 +381,7 @@ eve-buzz-acp-adapter install ./path/to/eve-app
 eve-buzz-acp-adapter install https://agent.example.com
 \`\`\`
 
-The installer validates the target, discovers its authored model, and registers an **eve** custom harness with Buzz. Reopen Buzz, then create or edit an agent:
+The installer registers **eve** as a custom harness with Buzz. Reopen Buzz, then create or edit an agent:
 
 1. Enter an **Agent name** and, optionally, **Agent instructions** for Buzz-specific behavior.
 2. Under **AI configuration**, choose **Customize for this agent**.
