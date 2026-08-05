@@ -4,20 +4,22 @@ import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#harness/handles/stor
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 
-const { dispatchSessionMock } = vi.hoisted(() => ({
-  dispatchSessionMock: vi.fn(),
+const { cancelRunMock, getWorldMock } = vi.hoisted(() => ({
+  cancelRunMock: vi.fn(),
+  getWorldMock: vi.fn(),
 }));
 
-vi.mock("./workflow-runtime.js", () => ({
-  createWorkflowRuntime: vi.fn(() => ({
-    dispatchSession: dispatchSessionMock,
-  })),
+vi.mock("#internal/workflow/runtime.js", () => ({
+  cancelRun: cancelRunMock,
+  getWorld: getWorldMock,
 }));
 
 describe("terminateChildSessionsStep", () => {
   beforeEach(() => {
-    dispatchSessionMock.mockReset();
-    dispatchSessionMock.mockResolvedValue({ status: "accepted" });
+    cancelRunMock.mockReset();
+    cancelRunMock.mockResolvedValue(undefined);
+    getWorldMock.mockReset();
+    getWorldMock.mockResolvedValue("world");
   });
 
   it("terminates running and parked local/self children", async () => {
@@ -30,14 +32,12 @@ describe("terminateChildSessionsStep", () => {
       sessionState: makeSessionState(handles),
     });
 
-    expect(dispatchSessionMock).toHaveBeenCalledTimes(2);
-    expect(dispatchSessionMock).toHaveBeenNthCalledWith(1, {
-      command: { kind: "reset", reason: "Parent session ended" },
-      sessionId: "session-local",
+    expect(cancelRunMock).toHaveBeenCalledTimes(2);
+    expect(cancelRunMock).toHaveBeenNthCalledWith(1, "world", "session-local", {
+      cancelReason: "Parent session ended",
     });
-    expect(dispatchSessionMock).toHaveBeenNthCalledWith(2, {
-      command: { kind: "reset", reason: "Parent session ended" },
-      sessionId: "session-self",
+    expect(cancelRunMock).toHaveBeenNthCalledWith(2, "world", "session-self", {
+      cancelReason: "Parent session ended",
     });
   });
 
@@ -49,9 +49,8 @@ describe("terminateChildSessionsStep", () => {
       ]),
     });
 
-    expect(dispatchSessionMock).toHaveBeenCalledExactlyOnceWith({
-      command: { kind: "reset", reason: "Parent session ended" },
-      sessionId: "session-local",
+    expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-local", {
+      cancelReason: "Parent session ended",
     });
   });
 
@@ -63,17 +62,16 @@ describe("terminateChildSessionsStep", () => {
       ]),
     });
 
-    expect(dispatchSessionMock).toHaveBeenCalledExactlyOnceWith({
-      command: { kind: "reset", reason: "Parent session ended" },
-      sessionId: "session-self",
+    expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-self", {
+      cancelReason: "Parent session ended",
     });
   });
 
   it("continues terminating children after one termination fails", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    dispatchSessionMock
+    cancelRunMock
       .mockRejectedValueOnce(new Error("termination unavailable"))
-      .mockResolvedValueOnce({ status: "accepted" });
+      .mockResolvedValueOnce(undefined);
 
     try {
       await expect(
@@ -85,7 +83,7 @@ describe("terminateChildSessionsStep", () => {
         }),
       ).resolves.toBeUndefined();
 
-      expect(dispatchSessionMock).toHaveBeenCalledTimes(2);
+      expect(cancelRunMock).toHaveBeenCalledTimes(2);
       expect(errorSpy).toHaveBeenCalledWith(
         "[eve:execution.terminate-child-sessions] failed to terminate child session",
         expect.objectContaining({

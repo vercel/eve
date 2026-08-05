@@ -1,7 +1,7 @@
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 
 const log = createLogger("execution.terminate-child-sessions");
 
@@ -36,10 +36,6 @@ export async function terminateChildSessionsStep(input: {
     return;
   }
 
-  const runtime = createWorkflowRuntime({
-    compiledArtifactsSource: { kind: "bundled" },
-  });
-
   for (const handle of handles) {
     if (handle.phase === "starting") {
       log.debug("skipping starting child without a session id", {
@@ -50,9 +46,8 @@ export async function terminateChildSessionsStep(input: {
       continue;
     }
     try {
-      await runtime.dispatchSession({
-        command: { kind: "reset", reason: "Parent session ended" },
-        sessionId: handle.address.sessionId,
+      await cancelRun(await getWorld(), handle.address.sessionId, {
+        cancelReason: "Parent session ended",
       });
     } catch (error) {
       logError(log, "failed to terminate child session", error, {
