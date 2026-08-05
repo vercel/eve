@@ -23,13 +23,18 @@
   },
   "files": [
     "dist",
+    "NOTICE",
     "README.md"
   ],
   "type": "module",
   "sideEffects": true,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "clean": "rm -rf dist",
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs .",
     "test": "pnpm run test:unit",
     "test:unit": "vitest run --config vitest.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
