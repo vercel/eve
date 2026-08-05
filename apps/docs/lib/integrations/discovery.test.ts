@@ -39,7 +39,10 @@ describe("integration discovery", () => {
     const markdown = integrationMarkdown(buzz!);
     expect(markdown).toContain("npm install --global @eve/buzz-acp-adapter");
     expect(markdown).toContain("eve-buzz-acp-adapter install");
+    expect(markdown).toContain("Customize for this agent");
+    expect(markdown).toContain("Agent harness** to **eve");
     expect(markdown).toContain("Respond to** set to **Owner only");
+    expect(markdown).toContain("rerun the installer");
     expect(markdown).toContain("--allow-shared-principal");
     expect(integrationSearchText(buzz!)).toContain("acp");
   });
