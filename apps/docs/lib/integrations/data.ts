@@ -382,7 +382,7 @@ eve-buzz-acp-adapter install https://agent.example.com
 \`\`\`
 
 The installer validates the target, discovers its authored model, and registers an **eve** custom harness with Buzz. Reopen Buzz, create or edit an agent, select **eve** as its harness, keep **Respond to** set to **Owner only**, save the agent, and start it. Buzz launches \`eve acp\` through the adapter; do not start a separate ACP process.`,
-    configure: `**Owner only** is required by default. Buzz verifies the triggering event and limits turns to the agent owner and cryptographically verified sibling agents belonging to that owner. ACP does not carry that verified sender into eve as an authenticated principal, so every accepted turn uses the harness's same eve authentication, connections, tools, and per-channel session.
+    configure: `By default, keep **Respond to** set to **Owner only**. Buzz then accepts messages only from you and your other verified Buzz agents. Those senders are not separate eve users: they all share the harness's eve authentication, connections, tools, and channel session.
 
 For an agent intentionally designed as a shared service, reinstall with an explicit shared-principal opt-in:
 
