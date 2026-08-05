@@ -26,6 +26,18 @@ describe("Buzz harness definition", () => {
     expect(JSON.stringify(definition)).not.toMatch(/PRIVATE|TOKEN|AUTH/i);
   });
 
+  it("records an explicit shared-principal opt-in", () => {
+    expect(
+      buildHarnessDefinition({
+        allowSharedPrincipal: true,
+        buzzCli: "buzz",
+        cliPath: "/connector.js",
+        modelId: "model",
+        nodePath: "/node",
+      }).env,
+    ).toMatchObject({ EVE_BUZZ_ALLOW_SHARED_PRINCIPAL: "1" });
+  });
+
   it("pins a local application directory", () => {
     expect(
       buildHarnessDefinition({

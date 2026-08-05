@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { addReplySinkInstruction, parseBuzzRoute } from "./buzz-context.js";
-import { eveChildEnvironment } from "./environment.js";
+import { assertSafeBuzzAuthorGate, eveChildEnvironment } from "./environment.js";
 import { readJsonLines } from "./line-reader.js";
 import { fixedModelResult, isFixedModelRequest } from "./model.js";
 import { publishBuzzReply } from "./publisher.js";
@@ -48,6 +48,7 @@ export interface ProxyOptions {
 const keyForId = (id: JsonRpcMessage["id"]): string => `${typeof id}:${String(id)}`;
 
 export async function runProxy(options: ProxyOptions): Promise<void> {
+  assertSafeBuzzAuthorGate(options.environment);
   const spawnProcess: SpawnAcpProcess =
     options.spawnProcess ??
     ((command, args, spawnOptions) =>

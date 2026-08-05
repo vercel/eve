@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPrompter, WizardCancelledError } from "eve/setup";
+import { SHARED_PRINCIPAL_OPT_IN } from "./environment.js";
 import { readEveTargetInfo, resolveBundledEveBin } from "./eve-target.js";
 import {
   buildHarnessDefinition,
@@ -32,6 +33,7 @@ interface CliOptions {
   buzzCli: string;
   harnessDirectory?: string;
   modelId?: string;
+  allowSharedPrincipal: boolean;
   yes: boolean;
 }
 
@@ -87,10 +89,13 @@ async function main(): Promise<void> {
     }
   }
 
+  const environment = options.allowSharedPrincipal
+    ? { ...process.env, [SHARED_PRINCIPAL_OPT_IN]: "1" }
+    : process.env;
   const proxyOptions: Parameters<typeof runProxy>[0] = {
     buzzCli: options.buzzCli,
     cwd: explicitTarget?.kind === "local" ? explicitTarget.directory : cwd,
-    environment: process.env,
+    environment,
     eveBin: options.eveBin,
     input: process.stdin,
     output: process.stdout,
@@ -129,6 +134,11 @@ async function runInstall(
   prompter?.log.info(`Authored model: ${info.modelId}`);
   prompter?.log.info(`Target: ${target.kind === "remote" ? target.url : target.directory}`);
   prompter?.log.info(`Buzz CLI: ${options.buzzCli}`);
+  prompter?.log.info(
+    options.allowSharedPrincipal
+      ? "Author gate: shared eve authentication explicitly enabled"
+      : "Author gate: Buzz Respond to must remain Owner only",
+  );
   prompter?.log.info(`Harness: ${join(directory, "eve-buzz-acp-adapter.json")}`);
 
   const confirmOptions: Parameters<typeof confirmInstall>[0] = {
@@ -148,15 +158,21 @@ async function runInstall(
     nodePath: process.execPath,
   };
   if (vercelScope) harnessOptions.vercelScope = vercelScope;
+  if (options.allowSharedPrincipal) harnessOptions.allowSharedPrincipal = true;
   if (target.kind === "remote") harnessOptions.target = target.url;
   else harnessOptions.appDirectory = target.directory;
   const path = await installHarness(directory, buildHarnessDefinition(harnessOptions));
 
+  const authorGateNotice = options.allowSharedPrincipal
+    ? "Shared-principal mode is enabled: every sender accepted by Buzz will use the same eve authentication and connections."
+    : "Keep the Buzz agent's Respond to setting on Owner only.";
   if (prompter) {
     prompter.log.success(`Installed the Buzz harness at ${path}`);
+    prompter.log.info(authorGateNotice);
     prompter.outro("Reopen Buzz, then select eve as the agent harness.");
   } else {
     console.log(`Installed the eve Buzz harness at ${path}`);
+    console.log(authorGateNotice);
     console.log("Reopen Buzz, then select eve as the agent harness.");
   }
 }
@@ -186,13 +202,14 @@ function parseArguments(arguments_: string[]): CliOptions {
   let buzzCli = process.env.BUZZ_CLI || defaultBuzzCli();
   let harnessDirectory: string | undefined;
   let modelId: string | undefined;
+  let allowSharedPrincipal = false;
   let yes = false;
 
   const argumentsCopy = [...arguments_];
   if (["install", "uninstall", "doctor"].includes(argumentsCopy[0] ?? "")) {
     command = argumentsCopy.shift() as CliOptions["command"];
   } else if (["help", "--help", "-h"].includes(argumentsCopy[0] ?? "")) {
-    return { command: "help", eveBin, buzzCli, yes };
+    return { command: "help", eveBin, buzzCli, allowSharedPrincipal, yes };
   }
 
   while (argumentsCopy.length > 0) {
@@ -206,13 +223,14 @@ function parseArguments(arguments_: string[]): CliOptions {
       if (target !== undefined) throw new Error("Specify only one target");
       target = requiredValue(argument, argumentsCopy.shift());
       targetKind = argument === "--local" ? "local" : "remote";
-    } else if (argument === "--yes" || argument === "-y") yes = true;
+    } else if (argument === "--allow-shared-principal") allowSharedPrincipal = true;
+    else if (argument === "--yes" || argument === "-y") yes = true;
     else if (argument.startsWith("-")) throw new Error(`Unknown option: ${argument}`);
     else if (target === undefined) target = argument;
     else throw new Error(`Unexpected argument: ${argument}`);
   }
 
-  const options: CliOptions = { command, eveBin, buzzCli, yes };
+  const options: CliOptions = { command, eveBin, buzzCli, allowSharedPrincipal, yes };
   if (target) options.target = target;
   if (targetKind) options.targetKind = targetKind;
   if (harnessDirectory) options.harnessDirectory = harnessDirectory;
@@ -243,6 +261,8 @@ Running install without a target starts the interactive setup flow.
 Options:
   --local <directory>    local eve application directory
   --url <url>            deployed eve application URL
+  --allow-shared-principal
+                         allow accepted Buzz senders to share eve authentication
   -y, --yes              confirm a non-interactive install
   --eve-bin <path>       eve executable to launch
   --buzz-cli <path>      Buzz CLI executable

@@ -1,6 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { SHARED_PRINCIPAL_OPT_IN } from "./environment.js";
 
 export interface HarnessDefinition {
   id: string;
@@ -20,6 +21,7 @@ export function buildHarnessDefinition(options: {
   target?: string;
   appDirectory?: string;
   vercelScope?: string;
+  allowSharedPrincipal?: boolean;
 }): HarnessDefinition {
   const env: Record<string, string> = {
     BUZZ_CLI: options.buzzCli,
@@ -27,6 +29,7 @@ export function buildHarnessDefinition(options: {
   };
   if (options.appDirectory) env.EVE_APP_DIR = options.appDirectory;
   if (options.vercelScope) env.EVE_VERCEL_SCOPE = options.vercelScope;
+  if (options.allowSharedPrincipal) env[SHARED_PRINCIPAL_OPT_IN] = "1";
   return {
     id: "eve-buzz-acp-adapter",
     label: "eve",

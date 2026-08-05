@@ -4,6 +4,25 @@ import { describe, expect, it, vi } from "vitest";
 import { runProxy } from "./proxy.js";
 
 describe("Buzz ACP proxy lifecycle", () => {
+  it("rejects a shared author gate before spawning eve", async () => {
+    const spawnProcess = vi.fn();
+
+    await expect(
+      runProxy({
+        buzzCli: "buzz",
+        cwd: "/workspace",
+        environment: { BUZZ_ACP_RESPOND_TO: "anyone" },
+        eveBin: "/eve",
+        input: new PassThrough(),
+        output: new PassThrough(),
+        publicationStateDirectory: "/unused",
+        publishTimeoutMs: 1_000,
+        spawnProcess,
+      }),
+    ).rejects.toThrow("--allow-shared-principal");
+    expect(spawnProcess).not.toHaveBeenCalled();
+  });
+
   it("closes and settles its input reader when eve exits first", async () => {
     const input = new PassThrough();
     const stdin = new PassThrough();
@@ -19,7 +38,7 @@ describe("Buzz ACP proxy lifecycle", () => {
     const result = runProxy({
       buzzCli: "buzz",
       cwd: "/workspace",
-      environment: {},
+      environment: { BUZZ_ACP_RESPOND_TO: "owner-only" },
       eveBin: "/eve",
       input,
       output: new PassThrough(),
