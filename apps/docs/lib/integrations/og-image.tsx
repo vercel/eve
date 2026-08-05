@@ -216,7 +216,7 @@ export const createIntegrationOgImage = async (
             color: "white",
             display: "flex",
             height: 132,
-            justifyContent: "center",
+            justifyContent: "flex-end",
             width: 240,
           }}
         >
@@ -241,7 +241,7 @@ export const createIntegrationOgImage = async (
             alignItems: "center",
             display: "flex",
             height: 132,
-            justifyContent: "center",
+            justifyContent: "flex-start",
             width: 240,
           }}
         >
