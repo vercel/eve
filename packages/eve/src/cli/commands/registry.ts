@@ -8,14 +8,14 @@ import {
 import { createCliTheme, sanitizeForTerminal } from "#cli/ui/output.js";
 import { clipVisible, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 import semver from "#compiled/semver/index.js";
-import { z } from "#compiled/zod/index.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { isEveProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import { hasInteractiveTerminal, NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
-import { RegistryPackageComponentSchema, runRegistryPackage } from "./registry-package.js";
+import { eveMetadataFromRegistryItem } from "./registry-metadata.js";
+import { runRegistryPackage } from "./registry-package.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
 
@@ -143,33 +143,6 @@ export async function installOfficialRegistryItem(
     cwd: appRoot,
     overwrite: options.overwrite,
   });
-}
-
-const RegistrySetupSchema = z.object({
-  package: z.string().min(1),
-  bin: z.string().min(1),
-  args: z.array(z.string()).default([]),
-});
-
-const EveRegistryItemMetadataSchema = z.object({
-  meta: z
-    .object({
-      eve: z
-        .object({
-          requires: z.string().optional(),
-          setup: z
-            .union([RegistrySetupSchema, z.array(RegistrySetupSchema).min(1)])
-            .transform((setup) => (Array.isArray(setup) ? setup : [setup]))
-            .optional(),
-          components: z.array(RegistryPackageComponentSchema).min(1).optional(),
-        })
-        .optional(),
-    })
-    .optional(),
-});
-
-function eveMetadataFromRegistryItem(item: unknown) {
-  return EveRegistryItemMetadataSchema.parse(item).meta?.eve;
 }
 
 function setupResumeCommand(item: string): string {
