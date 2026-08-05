@@ -14,14 +14,14 @@
           "components": [
             {
               "item": "channel/linear-agent",
-              "label": "Linear Agent",
-              "description": "Receive delegated issues and Agent Sessions",
+              "label": "Linear Channel",
+              "description": "Interact with your eve agent natively in Linear",
               "default": true
             },
             {
               "item": "connection/linear",
-              "label": "Linear tools",
-              "description": "Search and update issues, projects, cycles, and comments",
+              "label": "Linear MCP",
+              "description": "Use the Linear MCP",
               "default": true
             }
           ]

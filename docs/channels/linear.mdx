@@ -14,7 +14,7 @@ Run the registry setup from the agent directory:
 eve add linear
 ```
 
-Select **Linear Agent** in the component checklist. **Linear tools** is also selected by default if you want the agent to search and update Linear through MCP. Run `eve add channel/linear-agent` instead to install only the channel directly.
+Select **Linear Channel** in the component checklist. **Linear MCP** is also selected by default if you want the agent to search and update Linear through MCP. Run `eve add channel/linear-agent` instead to install only the channel directly.
 
 The flow checks that the Vercel CLI is authenticated, creates or links a Vercel project when needed, reuses a compatible existing connector when available or provisions an app-scoped Linear Connect client, and replaces its default trigger with `/eve/v1/linear`. It then installs `@vercel/connect` and writes `agent/channels/linear.ts` with the connector UID.
 

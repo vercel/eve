@@ -193,14 +193,14 @@ describe("registry commands", () => {
               components: [
                 {
                   item: "channel/linear-agent",
-                  label: "Linear Agent",
-                  description: "Receive delegated issues and Agent Sessions",
+                  label: "Linear Channel",
+                  description: "Interact with your eve agent natively in Linear",
                   default: true,
                 },
                 {
                   item: "connection/linear",
-                  label: "Linear tools",
-                  description: "Search and update Linear issues",
+                  label: "Linear MCP",
+                  description: "Use the Linear MCP",
                   default: true,
                 },
               ],
@@ -258,8 +258,8 @@ describe("registry commands", () => {
         meta: {
           eve: {
             components: [
-              { item: "channel/linear-agent", label: "Linear Agent", default: true },
-              { item: "connection/linear", label: "Linear tools", default: true },
+              { item: "channel/linear-agent", label: "Linear Channel", default: true },
+              { item: "connection/linear", label: "Linear MCP", default: true },
             ],
           },
         },
@@ -298,8 +298,8 @@ describe("registry commands", () => {
           meta: {
             eve: {
               components: [
-                { item: "channel/linear-agent", label: "Linear Agent", default: true },
-                { item: "connection/linear", label: "Linear tools", default: true },
+                { item: "channel/linear-agent", label: "Linear Channel", default: true },
+                { item: "connection/linear", label: "Linear MCP", default: true },
               ],
             },
           },
@@ -335,8 +335,8 @@ describe("registry commands", () => {
           meta: {
             eve: {
               components: [
-                { item: "channel/linear-agent", label: "Linear Agent", default: true },
-                { item: "connection/linear", label: "Linear tools", default: true },
+                { item: "channel/linear-agent", label: "Linear Channel", default: true },
+                { item: "connection/linear", label: "Linear MCP", default: true },
               ],
             },
           },

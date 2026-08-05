@@ -18,7 +18,7 @@ eve add instrumentation/braintrust
 
 Extensions may create a mount under `agent/extensions/`. Connections write their initial definition under `agent/connections/` and install `@vercel/connect` when required. Instrumentation providers write `agent/instrumentation.ts`; because an agent has one instrumentation file, compose multiple exporters there by hand. Configure generated files and required environment variables before running your agent.
 
-Some integrations package several independently installable components. For example, `eve add linear` lets you choose the Linear Agent channel, Linear tools, or both; both are selected by default. The specific `eve add channel/linear-agent` and `eve add connection/linear` commands remain available.
+Some integrations package several independently installable components. For example, `eve add linear` lets you choose the Linear Channel, Linear MCP, or both; both are selected by default. The specific `eve add channel/linear-agent` and `eve add connection/linear` commands remain available.
 
 When an official item declares an interactive setup flow or flows, eve asks whether to run them after installation and runs multiple flows in declaration order. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later; it reruns the selected components' declared flows from the beginning.
 
