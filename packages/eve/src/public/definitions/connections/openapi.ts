@@ -6,7 +6,7 @@ import type {
 import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
-import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import { connectionDefinitionKey, stampDefinitionKey } from "#public/tool-result-narrowing.js";
 
 /**
  * The OpenAPI document backing the connection: either an HTTPS URL the
@@ -116,10 +116,10 @@ export function defineOpenAPIConnection(
   if (definition.auth !== undefined && typeof definition.auth !== "function") {
     definition.auth = normalizeAuthorizationSpec(definition.auth, "defineOpenAPIConnection:");
   }
-  const definitionKey =
-    definition.baseUrl ??
-    (typeof definition.spec === "string" ? definition.spec : definition.description);
-  stampDefinitionKey(definition, `connection:${definitionKey}`);
+  stampDefinitionKey(
+    definition,
+    connectionDefinitionKey(definition.baseUrl ?? "", definition.description),
+  );
   stampConnectionProtocol(definition, "openapi");
   return definition;
 }

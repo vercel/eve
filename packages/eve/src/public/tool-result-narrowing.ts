@@ -1,6 +1,16 @@
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { McpClientConnectionDefinition } from "#public/definitions/connections/mcp.js";
+import type { OpenAPIConnectionDefinition } from "#public/definitions/connections/openapi.js";
 import type { ToolDefinition } from "#public/definitions/tool.js";
+
+/**
+ * Connection definitions {@link toolResultFrom} can narrow against. Both
+ * wire protocols match by the qualified tool name (`<connection>__<op>`),
+ * so narrowing is protocol-agnostic.
+ */
+export type NarrowableConnectionDefinition =
+  | McpClientConnectionDefinition
+  | OpenAPIConnectionDefinition;
 
 /**
  * Narrowed tool result returned by {@link toolResultFrom} when the
@@ -16,12 +26,12 @@ export interface MatchedToolResult<TOutput> {
 
 /**
  * Narrowed tool result returned by {@link toolResultFrom} when the
- * action result matches an MCP connection.
+ * action result matches an MCP or OpenAPI connection.
  *
- * `output` stays `unknown` because MCP tool schemas are remote.
- * `connectionToolName` is the unqualified MCP tool name (e.g.
- * `"list_issues"`) while `toolName` is the full qualified name
- * (e.g. `"linear__list_issues"`).
+ * `output` stays `unknown` because connection tool/operation schemas are
+ * not known statically. `connectionToolName` is the unqualified tool or
+ * operation name (e.g. `"list_issues"`) while `toolName` is the full
+ * qualified name (e.g. `"linear__list_issues"`).
  */
 export interface MatchedConnectionResult {
   readonly callId: string;
@@ -78,6 +88,24 @@ const definitionSourceRegistry = registryContainer[REGISTRY_SYMBOL];
  */
 export function stampDefinitionKey(definition: object, key: string): void {
   Object.defineProperty(definition, DEFINITION_KEY, { configurable: true, value: key });
+}
+
+/**
+ * Builds the authoring-time fallback identity for a connection.
+ *
+ * The `define*` factory stamps this on the authored object and the
+ * resolver registers the same string, so `toolResultFrom` can match a
+ * connection passed as a module export even across module instances,
+ * where the source-derived key never reached the caller's copy.
+ *
+ * The `description` is folded in so two connections on the same host
+ * (e.g. Jira and Confluence on one Atlassian domain) get distinct
+ * fallback identities instead of colliding on `connection:<host>`. The
+ * NUL separator keeps `(url, description)` unambiguous. Two connections
+ * identical in both url and description remain genuinely ambiguous.
+ */
+export function connectionDefinitionKey(url: string, description: string): string {
+  return `connection:${url}\u0000${description}`;
 }
 
 /**
@@ -142,7 +170,7 @@ export interface ToolResultFromFn {
 
   (
     result: RuntimeActionResult,
-    connection: McpClientConnectionDefinition,
+    connection: NarrowableConnectionDefinition,
   ): MatchedConnectionResult | undefined;
 }
 
@@ -150,9 +178,9 @@ export interface ToolResultFromFn {
  * Narrows a {@link RuntimeActionResult} to a typed tool or connection
  * result by matching against an authored definition object.
  *
- * Pass a `ToolDefinition` to get a typed `output`; pass a
- * `McpClientConnectionDefinition` to match any tool from that
- * connection (`output` stays `unknown`).
+ * Pass a `ToolDefinition` to get a typed `output`; pass an MCP or
+ * OpenAPI connection definition to match any tool from that connection
+ * (`output` stays `unknown`).
  *
  * Returns `undefined` when the result doesn't match, or when
  * `isError` is `true`.
@@ -165,11 +193,11 @@ function toolResultFromImpl<TInput, TOutput>(
 ): MatchedToolResult<TOutput> | undefined;
 function toolResultFromImpl(
   result: RuntimeActionResult,
-  connection: McpClientConnectionDefinition,
+  connection: NarrowableConnectionDefinition,
 ): MatchedConnectionResult | undefined;
 function toolResultFromImpl(
   result: RuntimeActionResult,
-  source: ToolDefinition<unknown, unknown> | McpClientConnectionDefinition,
+  source: ToolDefinition<unknown, unknown> | NarrowableConnectionDefinition,
 ): MatchedToolResult<unknown> | MatchedConnectionResult | undefined {
   if (result.kind !== "tool-result") return undefined;
   if (result.isError === true) return undefined;
