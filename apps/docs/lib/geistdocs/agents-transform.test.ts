@@ -38,11 +38,13 @@ describe("transformAgentsMarkdown", () => {
   it("adds concise canonical template discovery entries", () => {
     const output = transformAgentsMarkdown(input, {
       origin: "https://eve.dev",
-      templates: [{ slug: "chat", title: "Chat", description: "A persisted chat agent." }],
+      templates: [
+        { slug: "chat", title: "Chat agent template", description: "A persisted chat agent." },
+      ],
     });
 
     expect(output).toContain(
-      "- [Chat template](https://eve.dev/templates/chat): A persisted chat agent.",
+      "- [Chat agent template](https://eve.dev/templates/chat): A persisted chat agent.",
     );
   });
 

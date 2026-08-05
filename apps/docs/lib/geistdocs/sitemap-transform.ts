@@ -48,7 +48,7 @@ export const transformSitemapMarkdown = (
 
   const templateLines = templates.map(
     (template) =>
-      `- [${template.title} template](/templates/${template.slug}) | Type: Example | Summary: ${template.description} | Canonical: /templates/${template.slug}`,
+      `- [${template.title}](/templates/${template.slug}) | Type: Example | Summary: ${template.description} | Canonical: /templates/${template.slug}`,
   );
 
   return `${transformed.trimEnd()}\n\n## Templates\n\n${templateLines.join("\n")}\n`;

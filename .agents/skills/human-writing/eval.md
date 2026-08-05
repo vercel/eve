@@ -26,6 +26,14 @@ Run this checklist internally after editing, detecting, or drafting. Treat every
 4. Are robotic rhythm, fake-profound endings, redundant conclusions, decorative formatting, and punctuation crutches corrected where appropriate?
 5. Were intentional constructions and required house-style choices preserved?
 
+## Technical documentation
+
+1. Does the page have a clear audience and goal, use established terminology, and stay focused on one job?
+2. Are technical claims and code examples accurate, current, and supported by the code or an authoritative source?
+3. Does the page use a neutral instructional voice, descriptive sentence-case headings, and formatting that supports scanning?
+4. Are code examples minimal, explained, language-tagged, and consistent with repository conventions?
+5. For a review, does each finding include a concise, clickable `file:line` location?
+
 ## Response contract
 
 1. For an edit, is the full edited draft present, followed by a short **What changed** section unless the user requested clean copy only?

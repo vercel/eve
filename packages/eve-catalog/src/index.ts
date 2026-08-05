@@ -122,7 +122,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "github",
     name: "GitHub",
     kind: "channel",
-    tagline: "Drive your agent from issues, pull requests, and comments.",
+    tagline:
+      "Drive your agent from issues, pull requests, and comments, with guided Connect setup.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {

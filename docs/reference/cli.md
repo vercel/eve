@@ -87,6 +87,7 @@ Commands for installing and discovering [shadcn registry](https://ui.shadcn.com/
 
 ```bash
 eve add extension/agent-browser
+eve add linear
 eve add channel/slack --skip-install
 eve add https://example.com/r/my-extension.json --overwrite
 eve registry add @acme=https://example.com/r/{name}.json
@@ -97,7 +98,9 @@ eve registry view @acme/my-extension
 eve add @acme/my-extension
 ```
 
-`eve add` asks before running setup declared by an official item and prints the matching `eve add <item> --skip-install` command when setup is skipped or cancelled. `--skip-install` reruns setup without reinstalling the item.
+`eve add` asks before running setup declared by an official item and runs multiple declared flows in declaration order. Product-level packages can offer independently installable components: `eve add linear` lets you select the Linear Channel, Linear MCP, or both, with both selected by default. `--yes` installs a package's default components.
+
+When setup is skipped or cancelled, eve prints the matching `eve add <item> --skip-install` command. `--skip-install` reruns the selected components' declared flows from the beginning without reinstalling them.
 
 `eve registry add` records configured sources in `package.json#registries`. `eve registry list` aggregates the official catalog and all configured sources by default. `eve registry search` also includes [skills.sh](https://skills.sh), available without configuration at `@skills`, and groups results by source with each source's available result count. Search returns up to 10 matches per source by default; pass `--limit <count>` to request between 1 and 100. Either command can browse one supplied URL or namespace. Official and other universal items with explicit file targets do not require shadcn project configuration.
 
@@ -254,9 +257,13 @@ eve traces ls              # list traces, most recent first
 eve traces ls --json       # emit machine-readable trace summaries
 eve traces                 # show the most recent span tree
 eve traces <trace>         # show one span tree
+eve traces --verbose       # expand every span with all attributes and events
+eve traces --json          # dump the full trace as JSON
 ```
 
 Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed segments are skipped without hiding valid spans from the same trace.
+
+Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `ai.toolCall` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
 
 A subagent keeps its own session id but records into the trace its parent had open at dispatch, so delegated work appears under the session that caused it, tagged with `agent.root.session.id`. Either session id resolves to that trace. A remote agent traces under its own deployment and is not recorded here.
 

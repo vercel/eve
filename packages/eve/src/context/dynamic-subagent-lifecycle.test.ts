@@ -22,6 +22,7 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
+      persistentSessions: false,
       resolvers: [resolver],
     });
 
@@ -41,6 +42,7 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
+      persistentSessions: false,
       resolvers: [resolver],
     });
 
@@ -75,6 +77,7 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
+      persistentSessions: false,
       resolvers: [resolver],
     });
     expect(buildDynamicSubagentTools(ctx)).toHaveLength(1);
@@ -83,6 +86,7 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
       messages: [],
+      persistentSessions: false,
       resolvers: [resolver],
     });
     expect(buildDynamicSubagentTools(ctx)).toEqual([]);
@@ -114,6 +118,7 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
+      persistentSessions: false,
       resolvers: [resolver],
     });
     const sessionSelection = getDynamicSubagentSelection(ctx, resolver.nodeId);
@@ -126,6 +131,7 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
       messages: [],
+      persistentSessions: false,
       resolvers: [resolver],
     });
     const turnSelection = getDynamicSubagentSelection(ctx, resolver.nodeId);
@@ -167,6 +173,7 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
+      persistentSessions: true,
       resolvers: [resolver],
     });
 
@@ -183,6 +190,11 @@ describe("dynamic subagent lifecycle", () => {
     ]);
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toMatchObject({
       kind: "remote",
+      prepared: {
+        inputSchema: {
+          properties: { agentId: expect.any(Object) },
+        },
+      },
       remoteAgent: {
         credentialsStepId: "eve:dynamic-remote-agent//researcher",
         forwardPrincipal: true,
@@ -207,6 +219,7 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
+      persistentSessions: false,
       resolvers: [resolver],
     });
 
@@ -226,6 +239,7 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
+      persistentSessions: false,
       resolvers: [resolver],
       runtimeRevision: "deployment:one",
     });
@@ -233,6 +247,7 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
+      persistentSessions: false,
       resolvers: [resolver],
       runtimeRevision: "deployment:one",
     });

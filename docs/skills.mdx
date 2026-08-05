@@ -40,6 +40,8 @@ When the task is novel or ambiguous, gather evidence first, then answer with the
 key facts and the remaining uncertainty.
 ```
 
+eve reads `description`, optional `license`, and string `metadata`; other `SKILL.md` frontmatter is accepted as a no-op.
+
 When markdown can't express what you need (typed values, generated content, or inline sibling files), author the skill in TypeScript with `defineSkill` from `eve/skills`:
 
 ```ts title="agent/skills/research.ts"

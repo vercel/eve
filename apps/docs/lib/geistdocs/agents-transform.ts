@@ -50,7 +50,7 @@ export const transformAgentsMarkdown = (
 
   const templateLines = templates.map(
     (template) =>
-      `- [${escapeMarkdown(`${template.title} template`)}](${origin}/templates/${template.slug}): ${template.description}`,
+      `- [${escapeMarkdown(template.title)}](${origin}/templates/${template.slug}): ${template.description}`,
   );
 
   return `${corrected.trimEnd()}\n\n## Templates\n\n${templateLines.join("\n")}\n`;

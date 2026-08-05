@@ -139,6 +139,7 @@ type LinearSessionFailedHandler = (
 export interface LinearChannelEvents {
   readonly "turn.started"?: LinearEventHandler<"turn.started">;
   readonly "actions.requested"?: LinearEventHandler<"actions.requested">;
+  readonly "action.partial"?: LinearEventHandler<"action.partial">;
   readonly "action.result"?: LinearEventHandler<"action.result">;
   readonly "message.completed"?: LinearEventHandler<"message.completed">;
   readonly "message.appended"?: LinearEventHandler<"message.appended">;

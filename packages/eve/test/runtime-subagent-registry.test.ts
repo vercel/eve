@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { RuntimeRegistryError } from "../src/internal/runtime-registry.js";
-import { createRuntimeSubagentRegistry } from "../src/runtime/subagents/registry.js";
+import {
+  createRuntimeSubagentRegistry,
+  PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA,
+} from "../src/runtime/subagents/registry.js";
 import type { ResolvedRuntimeSubagentNode } from "../src/runtime/types.js";
 
 const SUBAGENT_TOOL_INPUT_SCHEMA = {
@@ -18,6 +21,15 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
 } as const;
 
 describe("createRuntimeSubagentRegistry", () => {
+  it("accepts null as an omitted persistent agentId", () => {
+    expect(
+      PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA.parse({
+        agentId: null,
+        message: "Investigate this",
+      }),
+    ).toEqual({ agentId: null, message: "Investigate this" });
+  });
+
   it("lowers local subagent inputs into serializable model-visible tools with a uniform messaging schema", () => {
     const registry = createRuntimeSubagentRegistry({
       subagents: [

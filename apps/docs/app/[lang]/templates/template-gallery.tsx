@@ -20,7 +20,11 @@ import {
   normalizeSearchQuery,
 } from "@/lib/analytics/events";
 import { templatePath } from "@/lib/geistdocs/canonical";
-import type { TemplateCategory, TemplateEntry, TemplateIntegration } from "@/lib/templates/data";
+import type {
+  TemplateCategory,
+  TemplateIntegration,
+  TemplateManifestEntry,
+} from "@/lib/templates/manifest";
 import { integrationIcons } from "./integration-icons";
 
 const ALL = "all" as const;
@@ -28,8 +32,13 @@ const ALL = "all" as const;
 type FilterValue<T extends string> = typeof ALL | T;
 
 interface TemplateGalleryProps {
-  entries: TemplateEntry[];
+  entries: TemplateGalleryEntry[];
 }
+
+type TemplateGalleryEntry = Pick<
+  TemplateManifestEntry,
+  "category" | "description" | "integrations" | "slug" | "title"
+>;
 
 interface FilterSelectProps<T extends string> {
   allLabel: string;
@@ -77,7 +86,13 @@ const FilterOption = ({ label, value }: { label: string; value: string }) => (
   </DropdownMenuRadioItem>
 );
 
-const TemplateCard = ({ entry, onSelect }: { entry: TemplateEntry; onSelect: () => void }) => (
+const TemplateCard = ({
+  entry,
+  onSelect,
+}: {
+  entry: TemplateGalleryEntry;
+  onSelect: () => void;
+}) => (
   <li>
     <Link
       className="flex min-h-36 flex-col rounded-lg border border-gray-alpha-400 bg-background-100 p-4 no-underline outline-none transition-colors hover:border-gray-alpha-500 hover:bg-gray-alpha-100 focus-visible:border-gray-alpha-600 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"

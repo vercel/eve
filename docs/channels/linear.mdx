@@ -11,10 +11,12 @@ The Linear channel uses Linear's Agent Session surface rather than ordinary comm
 Run the registry setup from the agent directory:
 
 ```bash
-eve add channel/linear-agent
+eve add linear
 ```
 
-The flow checks that the Vercel CLI is authenticated, creates or links a Vercel project when needed, provisions an app-scoped Linear Connect client, and replaces its default trigger with `/eve/v1/linear`. It then installs `@vercel/connect` and writes `agent/channels/linear.ts` with the connector UID.
+Select **Linear Channel** in the component checklist. **Linear MCP** is also selected by default if you want the agent to search and update Linear through MCP. Run `eve add channel/linear-agent` instead to install only the channel directly.
+
+The flow checks that the Vercel CLI is authenticated, creates or links a Vercel project when needed, reuses a compatible existing connector when available or provisions an app-scoped Linear Connect client, and replaces its default trigger with `/eve/v1/linear`. It then installs `@vercel/connect` and writes `agent/channels/linear.ts` with the connector UID.
 
 Vercel Connect creates the Linear app with the `app:assignable` and `app:mentionable` scopes required for Agent Sessions, receives and verifies `AgentSessionEvent` webhooks, and forwards them to the deployed agent. After deploying, open the Linear app in the Connect dashboard and install it in the workspace where you want to delegate work. Then delegate an issue or mention the agent in a Linear Agent Session.
 

@@ -17,7 +17,11 @@ import { defineInstrumentation } from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { defineTool, experimental_workflow } from "#public/definitions/tool.js";
+import {
+  defineTool,
+  experimental_workflow,
+  type ToolDefinition,
+} from "#public/definitions/tool.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
@@ -42,6 +46,21 @@ describe("definition helper exact inputs", () => {
     expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
     expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
+  });
+
+  it("accepts async-generator tool executors", () => {
+    const streamedTool = defineTool({
+      description: "Stream report progress.",
+      inputSchema: { type: "object" },
+      async *execute() {
+        yield { phase: "collecting" };
+        yield { phase: "complete" };
+      },
+    });
+
+    expectTypeOf(streamedTool).toMatchTypeOf<
+      ToolDefinition<Record<string, unknown>, { phase: string }>
+    >();
   });
 
   it("keeps the public hook event map aligned with runtime stream events", () => {

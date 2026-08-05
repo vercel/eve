@@ -6,9 +6,6 @@
  * agent handle store and is never inferred from an error code.
  */
 
-/** Error code for a requested agent id that is not registered. */
-export const AGENT_UNKNOWN = "AGENT_UNKNOWN";
-
 /** Error code for an agent id invoked through the wrong subagent tool. */
 export const AGENT_MISMATCH = "AGENT_MISMATCH";
 

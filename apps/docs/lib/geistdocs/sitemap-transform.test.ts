@@ -5,7 +5,9 @@ const transform = (markdown: string) =>
   transformSitemapMarkdown(markdown, {
     resolveTitle: (title, url) =>
       title === "Overview" && url === "/docs/channels/overview" ? "Channels" : title,
-    templates: [{ slug: "chat", title: "Chat", description: "A persisted chat agent." }],
+    templates: [
+      { slug: "chat", title: "Chat agent template", description: "A persisted chat agent." },
+    ],
   });
 
 describe("transformSitemapMarkdown", () => {
@@ -33,7 +35,7 @@ describe("transformSitemapMarkdown", () => {
     const output = transform("# Documentation Sitemap");
 
     expect(output).toContain(
-      "- [Chat template](/templates/chat) | Type: Example | Summary: A persisted chat agent. | Canonical: /templates/chat",
+      "- [Chat agent template](/templates/chat) | Type: Example | Summary: A persisted chat agent. | Canonical: /templates/chat",
     );
   });
 });

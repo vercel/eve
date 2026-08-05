@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyticsEvents,
   countMarkdownSuggestions,
+  getAnalyticsPathname,
   getAskAiContext,
   getCountBucket,
   getDocsSurface,
@@ -67,6 +68,13 @@ describe("docs analytics", () => {
     expect(normalizeSearchQuery("  Durable   Agents  ")).toBe("durable agents");
     expect(normalizeSearchQuery("ＡＧＥＮＴ")).toBe("agent");
     expect(normalizeSearchQuery("a".repeat(200))).toHaveLength(120);
+  });
+
+  it("records a bounded pathname without query data or fragments", () => {
+    expect(getAnalyticsPathname("https://eve.dev/docs/env-vars.md?token=secret#section")).toBe(
+      "/docs/env-vars.md",
+    );
+    expect(getAnalyticsPathname(`/docs/${"a".repeat(300)}.md`)).toHaveLength(255);
   });
 
   it.each([

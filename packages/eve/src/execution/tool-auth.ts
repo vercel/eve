@@ -35,6 +35,7 @@ import {
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import { isAsyncIterable } from "#shared/async-iterable.js";
 
 /**
  * Wraps one authored tool's `execute` with a context that supports inline
@@ -54,28 +55,50 @@ import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 export function createToolExecuteWithAuth(input: {
   readonly scope: string;
   readonly execute: (toolInput: unknown, ctx: unknown) => unknown;
-}): (toolInput: unknown, options: ToolExecuteOptions) => Promise<unknown> {
+}): (toolInput: unknown, options: ToolExecuteOptions) => Promise<unknown> | AsyncIterable<unknown> {
   const { scope, execute } = input;
 
-  return async (toolInput: unknown, options: ToolExecuteOptions): Promise<unknown> => {
+  // An async wrapper would turn an async generator into Promise<AsyncIterable>,
+  // which the AI SDK treats as one non-serializable terminal output.
+  return (
+    toolInput: unknown,
+    options: ToolExecuteOptions,
+  ): Promise<unknown> | AsyncIterable<unknown> => {
     const justAuthorizedScopes = new Set<string>();
+    const ctx = buildToolContext({
+      inlineAuthState: {},
+      justAuthorizedScopes,
+      options,
+      scope,
+    });
 
     try {
-      return await execute(
-        toolInput,
-        buildToolContext({
-          inlineAuthState: {},
-          justAuthorizedScopes,
-          options,
-          scope,
-        }),
-      );
-    } catch (err) {
-      if (isToolAuthorizationRequiredError(err)) {
-        return await handleAuthorizationRequests(err.requests);
+      const output = execute(toolInput, ctx);
+      if (isAsyncIterable(output)) {
+        return handleToolIterableErrors(output);
       }
+      return Promise.resolve(output).catch(handleToolError);
+    } catch (err) {
+      return handleToolError(err);
+    }
 
-      throw err;
+    async function handleToolError(error: unknown): Promise<unknown> {
+      if (isToolAuthorizationRequiredError(error)) {
+        return await handleAuthorizationRequests(error.requests);
+      }
+      throw error;
+    }
+
+    async function* handleToolIterableErrors(
+      output: AsyncIterable<unknown>,
+    ): AsyncIterable<unknown> {
+      try {
+        for await (const value of output) {
+          yield value;
+        }
+      } catch (error) {
+        yield await handleToolError(error);
+      }
     }
   };
 }

@@ -4,7 +4,7 @@ import { resolveDocsPageTitle } from "@/lib/geistdocs/page-title";
 import { transformSitemapMarkdown } from "@/lib/geistdocs/sitemap-transform";
 import { geistdocsSource } from "@/lib/geistdocs/source";
 import { integrationSource } from "@/lib/integrations/source";
-import { templateEntries } from "@/lib/templates/data";
+import { templateManifest } from "@/lib/templates/manifest";
 
 export const revalidate = false;
 export const dynamic = "error";
@@ -20,7 +20,7 @@ const sitemapRoute = createSitemapMarkdownRoute({
           pageUrl: url,
           tree: geistdocsSource.source.getPageTree(lang),
         }) ?? title,
-      templates: templateEntries,
+      templates: templateManifest,
     }),
 });
 

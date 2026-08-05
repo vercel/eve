@@ -125,6 +125,8 @@ export type EveAuthorizationPart = {
  * `"output-available"`, `"output-error"` (`errorText` set), or `"output-denied"`
  * (`approval.approved` is `false`). Which of `input`, `output`, `errorText`, and
  * `approval` are present depends on `state`, so narrow on `state` before reading them.
+ * Preliminary generator output uses `"output-available"` with `partial: true`;
+ * the terminal tool result clears that flag.
  * `toolName` and `toolMetadata.eve` ({@link EveMessageToolMetadata}) record call identity.
  */
 export type EveDynamicToolPart = {
@@ -182,6 +184,7 @@ export type EveDynamicToolPart = {
       readonly errorText?: never;
       readonly input: unknown;
       readonly output: unknown;
+      readonly partial?: true;
       readonly state: "output-available";
     }
   | {

@@ -21,6 +21,7 @@ import { getAgentHandleStore } from "#harness/handles/store.js";
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { setPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -1071,6 +1072,205 @@ describe("turnStep", () => {
     expect(createExecutionNodeStep).toHaveBeenCalledWith(
       expect.objectContaining({ node: effectiveNode }),
     );
+  });
+
+  it("carries a settled turn through the typed park action when no work remains pending", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: stepSession,
+        settledTurn: { output: "settled answer" },
+      });
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "hello" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "park",
+      settled: { output: "settled answer" },
+    });
+  });
+
+  it("reports each settled turn's usage as a delta, not the cumulative session totals", async () => {
+    const usageStateAfterTurn = (
+      totals: Readonly<Record<string, number>>,
+    ): Record<string, unknown> => ({
+      "eve.harness.turnUsage": {
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0,
+        sawCost: false,
+        inputTokens: 0,
+        outputTokens: 0,
+        session: {
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          sawCost: false,
+          ...totals,
+        },
+        turnId: "turn_usage",
+      },
+    });
+
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: {
+          ...stepSession,
+          state: {
+            ...stepSession.state,
+            ...usageStateAfterTurn({ inputTokens: 100, outputTokens: 40 }),
+          },
+        },
+        settledTurn: { output: "first answer" },
+      });
+    });
+
+    const first = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "hello" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(first).toMatchObject({
+      action: "park",
+      settled: {
+        output: "first answer",
+        usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 40 },
+      },
+    });
+    if (first.action !== "park") throw new Error("expected park");
+
+    // Second turn: session totals are cumulative (150/60), but the settled
+    // answer must only report what this turn added (50/20).
+    const firstSession = first.sessionState.snapshot?.session as HarnessSession;
+    installSessionStoreMocks([firstSession]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: {
+          ...stepSession,
+          state: {
+            ...stepSession.state,
+            ...usageStateAfterTurn({ inputTokens: 150, outputTokens: 60 }),
+          },
+        },
+        settledTurn: { output: "second answer" },
+      });
+    });
+
+    const second = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "again" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: first.sessionState,
+    });
+
+    expect(second).toMatchObject({
+      action: "park",
+      settled: {
+        output: "second answer",
+        usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 50, outputTokens: 20 },
+      },
+    });
+  });
+
+  it.each([
+    {
+      name: "authorization",
+      withPending: (session: HarnessSession): HarnessSession => ({
+        ...session,
+        state: setPendingAuthorization(session.state, {
+          challenges: [
+            {
+              challenge: {
+                instructions: "Sign in to continue",
+                url: "https://idp.example/authorize",
+              },
+              hookUrl: "https://app.example/callback",
+              name: "statuspage",
+            },
+          ],
+        }),
+      }),
+    },
+    {
+      name: "input batch",
+      withPending: (session: HarnessSession): HarnessSession =>
+        setPendingInputBatch({
+          requests: [
+            {
+              action: {
+                callId: "call-input",
+                input: {},
+                kind: "tool-call",
+                toolName: "confirm",
+              },
+              kind: "question",
+              prompt: "Continue?",
+              requestId: "request-input",
+            },
+          ],
+          responseMessages: [],
+          session,
+        }),
+    },
+    {
+      name: "runtime action",
+      withPending: (session: HarnessSession): HarnessSession =>
+        setPendingRuntimeActionBatch({
+          actions: [
+            {
+              callId: "call-runtime",
+              input: {},
+              kind: "tool-call",
+              toolName: "runtime-tool",
+            },
+          ],
+          event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+          responseMessages: [],
+          session,
+        }),
+    },
+  ])("does not attach settled output while a $name remains pending", async ({ withPending }) => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: withPending(stepSession),
+        settledTurn: { output: "must stay gated" },
+      });
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "hello" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result.action).toBe("park");
+    if (result.action === "park") {
+      expect(result.settled).toBeUndefined();
+    }
   });
 
   it("reads the durable session from normalized turn-step input", async () => {

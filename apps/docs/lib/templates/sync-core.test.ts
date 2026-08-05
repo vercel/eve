@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { TemplateGitHubSource } from "./manifest";
-import {
-  commitUrl,
-  contentsUrl,
-  decodeContentsResponse,
-  languageForPath,
-  sortTemplateFiles,
-} from "./sync-core";
+import { commitUrl, languageForPath, rawContentsUrl, sortTemplateFiles } from "./sync-core";
 
 const source: TemplateGitHubSource = {
   owner: "vercel-labs",
@@ -36,10 +30,10 @@ describe("commitUrl", () => {
   });
 });
 
-describe("contentsUrl", () => {
-  it("pins the file to the resolved sha", () => {
-    expect(contentsUrl(source, "abc123", "agent/agent.ts")).toBe(
-      "https://api.github.com/repos/vercel-labs/eve-chat-template/contents/agent/agent.ts?ref=abc123",
+describe("rawContentsUrl", () => {
+  it("pins the raw file to the resolved sha", () => {
+    expect(rawContentsUrl(source, "abc123", "agent/agent.ts")).toBe(
+      "https://raw.githubusercontent.com/vercel-labs/eve-chat-template/abc123/agent/agent.ts",
     );
   });
 
@@ -50,32 +44,8 @@ describe("contentsUrl", () => {
       ref: "main",
       pathPrefix: "apps/fixtures/weather-agent",
     };
-    expect(contentsUrl(monorepo, "abc123", "agent/agent.ts")).toBe(
-      "https://api.github.com/repos/vercel/eve/contents/apps/fixtures/weather-agent/agent/agent.ts?ref=abc123",
-    );
-  });
-});
-
-describe("decodeContentsResponse", () => {
-  it("decodes base64 content with embedded newlines", () => {
-    const contents = 'import { defineAgent } from "eve";\n\nexport default defineAgent({});\n';
-    const base64 = Buffer.from(contents, "utf8").toString("base64");
-    const wrapped = `${base64.slice(0, 20)}\n${base64.slice(20)}\n`;
-
-    expect(
-      decodeContentsResponse("agent/agent.ts", { content: wrapped, encoding: "base64" }),
-    ).toEqual({ contents, language: "typescript", relativePath: "agent/agent.ts" });
-  });
-
-  it("throws for files above the contents API 1 MB limit", () => {
-    expect(() =>
-      decodeContentsResponse("agent/huge.ts", { content: "", encoding: "none", size: 2_000_000 }),
-    ).toThrow(/1 MB limit/);
-  });
-
-  it("throws for non-base64 responses", () => {
-    expect(() => decodeContentsResponse("agent/agent.ts", { encoding: "utf8" })).toThrow(
-      /Unexpected contents API response/,
+    expect(rawContentsUrl(monorepo, "abc123", "agent/agent.ts")).toBe(
+      "https://raw.githubusercontent.com/vercel/eve/abc123/apps/fixtures/weather-agent/agent/agent.ts",
     );
   });
 });

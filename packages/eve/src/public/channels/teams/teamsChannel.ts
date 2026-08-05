@@ -165,6 +165,7 @@ type TeamsSessionFailedHandler = (
 export interface TeamsChannelEvents {
   readonly "turn.started"?: TeamsEventHandler<"turn.started">;
   readonly "actions.requested"?: TeamsEventHandler<"actions.requested">;
+  readonly "action.partial"?: TeamsEventHandler<"action.partial">;
   readonly "action.result"?: TeamsEventHandler<"action.result">;
   readonly "message.completed"?: TeamsEventHandler<"message.completed">;
   readonly "message.appended"?: TeamsEventHandler<"message.appended">;

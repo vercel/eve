@@ -11,6 +11,7 @@ import {
   type StartOperation,
 } from "#harness/handles/store.js";
 import {
+  abandonRunningAgentTurns,
   confirmAgentStarted,
   prepareAgentContinuation,
   prepareAgentStart,
@@ -267,6 +268,23 @@ describe("rejectAgentEffect", () => {
   it("ignores unknown operations", () => {
     const parked = parkedSession();
     expect(rejectAgentEffect(parked, { disposition: "dead", operationId: "op_gone" })).toBe(parked);
+  });
+});
+
+describe("abandonRunningAgentTurns", () => {
+  it("parks a running handle as cancelled so it stays resumable", () => {
+    const abandoned = abandonRunningAgentTurns(runningSession());
+    expect(handlesOf(abandoned)).toEqual([
+      { address, identity, lastStatus: "(cancelled)", phase: "parked" },
+    ]);
+  });
+
+  it("returns the session unchanged when nothing is running", () => {
+    const parked = parkedSession();
+    expect(abandonRunningAgentTurns(parked)).toBe(parked);
+
+    const empty = createSession();
+    expect(abandonRunningAgentTurns(empty)).toBe(empty);
   });
 });
 

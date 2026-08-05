@@ -23,6 +23,22 @@ Use when the user asks to audit, scan, flag, or judge whether a draft reads like
 
 Use when the user asks for new prose. Follow the supplied brief, audience, format, tone, and writing samples. Do not manufacture personal opinions, feelings, stories, humor, or first-person experience merely to make the prose sound human.
 
+### Technical documentation
+
+Apply these rules when writing, editing, or reviewing eve's documentation:
+
+- Identify the audience, goal, and content type before writing. Keep each page focused on one job and read nearby docs for established terminology and structure.
+- Verify behavior against the code or an authoritative source. Never invent examples, measurements, implementation details, or citations to make prose more specific.
+- Use a neutral, instructional voice. Address the reader as `you`, use imperative verbs for steps, and do not add personal reactions, humor, tangents, or first-person experience.
+- Prefer active voice, present tense, concrete verbs, and consistent terms. Do not describe a reader's task as `easy`, `simple`, or `quick`.
+- Open with a short summary of what the page helps the reader do. Use sentence case and descriptive headings, focused paragraphs, and lists when they improve scanning.
+- Define unfamiliar terms and spell out acronyms on first use. Use inline code for paths and identifiers, and reserve bold for user interface elements or critical facts.
+- Prefer TypeScript examples unless the subject is language-agnostic. Add a language tag, explain each example, and keep it minimal, runnable, and consistent with the current API.
+- Use descriptive link text and placeholders such as `your_access_token_here`. Avoid bare URLs, `here`, `<TOKEN>`, and unexplained values.
+- For review-only requests, group concise findings by file and include a clickable `file:line` location. If a file passes, report `✓ pass`.
+
+Follow repository conventions when they conflict with these rules.
+
 ## Protect the writer
 
 - Preserve the meaning, facts, nuance, uncertainty, and intent.

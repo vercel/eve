@@ -4,12 +4,20 @@ import { EVE_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
+import { agentTurnOutcomeSchema, type AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import type { JsonValue } from "#shared/json.js";
 import { tokenUsageSchema, type TokenUsage } from "#shared/token-usage.js";
 
 export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
 
 const HANDLED_METHODS: readonly ChannelMethod[] = ["POST"];
+
+const ZERO_TOKEN_USAGE: TokenUsage = {
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+};
 
 /**
  * Wire payload of the child→parent callback route. Possession of the
@@ -38,15 +46,16 @@ type SessionCallbackPayload =
   | {
       readonly callId: string;
       readonly kind: "turn.completed";
+      readonly outcome: AgentTurnOutcome;
       readonly output: JsonValue;
       readonly sessionId?: string;
       readonly subagentName: string;
-      readonly usage?: TokenUsage;
     }
   | {
       readonly callId: string;
       readonly error: JsonValue;
       readonly kind: "turn.failed";
+      readonly outcome: AgentTurnOutcome;
       readonly sessionId?: string;
       readonly subagentName: string;
     };
@@ -121,50 +130,107 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
   if (typeof payload.subagentName !== "string" || payload.subagentName.length === 0) {
     return Response.json({ error: "Missing callback subagentName.", ok: false }, { status: 400 });
   }
-  if (payload.kind === "session.completed" || payload.kind === "turn.completed") {
+  // Task-session terminal callbacks carry no outcome envelope on the wire;
+  // this boundary synthesizes the terminal verdict (a task session always
+  // ends with its result) so the parent settles from an explicit outcome.
+  if (payload.kind === "session.completed") {
+    const output = payload.output ?? "";
+    const usage = parseCallbackUsage((payload as { usage?: unknown }).usage);
     const base: RuntimeSubagentChildResult = {
       callId: payload.callId,
       kind: "subagent-result",
       origin: "child",
-      output: payload.output ?? "",
+      outcome: {
+        kind: "terminal",
+        result: { kind: "succeeded", output },
+        usageDelta: usage ?? ZERO_TOKEN_USAGE,
+      },
+      output,
       subagentName: payload.subagentName,
     };
-    const usage = parseCallbackUsage((payload as { usage?: unknown }).usage);
     return usage === undefined ? base : { ...base, usage };
   }
 
   if (payload.kind === "session.failed") {
+    const error: JsonValue =
+      payload.error === undefined
+        ? {
+            code: REMOTE_AGENT_FAILED,
+            message: "Remote agent failed.",
+          }
+        : payload.error;
+    const usage = parseCallbackUsage((payload as { usage?: unknown }).usage);
     return {
       callId: payload.callId,
       isError: true,
       kind: "subagent-result",
       origin: "child",
-      output:
-        payload.error === undefined
-          ? {
-              code: REMOTE_AGENT_FAILED,
-              message: "Remote agent failed.",
-            }
-          : payload.error,
+      outcome: {
+        kind: "terminal",
+        result: { error, kind: "failed" },
+        usageDelta: usage ?? ZERO_TOKEN_USAGE,
+      },
+      output: error,
       subagentName: payload.subagentName,
     };
+  }
+
+  if (payload.kind === "turn.completed") {
+    const outcome = parseCallbackOutcome((payload as { outcome?: unknown }).outcome);
+    if (outcome instanceof Response) {
+      return outcome;
+    }
+    const result: RuntimeSubagentChildResult = {
+      callId: payload.callId,
+      kind: "subagent-result",
+      origin: "child",
+      outcome,
+      output: payload.output ?? "",
+      subagentName: payload.subagentName,
+      // Per-result usage projection (usage spans); the parent folds
+      // `outcome.usageDelta`, never this field, when an outcome is present.
+      usage: outcome.usageDelta,
+    };
+    return result;
   }
 
   if (payload.kind === "turn.failed") {
     if (payload.error === undefined) {
       return Response.json({ error: "Missing callback error.", ok: false }, { status: 400 });
     }
+    const outcome = parseCallbackOutcome((payload as { outcome?: unknown }).outcome);
+    if (outcome instanceof Response) {
+      return outcome;
+    }
     return {
       callId: payload.callId,
       isError: true,
       kind: "subagent-result",
       origin: "child",
+      outcome,
       output: payload.error,
       subagentName: payload.subagentName,
     };
   }
 
   return Response.json({ error: "Unsupported callback kind.", ok: false }, { status: 400 });
+}
+
+/**
+ * Turn callbacks must carry the explicit {@link AgentTurnOutcome} envelope:
+ * the receiving parent settles the child's handle from `outcome.kind`, so
+ * a turn callback that cannot state its lifecycle is rejected rather than
+ * guessed at (pre-1.0: no wire compatibility shims).
+ */
+function parseCallbackOutcome(value: unknown): AgentTurnOutcome | Response {
+  const parsed = agentTurnOutcomeSchema.safeParse(value);
+  if (!parsed.success) {
+    return Response.json(
+      { error: "Missing or invalid callback outcome.", ok: false },
+      { status: 400 },
+    );
+  }
+  return parsed.data;
 }
 
 /**

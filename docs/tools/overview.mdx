@@ -28,9 +28,33 @@ A tool definition needs:
 - a filename slug under `agent/tools/`, the model-facing name.
 - a `description`: what the tool does, written for the model.
 - an `inputSchema`: a Zod schema (or any Standard Schema, or a plain JSON Schema object). Required. For no input, pass `z.object({})`. Zod and Standard Schema infer the `input` type in `execute`. Plain JSON Schema types it as `Record<string, unknown>`.
-- an `execute(input, ctx)`: the implementation. May be sync or async.
+- an `execute(input, ctx)`: the implementation. May be sync, async, or an async generator.
 
 When a tool returns structured data, add an optional `outputSchema`. With Zod or Standard Schema it also types the `execute` return.
+
+### Stream preliminary tool results
+
+An async generator lets a long-running tool stream complete output snapshots
+before it finishes. Each `yield` replaces the previous snapshot; the final
+yield is the normal tool result the model receives:
+
+```ts title="agent/tools/build_report.ts"
+export default defineTool({
+  description: "Build a project report.",
+  inputSchema: z.object({ project: z.string() }),
+  async *execute({ project }) {
+    yield { phase: "collecting", report: null };
+    const report = await buildReport(project);
+    yield { phase: "complete", report };
+  },
+});
+```
+
+eve publishes every earlier yield as an `action.partial` stream event. The
+snapshot is visible to channels, hooks, and clients but never enters model
+history or `toModelOutput`; only the final yield does. Treat snapshots as
+last-write-wins by tool call id, not append-only progress. The durable runtime
+can retry a step and replay overlapping snapshots.
 
 ### The `ctx` parameter
 
@@ -78,7 +102,7 @@ toModelOutput(output) {
 },
 ```
 
-`toModelOutput` receives the full, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
+`toModelOutput` receives the final, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
 
 Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, numbers, booleans, or `null`; convert values like `Date`, `Map`, `Set`, `NaN`, and cyclic objects before returning them from `execute` or from a `{ type: "json" }` `toModelOutput`.
 

@@ -6,19 +6,23 @@ import type {
   HookPayload,
   RunInput,
   SessionCapabilities,
+  TurnCaller,
 } from "#channel/types.js";
-import { coalesceDeliveries } from "#harness/messages.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
-import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
+import {
+  notifyDelegatedParentStep,
+  notifyTurnCallerStep,
+  resolveInitialTurnCallerStep,
+} from "#execution/delegated-parent-notification.js";
 import {
   createDelegatedSubagentErrorResult,
   createDelegatedSubagentSuccessResult,
 } from "#execution/delegated-parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
@@ -28,16 +32,15 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { disposeHook } from "#execution/hook-ownership.js";
-import {
-  createSessionCommandInbox,
-  type SessionCommandInbox,
-} from "#execution/session-command-inbox.js";
+import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
+import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -66,21 +69,47 @@ type DriverLoopOutcome =
   | {
       readonly kind: "expired";
       readonly serializedContext: Record<string, unknown>;
+      readonly sessionState: DurableSessionState;
     }
   | {
       readonly kind: "result";
       readonly result: WorkflowEntryResult;
     };
 
-type NextSessionAction =
-  | { readonly kind: "clear" }
-  | { readonly kind: "compact" }
-  | {
-      readonly delivery: DeliverHookPayload | null;
-      readonly kind: "delivery";
-    }
-  | { readonly kind: "expired" }
-  | { readonly kind: "reset" };
+/**
+ * Write-through cell owned by {@link workflowEntry}: written
+ * unconditionally by the driver loop as turns advance, read only by the
+ * outer catch. When the loop throws, its locals are unreachable, so this
+ * cell is the crash path's only view of values that changed after turn 1.
+ *
+ * Reach for this cell only when all three hold for a value:
+ * 1. it is produced or replaced inside the driver loop, so the entry
+ *    function's own locals go stale;
+ * 2. it travels by value inside Workflow step results — there is no
+ *    store the catch could re-read it from at crash time;
+ * 3. the crash path needs its latest value to discharge a cleanup
+ *    obligation.
+ * If any of the three fails, read the value from where it already lives
+ * instead of mirroring it here.
+ */
+interface CrashCleanupState {
+  // The caller whose awaited reply is still unsettled, so the catch can
+  // reject it with the error instead of leaving it parked forever.
+  // Populated for every session; only conversation-mode paths read it.
+  caller: TurnCaller | undefined;
+  // Whether `resolveInitialTurnCallerStep` has run. `caller: undefined` is
+  // ambiguous on its own: it also means "resolved and later cleared because
+  // its reply settled". This flag lets the crash path tell that apart from
+  // "crashed before the caller was ever resolved", where a delegated caller
+  // may still be parked on this session's reply.
+  callerResolved: boolean;
+  // The latest snapshot the driver has received, so the catch can
+  // terminate children adopted after turn 1. Honest staleness window: the
+  // driver only sees state at turn boundaries, so children dispatched by a
+  // turn that crashed mid-flight are absent from this snapshot and escape
+  // crash cleanup.
+  lastSessionState: DurableSessionState | undefined;
+}
 
 /**
  * Long-lived workflow entrypoint. Handles both root sessions and
@@ -115,6 +144,11 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   input.serializedContext["eve.sessionId"] = sessionId;
 
   const driverWritable = getWritable<Uint8Array>();
+  const crashCleanupState: CrashCleanupState = {
+    caller: undefined,
+    callerResolved: false,
+    lastSessionState: undefined,
+  };
 
   try {
     // Derived once and reused for createSession + tag emission so the
@@ -136,6 +170,14 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       sessionId,
       subagentDepth,
     });
+    crashCleanupState.lastSessionState = sessionState;
+    // Resolved for every session so the cell's population never depends
+    // on session shape: the step returns undefined for root sessions,
+    // and every reader is mode-gated.
+    crashCleanupState.caller = await resolveInitialTurnCallerStep({
+      serializedContext: input.serializedContext,
+    });
+    crashCleanupState.callerResolved = true;
 
     const outcome = await runDriverLoop({
       capabilities,
@@ -151,6 +193,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         ],
         requestId: readChannelRequestId(input.serializedContext),
       },
+      crashCleanupState,
       mode,
       serializedContext: input.serializedContext,
       sessionState,
@@ -165,29 +208,70 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       return outcome.result;
     }
     return await finalizeExpiredSession({
+      caller: crashCleanupState.caller,
       driverWritable,
+      mode,
       serializedContext: outcome.serializedContext,
+      sessionState: outcome.sessionState,
     });
   } catch (error) {
     // Safety net for failures the tool-loop harness does not already
     // surface as `session.failed` (deserialization, runtime-action
     // throws, adapter `deliver` throws, staging errors, etc.) so the
     // channel still sees a terminal event.
+    if (crashCleanupState.lastSessionState !== undefined) {
+      await terminateChildSessionsStep({
+        sessionState: crashCleanupState.lastSessionState,
+      });
+    }
     await emitTerminalSessionFailureStep({
       error: normalizeSerializableError(error),
       parentWritable: driverWritable,
       serializedContext: input.serializedContext,
     });
-    await fireSessionCallbackStep({
-      error: normalizeSerializableError(error),
-      serializedContext: input.serializedContext,
-      status: "failed",
-    });
-    await notifyDelegatedParentStep({
-      result: createDelegatedSubagentErrorResult(input.serializedContext, error),
-      serializedContext: input.serializedContext,
-    });
+    if (mode === "task") {
+      await fireSessionCallbackStep({
+        error: normalizeSerializableError(error),
+        serializedContext: input.serializedContext,
+        status: "failed",
+      });
+      await notifyDelegatedParentStep({
+        result: createDelegatedSubagentErrorResult(input.serializedContext, error),
+        serializedContext: input.serializedContext,
+      });
+    } else {
+      await notifyTurnCallerStep({
+        caller: await resolveCallerForCrash(crashCleanupState, input.serializedContext),
+        lifecycle: "terminal",
+        sessionId,
+        settled: { isError: true, output: error },
+      });
+    }
     throw createSafeOuterWorkflowError();
+  }
+}
+
+/**
+ * Caller to reject from the crash path. Normally the resolved cell value —
+ * including `undefined` after a settled reply cleared it, when there is
+ * nothing left to notify. When the crash happened before
+ * `resolveInitialTurnCallerStep` ever ran (e.g. `createSessionStep` threw),
+ * the cell is empty even though a delegated caller may be parked on this
+ * session's reply, so the caller is re-resolved from the serialized context
+ * — which needs nothing from the failed steps. Best-effort: when resolution
+ * fails again there is no reachable caller to notify.
+ */
+async function resolveCallerForCrash(
+  state: CrashCleanupState,
+  serializedContext: Record<string, unknown>,
+): Promise<TurnCaller | undefined> {
+  if (state.callerResolved) {
+    return state.caller;
+  }
+  try {
+    return await resolveInitialTurnCallerStep({ serializedContext });
+  } catch {
+    return undefined;
   }
 }
 
@@ -201,6 +285,7 @@ async function runDriverLoop(input: {
   readonly capabilities?: SessionCapabilities;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly initialInput: HookPayload;
+  readonly crashCleanupState: CrashCleanupState;
   readonly mode: RunMode;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -268,6 +353,7 @@ async function runDriverLoop(input: {
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     });
+    input.crashCleanupState.lastSessionState = action.sessionState;
 
     while (true) {
       if (action.kind === "done") {
@@ -275,7 +361,8 @@ async function runDriverLoop(input: {
           kind: "result",
           result: await finalizeDone({
             action,
-            driverWritable: input.driverWritable,
+            caller: input.crashCleanupState.caller,
+            mode: input.mode,
           }),
         };
       }
@@ -298,6 +385,7 @@ async function runDriverLoop(input: {
           serializedContext: settled.serializedContext,
           sessionState: settled.sessionState,
         };
+        input.crashCleanupState.lastSessionState = action.sessionState;
       }
 
       // Channel-created sessions may rekey their dynamic alias. Sessions
@@ -326,80 +414,98 @@ async function runDriverLoop(input: {
           serializedContext: action.serializedContext,
           sessionState: action.sessionState,
         });
+        input.crashCleanupState.lastSessionState = action.sessionState;
         continue;
       }
 
-      const nextAction = await waitForNextSessionAction({
+      // `settled` rides the typed park arm exclusively; `run-step` preserves
+      // the full StepResult so no state-key fallback exists anymore.
+      const settled = action.settled;
+      if (action.cancelled !== true && settled !== undefined) {
+        await notifyTurnCallerStep({
+          caller: input.crashCleanupState.caller,
+          lifecycle: "parked",
+          sessionId: action.sessionState.sessionId,
+          settled,
+        });
+        input.crashCleanupState.caller = undefined;
+      } else if (action.cancelled === true) {
+        input.crashCleanupState.caller = undefined;
+      }
+
+      const next = await nextTurnDelivery({
         bufferedDeliveries,
         bufferedSessionControls,
         commandInbox,
-      });
-
-      if (nextAction.kind === "expired") {
-        return {
-          kind: "expired",
-          serializedContext: action.serializedContext,
-        };
-      }
-
-      if (nextAction.kind === "reset") {
-        return { kind: "result", result: { output: "" } };
-      }
-
-      if (nextAction.kind === "clear" || nextAction.kind === "compact") {
-        action = await runTurn({
-          delivery: { kind: nextAction.kind },
-          serializedContext: action.serializedContext,
-          sessionState: action.sessionState,
-        });
-        continue;
-      }
-
-      const nextDeliver = nextAction.delivery;
-      if (nextDeliver === null) {
-        return { kind: "result", result: { output: "" } };
-      }
-
-      const routed = await routeDeliverToChildren({
-        auth: nextDeliver.auth,
-        parentWritable: input.driverWritable,
-        payloads: nextDeliver.payloads,
+        driverWritable: input.driverWritable,
         sessionState: action.sessionState,
       });
 
-      if (routed.kind === "cancel-turn") {
+      if (next.kind === "expired") {
+        return {
+          kind: "expired",
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        };
+      }
+
+      if (next.kind === "reset") {
+        await terminateChildSessionsStep({ sessionState: action.sessionState });
+        return { kind: "result", result: { output: "" } };
+      }
+
+      if (next.kind === "clear" || next.kind === "compact") {
+        action = await runTurn({
+          delivery: { kind: next.kind },
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
+        input.crashCleanupState.lastSessionState = action.sessionState;
+        continue;
+      }
+
+      if (next.kind === "closed") {
+        return { kind: "result", result: { output: "" } };
+      }
+
+      if (next.kind === "cancel-turn") {
         await cancelDescendantTurnsStep({
           serializedContext: action.serializedContext,
           sessionState: action.sessionState,
         });
-        const settled = await settleCancelledTurnStep({
+        const cancelled = await settleCancelledTurnStep({
           parentWritable: input.driverWritable,
           serializedContext: action.serializedContext,
           sessionState: action.sessionState,
         });
+        // Re-enter with `settled` cleared: the parked answer was already
+        // delivered to its caller before this wait, so the next iteration
+        // must not treat it as a fresh settlement.
         action = {
           ...action,
-          serializedContext: settled.serializedContext,
-          sessionState: settled.sessionState,
+          serializedContext: cancelled.serializedContext,
+          sessionState: cancelled.sessionState,
+          settled: undefined,
         };
+        input.crashCleanupState.caller = undefined;
+        input.crashCleanupState.lastSessionState = action.sessionState;
         continue;
       }
 
-      if (routed.remainder === undefined) {
-        // Fully routed to a descendant; parent has no turn to run.
-        continue;
+      if (next.deliver.caller !== undefined) {
+        input.crashCleanupState.caller = next.deliver.caller;
       }
-
       action = await runTurn({
         delivery: {
-          auth: nextDeliver.auth,
+          auth: next.deliver.auth,
           kind: "deliver",
-          payloads: [routed.remainder],
-          requestId: nextDeliver.requestId,
+          payloads: [next.remainder],
+          requestId: next.deliver.requestId,
         },
         serializedContext: action.serializedContext,
         sessionState: action.sessionState,
       });
+      input.crashCleanupState.lastSessionState = action.sessionState;
     }
   } finally {
     await disposeSettledTurnControl?.();
@@ -412,103 +518,83 @@ async function runDriverLoop(input: {
   }
 }
 
-async function waitForNextSessionAction(input: {
-  readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
-  readonly commandInbox: SessionCommandInbox;
-}): Promise<NextSessionAction> {
-  const pendingSessionControl = input.bufferedSessionControls.shift();
-  if (pendingSessionControl !== undefined) {
-    return { kind: pendingSessionControl };
-  }
-
-  if (input.bufferedDeliveries.length > 0) {
-    return {
-      delivery: coalesceDeliveries(input.bufferedDeliveries.splice(0)),
-      kind: "delivery",
-    };
-  }
-
-  while (true) {
-    const first = await input.commandInbox.next();
-    input.commandInbox.consumeNext();
-
-    if (first.done) {
-      return { delivery: null, kind: "delivery" };
-    }
-
-    if (first.value.kind === "session-timeout") {
-      return { kind: "expired" };
-    }
-
-    if (
-      first.value.kind === "clear" ||
-      first.value.kind === "compact" ||
-      first.value.kind === "reset"
-    ) {
-      return { kind: first.value.kind };
-    }
-
-    if (first.value.kind === "cancel") {
-      continue;
-    }
-
-    return { delivery: commandToDelivery(first.value), kind: "delivery" };
-  }
-}
-
-function commandToDelivery(
-  command: Extract<import("#channel/types.js").SessionCommand, { readonly kind: "send" }>,
-): DeliverHookPayload {
-  return {
-    auth: command.auth,
-    caller: command.caller,
-    kind: "deliver",
-    payloads: [command.payload],
-    requestId: command.requestId,
-  };
-}
-
 async function finalizeExpiredSession(input: {
+  readonly caller: TurnCaller | undefined;
   readonly driverWritable: WritableStream<Uint8Array>;
+  readonly mode: RunMode;
   readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
 }): Promise<WorkflowEntryResult> {
+  await terminateChildSessionsStep({
+    sessionState: input.sessionState,
+  });
   await emitTerminalSessionCompletionStep({
     parentWritable: input.driverWritable,
     serializedContext: input.serializedContext,
   });
-  await fireSessionCallbackStep({
-    output: "",
-    serializedContext: input.serializedContext,
-    status: "completed",
-  });
-  await notifyDelegatedParentStep({
-    result: createDelegatedSubagentSuccessResult(input.serializedContext, ""),
-    serializedContext: input.serializedContext,
-  });
+
+  if (input.mode === "task") {
+    await fireSessionCallbackStep({
+      output: "",
+      serializedContext: input.serializedContext,
+      status: "completed",
+    });
+    await notifyDelegatedParentStep({
+      result: createDelegatedSubagentSuccessResult(input.serializedContext, ""),
+      serializedContext: input.serializedContext,
+    });
+  } else {
+    await notifyTurnCallerStep({
+      caller: input.caller,
+      lifecycle: "terminal",
+      sessionId: input.sessionState.sessionId,
+      settled: { output: "" },
+    });
+  }
   return { output: "" };
 }
 
 async function finalizeDone(input: {
   readonly action: NextDriverAction & { readonly kind: "done" };
-  readonly driverWritable: WritableStream<Uint8Array>;
+  readonly caller: TurnCaller | undefined;
+  readonly mode: RunMode;
 }): Promise<WorkflowEntryResult> {
   const { output, serializedContext } = input.action;
   const failed = input.action.isError === true;
 
-  await fireSessionCallbackStep({
-    error: failed ? output : undefined,
-    output: failed ? undefined : output,
-    serializedContext,
-    status: failed ? "failed" : "completed",
-    usage: failed ? undefined : input.action.usage,
+  await terminateChildSessionsStep({
+    sessionState: input.action.sessionState,
   });
-  await notifyDelegatedParentStep({
-    result: failed
-      ? createDelegatedSubagentErrorResult(serializedContext, output)
-      : createDelegatedSubagentSuccessResult(serializedContext, output),
-    serializedContext,
-    usage: failed ? undefined : input.action.usage,
-  });
+  if (input.mode === "task") {
+    await fireSessionCallbackStep({
+      error: failed ? output : undefined,
+      output: failed ? undefined : output,
+      serializedContext,
+      status: failed ? "failed" : "completed",
+      usage: failed ? undefined : input.action.usage,
+    });
+    await notifyDelegatedParentStep({
+      result: failed
+        ? createDelegatedSubagentErrorResult(serializedContext, output)
+        : createDelegatedSubagentSuccessResult(serializedContext, output),
+      serializedContext,
+      usage: failed ? undefined : input.action.usage,
+    });
+  } else {
+    const settled: {
+      isError?: boolean;
+      output: unknown;
+      usage?: TokenUsage;
+    } = { output, usage: input.action.usageDelta };
+    if (failed) {
+      settled.isError = true;
+    }
+    await notifyTurnCallerStep({
+      caller: input.caller,
+      lifecycle: "terminal",
+      sessionId: input.action.sessionState.sessionId,
+      settled,
+    });
+  }
   return { output };
 }

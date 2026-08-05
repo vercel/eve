@@ -15,12 +15,19 @@ interface RegistryItem {
   files?: RegistryFile[];
   meta?: {
     eve?: {
-      setup?: {
-        command?: string;
-        package?: string;
-        bin?: string;
-        args?: string[];
-      };
+      setup?:
+        | {
+            command?: string;
+            package?: string;
+            bin?: string;
+            args?: string[];
+          }
+        | Array<{
+            command?: string;
+            package?: string;
+            bin?: string;
+            args?: string[];
+          }>;
     };
   };
 }
@@ -52,16 +59,24 @@ if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
 }
 
 for (const item of items) {
-  const setup = item.meta?.eve?.setup;
+  const declaredSetup = item.meta?.eve?.setup;
+  const setups =
+    declaredSetup === undefined
+      ? undefined
+      : Array.isArray(declaredSetup)
+        ? declaredSetup
+        : [declaredSetup];
   if (
-    setup !== undefined &&
-    (setup.command === undefined ||
-      setup.package === undefined ||
-      setup.bin === undefined ||
-      setup.args === undefined)
+    setups?.some(
+      (setup) =>
+        setup.command === undefined ||
+        setup.package === undefined ||
+        setup.bin === undefined ||
+        setup.args === undefined,
+    )
   ) {
     throw new Error(
-      `Registry item "${item.name}" setup must declare command, package, bin, and args during the migration.`,
+      `Registry item "${item.name}" setup entries must declare command, package, bin, and args.`,
     );
   }
 
@@ -73,7 +88,7 @@ for (const item of items) {
       bin: "eve",
       args: ["integration", "connect", slug, CONNECT_SERVICES[slug] ?? slug, slug],
     };
-    if (JSON.stringify(setup) !== JSON.stringify(expectedSetup)) {
+    if (JSON.stringify(setups) !== JSON.stringify([expectedSetup])) {
       throw new Error(
         `Registry item "${item.name}" must configure its Vercel Connect connector through eve.`,
       );

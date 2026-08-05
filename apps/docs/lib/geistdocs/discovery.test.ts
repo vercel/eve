@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { integrations } from "../integrations/data";
-import { templateEntries } from "../templates/data";
+import { templateManifest } from "../templates/manifest";
 import { integrationPath, templatePath } from "./canonical";
 
 describe("authoritative hub discovery paths", () => {
@@ -12,9 +12,9 @@ describe("authoritative hub discovery paths", () => {
   });
 
   it("gives every template a unique canonical child link", () => {
-    const paths = templateEntries.map(({ slug }) => templatePath(slug));
+    const paths = templateManifest.map(({ slug }) => templatePath(slug));
 
-    expect(new Set(paths).size).toBe(templateEntries.length);
+    expect(new Set(paths).size).toBe(templateManifest.length);
     expect(paths.every((path) => /^\/templates\/[^/?#]+$/.test(path))).toBe(true);
   });
 });

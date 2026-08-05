@@ -172,6 +172,11 @@ export type StepNext = StepDone | StepFn | null;
 export interface SettledTurn {
   readonly output: unknown;
   readonly isError?: boolean;
+  /**
+   * Usage this turn added to the child's session subtree. The harness never
+   * sets it; the durable turn step fills it with the per-turn delta before
+   * the answer crosses the park boundary to the delegated caller.
+   */
   readonly usage?: TokenUsage;
 }
 
@@ -283,8 +288,8 @@ export interface ToolLoopHarnessConfig {
   readonly onCompaction?: () => readonly ModelMessage[];
   /**
    * Whether the agent opted into `experimental.subagentPersistentSessions`.
-   * Gates the model-visible `<agents>` listing of parked delegated-agent
-   * handles injected into each model call.
+   * Gates delegated-agent handle tracking and the model-visible `<agents>`
+   * listing appended after runtime-action batches resolve.
    */
   readonly persistentSubagentSessions?: boolean;
   readonly dispatchDynamicModelEvent?: (input: {

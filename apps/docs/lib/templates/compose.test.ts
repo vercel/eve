@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { composeTemplateEntries, type GeneratedTemplatesInput } from "./compose";
-import generatedTemplates from "./generated/templates.json";
-import { templateManifest, type TemplateManifestEntry } from "./manifest";
+import type { TemplateManifestEntry } from "./manifest";
 
 const manifestEntry: TemplateManifestEntry = {
   slug: "example",
-  title: "Example",
+  title: "Example agent template",
   description: "An example template.",
   category: "Example",
   integrations: ["HTTP API"],
@@ -21,6 +20,7 @@ const manifestEntry: TemplateManifestEntry = {
 const generated: GeneratedTemplatesInput = {
   templates: {
     example: {
+      readme: "# Example\n\nAn example template.\n",
       sourceRevision: "0123456789abcdef0123456789abcdef01234567",
       files: [
         {
@@ -38,8 +38,12 @@ describe("composeTemplateEntries", () => {
     const [entry] = composeTemplateEntries([manifestEntry], generated);
 
     expect(entry.slug).toBe("example");
-    expect(entry.title).toBe("Example");
+    expect(entry.title).toBe("Example agent template");
     expect(entry.sourceRevision).toBe("0123456789abcdef0123456789abcdef01234567");
+    expect(entry.sourceRevisionHref).toBe(
+      "https://github.com/vercel-labs/example/tree/0123456789abcdef0123456789abcdef01234567",
+    );
+    expect(entry.readme).toBe(generated.templates.example.readme);
     expect(entry.files).toEqual(generated.templates.example.files);
     expect(entry).not.toHaveProperty("github");
   });
@@ -63,6 +67,7 @@ describe("composeTemplateEntries", () => {
     const bad: GeneratedTemplatesInput = {
       templates: {
         example: {
+          readme: "# Example\n",
           sourceRevision: "0123456789abcdef0123456789abcdef01234567",
           files: [{ contents: "{}", language: "json", relativePath: "agent/agent.ts" }],
         },
@@ -71,23 +76,13 @@ describe("composeTemplateEntries", () => {
     const jsonManifest = { ...manifestEntry, files: ["agent/agent.ts"] };
     expect(() => composeTemplateEntries([jsonManifest], bad)).toThrow(/Unknown language "json"/);
   });
-});
 
-describe("committed generated data", () => {
-  it("composes cleanly with the manifest", () => {
-    const entries = composeTemplateEntries(
-      templateManifest,
-      generatedTemplates as GeneratedTemplatesInput,
+  it("throws when generated README content is empty", () => {
+    const emptyReadme = {
+      templates: { example: { ...generated.templates.example, readme: "" } },
+    };
+    expect(() => composeTemplateEntries([manifestEntry], emptyReadme)).toThrow(
+      /Generated README is empty/,
     );
-
-    expect(entries).toHaveLength(templateManifest.length);
-    for (const entry of entries) {
-      expect(entry.sourceRevision).toMatch(/^[0-9a-f]{40}$/);
-      expect(entry.files.length).toBeGreaterThan(0);
-      for (const file of entry.files) {
-        expect(file.contents.length).toBeGreaterThan(0);
-        expect(["markdown", "typescript"]).toContain(file.language);
-      }
-    }
   });
 });

@@ -3,6 +3,7 @@ import { createMDX } from "fumadocs-mdx/next";
 import type { NextConfig } from "next";
 import {
   compatibilityRedirects,
+  defaultLanguageRedirects,
   docsRedirects,
   rootMarkdownRedirects,
 } from "./lib/geistdocs/redirects";
@@ -56,14 +57,10 @@ const config: NextConfig = {
         destination: "/docs/getting-started",
         permanent: true,
       },
-      {
-        source: "/:lang/docs",
-        destination: "/:lang/docs/getting-started",
-        permanent: true,
-      },
       ...compatibilityRedirects,
       ...docsRedirects,
       ...rootMarkdownRedirects,
+      ...defaultLanguageRedirects,
     ];
   },
 };

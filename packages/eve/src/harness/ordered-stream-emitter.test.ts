@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import {
+  createActionPartialEvent,
+  createActionResultEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
   createReasoningAppendedEvent,
@@ -30,6 +32,15 @@ function reasoning(delta: string, soFar: string) {
   return createReasoningAppendedEvent({
     reasoningDelta: delta,
     reasoningSoFar: soFar,
+    sequence: 1,
+    stepIndex: 0,
+    turnId: "turn_1",
+  });
+}
+
+function partial(callId: string, output: string) {
+  return createActionPartialEvent({
+    result: { callId, kind: "tool-result", output, toolName: "progress" },
     sequence: 1,
     stepIndex: 0,
     turnId: "turn_1",
@@ -89,6 +100,40 @@ describe("createOrderedStreamEmitter", () => {
       message("CD", "CD", 1),
       reasoning("RS", "RS"),
       completed,
+    ]);
+  });
+
+  it("keeps the newest adjacent partial for each call and preserves terminal barriers", async () => {
+    const firstWrite = deferred();
+    const events: UnstampedMessageStreamEvent[] = [];
+    const emitFn = vi.fn(async (event: UnstampedMessageStreamEvent) => {
+      events.push(event);
+      if (events.length === 1) await firstWrite.promise;
+    });
+    const emitter = createOrderedStreamEmitter(emitFn);
+    const result = createActionResultEvent({
+      result: { callId: "call_1", kind: "tool-result", output: "done", toolName: "progress" },
+      sequence: 1,
+      stepIndex: 0,
+      turnId: "turn_1",
+    });
+
+    await emitter.emit(partial("call_1", "first"));
+    await emitter.emit(partial("call_1", "second"));
+    await emitter.emit(partial("call_2", "first"));
+    await emitter.emit(partial("call_2", "second"));
+    await emitter.emit(result);
+    await emitter.emit(partial("call_1", "late"));
+
+    firstWrite.resolve();
+    await emitter.closeAndDrain();
+
+    expect(events).toEqual([
+      partial("call_1", "first"),
+      partial("call_1", "second"),
+      partial("call_2", "second"),
+      result,
+      partial("call_1", "late"),
     ]);
   });
 

@@ -148,13 +148,21 @@ export async function setupLinear(
       { force: context.force },
     );
     const dashboardUrl = "https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Open+Vercel+Connect";
-    context.ui.nextSteps([
-      "Deploy the agent, then open the Linear app in Vercel Connect and install it in the workspace where you want to delegate issues and comments.",
-      "In Linear, delegate an issue or mention the agent in an Agent Session to start a conversation.",
-    ]);
     return {
       kind: "done",
-      facts: [{ label: "Vercel Connect", value: dashboardUrl, kind: "url" }],
+      facts: [
+        { label: "Vercel Connect", value: dashboardUrl, kind: "url" },
+        {
+          label: "Next step",
+          value:
+            "Deploy the agent, then open the Linear app in Vercel Connect and install it in the workspace where you want to delegate issues and comments.",
+        },
+        {
+          label: "In Linear",
+          value:
+            "Delegate an issue or mention the agent in an Agent Session to start a conversation.",
+        },
+      ],
     };
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };

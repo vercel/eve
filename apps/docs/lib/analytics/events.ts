@@ -32,6 +32,9 @@ export const isQueryFreeUrl = (url: string): boolean => {
 export const normalizeSearchQuery = (query: string): string =>
   query.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase().slice(0, 120);
 
+export const getAnalyticsPathname = (url: string): string =>
+  new URL(url, "https://eve.dev").pathname.slice(0, 255);
+
 export const getDocsSurface = (value: unknown): DocsSurface => {
   if (typeof value !== "string") return "other";
 

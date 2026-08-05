@@ -6,6 +6,7 @@ import type {
   TurnStepInput,
   TurnStepPayload,
 } from "#execution/durable-session-migrations/turn-workflow.js";
+import type { SettledTurn } from "#harness/types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 interface TurnTransition {
@@ -19,11 +20,13 @@ type TurnTerminalAction =
       readonly kind: "done";
       readonly output: unknown;
       readonly usage?: TokenUsage;
+      readonly usageDelta?: TokenUsage;
     }
   | {
       readonly authorizationNames?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";
+      readonly settled?: SettledTurn;
     };
 
 /** Owns the mutable durable state cursor for one active turn workflow. */

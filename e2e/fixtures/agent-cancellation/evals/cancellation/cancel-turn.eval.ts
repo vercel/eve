@@ -9,8 +9,7 @@ const TOOL_NAME = "wait-for-cancellation";
  * Flow: start a turn that hangs mid-tool, request cooperative cancellation,
  * and assert the turn settles as `turn.cancelled` followed by
  * `session.waiting` with zero failure events. Then prove the session accepts a
- * follow-up normally and a late duplicate cancel reports the benign
- * `no_active_turn` outcome.
+ * follow-up normally and a late duplicate cancel is a benign no-op.
  */
 export default defineEval({
   tags: ["real-model"],
@@ -51,17 +50,12 @@ export default defineEval({
     followUp.notEvent("session.failed");
     followUp.messageIncludes(/CANCELLATION-FOLLOW-UP-OK/i);
 
-    let lateStatus: "accepted" | "no_active_turn" | undefined;
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      lateStatus = (await t.cancel()).status;
-      if (lateStatus === "no_active_turn") break;
-      await t.sleep(500);
-    }
+    const lateStatus = (await t.cancel()).status;
     await t.require(
       lateStatus,
       satisfies(
-        (value: typeof lateStatus) => value === "no_active_turn",
-        "a late cancel reports no_active_turn",
+        (value: typeof lateStatus) => value === "accepted" || value === "no_active_turn",
+        "a late cancel is accepted as a no-op or reports no_active_turn",
       ),
     );
 

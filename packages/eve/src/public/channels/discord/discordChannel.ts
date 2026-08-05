@@ -129,6 +129,7 @@ type DiscordSessionFailedHandler = (
 export interface DiscordChannelEvents {
   readonly "turn.started"?: DiscordEventHandler<"turn.started">;
   readonly "actions.requested"?: DiscordEventHandler<"actions.requested">;
+  readonly "action.partial"?: DiscordEventHandler<"action.partial">;
   readonly "action.result"?: DiscordEventHandler<"action.result">;
   readonly "message.completed"?: DiscordEventHandler<"message.completed">;
   readonly "message.appended"?: DiscordEventHandler<"message.appended">;

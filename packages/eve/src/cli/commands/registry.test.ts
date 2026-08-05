@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { WizardCancelledError } from "#setup/step.js";
 import {
   browseRegistryCatalog,
+  installRegistryItem,
   runAddCommand,
   runRegistryAddCommand,
   runRegistryListCommand,
@@ -11,6 +13,10 @@ import {
   runRegistryViewCommand,
   type RegistryCommandLogger,
 } from "./registry.js";
+import type {
+  RegistrySetupCommand,
+  RegistrySetupCommandOptions,
+} from "./registry-setup-command.js";
 
 const {
   addRegistryItems,
@@ -133,7 +139,7 @@ describe("registry commands", () => {
           type: "registry:item",
           meta: {
             eve: {
-              setup: { package: "eve", bin: "eve", args: ["integration", "setup", kind] },
+              setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", kind] }],
             },
           },
         },
@@ -166,12 +172,313 @@ describe("registry commands", () => {
     },
   );
 
+  it("lets interactive users select components from an official registry package", async () => {
+    const logger = createLogger();
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    const fake = createFakePrompter({
+      multiple: (options) => {
+        expect(options).toMatchObject({
+          message: "Add linear",
+          description: "Select what you want to add to your agent.",
+          initialValues: ["channel/linear-agent", "connection/linear"],
+        });
+        return ["connection/linear"];
+      },
+    });
+    getRegistryItems
+      .mockResolvedValueOnce([
+        {
+          meta: {
+            eve: {
+              components: [
+                {
+                  item: "channel/linear-agent",
+                  label: "Linear Channel",
+                  description: "Interact with your eve agent natively in Linear",
+                  default: true,
+                },
+                {
+                  item: "connection/linear",
+                  label: "Linear MCP",
+                  description: "Use the Linear MCP",
+                  default: true,
+                },
+              ],
+            },
+          },
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          meta: {
+            eve: {
+              setup: [
+                {
+                  package: "eve",
+                  bin: "eve",
+                  args: ["integration", "connect", "linear", "mcp.linear.app", "linear"],
+                },
+              ],
+            },
+          },
+        },
+      ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "linear",
+      { prompter: fake.prompter },
+      { hasInteractiveTerminal: () => true, loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(addRegistryItems).toHaveBeenCalledWith(
+      ["https://eve.dev/r/connection/linear.json"],
+      expect.objectContaining({ cwd: "/project" }),
+    );
+    expect(runSetupCommand).toHaveBeenCalledWith(
+      "/project",
+      expect.objectContaining({
+        args: ["integration", "connect", "linear", "mcp.linear.app", "linear"],
+      }),
+      "linear",
+      expect.objectContaining({ prompter: fake.prompter }),
+    );
+  });
+
+  it("cancels registry package component selection without reporting an error", async () => {
+    const logger = createLogger();
+    const fake = createFakePrompter({
+      multiple: () => {
+        throw new WizardCancelledError();
+      },
+    });
+    getRegistryItems.mockResolvedValueOnce([
+      {
+        meta: {
+          eve: {
+            components: [
+              { item: "channel/linear-agent", label: "Linear Channel", default: true },
+              { item: "connection/linear", label: "Linear MCP", default: true },
+            ],
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "linear",
+      { prompter: fake.prompter },
+      { hasInteractiveTerminal: () => true, loadSetupCommandRunner: vi.fn() },
+    );
+
+    expect(logger.errors).toEqual([]);
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("keeps registry package setup interactive when called from the TUI", async () => {
+    const fake = createFakePrompter({
+      multiple: () => ["channel/linear-agent", "connection/linear"],
+      single: () => "yes",
+    });
+    const runSetupCommand = vi.fn(
+      async (
+        _appRoot: string,
+        _setup: RegistrySetupCommand,
+        _item: string,
+        _options?: RegistrySetupCommandOptions,
+      ) => ({ kind: "completed" as const, output: [] }),
+    );
+    getRegistryItems
+      .mockResolvedValueOnce([
+        {
+          meta: {
+            eve: {
+              components: [
+                { item: "channel/linear-agent", label: "Linear Channel", default: true },
+                { item: "connection/linear", label: "Linear MCP", default: true },
+              ],
+            },
+          },
+        },
+      ])
+      .mockResolvedValueOnce([
+        { meta: { eve: { setup: [{ package: "eve", bin: "eve", args: ["channel-setup"] }] } } },
+        { meta: { eve: { setup: [{ package: "eve", bin: "eve", args: ["connection-setup"] }] } } },
+      ]);
+
+    await installRegistryItem(
+      "/project",
+      "linear",
+      { prompter: fake.prompter },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(fake.selectMessages).toEqual(["Add linear"]);
+    expect(runSetupCommand).toHaveBeenCalledTimes(2);
+    expect(runSetupCommand.mock.calls[0]?.[1]).toEqual({
+      package: "eve",
+      bin: "eve",
+      args: ["channel-setup"],
+    });
+  });
+
+  it("installs a registry package's default components with --yes", async () => {
+    const logger = createLogger();
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    getRegistryItems
+      .mockResolvedValueOnce([
+        {
+          meta: {
+            eve: {
+              components: [
+                { item: "channel/linear-agent", label: "Linear Channel", default: true },
+                { item: "connection/linear", label: "Linear MCP", default: true },
+              ],
+            },
+          },
+        },
+      ])
+      .mockResolvedValueOnce([
+        { meta: { eve: { setup: [{ package: "eve", bin: "eve", args: ["channel-setup"] }] } } },
+        { meta: { eve: { setup: [{ package: "eve", bin: "eve", args: ["connection-setup"] }] } } },
+      ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "linear",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(addRegistryItems).toHaveBeenCalledWith(
+      ["https://eve.dev/r/channel/linear-agent.json", "https://eve.dev/r/connection/linear.json"],
+      expect.objectContaining({ cwd: "/project" }),
+    );
+    expect(runSetupCommand).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts a legacy singular setup command", async () => {
+    const logger = createLogger();
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: {
+          eve: {
+            setup: { package: "eve", bin: "eve", args: ["integration", "setup", "web"] },
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/web",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(runSetupCommand).toHaveBeenCalledWith(
+      "/project",
+      { package: "eve", bin: "eve", args: ["integration", "setup", "web", "--yes"] },
+      "channel/web",
+      expect.objectContaining({ prompter: expect.any(Object) }),
+    );
+  });
+
+  it("runs declared setups in order after installation", async () => {
+    const logger = createLogger();
+    const prompters: unknown[] = [];
+    const runSetupCommand = vi.fn(
+      async (
+        _appRoot: string,
+        _setup: RegistrySetupCommand,
+        _item: string,
+        options?: RegistrySetupCommandOptions,
+      ) => {
+        prompters.push(options?.prompter);
+        return { kind: "completed" as const, output: [] };
+      },
+    );
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: {
+          eve: {
+            setup: [
+              { package: "eve", bin: "eve", args: ["integration", "setup", "linear-channel"] },
+              { package: "eve", bin: "eve", args: ["integration", "connect", "linear"] },
+            ],
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "integration/linear",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(runSetupCommand).toHaveBeenNthCalledWith(
+      1,
+      "/project",
+      { package: "eve", bin: "eve", args: ["integration", "setup", "linear-channel", "--yes"] },
+      "integration/linear",
+      expect.objectContaining({ prompter: expect.any(Object) }),
+    );
+    expect(runSetupCommand).toHaveBeenNthCalledWith(
+      2,
+      "/project",
+      { package: "eve", bin: "eve", args: ["integration", "connect", "linear", "--yes"] },
+      "integration/linear",
+      expect.objectContaining({ prompter: expect.any(Object) }),
+    );
+    expect(prompters[0]).toBe(prompters[1]);
+  });
+
+  it("stops declared setups when one is cancelled", async () => {
+    const logger = createLogger();
+    const runSetupCommand = vi.fn(async () => ({ kind: "cancelled" as const }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: {
+          eve: {
+            setup: [
+              { package: "eve", bin: "eve", args: ["integration", "setup", "linear-channel"] },
+              { package: "eve", bin: "eve", args: ["integration", "connect", "linear"] },
+            ],
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "integration/linear",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(runSetupCommand).toHaveBeenCalledOnce();
+    expect(logger.logs).toEqual([
+      "Setup cancelled. Run `eve add integration/linear --skip-install` when you're ready.",
+    ]);
+  });
+
   it("skips setup in non-interactive use and prints the resume command", async () => {
     const logger = createLogger();
     const runSetup = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
     getRegistryItems.mockResolvedValue([
       {
-        meta: { eve: { setup: { package: "@acme/slack", bin: "eve-slack", args: ["setup"] } } },
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
       },
     ]);
 
@@ -181,7 +488,7 @@ describe("registry commands", () => {
       "channel/slack",
       {},
       {
-        isInteractive: () => false,
+        hasInteractiveTerminal: () => false,
         loadSetupCommandRunner: async () => runSetup,
       },
     );
@@ -198,7 +505,7 @@ describe("registry commands", () => {
     const fake = createFakePrompter({ single: () => "no" });
     getRegistryItems.mockResolvedValue([
       {
-        meta: { eve: { setup: { package: "@acme/slack", bin: "eve-slack", args: ["setup"] } } },
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
       },
     ]);
 
@@ -209,7 +516,7 @@ describe("registry commands", () => {
       {},
       {
         createPrompter: () => fake.prompter,
-        isInteractive: () => true,
+        hasInteractiveTerminal: () => true,
         loadSetupCommandRunner: async () => runSetup,
       },
     );
@@ -226,7 +533,7 @@ describe("registry commands", () => {
     const runSetup = vi.fn(async () => ({ kind: "cancelled" as const }));
     getRegistryItems.mockResolvedValue([
       {
-        meta: { eve: { setup: { package: "@acme/slack", bin: "eve-slack", args: ["setup"] } } },
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
       },
     ]);
 
@@ -251,7 +558,7 @@ describe("registry commands", () => {
     const runSetup = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
     getRegistryItems.mockResolvedValue([
       {
-        meta: { eve: { setup: { package: "@acme/slack", bin: "eve-slack", args: ["setup"] } } },
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
       },
     ]);
 
@@ -348,7 +655,7 @@ describe("registry commands", () => {
         type: "registry:item",
         meta: {
           eve: {
-            setup: { package: "eve", bin: "eve", args: ["integration", "setup", "web"] },
+            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "web"] }],
           },
         },
       },
@@ -377,7 +684,7 @@ describe("registry commands", () => {
         type: "registry:item",
         meta: {
           eve: {
-            setup: { package: "shell-package", bin: "sh", args: ["-c", "echo nope"] },
+            setup: [{ package: "shell-package", bin: "sh", args: ["-c", "echo nope"] }],
           },
         },
       },
@@ -398,7 +705,7 @@ describe("registry commands", () => {
         meta: {
           eve: {
             requires: ">=0.30.0",
-            setup: { package: "eve", bin: "eve", args: ["integration", "setup", "web"] },
+            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "web"] }],
           },
         },
       },

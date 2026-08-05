@@ -1,6 +1,5 @@
-// Curation manifest for the templates gallery. To add or update a template:
-// edit this file, run `pnpm --filter eve-docs templates:sync`, and commit the
-// regenerated `generated/templates.json` alongside it.
+// Curation manifest for the templates gallery. Repository content is resolved
+// from this manifest during docs development and production builds.
 
 export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing";
 

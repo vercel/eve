@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   createDocsRedirects,
+  createIntegrationRedirects,
   createRootMarkdownRedirects,
   compatibilityRedirects,
+  defaultLanguageRedirects,
   docsRedirects,
   rootMarkdownRedirects,
 } from "./redirects";
@@ -16,8 +18,8 @@ describe("createDocsRedirects", () => {
         permanent: true,
       },
       {
-        source: "/:lang/docs/channels",
-        destination: "/:lang/docs/channels/overview",
+        source: "/en/docs/channels",
+        destination: "/docs/channels/overview",
         permanent: true,
       },
       {
@@ -26,8 +28,8 @@ describe("createDocsRedirects", () => {
         permanent: true,
       },
       {
-        source: "/:lang/docs/channels.md",
-        destination: "/:lang/docs/channels/overview.md",
+        source: "/en/docs/channels.md",
+        destination: "/docs/channels/overview.md",
         permanent: true,
       },
       {
@@ -36,8 +38,8 @@ describe("createDocsRedirects", () => {
         permanent: true,
       },
       {
-        source: "/:lang/docs/channels.mdx",
-        destination: "/:lang/docs/channels/overview.mdx",
+        source: "/en/docs/channels.mdx",
+        destination: "/docs/channels/overview.mdx",
         permanent: true,
       },
     ]);
@@ -55,6 +57,43 @@ describe("createRootMarkdownRedirects", () => {
       {
         source: "/installation.mdx",
         destination: "/docs/installation.mdx",
+        permanent: true,
+      },
+    ]);
+  });
+});
+
+describe("createIntegrationRedirects", () => {
+  it("preserves HTML and Markdown representations across default and localized paths", () => {
+    expect(createIntegrationRedirects("chat-sdk-photon", "photon")).toEqual([
+      {
+        source: "/integrations/chat-sdk-photon",
+        destination: "/integrations/photon",
+        permanent: true,
+      },
+      {
+        source: "/en/integrations/chat-sdk-photon",
+        destination: "/integrations/photon",
+        permanent: true,
+      },
+      {
+        source: "/integrations/chat-sdk-photon.md",
+        destination: "/integrations/photon.md",
+        permanent: true,
+      },
+      {
+        source: "/en/integrations/chat-sdk-photon.md",
+        destination: "/integrations/photon.md",
+        permanent: true,
+      },
+      {
+        source: "/integrations/chat-sdk-photon.mdx",
+        destination: "/integrations/photon.mdx",
+        permanent: true,
+      },
+      {
+        source: "/en/integrations/chat-sdk-photon.mdx",
+        destination: "/integrations/photon.mdx",
         permanent: true,
       },
     ]);
@@ -96,8 +135,35 @@ describe("rootMarkdownRedirects", () => {
   });
 });
 
+describe("defaultLanguageRedirects", () => {
+  it("redirects observed locale aliases directly to their canonical destination", () => {
+    expect(defaultLanguageRedirects).toEqual([
+      {
+        source: "/en/docs",
+        destination: "/docs/getting-started",
+        permanent: true,
+      },
+      {
+        source: "/en/resources",
+        destination: "/templates",
+        permanent: true,
+      },
+      {
+        source: "/en/:path*",
+        destination: "/:path*",
+        permanent: true,
+      },
+    ]);
+  });
+});
+
 describe("all redirects", () => {
-  const redirects = [...compatibilityRedirects, ...docsRedirects, ...rootMarkdownRedirects];
+  const redirects = [
+    ...compatibilityRedirects,
+    ...docsRedirects,
+    ...rootMarkdownRedirects,
+    ...defaultLanguageRedirects,
+  ];
 
   it("has no duplicate sources", () => {
     const sources = redirects.map(({ source }) => source);

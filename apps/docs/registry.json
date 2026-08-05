@@ -4,6 +4,31 @@
   "homepage": "https://eve.dev",
   "items": [
     {
+      "name": "linear",
+      "type": "registry:item",
+      "title": "Linear",
+      "description": "Receive delegated Linear work and give your agent tools for issues, projects, and comments.",
+      "meta": {
+        "eve": {
+          "requires": ">=0.30.6",
+          "components": [
+            {
+              "item": "channel/linear-agent",
+              "label": "Linear Channel",
+              "description": "Interact with your eve agent natively in Linear",
+              "default": true
+            },
+            {
+              "item": "connection/linear",
+              "label": "Linear MCP",
+              "description": "Use the Linear MCP",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "extension/agent-browser",
       "type": "registry:item",
       "title": "agent-browser",
@@ -1135,14 +1160,14 @@
           "requires": ">=0.27.8"
         }
       },
-      "dependencies": ["@vercel/connect@0.4.2"]
+      "dependencies": ["@vercel/connect@>=0.4.2"]
     },
     {
       "name": "channel/discord",
       "type": "registry:item",
       "title": "Discord",
       "description": "Connect an eve agent to Discord with guided connector and slash-command setup.",
-      "dependencies": ["@vercel/connect@0.6.0"],
+      "dependencies": ["@vercel/connect@>=0.6.0"],
       "meta": {
         "eve": {
           "setup": {
@@ -1209,19 +1234,19 @@
       "name": "channel/github",
       "type": "registry:item",
       "title": "GitHub",
-      "description": "Drive your agent from issues, pull requests, and comments.",
-      "envVars": {
-        "GITHUB_APP_ID": "",
-        "GITHUB_APP_PRIVATE_KEY": "",
-        "GITHUB_WEBHOOK_SECRET": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/github.ts",
-          "type": "registry:file",
-          "target": "agent/channels/github.ts"
+      "description": "Drive your agent from issues, pull requests, and comments, with guided Connect setup.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "github"]
+          },
+          "requires": ">=0.30.7"
         }
-      ]
+      },
+      "dependencies": ["@vercel/connect@>=0.6.0"]
     },
     {
       "name": "channel/linear-agent",
@@ -1236,7 +1261,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "linear"]
           },
-          "requires": ">=0.31.0"
+          "requires": ">=0.30.6"
         }
       },
       "dependencies": ["@vercel/connect"]
@@ -1681,7 +1706,7 @@
       "type": "registry:item",
       "title": "Photon iMessage",
       "description": "Connect an eve agent to iMessage through Photon with guided project and phone setup.",
-      "dependencies": ["@vercel/connect@0.5.0"],
+      "dependencies": ["@vercel/connect@>=0.5.0"],
       "meta": {
         "eve": {
           "setup": {

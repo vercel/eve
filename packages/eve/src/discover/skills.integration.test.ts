@@ -145,11 +145,9 @@ describe("discoverSkills (memory)", () => {
     ]);
   });
 
-  it("reports frontmatter validation failures while silently ignoring authored name fields", async () => {
-    // Skill identity is path-derived, but the broader Agent Skills format
-    // commonly includes a `name` field in SKILL.md / flat skill frontmatter.
-    // We accept and drop the value rather than rejecting otherwise-valid
-    // skill markdown.
+  it("reports used-frontmatter validation failures while accepting unmodeled frontmatter", async () => {
+    // Frontmatter that eve does not model must not block importing a shared
+    // SKILL.md from another runtime.
     const project = buildMemoryAgentProject({
       agentFiles: {
         "skills/bad-skill/SKILL.md": ["---", "description: 42", "---", "Broken frontmatter."].join(
@@ -159,6 +157,8 @@ describe("discoverSkills (memory)", () => {
           "---",
           "name: other-name",
           "description: Use the weather tool before answering forecast questions.",
+          "argument-hint: '[location]'",
+          "disable-model-invocation: true",
           "---",
           "When the user asks about weather, call the weather tool before answering.",
         ].join("\n"),
@@ -166,6 +166,8 @@ describe("discoverSkills (memory)", () => {
           "---",
           "name: other-name",
           "description: Research complex weather questions.",
+          "argument-hint: '[topic]'",
+          "disable-model-invocation: true",
           "---",
           "Research weather patterns before replying.",
         ].join("\n"),
