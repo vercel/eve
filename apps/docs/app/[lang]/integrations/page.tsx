@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
-import { staticOgImage } from "@/lib/geistdocs/og";
 import { integrations } from "@/lib/integrations/data";
 import { translations } from "@/geistdocs";
 import { Gallery, type GalleryFilter } from "./components/gallery";
@@ -15,11 +14,10 @@ export const metadata: Metadata = {
   ...titleMetadata,
   description,
   alternates: canonicalAlternates(canonicalRoutes.integrations),
-  openGraph: { ...titleMetadata.openGraph, images: [staticOgImage] },
+  openGraph: titleMetadata.openGraph,
   twitter: {
     ...titleMetadata.twitter,
     card: "summary_large_image",
-    images: [staticOgImage],
   },
 };
 

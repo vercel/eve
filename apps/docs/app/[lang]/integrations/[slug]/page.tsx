@@ -5,7 +5,6 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { canonicalAlternates, integrationPath } from "@/lib/geistdocs/canonical";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
-import { staticOgImage } from "@/lib/geistdocs/og";
 import { buildConnectionInstall, buildConnectionSetup } from "@/lib/integrations/connection-setup";
 import {
   getIntegration,
@@ -47,11 +46,10 @@ export const generateMetadata = async ({
     ...titleMetadata,
     description: integration.tagline,
     alternates: canonicalAlternates(integrationPath(integration.slug)),
-    openGraph: { ...titleMetadata.openGraph, images: [staticOgImage] },
+    openGraph: titleMetadata.openGraph,
     twitter: {
       ...titleMetadata.twitter,
       card: "summary_large_image",
-      images: [staticOgImage],
     },
   };
 };
