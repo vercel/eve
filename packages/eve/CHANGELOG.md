@@ -1,5 +1,14 @@
 # eve
 
+## 0.30.7
+
+### Patch Changes
+
+- e5c9191: Add experimental agent messaging behind `experimental.subagentPersistentSessions` in `agent.ts`. Opted-in agents keep delegated children alive after they answer: each child is owned by a lifecycle handle, settles every turn with an explicit outcome carrying its per-turn token usage, and parks instead of terminating. The parent's subagent tools gain an `agentId` parameter to continue a parked child, discoverable from a per-model-call `<agents>` system injection that lists only parked (resumable) children. An omitted, empty, or unknown `agentId` starts a fresh child; continuing a child that is still starting or working fails with `AGENT_BUSY`. Without the opt-in, children keep running as one-shot tasks. The subagent tool input schema no longer includes the unused `description` field.
+- bd21332: Cancelling a turn with running delegated children no longer leaks their handles as permanently `running`. The cancellation epilogue now parks each abandoned child as `"(cancelled)"`, so cancelled children stay resumable and later cancellations no longer stall retrying already-dead children.
+- 1758161: Add guided GitHub channel setup through `eve add channel/github`. The flow provisions a Vercel Connect GitHub App, routes verified webhooks, scaffolds the channel, and explains how to install and use the app.
+- 56de47b: Show far more of what local traces record in `eve traces`: span rows carry inline token/cost/tool chips, the header aggregates models, token totals, cost, and errors, and two new flags expose everything else — `--verbose` expands every span with all attributes and events, and `--json` dumps the full trace machine-readably.
+
 ## 0.30.6
 
 ### Patch Changes
