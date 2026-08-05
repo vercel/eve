@@ -6,6 +6,7 @@ import {
 import { z } from "#compiled/zod/index.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 
+import { hasInteractiveTerminal } from "./preconditions.js";
 import type { AddCommandOptions, RegistryCommandLogger } from "./registry.js";
 import type { RegistrySetupCommand } from "./registry-setup-command.js";
 
@@ -16,12 +17,7 @@ export const RegistryPackageComponentSchema = z.object({
   default: z.boolean().default(false),
 });
 
-export interface RegistryPackageComponent {
-  item: string;
-  label: string;
-  description?: string;
-  default: boolean;
-}
+export type RegistryPackageComponent = z.infer<typeof RegistryPackageComponentSchema>;
 
 interface PackageMetadata {
   requires?: string;
@@ -30,7 +26,7 @@ interface PackageMetadata {
 
 export interface RegistryPackageDependencies {
   createPrompter?: () => Prompter;
-  isInteractive?: () => boolean;
+  hasInteractiveTerminal?: () => boolean;
 }
 
 export interface RegistryPackageOperations {
@@ -49,15 +45,13 @@ async function selectComponents(
   item: string,
   components: readonly RegistryPackageComponent[],
   options: AddCommandOptions & { prompter?: Prompter },
-  dependencies: RegistryPackageDependencies,
+  interactive: boolean,
+  getPrompter: () => Prompter,
 ): Promise<readonly RegistryPackageComponent[]> {
-  const isInteractive =
-    dependencies.isInteractive?.() ??
-    (process.stdin.isTTY === true && process.stdout.isTTY === true);
-  if (options.prompter === undefined && (options.yes === true || !isInteractive)) {
+  if (options.prompter === undefined && (options.yes === true || !interactive)) {
     return components.filter((component) => component.default);
   }
-  const prompter = options.prompter ?? dependencies.createPrompter?.() ?? createPrompter();
+  const prompter = getPrompter();
   const selected = await prompter.select<string>({
     message: `Add ${item}`,
     description: "Select what you want to add to your agent.",
@@ -88,14 +82,12 @@ export async function runRegistryPackage(input: {
   operations: RegistryPackageOperations;
 }): Promise<void> {
   const { logger, appRoot, item, components, config, options, dependencies, operations } = input;
-  if (options.overwrite === true && options.skipInstall === true) {
-    throw new Error("--overwrite cannot be used with --skip-install.");
-  }
-  if (options.skipSetup === true && options.skipInstall === true) {
-    throw new Error("--skip-install cannot be used with --skip-setup.");
-  }
+  const interactive = dependencies.hasInteractiveTerminal?.() ?? hasInteractiveTerminal();
+  let prompter = options.prompter;
+  const getPrompter = (): Prompter =>
+    (prompter ??= dependencies.createPrompter?.() ?? createPrompter());
 
-  const selected = await selectComponents(item, components, options, dependencies);
+  const selected = await selectComponents(item, components, options, interactive, getPrompter);
   const addresses = selected.map((component) => operations.itemAddress(component.item));
   const manifests = await getRegistryItems(addresses, { config });
   if (manifests.length !== selected.length) {
@@ -117,17 +109,14 @@ export async function runRegistryPackage(input: {
   }
   if (options.skipSetup === true) return;
 
-  const isInteractive =
-    dependencies.isInteractive?.() ??
-    (process.stdin.isTTY === true && process.stdout.isTTY === true);
-  if (options.yes !== true && options.prompter === undefined && !isInteractive) {
+  if (options.yes !== true && options.prompter === undefined && !interactive) {
     logger.log(operations.setupReminder(item));
     return;
   }
 
-  const prompter = options.prompter ?? dependencies.createPrompter?.() ?? createPrompter();
   for (const metadata of entries) {
     if (metadata?.setup === undefined) continue;
-    if (!(await operations.runSetups({ item, setups: metadata.setup, prompter }))) return;
+    if (!(await operations.runSetups({ item, setups: metadata.setup, prompter: getPrompter() })))
+      return;
   }
 }

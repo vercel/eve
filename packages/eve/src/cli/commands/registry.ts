@@ -14,7 +14,7 @@ import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { isEveProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
+import { hasInteractiveTerminal, NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import { RegistryPackageComponentSchema, runRegistryPackage } from "./registry-package.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
@@ -56,7 +56,7 @@ export interface RegistrySetupDependencies {
 
 export interface AddCommandDependencies extends RegistrySetupDependencies {
   createPrompter?: () => Prompter;
-  isInteractive?: () => boolean;
+  hasInteractiveTerminal?: () => boolean;
 }
 
 /** One discoverable item from an eve-compatible registry catalog. */
@@ -78,7 +78,7 @@ export interface RegistryCatalogResult {
 
 const defaultAddCommandDependencies: AddCommandDependencies = {
   createPrompter,
-  isInteractive: () => process.stdin.isTTY === true && process.stdout.isTTY === true,
+  hasInteractiveTerminal,
   loadSetupCommandRunner: async () =>
     (await import("./registry-setup-command.js")).runRegistrySetupCommand,
 };
@@ -610,9 +610,10 @@ export async function runAddCommand(
     });
     if (eveMetadata?.setup === undefined) return;
 
-    const isInteractive =
-      dependencies.isInteractive?.() ?? defaultAddCommandDependencies.isInteractive!();
-    if (options.skipSetup === true || (!options.yes && !isInteractive)) {
+    const interactive =
+      dependencies.hasInteractiveTerminal?.() ??
+      defaultAddCommandDependencies.hasInteractiveTerminal!();
+    if (options.skipSetup === true || (!options.yes && !interactive)) {
       logger.log(setupReminder(item, "skipped"));
       return;
     }

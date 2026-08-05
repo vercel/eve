@@ -229,7 +229,7 @@ describe("registry commands", () => {
       "/project",
       "linear",
       { prompter: fake.prompter },
-      { isInteractive: () => true, loadSetupCommandRunner: async () => runSetupCommand },
+      { hasInteractiveTerminal: () => true, loadSetupCommandRunner: async () => runSetupCommand },
     );
 
     expect(addRegistryItems).toHaveBeenCalledWith(
@@ -271,7 +271,7 @@ describe("registry commands", () => {
       "/project",
       "linear",
       { prompter: fake.prompter },
-      { isInteractive: () => true, loadSetupCommandRunner: vi.fn() },
+      { hasInteractiveTerminal: () => true, loadSetupCommandRunner: vi.fn() },
     );
 
     expect(logger.errors).toEqual([]);
@@ -488,7 +488,7 @@ describe("registry commands", () => {
       "channel/slack",
       {},
       {
-        isInteractive: () => false,
+        hasInteractiveTerminal: () => false,
         loadSetupCommandRunner: async () => runSetup,
       },
     );
@@ -516,7 +516,7 @@ describe("registry commands", () => {
       {},
       {
         createPrompter: () => fake.prompter,
-        isInteractive: () => true,
+        hasInteractiveTerminal: () => true,
         loadSetupCommandRunner: async () => runSetup,
       },
     );
