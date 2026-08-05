@@ -4,7 +4,7 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
-import { setHarnessEmissionState } from "#harness/emission.js";
+import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import {
   AGENT_HANDLES_STATE_KEY,

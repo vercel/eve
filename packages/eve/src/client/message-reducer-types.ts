@@ -182,6 +182,11 @@ export type EveDynamicToolPart = {
       readonly errorText?: never;
       readonly input: unknown;
       readonly output: unknown;
+      /**
+       * `true` while `output` is a preliminary snapshot from a streaming
+       * tool (`action.partial`); cleared by the terminal `action.result`.
+       */
+      readonly partial?: boolean;
       readonly state: "output-available";
     }
   | {

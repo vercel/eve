@@ -119,3 +119,99 @@ describe("wrapToolExecute", () => {
     expect(wrapToolExecute(baseDef)).toBeUndefined();
   });
 });
+
+function isAsyncIterableValue(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === "function"
+  );
+}
+
+async function collect(value: unknown): Promise<unknown[]> {
+  expect(isAsyncIterableValue(value)).toBe(true);
+  const collected: unknown[] = [];
+  for await (const item of value as AsyncIterable<unknown>) {
+    collected.push(item);
+  }
+  return collected;
+}
+
+describe("wrapToolExecute (async-generator execute)", () => {
+  it("streams each yield in order and preserves value identity", async () => {
+    const first = { step: 1 };
+    const second = { step: 2 };
+    const wrapped = wrapToolExecute({
+      ...baseDef,
+      async *execute() {
+        yield first;
+        yield second;
+      },
+    })!;
+    const ctx = new ContextContainer();
+    const collected = await contextStorage.run(ctx, () =>
+      collect(wrapped({}, { messages: [], toolCallId: "call_s1" })),
+    );
+
+    expect(collected).toHaveLength(2);
+    expect(collected[0]).toBe(first);
+    expect(collected[1]).toBe(second);
+  });
+
+  it("normalizes top-level undefined yields to null", async () => {
+    const wrapped = wrapToolExecute({
+      ...baseDef,
+      async *execute() {
+        yield undefined;
+      },
+    })!;
+    const ctx = new ContextContainer();
+    const collected = await contextStorage.run(ctx, () =>
+      collect(wrapped({}, { messages: [], toolCallId: "call_s2" })),
+    );
+
+    expect(collected).toEqual([null]);
+  });
+
+  it("rejects a non-JSON-serializable yield at the tool boundary", async () => {
+    const wrapped = wrapToolExecute({
+      ...baseDef,
+      async *execute() {
+        yield { now: new Date("2026-01-02T03:04:05.000Z") };
+      },
+    })!;
+    const ctx = new ContextContainer();
+
+    await expect(
+      contextStorage.run(ctx, () => collect(wrapped({}, { messages: [], toolCallId: "call_s3" }))),
+    ).rejects.toThrow(
+      'Tool "t" call "call_s3" returned a non-JSON-serializable result. Expected a JSON-serializable value.',
+    );
+  });
+
+  it("stashes an authorization-signal yield and ends the stream with opaque model output", async () => {
+    const signal = signalWithVerifier();
+    let pulledPastSignal = false;
+    const wrapped = wrapToolExecute({
+      ...baseDef,
+      async *execute() {
+        yield { partial: true };
+        yield signal;
+        pulledPastSignal = true;
+        yield { never: true };
+      },
+    })!;
+    const ctx = new ContextContainer();
+    const collected = await contextStorage.run(ctx, () =>
+      collect(wrapped({}, { messages: [], toolCallId: "call_s4" })),
+    );
+
+    expect(collected).toHaveLength(2);
+    expect(collected[0]).toEqual({ partial: true });
+    expect(isAuthorizationPendingModelOutput(collected[1])).toBe(true);
+    expect(collected[1]).toEqual(modelFacingAuthorizationOutput(signal));
+    expect(collected[1]).not.toHaveProperty("challenges");
+    expect(readToolInterrupt(ctx, "call_s4")).toBe(signal);
+    expect(pulledPastSignal).toBe(false);
+  });
+});

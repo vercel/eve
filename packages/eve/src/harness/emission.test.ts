@@ -1,12 +1,12 @@
 import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
+import { emitStreamContent } from "#harness/emission.js";
 import {
-  emitStreamContent,
   getHarnessEmissionState,
-  type HarnessEmissionState,
   setHarnessEmissionState,
-} from "#harness/emission.js";
+  type HarnessEmissionState,
+} from "#harness/emission-state.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
@@ -440,8 +440,35 @@ describe("emitStreamContent action requests", () => {
     const localEvents = vi.mocked(localEmit).mock.calls.map(([event]) => event);
     const providerEvents = vi.mocked(providerEmit).mock.calls.map(([event]) => event);
 
-    expect(localEvents).toEqual(providerEvents);
     expect(localEvents.map((event) => event.type)).toEqual([
+      "message.appended",
+      "message.completed",
+      "actions.requested",
+      "action.partial",
+      "action.result",
+      "message.appended",
+      "message.completed",
+    ]);
+    expect(localEvents[3]).toMatchObject({
+      data: {
+        result: {
+          callId: "call-1",
+          kind: "tool-result",
+          output: { results: ["partial"] },
+          toolName: "web_search",
+        },
+      },
+      type: "action.partial",
+    });
+    expect(localEvents[4]).toMatchObject({
+      data: { result: { output: { results: ["eve"] } } },
+      type: "action.result",
+    });
+
+    // Provider-executed preliminary results stay dropped: provider streaming
+    // is out of scope, and the provider result already lives in the
+    // assistant response.
+    expect(providerEvents.map((event) => event.type)).toEqual([
       "message.appended",
       "message.completed",
       "actions.requested",
@@ -449,8 +476,86 @@ describe("emitStreamContent action requests", () => {
       "message.appended",
       "message.completed",
     ]);
-    expect(localEvents[3]).toMatchObject({
+    expect(providerEvents[3]).toMatchObject({
       data: { result: { output: { results: ["eve"] } } },
+      type: "action.result",
+    });
+  });
+
+  it("emits one action.partial snapshot per preliminary result for a streaming tool", async () => {
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "long_task",
+        {
+          description: "Run a long task.",
+          execute: async () => ({ progress: 1 }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "long_task",
+        },
+      ],
+    ]);
+    const emit = createEmitStub();
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { input: {}, toolCallId: "call-1", toolName: "long_task", type: "tool-call" },
+        {
+          output: { progress: 0.25 },
+          preliminary: true,
+          toolCallId: "call-1",
+          toolName: "long_task",
+          type: "tool-result",
+        },
+        {
+          output: { progress: 0.5 },
+          preliminary: true,
+          toolCallId: "call-1",
+          toolName: "long_task",
+          type: "tool-result",
+        },
+        {
+          output: { progress: 1 },
+          toolCallId: "call-1",
+          toolName: "long_task",
+          type: "tool-result",
+        },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools,
+      },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.map((event) => event.type)).toEqual([
+      "actions.requested",
+      "action.partial",
+      "action.partial",
+      "action.result",
+    ]);
+    expect(events[1]).toMatchObject({
+      data: {
+        result: {
+          callId: "call-1",
+          kind: "tool-result",
+          output: { progress: 0.25 },
+          toolName: "long_task",
+        },
+        sequence: EMISSION_STATE.sequence,
+        stepIndex: EMISSION_STATE.stepIndex,
+        turnId: EMISSION_STATE.turnId,
+      },
+      type: "action.partial",
+    });
+    expect(events[2]).toMatchObject({
+      data: { result: { output: { progress: 0.5 } } },
+      type: "action.partial",
+    });
+    expect(events[3]).toMatchObject({
+      data: { result: { output: { progress: 1 } } },
       type: "action.result",
     });
   });
@@ -561,6 +666,13 @@ describe("emitStreamContent action requests", () => {
           toolCallId: "call-bad",
           toolName: "web_search",
           type: "tool-call",
+        },
+        {
+          output: { results: ["never"] },
+          preliminary: true,
+          toolCallId: "call-bad",
+          toolName: "web_search",
+          type: "tool-result",
         },
         { finishReason: "tool-calls", type: "finish-step" },
       ] as TextStreamPart<ToolSet>[]),

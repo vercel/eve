@@ -17,7 +17,7 @@
  */
 import type { ModelMessage } from "ai";
 
-import { getHarnessEmissionState, type HarnessEmissionState } from "#harness/emission.js";
+import { getHarnessEmissionState, type HarnessEmissionState } from "#harness/emission-state.js";
 import { hasProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import { migrateDurableSessionSnapshot } from "#execution/durable-session-migrations/snapshot.js";

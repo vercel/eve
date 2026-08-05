@@ -1,5 +1,6 @@
 import type {
   UnstampedMessageStreamEvent,
+  ActionPartialStreamEvent,
   MessageAppendedStreamEvent,
   ReasoningAppendedStreamEvent,
 } from "#protocol/message.js";
@@ -184,7 +185,25 @@ function mergeAdjacentAppends(
     return true;
   }
 
+  // Partial tool outputs are snapshots: a newer one for the same call
+  // supersedes the pending one outright, so keep only the latest.
+  if (left.event.type === "action.partial" && right.type === "action.partial") {
+    if (!samePartialCall(left.event, right)) return false;
+    left.event = right;
+    left.messages = messages;
+    return true;
+  }
+
   return false;
+}
+
+function samePartialCall(left: ActionPartialStreamEvent, right: ActionPartialStreamEvent): boolean {
+  return (
+    left.data.result.callId === right.data.result.callId &&
+    left.data.sequence === right.data.sequence &&
+    left.data.stepIndex === right.data.stepIndex &&
+    left.data.turnId === right.data.turnId
+  );
 }
 
 function appendDelta(event: UnstampedMessageStreamEvent): string | undefined {

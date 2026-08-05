@@ -1,7 +1,7 @@
 import type { ToolSet, TypedToolCall } from "ai";
 
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { HarnessEmissionState } from "#harness/emission-state.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";

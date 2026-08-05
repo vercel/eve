@@ -18,7 +18,7 @@ import {
   getHarnessEmissionState,
   isHarnessBetweenTurns,
   setHarnessEmissionState,
-} from "#harness/emission.js";
+} from "#harness/emission-state.js";
 import {
   clearAllProxyInputRequests,
   getProxyInputRequests,

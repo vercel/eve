@@ -14,12 +14,8 @@
 import type { ModelMessage } from "ai";
 
 import { createInputRequestedEvent } from "#protocol/message.js";
-import {
-  emitFailedStep,
-  emitTurnEpilogue,
-  setHarnessEmissionState,
-  type HarnessEmissionState,
-} from "#harness/emission.js";
+import { emitFailedStep, emitTurnEpilogue } from "#harness/emission.js";
+import { setHarnessEmissionState, type HarnessEmissionState } from "#harness/emission-state.js";
 import { setPendingInputBatch } from "#harness/input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
 import { SessionLimitDeclinedError } from "#harness/turn-cancellation.js";

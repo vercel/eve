@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import {
+  createActionPartialEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
   createReasoningAppendedEvent,
 } from "#protocol/message.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { JsonValue } from "#shared/json.js";
 
 function deferred(): { readonly promise: Promise<void>; resolve(): void } {
   let resolve!: () => void;
@@ -30,6 +32,15 @@ function reasoning(delta: string, soFar: string) {
   return createReasoningAppendedEvent({
     reasoningDelta: delta,
     reasoningSoFar: soFar,
+    sequence: 1,
+    stepIndex: 0,
+    turnId: "turn_1",
+  });
+}
+
+function partial(output: JsonValue, callId = "call-1") {
+  return createActionPartialEvent({
+    result: { callId, kind: "tool-result", output, toolName: "long_task" },
     sequence: 1,
     stepIndex: 0,
     turnId: "turn_1",
@@ -89,6 +100,50 @@ describe("createOrderedStreamEmitter", () => {
       message("CD", "CD", 1),
       reasoning("RS", "RS"),
       completed,
+    ]);
+  });
+
+  it("folds adjacent action.partial snapshots for the same call keeping the latest", async () => {
+    const firstWrite = deferred();
+    const events: UnstampedMessageStreamEvent[] = [];
+    const emitFn = vi.fn(async (event: UnstampedMessageStreamEvent) => {
+      events.push(event);
+      if (events.length === 1) await firstWrite.promise;
+    });
+    const emitter = createOrderedStreamEmitter(emitFn);
+
+    await emitter.emit(partial({ progress: 0.25 }));
+    await emitter.emit(partial({ progress: 0.5 }));
+    await emitter.emit(partial({ progress: 0.75 }));
+
+    firstWrite.resolve();
+    await emitter.closeAndDrain();
+
+    // Snapshots supersede each other, so only the latest pending one survives.
+    expect(events).toEqual([partial({ progress: 0.25 }), partial({ progress: 0.75 })]);
+  });
+
+  it("treats action.partial events for different calls as ordering barriers", async () => {
+    const firstWrite = deferred();
+    const events: UnstampedMessageStreamEvent[] = [];
+    const emitFn = vi.fn(async (event: UnstampedMessageStreamEvent) => {
+      events.push(event);
+      if (events.length === 1) await firstWrite.promise;
+    });
+    const emitter = createOrderedStreamEmitter(emitFn);
+
+    await emitter.emit(partial({ progress: 0.1 }, "call-1"));
+    await emitter.emit(partial({ progress: 0.2 }, "call-2"));
+    await emitter.emit(partial({ progress: 0.4 }, "call-2"));
+    await emitter.emit(partial({ progress: 0.9 }, "call-1"));
+
+    firstWrite.resolve();
+    await emitter.closeAndDrain();
+
+    expect(events).toEqual([
+      partial({ progress: 0.1 }, "call-1"),
+      partial({ progress: 0.4 }, "call-2"),
+      partial({ progress: 0.9 }, "call-1"),
     ]);
   });
 

@@ -104,9 +104,8 @@ import {
   emitStreamContent,
   emitTurnEpilogue,
   emitTurnPreamble,
-  getHarnessEmissionState,
-  setHarnessEmissionState,
 } from "#harness/emission.js";
+import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission-state.js";
 import {
   extractQuestionInputRequests,
   extractToolApprovalInputRequests,

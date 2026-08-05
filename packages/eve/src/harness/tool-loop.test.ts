@@ -31,7 +31,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
-import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
+import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission-state.js";
 import {
   getPendingAuthorization,
   modelFacingAuthorizationOutput,

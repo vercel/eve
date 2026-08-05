@@ -9,7 +9,7 @@ import {
   InitiatorAuthKey,
   ParentSessionKey,
 } from "#context/keys.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { HarnessEmissionState } from "#harness/emission-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import {
   normalizeInstrumentationChannelKind,

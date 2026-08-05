@@ -15,7 +15,7 @@ import {
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { HarnessEmissionState } from "#harness/emission-state.js";
 import type { HarnessSession } from "#harness/types.js";
 
 vi.mock("./sandbox/ensure.js", () => ({

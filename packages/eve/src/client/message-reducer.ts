@@ -225,6 +225,36 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       );
     }
 
+    case "action.partial": {
+      const descriptor = normalizeActionResult(event.data.result);
+      const existing = findToolPart(data, event.data.result.callId);
+      // Step retries can replay partials after the terminal result; a
+      // settled part never regresses to a snapshot.
+      if (existing !== undefined && isTerminalToolPart(existing)) {
+        return data;
+      }
+      const nextPart: EveDynamicToolPart = {
+        approval: approvedApproval(existing),
+        input: existing?.input,
+        output: event.data.result.output,
+        partial: true,
+        state: "output-available",
+        stepIndex: event.data.stepIndex,
+        toolCallId: event.data.result.callId,
+        toolMetadata: mergeToolMetadata(existing?.toolMetadata, createToolMetadata(descriptor)),
+        toolName: existing?.toolName ?? descriptor.toolName,
+        type: "dynamic-tool",
+      };
+
+      if (existing !== undefined) {
+        return updateToolPart(data, event.data.result.callId, nextPart);
+      }
+
+      return updateAssistantMessage(data, event.data.turnId, (message) =>
+        upsertPart(ensureStepStartPart(message, event.data.stepIndex), nextPart),
+      );
+    }
+
     case "authorization.required":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
         upsertPart(
@@ -496,6 +526,13 @@ function updateAuthorizationPart(
   }
 
   return upsertMessage(data, upsertPart(message, next));
+}
+
+function isTerminalToolPart(part: EveDynamicToolPart): boolean {
+  if (part.state === "output-error" || part.state === "output-denied") {
+    return true;
+  }
+  return part.state === "output-available" && part.partial !== true;
 }
 
 function findToolPart(data: EveMessageData, toolCallId: string): EveDynamicToolPart | undefined {

@@ -1,9 +1,6 @@
 import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
-import {
-  emitTurnEpilogue,
-  getHarnessEmissionState,
-  setHarnessEmissionState,
-} from "#harness/emission.js";
+import { emitTurnEpilogue } from "#harness/emission.js";
+import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission-state.js";
 import {
   getProxyInputRequests,
   toProxyInputRequestEntries,

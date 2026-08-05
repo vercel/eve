@@ -5,7 +5,7 @@ import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
-import { isObject } from "#shared/guards.js";
+import { isAsyncIterable, isObject } from "#shared/guards.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ApprovalStatus } from "#public/definitions/approval.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
@@ -161,25 +161,66 @@ export function buildToolSetFromDefinitions(input: {
  * the AI SDK records an opaque {@link AuthorizationPendingModelOutput} that
  * omits OAuth URLs, user codes, and hook URLs from model-facing history.
  * Returns `undefined` for client-side tools (no `execute`).
+ *
+ * An `execute` that returns an `AsyncIterable` (e.g. an `async *` generator)
+ * streams: each yield is forwarded to the AI SDK as a preliminary result, and
+ * the SDK treats the last yield as the terminal output. Every yield crosses
+ * the same boundary checks as a plain return.
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
-): ((input: any, options: ToolExecuteOptions) => Promise<any>) | undefined {
+):
+  | ((input: any, options: ToolExecuteOptions) => Promise<any> | AsyncIterable<unknown>)
+  | undefined {
   const execute = definition.execute;
   if (execute === undefined) return undefined;
-  return async (input, options) => {
-    const output = await execute(input, options);
-    if (isAuthorizationSignal(output)) {
-      stashToolInterrupt(loadContext(), options.toolCallId, output);
-      return modelFacingAuthorizationOutput(output);
+  return (input, options) => {
+    const result = execute(input, options);
+    if (isAsyncIterable(result)) {
+      return wrapStreamingToolExecute(result, options, definition.name);
     }
-    return normalizeToolJsonOutput({
-      boundary: "execute",
-      output,
-      toolCallId: options.toolCallId,
-      toolName: definition.name,
-    });
+    return finalizeToolOutput(result, options, definition.name);
   };
+}
+
+async function finalizeToolOutput(
+  result: unknown,
+  options: ToolExecuteOptions,
+  toolName: string,
+): Promise<any> {
+  const output = await result;
+  if (isAuthorizationSignal(output)) {
+    stashToolInterrupt(loadContext(), options.toolCallId, output);
+    return modelFacingAuthorizationOutput(output);
+  }
+  return normalizeToolJsonOutput({
+    boundary: "execute",
+    output,
+    toolCallId: options.toolCallId,
+    toolName,
+  });
+}
+
+async function* wrapStreamingToolExecute(
+  iterable: AsyncIterable<unknown>,
+  options: ToolExecuteOptions,
+  toolName: string,
+): AsyncIterable<unknown> {
+  for await (const value of iterable) {
+    if (isAuthorizationSignal(value)) {
+      stashToolInterrupt(loadContext(), options.toolCallId, value);
+      // The SDK's terminal output is the last yield, so an authorization
+      // signal ends the stream; the author generator gets `.return()`.
+      yield modelFacingAuthorizationOutput(value);
+      return;
+    }
+    yield normalizeToolJsonOutput({
+      boundary: "execute",
+      output: value,
+      toolCallId: options.toolCallId,
+      toolName,
+    });
+  }
 }
 
 /**

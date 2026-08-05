@@ -2,7 +2,7 @@ import { jsonSchema } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { HarnessEmissionState } from "#harness/emission-state.js";
 import { createWorkflowLifecycle } from "#harness/workflow-lifecycle.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { defineState } from "#public/definitions/state.js";

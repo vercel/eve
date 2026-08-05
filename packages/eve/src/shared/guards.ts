@@ -42,6 +42,20 @@ export function readNonEmptyString(value: unknown): string | undefined {
 }
 
 /**
+ * Returns `true` when `value` is an `AsyncIterable` — an object with a
+ * `Symbol.asyncIterator` function. Calling an `async *` generator
+ * function produces such a value, so this is how the harness detects a
+ * streaming tool `execute`.
+ */
+export function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === "function"
+  );
+}
+
+/**
  * Returns `true` when `value` is a thenable — an object with a `then`
  * function. Used to reject async instrumentation metadata projectors
  * that accidentally return a Promise instead of a plain record.

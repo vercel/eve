@@ -8,7 +8,11 @@ import {
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createEventId } from "#protocol/event-id.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
+import type {
+  RuntimeActionRequest,
+  RuntimeActionResult,
+  RuntimeToolResultActionResult,
+} from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -19,7 +23,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "20";
+export const EVE_MESSAGE_STREAM_VERSION = "21";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -252,6 +256,26 @@ export interface ActionResultStreamEvent {
     turnId: string;
   };
   type: "action.result";
+}
+
+/**
+ * Stream event carrying one preliminary output snapshot for an in-flight
+ * tool call, produced by an `async *` tool `execute` yield.
+ *
+ * Snapshot semantics: each event carries the complete preliminary output and
+ * supersedes the previous `action.partial` for the same `result.callId`; the
+ * terminal `action.result` supersedes them all. Step retries can replay
+ * overlapping partial runs, so consumers must treat every event as
+ * last-write-wins — never accumulate deltas across events.
+ */
+export interface ActionPartialStreamEvent {
+  data: {
+    result: RuntimeToolResultActionResult;
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "action.partial";
 }
 
 /**
@@ -631,6 +655,7 @@ export type UnstampedMessageStreamEvent =
   | SubagentStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
+  | ActionPartialStreamEvent
   | ActionResultStreamEvent
   | ReasoningCompletedStreamEvent
   | StepCompletedStreamEvent
@@ -1079,6 +1104,27 @@ export function createActionResultEvent(input: {
       turnId: input.turnId,
     },
     type: "action.result",
+  };
+}
+
+/**
+ * Creates the `action.partial` event for one preliminary tool-output
+ * snapshot of an in-flight tool call.
+ */
+export function createActionPartialEvent(input: {
+  readonly result: RuntimeToolResultActionResult;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}): ActionPartialStreamEvent {
+  return {
+    data: {
+      result: input.result,
+      sequence: input.sequence,
+      stepIndex: input.stepIndex,
+      turnId: input.turnId,
+    },
+    type: "action.partial",
   };
 }
 

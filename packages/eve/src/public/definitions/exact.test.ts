@@ -17,7 +17,11 @@ import { defineInstrumentation } from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { defineTool, experimental_workflow } from "#public/definitions/tool.js";
+import {
+  defineTool,
+  experimental_workflow,
+  type ToolDefinition,
+} from "#public/definitions/tool.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
@@ -46,6 +50,21 @@ describe("definition helper exact inputs", () => {
 
   it("keeps the public hook event map aligned with runtime stream events", () => {
     expectTypeOf<keyof HookEventMap>().toEqualTypeOf<UnstampedMessageStreamEvent["type"]>();
+  });
+
+  it("infers TOutput from async-generator execute yields", () => {
+    const streaming = defineTool({
+      description: "Stream partial counts.",
+      inputSchema: { type: "object" },
+      async *execute() {
+        yield { count: 1 };
+        yield { count: 2 };
+      },
+    });
+
+    expectTypeOf(streaming).toEqualTypeOf<
+      ToolDefinition<Record<string, unknown>, { count: number }>
+    >();
   });
 });
 

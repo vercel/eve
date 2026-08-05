@@ -23,7 +23,7 @@ import {
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { getHarnessEmissionState } from "#harness/emission.js";
+import { getHarnessEmissionState } from "#harness/emission-state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
+  createActionPartialEvent,
   createActionResultEvent,
   createActionsRequestedEvent,
   createAuthorizationCompletedEvent,
@@ -17,6 +18,7 @@ import {
   createTurnCancelledEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import type { JsonValue } from "#shared/json.js";
 
 function reduceServerEvents(
   reducer: ReturnType<typeof defaultMessageReducer>,
@@ -170,6 +172,123 @@ describe("defaultMessageReducer", () => {
               },
             },
             toolName: "eve:subagent:research",
+            type: "dynamic-tool",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
+  });
+
+  it("projects action.partial snapshots as partial output that the terminal result clears", () => {
+    const reducer = defaultMessageReducer();
+    const requested = createActionsRequestedEvent({
+      actions: [
+        { callId: "call_1", input: { task: "index" }, kind: "tool-call", toolName: "long_task" },
+      ],
+      sequence: 1,
+      stepIndex: 0,
+      turnId: "turn_1",
+    });
+    const partial = (output: JsonValue, sequence: number) =>
+      createActionPartialEvent({
+        result: { callId: "call_1", kind: "tool-result", output, toolName: "long_task" },
+        sequence,
+        stepIndex: 0,
+        turnId: "turn_1",
+      });
+    const expectedPart = (extra: Record<string, unknown>) => ({
+      input: { task: "index" },
+      stepIndex: 0,
+      toolCallId: "call_1",
+      toolMetadata: { eve: { kind: "tool-call", name: "long_task" } },
+      toolName: "long_task",
+      type: "dynamic-tool",
+      ...extra,
+    });
+    const findPart = (data: ReturnType<typeof reducer.initial>) =>
+      data.messages
+        .flatMap((message) => message.parts)
+        .find((part) => part.type === "dynamic-tool");
+
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      requested,
+      partial({ progress: 0.25 }, 2),
+    ]);
+    expect(findPart(data)).toEqual(
+      expectedPart({ output: { progress: 0.25 }, partial: true, state: "output-available" }),
+    );
+
+    // A newer snapshot overwrites the previous one wholesale.
+    data = reduceServerEvents(reducer, data, [partial({ progress: 0.5 }, 3)]);
+    expect(findPart(data)).toEqual(
+      expectedPart({ output: { progress: 0.5 }, partial: true, state: "output-available" }),
+    );
+
+    // The terminal result clears the partial flag.
+    data = reduceServerEvents(reducer, data, [
+      createActionResultEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { progress: 1 },
+          toolName: "long_task",
+        },
+        sequence: 4,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+    expect(findPart(data)).toEqual(
+      expectedPart({ output: { progress: 1 }, state: "output-available" }),
+    );
+
+    // Replayed partials (e.g. from a retried step) never regress a terminal part.
+    data = reduceServerEvents(reducer, data, [partial({ progress: 0.75 }, 5)]);
+    expect(findPart(data)).toEqual(
+      expectedPart({ output: { progress: 1 }, state: "output-available" }),
+    );
+  });
+
+  it("projects an action.partial without a preceding action request", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionPartialEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { progress: 0.1 },
+          toolName: "long_task",
+        },
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages).toEqual([
+      {
+        id: "turn_1:assistant",
+        metadata: {
+          status: "streaming",
+          turnId: "turn_1",
+        },
+        parts: [
+          { type: "step-start" },
+          {
+            input: undefined,
+            output: { progress: 0.1 },
+            partial: true,
+            state: "output-available",
+            stepIndex: 0,
+            toolCallId: "call_1",
+            toolMetadata: {
+              eve: {
+                kind: "tool-call",
+                name: "long_task",
+              },
+            },
+            toolName: "long_task",
             type: "dynamic-tool",
           },
         ],

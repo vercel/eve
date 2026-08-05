@@ -118,7 +118,15 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
   TInput,
   TOutput
 > {
-  execute(input: TInput, ctx: ToolContext): Promise<TOutput> | TOutput;
+  /**
+   * The tool implementation. May be sync, async, or an `async *` generator.
+   *
+   * A generator streams: each yielded `TOutput` is sent to clients as a
+   * preliminary `action.partial` snapshot superseding the previous one, and
+   * the last yield becomes the tool result. The model and `toModelOutput`
+   * only ever see the terminal value.
+   */
+  execute(input: TInput, ctx: ToolContext): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
   /**
    * Optional per-tool approval gate. The return value determines whether
    * user approval is required before executing this tool.
@@ -161,7 +169,8 @@ export function defineTool<
     ctx: ToolContext,
   ):
     | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
-    | StandardJSONSchemaV1.InferOutput<TOutputSchema>;
+    | StandardJSONSchemaV1.InferOutput<TOutputSchema>
+    | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
   approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
   toModelOutput?: ToolDefinition<
     unknown,
@@ -181,7 +190,7 @@ export function defineTool<
   execute(
     input: StandardJSONSchemaV1.InferOutput<TSchema>,
     ctx: ToolContext,
-  ): Promise<TOutput> | TOutput;
+  ): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
   approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
 }): ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, TOutput>;
@@ -196,7 +205,8 @@ export function defineTool<
     ctx: ToolContext,
   ):
     | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
-    | StandardJSONSchemaV1.InferOutput<TOutputSchema>;
+    | StandardJSONSchemaV1.InferOutput<TOutputSchema>
+    | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   toModelOutput?: ToolDefinition<
     unknown,
@@ -207,7 +217,10 @@ export function defineTool<TOutput>(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
   inputSchema: JsonObject;
   outputSchema?: JsonObject;
-  execute(input: Record<string, unknown>, ctx: ToolContext): Promise<TOutput> | TOutput;
+  execute(
+    input: Record<string, unknown>,
+    ctx: ToolContext,
+  ): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
 }): ToolDefinition<Record<string, unknown>, TOutput>;

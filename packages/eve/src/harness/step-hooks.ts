@@ -21,7 +21,7 @@ import {
   createRuntimeToolResultFromMessagePart,
   createRuntimeToolResultFromStepResult,
 } from "#harness/action-result-helpers.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { HarnessEmissionState } from "#harness/emission-state.js";
 import { emitStepStarted, normalizeAssistantStepFinishReason } from "#harness/emission.js";
 import { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
 import {

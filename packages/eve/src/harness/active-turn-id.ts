@@ -1,4 +1,4 @@
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { HarnessEmissionState } from "#harness/emission-state.js";
 
 /**
  * Returns the id of the in-flight turn, or — between turns — the id the
