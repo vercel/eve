@@ -367,7 +367,7 @@ On any other stack, wire it up by hand: run the agent as its own service and pro
 npm install --global @eve/buzz-acp-adapter
 \`\`\`
 
-The global installation is required because the installer records the adapter's absolute executable path in Buzz's persistent harness definition. Do not run the installer through \`npx\`: its disposable cache path can disappear and leave Buzz unable to start the harness.`,
+> **Note:** The adapter must be installed globally because Buzz uses it whenever it interfaces with eve.`,
     quickStart: `From an eve application directory, run the interactive installer:
 
 \`\`\`bash
