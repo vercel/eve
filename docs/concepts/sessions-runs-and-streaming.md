@@ -47,6 +47,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `message.received`        | An inbound user message was accepted; carries flattened text plus structured text/file parts.                    |
 | `step.started`            | A model step began.                                                                                              |
 | `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                    |
+| `action.partial`          | A streaming tool yielded a preliminary output snapshot; each one supersedes the last for the same call.          |
 | `action.result`           | A tool call returned.                                                                                            |
 | `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |
@@ -70,6 +71,8 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `session.completed`       | The session reached a terminal end.                                                                              |
 
 `reasoning.appended` and `message.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas of the same type; the text remains in source order, and any other event forms an ordering barrier. Each append carries both the new delta and the cumulative text for the current block. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
+
+`action.partial` streams preliminary output from a [streaming tool](/docs/tools#stream-intermediate-results). Each event carries the complete snapshot so far — not a delta — and supersedes the previous `action.partial` for the same `result.callId`; the terminal `action.result` supersedes them all. When the durable writer is busy, adjacent snapshots for the same call coalesce to the latest. Always render the most recent snapshot rather than accumulating across events: a retried step can replay overlapping snapshot runs.
 
 Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning events in your application.
 

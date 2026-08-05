@@ -28,7 +28,7 @@ A tool definition needs:
 - a filename slug under `agent/tools/`, the model-facing name.
 - a `description`: what the tool does, written for the model.
 - an `inputSchema`: a Zod schema (or any Standard Schema, or a plain JSON Schema object). Required. For no input, pass `z.object({})`. Zod and Standard Schema infer the `input` type in `execute`. Plain JSON Schema types it as `Record<string, unknown>`.
-- an `execute(input, ctx)`: the implementation. May be sync or async.
+- an `execute(input, ctx)`: the implementation. May be sync, async, or an `async *` generator (see [streaming intermediate results](#stream-intermediate-results)).
 
 When a tool returns structured data, add an optional `outputSchema`. With Zod or Standard Schema it also types the `execute` return.
 
@@ -46,6 +46,44 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in eve’s durable pause/resume model.
 
 eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
+
+## Stream intermediate results
+
+A long-running tool can stream progress to clients while it works. Write
+`execute` as an `async *` generator: each `yield` is a complete snapshot of the
+output so far, and the last yield becomes the tool result.
+
+```ts title="agent/tools/index_documents.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Index a document collection.",
+  inputSchema: z.object({ collection: z.string() }),
+  async *execute({ collection }) {
+    const documents = await listDocuments(collection);
+    let indexed = 0;
+    for (const document of documents) {
+      await indexDocument(document);
+      indexed += 1;
+      yield { indexed, total: documents.length };
+    }
+    yield { done: true, indexed, total: documents.length };
+  },
+});
+```
+
+Every yield streams to clients as an
+[`action.partial` event](/docs/concepts/sessions-runs-and-streaming) carrying
+the full snapshot; each one supersedes the previous snapshot for the same
+call, and the terminal `action.result` supersedes them all. Because retried
+steps can replay overlapping snapshot runs, consumers must always render the
+latest snapshot rather than accumulate across events.
+
+Each yield crosses the same boundary as a plain return: it must be
+JSON-serializable and satisfy `outputSchema`/the inferred output type. The
+model and `toModelOutput` only ever see the terminal value — partials are a
+client-facing progress surface, not model context.
 
 ## Gate a tool on human approval
 
