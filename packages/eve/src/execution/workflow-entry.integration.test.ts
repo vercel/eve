@@ -420,6 +420,9 @@ describe("workflowEntry integration", () => {
 
   it("notifies each delegated conversation turn and remains available via agentId", async () => {
     const runtime = createTestRuntime({ agent: { name: "workflow-entry-delegated-conversation" } });
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
     const childContinuationToken = "subagent:parent-session:call-1";
 
     await runtime.run(async () => {
@@ -456,14 +459,22 @@ describe("workflowEntry integration", () => {
           ],
         });
 
-        await resumeHook(childContinuationToken, {
-          caller: {
-            callId: "call-2",
-            replyTo: { kind: "hook", token: childContinuationToken },
-            subagentName: "researcher",
-          },
-          kind: "deliver",
-          payloads: [{ message: "delegated follow-up turn" }],
+        await expect(
+          workflowRuntime.dispatchSession({
+            command: {
+              caller: {
+                callId: "call-2",
+                replyTo: { kind: "hook", token: childContinuationToken },
+                subagentName: "researcher",
+              },
+              kind: "send",
+              payload: { message: "delegated follow-up turn" },
+            },
+            sessionId: child.runId,
+          }),
+        ).resolves.toEqual({
+          sessionId: child.runId,
+          status: "accepted",
         });
 
         const secondTurn = await withTimeout(stream.nextTurn(), "delegated follow-up turn");
