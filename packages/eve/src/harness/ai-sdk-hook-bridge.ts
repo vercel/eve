@@ -3,7 +3,7 @@ import type { Telemetry } from "ai";
 import type {
   InstrumentationActionKind,
   InstrumentationAttemptScope,
-  InstrumentationAttemptStartedEvent,
+  InstrumentationStepStartedLifecycleEvent,
   InstrumentationContentPart,
   InstrumentationContextRunner,
   InstrumentationHooks,
@@ -58,7 +58,7 @@ export function createAiSdkHookBridge(
     },
     async onStepStart(event) {
       state.stepNumber = event.stepNumber;
-      const started = toAttemptStarted(state);
+      const started = toStepStarted(state);
       if (started !== undefined) await hooks.publish(started);
     },
     async onLanguageModelCallStart(event) {
@@ -88,7 +88,7 @@ export function createAiSdkHookBridge(
       await hooks.publish({
         providerMetadata: event.providerMetadata,
         scope: state.scope,
-        type: "attempt.metadata",
+        type: "step.metadata",
       });
     },
     async onToolExecutionStart(event) {
@@ -135,12 +135,12 @@ const directRunInContext: InstrumentationContextRunner = (_operation, execute) =
 
 const defaultResolveActionKind: ActionKindResolver = () => "tool-call";
 
-function toAttemptStarted(state: AttemptState): InstrumentationAttemptStartedEvent | undefined {
+function toStepStarted(state: AttemptState): InstrumentationStepStartedLifecycleEvent | undefined {
   if (state.operation === undefined || state.stepNumber === undefined) return undefined;
   return {
     operation: state.operation,
     scope: state.scope,
-    type: "attempt.started",
+    type: "step.started",
   };
 }
 

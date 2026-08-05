@@ -1150,7 +1150,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       try {
         const result = await executeModelCall();
         if (attemptScope !== undefined) {
-          await instrumentationHooks?.publish({ scope: attemptScope, type: "attempt.completed" });
+          await instrumentationHooks?.publish({ scope: attemptScope, type: "step.completed" });
         }
         return result;
       } catch (error) {
@@ -1158,7 +1158,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           await instrumentationHooks?.publish({
             error,
             scope: attemptScope,
-            type: "attempt.failed",
+            type: "step.failed",
           });
         }
         return rethrowNoOutputAsEmptyResponse(error);

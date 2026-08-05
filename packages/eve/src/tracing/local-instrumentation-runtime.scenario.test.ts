@@ -109,7 +109,7 @@ describe("local instrumentation runtime", () => {
           toolOutput: { output: { temperature: 72 }, type: "tool-result" },
         },
       ]);
-      await runtime.hooks.publish({ scope, type: "attempt.completed" });
+      await runtime.hooks.publish({ scope, type: "step.completed" });
     });
     await runtime.forceFlush();
 

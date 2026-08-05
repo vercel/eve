@@ -9320,7 +9320,7 @@ describe("createToolLoopHarness", () => {
       });
       const attemptCompleted = vi.fn();
       const hooks = createInstrumentationHooks([
-        { events: { "attempt.completed": attemptCompleted } },
+        { events: { "step.completed": attemptCompleted } },
       ]);
       const runInContext: InstrumentationContextRunner = (_operation, execute) => execute();
       const config = createTestConfig("conversation", undefined, {
@@ -9358,7 +9358,7 @@ describe("createToolLoopHarness", () => {
       expect(attemptCompleted).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
           scope: expect.objectContaining({ attemptIndex: 0 }),
-          type: "attempt.completed",
+          type: "step.completed",
         }),
       );
     });

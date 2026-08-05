@@ -22,10 +22,10 @@ import {
   toolResultsContentAttribute,
 } from "#tracing/agent-otel-content.js";
 import type {
-  InstrumentationAttemptMetadataEvent,
+  InstrumentationStepMetadataEvent,
   InstrumentationAttemptScope,
-  InstrumentationAttemptStartedEvent,
-  InstrumentationAttemptTerminalEvent,
+  InstrumentationStepStartedLifecycleEvent,
+  InstrumentationStepTerminalEvent,
   InstrumentationContextRunner,
   InstrumentationModelCallTerminalEvent,
   InstrumentationModelCallStartedEvent,
@@ -137,7 +137,7 @@ export function createAgentOtelInstrumentation(
     span.end();
   };
 
-  const onAttemptStarted = async (event: InstrumentationAttemptStartedEvent): Promise<void> => {
+  const onStepStarted = async (event: InstrumentationStepStartedLifecycleEvent): Promise<void> => {
     const turn = await input.stateStore.getTurn(event.scope.sessionId, event.scope.turnId);
     if (turn === undefined) return;
     const turnContext = contextFromSpanContext(turn.context);
@@ -181,14 +181,12 @@ export function createAgentOtelInstrumentation(
     });
   };
 
-  const onAttemptTerminal = (event: InstrumentationAttemptTerminalEvent): void => {
+  const onStepTerminal = (event: InstrumentationStepTerminalEvent): void => {
     executionContexts.delete(event.scope);
     const attempt = steps.get(event.scope);
     if (attempt === undefined) return;
-    attempt.step.span.addEvent(
-      event.type === "attempt.completed" ? "step.completed" : "step.failed",
-    );
-    if (event.type === "attempt.failed") {
+    attempt.step.span.addEvent(event.type === "step.completed" ? "step.completed" : "step.failed");
+    if (event.type === "step.failed") {
       recordError(attempt.operation.span, event.error);
       recordError(attempt.step.span, event.error);
     }
@@ -463,7 +461,7 @@ export function createAgentOtelInstrumentation(
     };
   };
 
-  const onAttemptMetadata = (event: InstrumentationAttemptMetadataEvent): void => {
+  const onStepMetadata = (event: InstrumentationStepMetadataEvent): void => {
     const attempt = steps.get(event.scope);
     if (attempt === undefined) return;
     // Vercel AI Gateway reports per-call cost in providerMetadata.gateway;
@@ -479,10 +477,10 @@ export function createAgentOtelInstrumentation(
   return {
     hook: {
       events: {
-        "attempt.completed": onAttemptTerminal,
-        "attempt.failed": onAttemptTerminal,
-        "attempt.metadata": onAttemptMetadata,
-        "attempt.started": onAttemptStarted,
+        "step.completed": onStepTerminal,
+        "step.failed": onStepTerminal,
+        "step.metadata": onStepMetadata,
+        "step.started": onStepStarted,
         "model.call.completed": onModelCallTerminal,
         "model.call.failed": onModelCallTerminal,
         "model.call.started": onModelCallStarted,

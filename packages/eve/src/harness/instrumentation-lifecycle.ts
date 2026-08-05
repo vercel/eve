@@ -73,8 +73,8 @@ export type InstrumentationToolOutput =
   | { readonly type: "result"; readonly output: unknown }
   | { readonly type: "error"; readonly error: unknown };
 
-export interface InstrumentationAttemptStartedEvent {
-  readonly type: "attempt.started";
+export interface InstrumentationStepStartedLifecycleEvent {
+  readonly type: "step.started";
   readonly operation: InstrumentationOperationRef;
   readonly scope: InstrumentationAttemptScope;
 }
@@ -129,8 +129,8 @@ export interface InstrumentationTurnTerminalEvent {
   readonly turnId: string;
 }
 
-export interface InstrumentationAttemptTerminalEvent {
-  readonly type: "attempt.completed" | "attempt.failed";
+export interface InstrumentationStepTerminalEvent {
+  readonly type: "step.completed" | "step.failed";
   readonly error?: unknown;
   readonly scope: InstrumentationAttemptScope;
 }
@@ -140,8 +140,8 @@ export interface InstrumentationAttemptTerminalEvent {
  * (`StepResult.providerMetadata`). Carries Vercel AI Gateway cost data when
  * the request went through the gateway; absent for other providers.
  */
-export interface InstrumentationAttemptMetadataEvent {
-  readonly type: "attempt.metadata";
+export interface InstrumentationStepMetadataEvent {
+  readonly type: "step.metadata";
   readonly scope: InstrumentationAttemptScope;
   readonly providerMetadata: Readonly<Record<string, unknown>>;
 }
@@ -213,10 +213,10 @@ export type InstrumentationEventHandler<TEvent> = (event: TEvent) => void | Prom
 /** Internal provider shape mirrored by the future public hook contract. */
 export interface InstrumentationProviderDefinition {
   readonly events?: {
-    readonly "attempt.started"?: InstrumentationEventHandler<InstrumentationAttemptStartedEvent>;
-    readonly "attempt.completed"?: InstrumentationEventHandler<InstrumentationAttemptTerminalEvent>;
-    readonly "attempt.failed"?: InstrumentationEventHandler<InstrumentationAttemptTerminalEvent>;
-    readonly "attempt.metadata"?: InstrumentationEventHandler<InstrumentationAttemptMetadataEvent>;
+    readonly "step.started"?: InstrumentationEventHandler<InstrumentationStepStartedLifecycleEvent>;
+    readonly "step.completed"?: InstrumentationEventHandler<InstrumentationStepTerminalEvent>;
+    readonly "step.failed"?: InstrumentationEventHandler<InstrumentationStepTerminalEvent>;
+    readonly "step.metadata"?: InstrumentationEventHandler<InstrumentationStepMetadataEvent>;
     readonly "model.call.started"?: InstrumentationEventHandler<InstrumentationModelCallStartedEvent>;
     readonly "model.call.completed"?: InstrumentationEventHandler<InstrumentationModelCallCompletedEvent>;
     readonly "model.call.failed"?: InstrumentationEventHandler<InstrumentationModelCallFailedEvent>;
@@ -242,9 +242,9 @@ export type InstrumentationCorrelatedEvent =
   | InstrumentationToolCallTerminalEvent;
 
 export type InstrumentationPointEvent =
-  | InstrumentationAttemptStartedEvent
-  | InstrumentationAttemptMetadataEvent
-  | InstrumentationAttemptTerminalEvent
+  | InstrumentationStepStartedLifecycleEvent
+  | InstrumentationStepMetadataEvent
+  | InstrumentationStepTerminalEvent
   | InstrumentationSessionStartedEvent
   | InstrumentationSessionTransitionEvent
   | InstrumentationTurnStartedEvent

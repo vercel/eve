@@ -160,11 +160,11 @@ async function emitAttempt(input: {
     await input.hooks.publish({
       providerMetadata: input.providerMetadata,
       scope,
-      type: "attempt.metadata",
+      type: "step.metadata",
     });
   }
 
-  await input.hooks.publish({ scope, type: "attempt.completed" });
+  await input.hooks.publish({ scope, type: "step.completed" });
   await input.hooks.publish({
     sessionId: input.sessionId,
     turnId: input.turnId,

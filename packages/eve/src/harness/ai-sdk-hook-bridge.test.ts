@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import {
   createInstrumentationHooks,
-  type InstrumentationAttemptMetadataEvent,
+  type InstrumentationStepMetadataEvent,
   type InstrumentationAttemptScope,
   type InstrumentationProviderDefinition,
 } from "#harness/instrumentation-lifecycle.js";
@@ -121,12 +121,12 @@ describe("createAiSdkHookBridge", () => {
     expect(adapterCalls).toBe(0);
   });
 
-  it("publishes step provider metadata as attempt.metadata, skipping steps without any", async () => {
-    const events: InstrumentationAttemptMetadataEvent[] = [];
+  it("publishes step provider metadata as step.metadata, skipping steps without any", async () => {
+    const events: InstrumentationStepMetadataEvent[] = [];
     const hooks = createInstrumentationHooks([
       {
         events: {
-          "attempt.metadata": (event) => {
+          "step.metadata": (event) => {
             events.push(event);
           },
         },
@@ -143,7 +143,7 @@ describe("createAiSdkHookBridge", () => {
       {
         providerMetadata: { gateway: { cost: "0.000082" } },
         scope,
-        type: "attempt.metadata",
+        type: "step.metadata",
       },
     ]);
   });
@@ -201,7 +201,7 @@ describe("createAiSdkHookBridge", () => {
 
   it("projects the operation callback onto eve fields only", async () => {
     const started = vi.fn();
-    const hooks = createInstrumentationHooks([{ events: { "attempt.started": started } }]);
+    const hooks = createInstrumentationHooks([{ events: { "step.started": started } }]);
     const bridge = createAiSdkHookBridge(scope, hooks);
 
     Reflect.apply(bridge.onStart!, bridge, [
@@ -212,7 +212,7 @@ describe("createAiSdkHookBridge", () => {
     expect(started).toHaveBeenCalledExactlyOnceWith({
       operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
       scope,
-      type: "attempt.started",
+      type: "step.started",
     });
   });
 
