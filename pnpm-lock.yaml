@@ -194,6 +194,9 @@ importers:
       phase:
         specifier: 'catalog:'
         version: 0.0.1(react@19.2.6)
+      pngjs:
+        specifier: ^7.0.0
+        version: 7.0.0
       react:
         specifier: 'catalog:'
         version: 19.2.6
@@ -339,9 +342,6 @@ importers:
       eve:
         specifier: workspace:*
         version: link:../../packages/eve
-      pngjs:
-        specifier: ^7.0.0
-        version: 7.0.0
       postcss:
         specifier: 8.5.15
         version: 8.5.15

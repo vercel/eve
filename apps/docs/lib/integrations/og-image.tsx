@@ -1,5 +1,6 @@
 import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
 import { ImageResponse } from "next/og";
+import { PNG } from "pngjs";
 import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import type { Integration } from "./data";
 import { logos } from "./logos";
@@ -62,6 +63,66 @@ const fitLogo = (node: ReactNode, maxWidth: number, maxHeight: number): ReactNod
   });
 };
 
+interface RasterizedLogo {
+  height: number;
+  src: string;
+  width: number;
+}
+
+const cropLogo = (image: PNG): PNG => {
+  let minX = image.width;
+  let minY = image.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      const alpha = image.data[(y * image.width + x) * 4 + 3];
+      if (alpha <= 8) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return image;
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const cropped = new PNG({ height, width });
+  PNG.bitblt(image, cropped, minX, minY, width, height, 0, 0);
+  return cropped;
+};
+
+const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
+  const response = new ImageResponse(
+    <div
+      style={{
+        alignItems: "center",
+        display: "flex",
+        height: "100%",
+        justifyContent: "center",
+        width: "100%",
+      }}
+    >
+      {fitLogo(logo, 480, 480)}
+    </div>,
+    { height: 512, width: 512 },
+  );
+  const image = PNG.sync.read(Buffer.from(await response.arrayBuffer()));
+  const cropped = cropLogo(image);
+  const aspectRatio = cropped.width / cropped.height;
+  const width = Math.min(180, 132 * aspectRatio);
+  const height = width / aspectRatio;
+
+  return {
+    height,
+    src: `data:image/png;base64,${PNG.sync.write(cropped).toString("base64")}`,
+    width,
+  };
+};
+
 const collectLogoColors = (node: ReactNode, colors = new Set<string>()): Set<string> => {
   if (!isValidElement(node)) return colors;
 
@@ -107,11 +168,24 @@ const recolorLogo = (node: ReactNode, preserveTones: boolean): ReactNode => {
   );
 };
 
-export const createIntegrationOgImage = (integration: Integration): ImageResponse => {
+const rasterizedLogos = new Map<string, Promise<RasterizedLogo>>();
+
+const getRasterizedLogo = (integration: Integration): Promise<RasterizedLogo> => {
+  const cached = rasterizedLogos.get(integration.logo);
+  if (cached) return cached;
+
   const Logo = logos[integration.logo];
   const resolvedLogo = resolveLogo(<Logo aria-hidden />);
   const recoloredLogo = recolorLogo(resolvedLogo, collectLogoColors(resolvedLogo).size > 1);
-  const integrationLogo = fitLogo(recoloredLogo, 180, 132);
+  const rasterized = rasterizeLogo(recoloredLogo);
+  rasterizedLogos.set(integration.logo, rasterized);
+  return rasterized;
+};
+
+export const createIntegrationOgImage = async (
+  integration: Integration,
+): Promise<ImageResponse> => {
+  const integrationLogo = await getRasterizedLogo(integration);
 
   return new ImageResponse(
     <div
@@ -171,7 +245,12 @@ export const createIntegrationOgImage = (integration: Integration): ImageRespons
             width: 240,
           }}
         >
-          {integrationLogo}
+          <img
+            alt=""
+            height={integrationLogo.height}
+            src={integrationLogo.src}
+            width={integrationLogo.width}
+          />
         </div>
       </div>
     </div>,
