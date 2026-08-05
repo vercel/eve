@@ -339,6 +339,9 @@ importers:
       eve:
         specifier: workspace:*
         version: link:../../packages/eve
+      eve-channel-blooio:
+        specifier: 0.2.0
+        version: 0.2.0(ai@7.0.38(zod@4.4.3))(eve@packages+eve)
       pngjs:
         specifier: ^7.0.0
         version: 7.0.0
@@ -9913,6 +9916,13 @@ packages:
   etag@1.8.1:
     resolution: {integrity: sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==}
     engines: {node: '>= 0.6'}
+
+  eve-channel-blooio@0.2.0:
+    resolution: {integrity: sha512-YO8EicgbW8BqYNDQCjYo+1HS64tajjYEJKtbLQvzFIj7v1zPms7zNzDHsol+EO2FF1kyzujeugtx4qHhO7O+Sg==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      ai: '>=7.0.0-beta.178'
+      eve: '>=0.11.0'
 
   event-target-shim@5.0.1:
     resolution: {integrity: sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==}
@@ -24865,6 +24875,11 @@ snapshots:
   esutils@2.0.3: {}
 
   etag@1.8.1: {}
+
+  eve-channel-blooio@0.2.0(ai@7.0.38(zod@4.4.3))(eve@packages+eve):
+    dependencies:
+      ai: 7.0.38(zod@4.4.3)
+      eve: link:packages/eve
 
   event-target-shim@5.0.1: {}
 

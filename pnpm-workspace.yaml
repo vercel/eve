@@ -79,6 +79,7 @@ minimumReleaseAgeExclude:
   - "@zernio/chat-sdk-adapter"
   - chat
   - chat-adapter-sendblue
+  - eve-channel-blooio
   - "@ai-sdk/*"
   - "@photon-ai/chat-adapter-imessage"
   - "@rolldown/*"

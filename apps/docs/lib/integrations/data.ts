@@ -267,6 +267,47 @@ TWILIO_AUTH_TOKEN=...      # required for inbound signature verification
 \`\`\``,
     configure: `In the Twilio console, point your number's Messaging webhook at \`/eve/v1/twilio/messages\` and its Voice webhook at \`/eve/v1/twilio/voice\`. Inbound calls are answered with speech gathering, and the transcript feeds the same session SMS uses. See the [Twilio channel docs](/docs/channels/twilio) for dispatch, streaming, and voice specifics.`,
   },
+  blooio: {
+    logo: "blooio",
+    docsHref: "https://github.com/Blooio/eve-channel-blooio#readme",
+    badge: "Provider official",
+    keywords: [
+      "imessage",
+      "rcs",
+      "sms",
+      "blooio",
+      "tapback",
+      "typing",
+      "read receipt",
+      "poll",
+      "group",
+    ],
+    install: `Add this channel from eve's registry. This writes \`agent/channels/blooio.ts\` and installs the \`eve-channel-blooio\` package:
+
+\`\`\`bash
+eve add channel/blooio
+\`\`\``,
+    quickStart: `Create \`agent/channels/blooio.ts\`:
+
+\`\`\`ts
+// agent/channels/blooio.ts
+import { blooioChannel } from "eve-channel-blooio";
+
+export default blooioChannel();
+\`\`\`
+
+Blooio is a native eve channel built on \`defineChannel\` (not a Chat SDK adapter), so eve owns session dispatch, streaming, and human-in-the-loop directly. See the [eve-channel-blooio README](https://github.com/Blooio/eve-channel-blooio#readme) for the full \`BlooioHandle\` surface: reactions, typing indicators, read receipts, polls, groups, capability checks, and history.`,
+    configure: `Set \`BLOOIO_API_KEY\` (a \`bl_live_...\` key) and \`BLOOIO_WEBHOOK_SECRET\` (\`whsec_...\`), then point a Blooio webhook at \`/eve/v1/blooio\`:
+
+\`\`\`bash
+curl -X POST https://api.blooio.com/v4/webhooks \\
+  -H "Authorization: Bearer $BLOOIO_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "url": "https://your-app.vercel.app/eve/v1/blooio", "event_types": ["*"] }'
+\`\`\`
+
+Blooio signs every delivery with \`X-Blooio-Signature: t=<unix>,v1=<hmac_sha256>\`; the channel verifies it and rejects timestamps older than 5 minutes. Inbound media is re-hosted at servable URLs and forwarded to the model as multimodal file parts.`,
+  },
   github: {
     logo: "github",
     docsHref: "/docs/channels/github",

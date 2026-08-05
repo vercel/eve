@@ -88,6 +88,7 @@
     "chat": "4.34.0",
     "chat-adapter-sendblue": "0.2.0",
     "eve": "workspace:*",
+    "eve-channel-blooio": "0.2.0",
     "pngjs": "^7.0.0",
     "postcss": "8.5.15",
     "shadcn": "4.16.0",
