@@ -1,5 +1,12 @@
 # eve
 
+## 0.30.8
+
+### Patch Changes
+
+- e6f4808: Add a single `eve add linear` flow that installs and configures both the Linear Channel and Linear MCP connection.
+- f51f866: Tools can now use async generators to stream preliminary output snapshots. eve publishes local snapshots as `action.partial` events before the final `action.result`, and the default client reducer exposes provisional output with `partial: true`.
+
 ## 0.30.7
 
 ### Patch Changes
