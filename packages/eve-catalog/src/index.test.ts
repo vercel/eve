@@ -93,6 +93,11 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("upstash-agentkit")?.connection).toBeUndefined();
   });
 
+  it("exposes Kybernesis Arcana as an extension", () => {
+    expect(getIntegrationEntry("arcana")?.kind).toBe("extension");
+    expect(getIntegrationEntry("arcana")?.connection).toBeUndefined();
+  });
+
   it("exposes Hindsight as an extension", () => {
     expect(getIntegrationEntry("hindsight")?.kind).toBe("extension");
     expect(getIntegrationEntry("hindsight")?.connection).toBeUndefined();

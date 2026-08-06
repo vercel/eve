@@ -60,6 +60,7 @@
     "@github-tools/eve-extension": "^0.1.0",
     "@jetty/eve": "^0.3.0",
     "@kapso/chat-adapter": "0.1.1",
+    "@kybernesis/arcana": "0.1.1",
     "@larksuite/vercel-chat-adapter": "0.1.2",
     "@linqapp/chat-sdk-adapter": "0.1.0",
     "@liveblocks/chat-sdk-adapter": "3.23.0",

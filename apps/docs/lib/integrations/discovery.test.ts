@@ -80,6 +80,18 @@ describe("integration discovery", () => {
     expect(integrationSearchText(agentkit!)).toContain("long-term memory");
   });
 
+  it("renders the Kybernesis Arcana memory extension setup", () => {
+    const arcana = getIntegration("arcana");
+    expect(arcana).toBeDefined();
+
+    const markdown = integrationMarkdown(arcana!);
+    expect(markdown).toContain("eve add extension/arcana");
+    expect(markdown).toContain('import arcana from "@kybernesis/arcana"');
+    expect(markdown).toContain("ARCANA_API_KEY");
+    expect(markdown).toContain("ARCANA_WORKSPACE");
+    expect(integrationSearchText(arcana!)).toContain("long-term memory");
+  });
+
   it("renders the Hindsight memory extension setup", () => {
     const hindsight = getIntegration("hindsight");
     expect(hindsight).toBeDefined();

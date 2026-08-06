@@ -255,6 +255,9 @@ importers:
       '@kapso/chat-adapter':
         specifier: 0.1.1
         version: 0.1.1(ai@7.0.38(zod@4.4.3))(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
+      '@kybernesis/arcana':
+        specifier: 0.1.1
+        version: 0.1.1(eve@packages+eve)
       '@larksuite/vercel-chat-adapter':
         specifier: 0.1.2
         version: 0.1.2(ai@7.0.38(zod@4.4.3))(bufferutil@4.1.0)(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3)
@@ -3234,6 +3237,12 @@ packages:
 
   '@kwsites/promise-deferred@1.1.1':
     resolution: {integrity: sha512-GaHYm+c0O9MjZRu0ongGBRbinu8gVAMd2UZjji6jVmqKtZluZnptXGWhz1E8j8D2HJ3f/yMxKAUC0b+57wncIw==}
+
+  '@kybernesis/arcana@0.1.1':
+    resolution: {integrity: sha512-lLpFmhsRy8FWNdE/nZqI+D3ZHEdWxUUV6rO75aMLh2R7Snzwg2EL5xUq3wBBcU3d7CRJ7UzV/tYKfMl3sglGJw==}
+    engines: {node: 24.x}
+    peerDependencies:
+      eve: '*'
 
   '@langchain/core@1.2.4':
     resolution: {integrity: sha512-GIrJktdsFPx8gM0C3VyikkeYGZAV7iRIzUJuS5tFatiKLExybou0LI0MuxH9kksN38quyfWdQDl20lIEAEVkVA==}
@@ -17331,6 +17340,11 @@ snapshots:
       - supports-color
 
   '@kwsites/promise-deferred@1.1.1': {}
+
+  '@kybernesis/arcana@0.1.1(eve@packages+eve)':
+    dependencies:
+      eve: link:packages/eve
+      zod: 4.4.3
 
   '@langchain/core@1.2.4(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))(openai@6.39.1(ws@8.21.1(bufferutil@4.1.0))(zod@4.4.3))(ws@8.21.1(bufferutil@4.1.0))':
     dependencies:
