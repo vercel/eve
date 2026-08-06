@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
+import { z } from "zod";
 
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
@@ -60,6 +61,93 @@ describe("definition helper exact inputs", () => {
 
     expectTypeOf(streamedTool).toMatchTypeOf<
       ToolDefinition<Record<string, unknown>, { phase: string }>
+    >();
+    expectTypeOf(streamedTool.execute({}, null as never)).toEqualTypeOf<
+      AsyncGenerator<{ phase: string }, void, unknown>
+    >();
+  });
+
+  it("preserves ordinary async tool executor return types", () => {
+    const asyncTool = defineTool({
+      description: "Return a report.",
+      inputSchema: { type: "object" },
+      async execute() {
+        return { report: "complete" };
+      },
+    });
+
+    expectTypeOf(asyncTool.execute({}, null as never)).toEqualTypeOf<Promise<{ report: string }>>();
+
+    const projectedTool = defineTool({
+      description: "Project a report.",
+      inputSchema: { type: "object" },
+      toModelOutput(output) {
+        return { type: "text", value: output.report };
+      },
+      async execute() {
+        return { report: "complete" };
+      },
+    });
+
+    expectTypeOf(projectedTool.execute({}, null as never)).toEqualTypeOf<
+      Promise<{ report: string }>
+    >();
+
+    const schemaProjectedTool = defineTool({
+      description: "Project a schema-backed report.",
+      inputSchema: z.object({}),
+      toModelOutput(output) {
+        return { type: "text", value: output.report };
+      },
+      async execute() {
+        return { report: "complete" };
+      },
+    });
+
+    expectTypeOf(schemaProjectedTool.execute({}, null as never)).toEqualTypeOf<
+      Promise<{ report: string }>
+    >();
+
+    const mixedTool = defineTool({
+      description: "Return or stream a report.",
+      inputSchema: { type: "object" },
+      toModelOutput(output) {
+        return { type: "text", value: output.report };
+      },
+      execute(): Promise<{ report: string }> | AsyncIterable<{ report: string }> {
+        return Promise.resolve({ report: "complete" });
+      },
+    });
+
+    expectTypeOf(mixedTool).toMatchTypeOf<
+      ToolDefinition<Record<string, unknown>, { report: string }>
+    >();
+    expectTypeOf(mixedTool.execute({}, null as never)).toEqualTypeOf<
+      Promise<{ report: string }> | AsyncIterable<{ report: string }>
+    >();
+
+    const explicitlyTypedTool = defineTool<{ report: string }>({
+      description: "Return an explicitly typed report.",
+      inputSchema: { type: "object" },
+      async execute() {
+        return { report: "complete" };
+      },
+    });
+
+    expectTypeOf(explicitlyTypedTool).toMatchTypeOf<
+      ToolDefinition<Record<string, unknown>, { report: string }>
+    >();
+
+    const broadlyTypedTool = defineTool<string, string>({
+      description: "Normalize text.",
+      inputSchema: { type: "string" },
+      async execute(input) {
+        return input.toUpperCase();
+      },
+    });
+
+    expectTypeOf(broadlyTypedTool.execute("hello", null as never)).toEqualTypeOf<
+      Promise<string> | string | AsyncIterable<string>
     >();
   });
 

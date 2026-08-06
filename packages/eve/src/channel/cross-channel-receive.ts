@@ -25,7 +25,7 @@ export interface CrossChannelTargetHandle {
 }
 
 /** Selects another authored channel and one of its proactive targets. */
-export type CrossChannelToFn = <TChannel extends ChannelReference>(
+export type CrossChannelToFn = <TChannel extends ChannelReference<unknown>>(
   channel: TChannel,
   target: InferReceiveTarget<TChannel>,
 ) => CrossChannelTargetHandle;

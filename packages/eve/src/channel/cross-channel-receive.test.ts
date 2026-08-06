@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
-import { createCrossChannelToFn, type CrossChannelTarget } from "#channel/cross-channel-receive.js";
+import {
+  createCrossChannelToFn,
+  type CrossChannelTarget,
+  type CrossChannelToFn,
+} from "#channel/cross-channel-receive.js";
 import type { Session } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
+import type { SlackChannel } from "#public/channels/slack/slackChannel.js";
 
 function makeRuntime(): Runtime {
   return {
@@ -186,3 +191,9 @@ describe("createCrossChannelToFn", () => {
     expect(slack.receive.mock.calls[0]![0]).toEqual(expect.objectContaining({ auth }));
   });
 });
+
+function typeOnlyFixtures(to: CrossChannelToFn, slack: SlackChannel): void {
+  to(slack, { channelId: "C123" });
+}
+
+void typeOnlyFixtures;
