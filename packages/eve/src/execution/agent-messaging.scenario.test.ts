@@ -44,8 +44,8 @@ const model = mockModel((request) => {
   }
 
   if (childResults.length === 1) {
-    // The agents listing rides the conversation as an assistant announcement
-    // (not the system prompt), so scan every message for the latest listing.
+    // The agents listing rides the conversation as a framework-injected
+    // user-role announcement, so scan every message for the latest listing.
     const agentsSnippet = request.messages.map((message) => message.text).join("\\n");
     const agentId = AGENT_ID_PATTERN.exec(agentsSnippet)?.[1];
     if (agentId === undefined) {

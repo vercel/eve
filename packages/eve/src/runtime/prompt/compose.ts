@@ -12,7 +12,7 @@ const PARALLEL_ACTION_INSTRUCTION =
   "Tool execution\nA single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.";
 
 const AGENT_MESSAGING_INSTRUCTION =
-  "Agent messaging\nAgents you have already delegated to stay available after they answer. The system-message `<agents>` list is only a record of those existing agents — their `agentId`, name, and latest status. It does not limit which subagent tools you can call: your tool list is the source of truth, and any subagent tool can always be called without `agentId` to start a new agent, including when the `<agents>` list is empty or absent. Pass `agentId` to the same subagent tool only to continue one of those existing agents' sessions.";
+  "Agent messaging\nAgents you have already delegated to stay available after they answer. eve injects the current `<agents>` list into the conversation as a note labeled `[Agents]`; it is added automatically by the framework, not written by the user, and never requires a reply. The list is only a record of those existing agents — their `agentId`, name, and latest status. It does not limit which subagent tools you can call: your tool list is the source of truth, and any subagent tool can always be called without `agentId` to start a new agent, including when the `<agents>` list is empty or absent. Pass `agentId` to the same subagent tool only to continue one of those existing agents' sessions.";
 
 /**
  * Input for composing the base authored instructions prompt for one

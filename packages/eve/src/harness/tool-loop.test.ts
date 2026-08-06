@@ -692,7 +692,7 @@ describe("createToolLoopHarness", () => {
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
-  it("announces current agents outside the cacheable system prompt", async () => {
+  it("announces parked agents as user-role content before the user message, outside the system prompt", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -742,18 +742,25 @@ describe("createToolLoopHarness", () => {
       generate: ReturnType<typeof vi.fn>;
     };
     const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
+    // The volatile listing stays out of the system prompt (prompt cache) and
+    // rides history as a labeled, framework-injected user message.
     expect(instructions).toBe("You are a test assistant.");
     expect(messages).toContainEqual({
       content: expect.stringContaining(
         '<agent id="ag_research:123456789012" name="research">waiting</agent>',
       ),
-      role: "assistant",
+      role: "user",
     });
+    // The announcement precedes the turn's actual user message.
     expect(messages.at(-1)).toEqual({ content: "Hi", role: "user" });
+    expect(messages.at(-2)).toEqual({
+      content: expect.stringContaining("[Agents]"),
+      role: "user",
+    });
     expect(JSON.stringify({ instructions, messages })).not.toContain("private-token");
     expect(result.session.history).toContainEqual({
       content: expect.stringContaining('<agent id="ag_research:123456789012"'),
-      role: "assistant",
+      role: "user",
     });
   });
 
@@ -802,6 +809,95 @@ describe("createToolLoopHarness", () => {
     const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
     expect(JSON.stringify(call?.instructions ?? "")).not.toContain("<agents>");
     expect(JSON.stringify(messages)).not.toContain("<agents>");
+  });
+
+  // Regression: a child settling used to append the updated <agents> listing
+  // to history as an assistant message. On a resume with no new user input the
+  // request then ended with `assistant`, which Anthropic rejects ("this model
+  // does not support assistant message prefill"). The announcement is
+  // user-role content, so on a no-input resume it trails the tool results
+  // and the request stays user-final.
+  it("keeps a no-input resume provider-valid when a parked handle is announced", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Done.", role: "assistant" }] },
+      text: "Done.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { persistentSubagentSessions: true }),
+    );
+    const session = createTestSession({
+      history: [
+        { content: "Delegate this.", role: "user" },
+        {
+          content: [
+            {
+              input: { message: "do it" },
+              toolCallId: "call-1",
+              toolName: "research",
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              output: { type: "text", value: "child answered" },
+              toolCallId: "call-1",
+              toolName: "research",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+      ],
+      state: {
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              address: {
+                continuationToken: "private-token",
+                kind: "agent/local",
+                sessionId: "child-session-123456789012",
+              },
+              identity: {
+                id: "ag_research:123456789012",
+                name: "research",
+                nodeId: "subagents/research",
+              },
+              lastStatus: "child answered",
+              phase: "parked",
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await runStep(session);
+
+    const { instructions } = vi.mocked(ToolLoopAgent).mock.calls[0]![0];
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
+    // The request ends user-final: the announcement trails the tool results.
+    expect(messages.at(-1)).toEqual({
+      content: expect.stringContaining('<agent id="ag_research:123456789012"'),
+      role: "user",
+    });
+    expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+    // The volatile listing never rides the system prompt (prompt cache).
+    expect(JSON.stringify(instructions ?? "")).not.toContain("<agents>");
+    // The announcement persists append-only so the next step's diff gate
+    // sees it and does not re-announce an unchanged listing.
+    expect(result.session.history.at(-2)).toEqual({
+      content: expect.stringContaining("[Agents]"),
+      role: "user",
+    });
   });
 
   it("uses dynamic model selection for the model call", async () => {

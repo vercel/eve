@@ -759,13 +759,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
+    // Announce the parked-agents listing as framework-injected user-role
+    // content, before any new user input so a message present on this step
+    // stays the turn's focus. On a no-input settle resume it trails the tool
+    // results, keeping the request user-final for providers that reject
+    // assistant-final histories. See resolveAgentsAnnouncement for the role
+    // rationale (assistant-final rejection, prompt-cache preservation).
     if (config.persistentSubagentSessions === true) {
       const announcement = resolveAgentsAnnouncement({
         messages,
         store: getAgentHandleStore(session.state),
       });
       if (announcement !== undefined) {
-        messages.push({ content: announcement, role: "assistant" });
+        messages.push({ content: announcement, role: "user" });
       }
     }
 

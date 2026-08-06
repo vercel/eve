@@ -82,12 +82,12 @@ describe("resolveAgentsAnnouncement", () => {
     expect(messages).toEqual([{ content: "Earlier response", role: "assistant" }]);
   });
 
-  it("does not repeat an unchanged listing", () => {
+  it("does not repeat an unchanged listing already announced as user content", () => {
     const content = renderAgentsSnippet({ handles: [parkedRemoteHandle] });
 
     expect(
       resolveAgentsAnnouncement({
-        messages: [{ content, role: "assistant" }],
+        messages: [{ content, role: "user" }],
         store: { handles: [parkedRemoteHandle] },
       }),
     ).toBeUndefined();
@@ -98,7 +98,7 @@ describe("resolveAgentsAnnouncement", () => {
 
     expect(
       resolveAgentsAnnouncement({
-        messages: [{ content: previous, role: "assistant" }],
+        messages: [{ content: previous, role: "user" }],
         store: { handles: [runningHandle] },
       }),
     ).toBe("[Agents]\n<agents>\n</agents>");
@@ -106,5 +106,18 @@ describe("resolveAgentsAnnouncement", () => {
 
   it("skips empty scaffolding when no listing was previously announced", () => {
     expect(resolveAgentsAnnouncement({ messages: [], store: undefined })).toBeUndefined();
+  });
+
+  it("ignores an assistant message that happens to start with the label", () => {
+    const content = renderAgentsSnippet({ handles: [parkedRemoteHandle] });
+
+    // Only framework-injected user-role announcements gate re-announcement;
+    // model output echoing the label must not suppress a fresh listing.
+    expect(
+      resolveAgentsAnnouncement({
+        messages: [{ content, role: "assistant" }],
+        store: { handles: [parkedRemoteHandle] },
+      }),
+    ).toBe(content);
   });
 });

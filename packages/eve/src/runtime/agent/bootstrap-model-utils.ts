@@ -155,6 +155,10 @@ export function getPromptContentText(content: BootstrapPrompt[number]["content"]
 
 /**
  * Returns the text from the last user message in the prompt, or `null`.
+ *
+ * Skips framework-injected `[Agents]` announcements: they ride the user
+ * role in conversation history, but they are not authored input and must
+ * not drive mock directive parsing.
  */
 export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
   for (const message of [...prompt].reverse()) {
@@ -163,6 +167,10 @@ export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
     }
 
     const text = getPromptContentText(message.content).trim();
+
+    if (text.startsWith("[Agents]")) {
+      continue;
+    }
 
     if (text.length > 0) {
       return text;

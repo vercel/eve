@@ -25,9 +25,22 @@ export function renderAgentsSnippet(store: AgentHandleStore): string {
 }
 
 /**
- * Returns an append-only model announcement when the visible handle listing
- * changed. Keeping volatile handles in conversation history preserves the
- * stable system prompt cache prefix.
+ * Returns an append-only announcement when the visible handle listing
+ * changed since the last one in history, or `undefined` when it is
+ * unchanged.
+ *
+ * The announcement is framework-injected `user`-role conversation content
+ * (the pattern system-reminder notes use in Claude Code and OpenCode), not
+ * an `assistant` or `system` entry:
+ *
+ * - `assistant` breaks providers that reject assistant-final requests
+ *   (a settle resume carries no new user input, so the announcement would
+ *   end the request) and invites the model to imitate the listing.
+ * - `system` busts the provider prompt cache for the entire conversation
+ *   every time a child settles; append-only history preserves the prefix.
+ *
+ * The static agent-messaging prompt block declares the `[Agents]` label as
+ * eve-injected so the model does not attribute it to the user.
  */
 export function resolveAgentsAnnouncement(input: {
   readonly messages: readonly ModelMessage[];
@@ -35,7 +48,7 @@ export function resolveAgentsAnnouncement(input: {
 }): string | undefined {
   const latest = input.messages.findLast(
     (message) =>
-      message.role === "assistant" &&
+      message.role === "user" &&
       typeof message.content === "string" &&
       message.content.startsWith(AGENTS_SNIPPET_LABEL),
   );
