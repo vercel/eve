@@ -23,6 +23,7 @@ import {
   getLastUserPromptText,
   getPromptContentText,
   getPromptText,
+  isAgentsAnnouncementText,
 } from "#runtime/agent/bootstrap-model-utils.js";
 import {
   findRelevantSkill,
@@ -484,6 +485,14 @@ function getAvailableTools(options: BootstrapGenerateOptions): AvailableBootstra
 function getLastAuthoredToolResult(prompt: BootstrapPrompt): BootstrapToolResult | null {
   for (const message of [...prompt].reverse()) {
     if (message.role === "user") {
+      // A framework-injected [Agents] announcement is scaffolding, not a
+      // turn boundary. Treating it as one masks the tool result behind it,
+      // and the adapter then re-issues the same deterministic tool call —
+      // for subagent starts that collides on the derived operation id and
+      // fatally fails the parent session.
+      if (isAgentsAnnouncementText(getPromptContentText(message.content).trim())) {
+        continue;
+      }
       return null;
     }
 

@@ -1,5 +1,7 @@
 import type { MockLanguageModelV3 } from "ai/test";
 
+import { AGENTS_SNIPPET_LABEL } from "#harness/handles/prompt.js";
+
 export type BootstrapGenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 export type BootstrapPrompt = BootstrapGenerateOptions["prompt"];
 export type BootstrapGenerateResult = Awaited<ReturnType<MockLanguageModelV3["doGenerate"]>>;
@@ -168,7 +170,7 @@ export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
 
     const text = getPromptContentText(message.content).trim();
 
-    if (text.startsWith("[Agents]")) {
+    if (isAgentsAnnouncementText(text)) {
       continue;
     }
 
@@ -178,6 +180,16 @@ export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
   }
 
   return null;
+}
+
+/**
+ * True when the text is a framework-injected `[Agents]` announcement.
+ * Announcements are user-role scaffolding, not authored input: mock model
+ * heuristics must scan past them instead of treating them as the turn's
+ * message or as a turn boundary.
+ */
+export function isAgentsAnnouncementText(text: string): boolean {
+  return text.startsWith(AGENTS_SNIPPET_LABEL);
 }
 
 /**

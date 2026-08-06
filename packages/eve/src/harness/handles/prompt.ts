@@ -2,7 +2,12 @@ import type { ModelMessage } from "ai";
 
 import type { AgentHandle, AgentHandleStore } from "#harness/handles/store.js";
 
-const AGENTS_SNIPPET_LABEL = "[Agents]";
+/**
+ * Label prefixing every framework-injected agents announcement. Mock model
+ * adapters use it to treat announcements as transparent scaffolding rather
+ * than authored user input.
+ */
+export const AGENTS_SNIPPET_LABEL = "[Agents]";
 
 /** Returns the resumable handles: the only phase the model may continue. */
 export function projectParkedAgentHandles(

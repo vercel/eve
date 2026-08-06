@@ -699,6 +699,68 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
+  // Regression: the [Agents] announcement is user-role scaffolding injected
+  // after a subagent settles. Treating it as a turn boundary masked the tool
+  // result, and the adapter re-issued the same deterministic tool call — a
+  // duplicate start operation that fatally failed the parent session in the
+  // mock world suites.
+  it("replies to a tool result behind a framework [Agents] announcement instead of re-calling", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Call conditional-marker exactly once.",
+          role: "user",
+        },
+        {
+          content: [
+            {
+              input: JSON.stringify({ message: "run" }),
+              toolCallId: "call_conditional_marker",
+              toolName: "conditional-marker",
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              output: { type: "json", value: "DYNAMIC_SUBAGENT_ENABLED" },
+              toolCallId: "call_conditional_marker",
+              toolName: "conditional-marker",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+        {
+          content:
+            '[Agents]\n<agents>\n<agent id="ag_conditional-marker:5ae9bfd35776" name="conditional-marker">DYNAMIC_SUBAGENT_ENABLED</agent>\n</agents>',
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            properties: { message: { type: "string" } },
+            required: ["message"],
+            type: "object",
+          },
+          name: "conditional-marker",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.finishReason).toEqual({ raw: undefined, unified: "stop" });
+    expect(result.content).toEqual([
+      {
+        text: 'Used conditional-marker for "Call conditional-marker exactly once.": DYNAMIC_SUBAGENT_ENABLED',
+        type: "text",
+      },
+    ]);
+  });
+
   it("does not reuse a prior turn's tool result after a later user message", async () => {
     const result = await generateWithPrompt([
       {
