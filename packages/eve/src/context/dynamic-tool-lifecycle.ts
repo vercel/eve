@@ -50,6 +50,7 @@ function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): Harness
     ...(entry.toModelOutput !== undefined
       ? { toModelOutput: entry.toModelOutput as (output: unknown) => unknown }
       : {}),
+    ...(entry.providerOptions !== undefined ? { providerOptions: entry.providerOptions } : {}),
   };
 }
 

@@ -88,7 +88,7 @@ export async function resolveToolDefinition(
  * result without clobbering required fields with `undefined`.
  */
 type OptionalResolvedFields = {
-  -readonly [K in "approval" | "toModelOutput"]?: ResolvedToolDefinition[K];
+  -readonly [K in "approval" | "toModelOutput" | "providerOptions"]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -114,6 +114,10 @@ function extractOptionalHooks(
       record.toModelOutput,
       describe(definition, "to provide a toModelOutput function"),
     ) as ResolvedToolDefinition["toModelOutput"];
+  }
+
+  if (record.providerOptions !== undefined) {
+    optional.providerOptions = record.providerOptions as ResolvedToolDefinition["providerOptions"];
   }
 
   return optional;

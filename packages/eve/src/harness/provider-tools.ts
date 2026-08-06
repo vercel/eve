@@ -152,6 +152,86 @@ export async function resolveWebSearchProviderTool(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Provider-native tool search
+// ---------------------------------------------------------------------------
+
+/** Backends with provider-native tool search support. */
+export type ToolSearchBackend = "anthropic" | "openai";
+
+/**
+ * A resolved tool-search provider tool plus the tool-set key to mount it
+ * under. The key matches the provider's fixed wire name so tool-call parts
+ * round-trip cleanly.
+ */
+export interface ToolSearchProviderTool {
+  readonly name: string;
+  readonly tool: ToolSet[string];
+}
+
+/**
+ * Returns `true` when a built AI SDK tool is marked as deferred for
+ * provider-native tool search (`providerOptions.<provider>.deferLoading`).
+ */
+export function isDeferredTool(candidate: ToolSet[string]): boolean {
+  const providerOptions = candidate.providerOptions as
+    | Record<string, Record<string, unknown> | undefined>
+    | undefined;
+  return (
+    providerOptions?.anthropic?.deferLoading === true ||
+    providerOptions?.openai?.deferLoading === true
+  );
+}
+
+/**
+ * Resolves which provider-native tool-search backend serves the current
+ * model, mirroring {@link resolveWebSearchBackend}. Returns `null` when the
+ * provider has no tool-search support — deferred tools then load eagerly,
+ * exactly as before this feature.
+ */
+export function resolveToolSearchBackend(
+  modelRef: RuntimeModelReference,
+): ToolSearchBackend | null {
+  if (modelRef.source === undefined) {
+    return null;
+  }
+
+  const providerId = modelRef.id.split("/")[0] ?? "";
+
+  if (providerId === "openai" || providerId.startsWith("openai.")) {
+    return "openai";
+  }
+
+  if (providerId === "anthropic" || providerId.startsWith("anthropic.")) {
+    return "anthropic";
+  }
+
+  return null;
+}
+
+/**
+ * Constructs the AI SDK provider tool for tool search based on the resolved
+ * backend. Dynamic imports keep unused provider SDKs out of the bundle,
+ * mirroring {@link resolveWebSearchProviderTool}.
+ */
+export async function resolveToolSearchProviderTool(
+  backend: ToolSearchBackend,
+): Promise<ToolSearchProviderTool> {
+  switch (backend) {
+    case "openai": {
+      const { openai } = await import("#compiled/@ai-sdk/openai/index.js");
+      return { name: "tool_search", tool: openai.tools.toolSearch({}) as ToolSet[string] };
+    }
+    case "anthropic": {
+      const { anthropic } = await import("#compiled/@ai-sdk/anthropic/index.js");
+      return {
+        name: "tool_search_tool_regex",
+        tool: anthropic.tools.toolSearchRegex_20251119() as ToolSet[string],
+      };
+    }
+  }
+}
+
 function attachWebSearchOutputSchema(
   tool: ToolSet[string],
   backend: WebSearchBackend,

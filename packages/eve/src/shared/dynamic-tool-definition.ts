@@ -4,6 +4,7 @@ import type {
   PublicToolInputSchema,
   PublicToolOutputSchema,
   ToolModelOutput,
+  ToolProviderOptions,
 } from "#shared/tool-definition.js";
 import type { Approval } from "#public/definitions/approval.js";
 import type { ToolContext } from "#public/definitions/tool.js";
@@ -93,6 +94,12 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
    * carry a function across replay.
    */
   readonly approval?: Approval;
+  /**
+   * Optional provider-specific tool options forwarded verbatim to the AI
+   * SDK tool — for example `{ anthropic: { deferLoading: true } }` to mark
+   * the tool as deferred for provider-native tool search.
+   */
+  readonly providerOptions?: ToolProviderOptions;
 }
 
 /**
