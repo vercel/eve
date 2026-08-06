@@ -58,19 +58,40 @@ describe("isDeferredTool", () => {
 });
 
 describe("resolveToolSearchBackend", () => {
+  // Gateway model ids carry no source; authored LanguageModel instances do.
+  const AUTHORED_SOURCE = {
+    exportName: "default",
+    logicalPath: "agent/agent.ts",
+    sourceId: "agent/agent.ts",
+    sourceKind: "module",
+  } as unknown as RuntimeModelReference["source"];
+
   function modelRef(overrides: Partial<RuntimeModelReference>): RuntimeModelReference {
-    return { id: "openai/gpt-5.6-luna", source: "authored", ...overrides } as RuntimeModelReference;
+    return { id: "openai/gpt-5.6-luna", ...overrides } as RuntimeModelReference;
   }
 
-  it("maps gateway model ids to their tool-search backend", () => {
+  it("maps gateway model ids (no source) to their tool-search backend", () => {
     expect(resolveToolSearchBackend(modelRef({ id: "openai/gpt-5.6-luna" }))).toBe("openai");
     expect(resolveToolSearchBackend(modelRef({ id: "anthropic/claude-opus-5" }))).toBe("anthropic");
     expect(resolveToolSearchBackend(modelRef({ id: "google/gemini-3-pro" }))).toBeNull();
+    expect(resolveToolSearchBackend(modelRef({ id: "xai/grok-5" }))).toBeNull();
   });
 
-  it("returns null for direct model instances", () => {
+  it("maps authored model instances via their provider-prefixed id", () => {
     expect(
-      resolveToolSearchBackend(modelRef({ id: "claude-opus-5", source: undefined })),
+      resolveToolSearchBackend(
+        modelRef({ id: "anthropic.messages/claude-opus-5", source: AUTHORED_SOURCE }),
+      ),
+    ).toBe("anthropic");
+    expect(
+      resolveToolSearchBackend(
+        modelRef({ id: "openai.responses/gpt-5.6", source: AUTHORED_SOURCE }),
+      ),
+    ).toBe("openai");
+    expect(
+      resolveToolSearchBackend(
+        modelRef({ id: "google.generative-ai/gemini-3-pro", source: AUTHORED_SOURCE }),
+      ),
     ).toBeNull();
   });
 });

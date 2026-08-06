@@ -185,17 +185,18 @@ export function isDeferredTool(candidate: ToolSet[string]): boolean {
 
 /**
  * Resolves which provider-native tool-search backend serves the current
- * model, mirroring {@link resolveWebSearchBackend}. Returns `null` when the
- * provider has no tool-search support — deferred tools then load eagerly,
+ * model. Unlike {@link resolveWebSearchBackend} there is no gateway
+ * fallback, and the id prefix is parsed for gateway model ids and authored
+ * instances alike — a gateway-routed Anthropic/OpenAI model forwards
+ * per-tool `providerOptions` upstream, so it needs the search tool just as
+ * much as a direct instance. Returns `null` when the provider has no
+ * tool-search support — the defer markers are then inert (providers only
+ * read their own `providerOptions` namespace) and tools load eagerly,
  * exactly as before this feature.
  */
 export function resolveToolSearchBackend(
   modelRef: RuntimeModelReference,
 ): ToolSearchBackend | null {
-  if (modelRef.source === undefined) {
-    return null;
-  }
-
   const providerId = modelRef.id.split("/")[0] ?? "";
 
   if (providerId === "openai" || providerId.startsWith("openai.")) {
