@@ -13,6 +13,7 @@
     "dev-tui",
     "acp",
     "frontend",
-    "client"
+    "client",
+    "ucp"
   ]
 }
