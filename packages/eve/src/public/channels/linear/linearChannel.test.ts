@@ -181,6 +181,19 @@ describe("linearChannel inbound Agent Session events", () => {
     });
   });
 
+  it("accepts signed retries within a configured timestamp skew", async () => {
+    const channel = linearChannel({
+      credentials: { webhookSecret: SECRET },
+      maxSkewMs: 5 * 60_000,
+    });
+    const request = signedRequest(sessionPayload({ webhookTimestamp: Date.now() - 2 * 60_000 }));
+
+    const { response, send } = await firePost(channel, request);
+
+    expect(response.status).toBe(200);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it("delivers prompted values as messages for the harness to resolve", async () => {
     const channel = linearChannel({ credentials: { webhookSecret: SECRET } });
     const { send } = await firePost(

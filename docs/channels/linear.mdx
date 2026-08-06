@@ -48,6 +48,8 @@ export default linearChannel({
 });
 ```
 
+Direct webhook verification accepts timestamps within 60 seconds by default, as Linear recommends. Set `maxSkewMs` to a larger number of milliseconds only when you intentionally accept delayed retries. Use the narrowest window that fits your retry policy.
+
 ```bash
 LINEAR_AGENT_ACCESS_TOKEN=lin_api_... # posts Agent Activities and creates proactive sessions
 LINEAR_WEBHOOK_SECRET=...             # verifies Linear-Signature
@@ -63,7 +65,7 @@ https://<deployment>/eve/v1/linear
 
 For Linear's agent surface, configure the OAuth authorize URL with `actor=app` and grant the app scopes that let it appear as an agent in Linear, including `app:assignable` and `app:mentionable`. Subscribe to the `AgentSessionEvent` webhook category so Linear sends `created` events when the agent is delegated or mentioned and `prompted` events when the user continues the session.
 
-Linear sends webhook signatures in `Linear-Signature`; eve verifies the HMAC over the raw body and rejects stale `webhookTimestamp` values. If a trusted gateway verifies Linear before the request reaches eve, pass `credentials.webhookVerifier` instead of a webhook secret.
+Linear sends webhook signatures in `Linear-Signature`; eve verifies the HMAC over the raw body and rejects stale `webhookTimestamp` values. If a trusted gateway verifies Linear before the request reaches eve, pass `credentials.webhookVerifier` instead of a webhook secret. Your custom verifier must enforce its timestamp policy because `maxSkewMs` does not apply.
 
 ## How the channel handles messages
 

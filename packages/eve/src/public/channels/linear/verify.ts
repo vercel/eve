@@ -64,6 +64,10 @@ export function signLinearWebhookBody(body: string, secret: string): string {
 }
 
 function verifyWebhookTimestamp(body: string, maxSkewMs: number): void {
+  if (!Number.isFinite(maxSkewMs) || maxSkewMs < 0) {
+    throw new Error("linearChannel: maxSkewMs must be a non-negative finite number.");
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(body) as unknown;

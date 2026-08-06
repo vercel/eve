@@ -172,6 +172,8 @@ export interface LinearChannelConfig {
   readonly api?: LinearApiOptions;
   readonly credentials?: LinearChannelCredentials;
   readonly events?: LinearChannelEvents;
+  /** Max allowed webhook timestamp skew in milliseconds. Defaults to 60 seconds. */
+  readonly maxSkewMs?: number;
   readonly route?: string;
 
   /** Inbound Agent Session hook. Defaults to dispatching `created` and `prompted` events. */
@@ -225,7 +227,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
       POST<LinearChannelState>(
         config.route ?? LINEAR_CHANNEL_DEFAULT_ROUTE,
         async (req, { from, waitUntil }) => {
-          const body = await verifyInbound(req, config.credentials);
+          const body = await verifyInbound(req, config.credentials, config.maxSkewMs);
           if (body === null) return new Response("unauthorized", { status: 401 });
 
           let event;
@@ -424,9 +426,11 @@ function initialLinearState(): LinearChannelState {
 async function verifyInbound(
   req: Request,
   credentials: LinearChannelCredentials | undefined,
+  maxSkewMs: number | undefined,
 ): Promise<string | null> {
   try {
     return await verifyLinearRequest(req, {
+      maxSkewMs,
       webhookSecret: credentials?.webhookSecret,
       webhookVerifier: credentials?.webhookVerifier,
     });
