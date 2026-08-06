@@ -35,10 +35,12 @@ export default defineEval({
     intervening.notEvent("input.requested");
     intervening.messageIncludes(/INTERVENING-HITL-OK/i);
 
-    const staleSelection = await t.respond({
-      requestId: request.requestId,
-      optionId: "candidate",
-    });
+    const staleSelection = await t.respond([
+      {
+        requestId: request.requestId,
+        optionId: "candidate",
+      },
+    ]);
     staleSelection.expectOk();
     staleSelection.notEvent("input.requested");
     staleSelection.event("message.received", {

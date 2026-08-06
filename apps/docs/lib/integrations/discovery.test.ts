@@ -32,6 +32,18 @@ describe("integration discovery", () => {
     expect(markdown).toContain("eve add channel/slack");
   });
 
+  it("renders the Web Chat setup for every host framework it documents", () => {
+    const web = getIntegration("eve");
+    expect(web).toBeDefined();
+
+    const markdown = integrationMarkdown(web!);
+    expect(markdown).toContain("eve add channel/web");
+    expect(markdown).toContain("/docs/guides/frontend/nextjs");
+    expect(markdown).toContain("/docs/guides/frontend/nuxt");
+    expect(markdown).toContain("/docs/guides/frontend/sveltekit");
+    expect(integrationSearchText(web!)).toContain("svelte");
+  });
+
   it("renders the Browserbase extension setup", () => {
     const browserbase = getIntegration("browserbase");
     expect(browserbase).toBeDefined();
@@ -68,6 +80,19 @@ describe("integration discovery", () => {
     expect(integrationSearchText(agentkit!)).toContain("long-term memory");
   });
 
+  it("renders the Hindsight memory extension setup", () => {
+    const hindsight = getIntegration("hindsight");
+    expect(hindsight).toBeDefined();
+
+    const markdown = integrationMarkdown(hindsight!);
+    expect(markdown).toContain("eve add extension/hindsight");
+    expect(markdown).toContain('import { hindsightMemory } from "@vectorize-io/hindsight-eve"');
+    expect(markdown).toContain("hindsightRetainHook");
+    expect(markdown).toContain("HINDSIGHT_API_KEY");
+    expect(markdown).toContain("HINDSIGHT_BANK_ID");
+    expect(integrationSearchText(hindsight!)).toContain("long-term memory");
+  });
+
   it("renders the GitHub Tools extension setup", () => {
     const githubTools = getIntegration("github-tools");
     expect(githubTools).toBeDefined();
@@ -98,5 +123,13 @@ describe("integration discovery", () => {
     expect(markdown).toContain("eve add instrumentation/braintrust");
     expect(markdown).toContain("agent/instrumentation.ts");
     expect(markdown).toContain("BRAINTRUST_API_KEY");
+
+    const posthog = getIntegration("posthog-instrumentation");
+    expect(posthog).toBeDefined();
+
+    const posthogMarkdown = integrationMarkdown(posthog!);
+    expect(posthogMarkdown).toContain("eve add instrumentation/posthog");
+    expect(posthogMarkdown).toContain("PostHogTraceExporter");
+    expect(posthogMarkdown).toContain("POSTHOG_PROJECT_TOKEN");
   });
 });

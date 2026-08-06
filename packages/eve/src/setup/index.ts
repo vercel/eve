@@ -68,6 +68,7 @@ export {
 } from "./project-resolution.js";
 export { runVercelEnvPull } from "./run-vercel-link.js";
 export { provisionSlackbot, reconcileSlackUid, type ProvisionSlackbotResult } from "./slackbot.js";
+export { runRemoteAuthFlow } from "../cli/dev/tui/remote-auth.js";
 export {
   setupConnectionConnector,
   type SetupConnectionConnectorOptions,

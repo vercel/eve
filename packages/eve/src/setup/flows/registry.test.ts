@@ -55,22 +55,35 @@ describe("runRegistryFlow", () => {
       expect.objectContaining({ silent: true, prompter: fake.prompter }),
     );
     expect(prompts[0]).toMatchObject({
-      message: "",
+      message: "Add an integration",
       hintLayout: "inline",
       options: expect.arrayContaining([
-        expect.objectContaining({ value: "category:channel", label: "Chat channels" }),
-        expect.objectContaining({ value: "category:connection", label: "Tools & data" }),
-        expect.objectContaining({ value: "category:extension", label: "Capabilities" }),
+        expect.objectContaining({
+          value: "category:channel",
+          label: "Channels",
+          hint: "Where people talk to your agent — Web, Slack, Discord, Teams",
+        }),
+        expect.objectContaining({
+          value: "category:connection",
+          label: "MCP connections",
+          hint: "Connect services like Linear, Notion, GitHub, and Vercel",
+        }),
+        expect.objectContaining({
+          value: "category:extension",
+          label: "Extensions",
+          hint: "Add browser automation, memory, and developer tools",
+        }),
         expect.objectContaining({
           value: "category:instrumentation",
           label: "Observability",
+          hint: "Trace, evaluate, and monitor your agent",
         }),
-        expect.objectContaining({ value: "category:all", label: "All integrations" }),
-        expect.objectContaining({ value: "action:done", label: "Back to chat" }),
+        expect.objectContaining({ value: "category:all", label: "Browse all" }),
+        expect.objectContaining({ value: "action:done", label: "Return to chat" }),
       ]),
     });
     expect(prompts[1]).toMatchObject({
-      message: "Browse registry integrations",
+      message: "Browse extensions",
       options: [
         expect.objectContaining({
           label: "Agent Browser",
@@ -247,7 +260,7 @@ describe("runRegistryFlow", () => {
     await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps });
 
     expect(prompts[1]).toMatchObject({
-      placeholder: "Search or enter an item address",
+      placeholder: "Search integrations or enter an item address",
       searchAction: { label: expect.any(Function), value: expect.any(Function) },
     });
     const searchAction = (prompts[1] as { searchAction: { label(query: string): string } })
@@ -269,6 +282,10 @@ describe("runRegistryFlow", () => {
       runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() }),
     ).resolves.toEqual({ kind: "done", addedItems: [] });
 
-    expect(fake.selectMessages).toEqual(["", "Browse registry integrations", ""]);
+    expect(fake.selectMessages).toEqual([
+      "Add an integration",
+      "Browse channels",
+      "Add an integration",
+    ]);
   });
 });

@@ -18,22 +18,20 @@ const AUTH = {
 
 export default defineChannel({
   routes: [
-    POST("/session-reset/:threadId/messages", async (request, { params, send }) => {
+    POST("/session-reset/:threadId/messages", async (request, { from, params }) => {
       const body = (await request.json().catch(() => ({}))) as { message?: string };
-      const session = await send(body.message ?? "Reply with hello.", {
+      const session = await from(params.threadId ?? "").send(body.message ?? "Reply with hello.", {
         auth: AUTH,
-        continuationToken: params.threadId ?? "",
       });
       return Response.json({ sessionId: session.id });
     }),
-    POST("/session-reset/:threadId/owner", async (_request, { params, resolveActiveSession }) => {
-      const owner = await resolveActiveSession({ continuationToken: params.threadId ?? "" });
-      return Response.json({ sessionId: owner?.sessionId ?? null });
+    POST("/session-reset/:threadId/owner", async (_request, { params, resolveSession }) => {
+      const owner = await resolveSession(params.threadId ?? "");
+      return Response.json({ sessionId: owner?.id ?? null });
     }),
-    POST("/session-reset/:threadId/new", async (_request, { params, reset }) => {
+    POST("/session-reset/:threadId/new", async (_request, { from, params }) => {
       return Response.json(
-        await reset({
-          continuationToken: params.threadId ?? "",
+        await from(params.threadId ?? "").reset({
           reason: "Vercel session reset integration test",
         }),
       );

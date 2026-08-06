@@ -10,13 +10,11 @@ import {
   ScheduleDispatcher,
 } from "#channel/schedule.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
-import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 function createMockRunHandle(): RunHandle {
   return {
-    continuationToken: "slack:C0123ABC:",
     events: new ReadableStream<MessageStreamEvent>(),
     sessionId: "mock-session-id",
   };
@@ -24,13 +22,12 @@ function createMockRunHandle(): RunHandle {
 
 function createMockRuntime(): Runtime {
   return {
-    cancelTurn: vi.fn(),
-    deliver: vi.fn().mockRejectedValue(new RuntimeNoActiveSessionError("schedule:token")),
-    resolveSession: vi.fn(),
-    run: vi.fn().mockResolvedValue(createMockRunHandle()),
+    createSession: vi.fn().mockResolvedValue(createMockRunHandle()),
+    dispatchContinuation: vi.fn().mockResolvedValue({ status: "session_not_active" }),
+    dispatchSession: vi.fn(),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-    terminateSession: vi.fn(),
+    resolveContinuation: vi.fn(),
   };
 }
 
@@ -61,7 +58,7 @@ function makeSlackChannelEntry(): {
 
 describe("ScheduleDispatcher", () => {
   describe("markdown form", () => {
-    it("starts a Session via runtime.run with the SCHEDULE_ADAPTER", async () => {
+    it("starts a Session via runtime.createSession with the SCHEDULE_ADAPTER", async () => {
       const runtime = createMockRuntime();
       const dispatcher = new ScheduleDispatcher({ runtime, channels: [] });
 
@@ -70,7 +67,7 @@ describe("ScheduleDispatcher", () => {
         markdown: "Run heartbeat task.",
       });
 
-      expect(runtime.run).toHaveBeenCalledWith(
+      expect(runtime.createSession).toHaveBeenCalledWith(
         expect.objectContaining({
           adapter: SCHEDULE_ADAPTER,
           input: { message: "Run heartbeat task." },
@@ -84,9 +81,9 @@ describe("ScheduleDispatcher", () => {
       expect(result.waitUntilTasks).toHaveLength(0);
     });
 
-    it("propagates runtime.run failures", async () => {
+    it("propagates runtime.createSession failures", async () => {
       const runtime = createMockRuntime();
-      runtime.run = vi.fn().mockRejectedValue(new Error("boom"));
+      runtime.createSession = vi.fn().mockRejectedValue(new Error("boom"));
       const dispatcher = new ScheduleDispatcher({ runtime, channels: [] });
 
       await expect(dispatcher.trigger({ scheduleId: "heartbeat", markdown: "x" })).rejects.toThrow(
@@ -96,7 +93,7 @@ describe("ScheduleDispatcher", () => {
   });
 
   describe("run handler form", () => {
-    it("invokes the author's run() with { receive, waitUntil, appAuth }", async () => {
+    it("invokes the author's run() with { to, waitUntil, appAuth }", async () => {
       const runtime = createMockRuntime();
       vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
       vi.stubEnv("SLACK_SIGNING_SECRET", "test-secret");
@@ -111,12 +108,10 @@ describe("ScheduleDispatcher", () => {
 
         const result = await dispatcher.trigger({
           scheduleId: "daily-digest",
-          async run({ receive, waitUntil, appAuth }) {
+          async run({ to, waitUntil, appAuth }) {
             observed.hasAppAuth = appAuth.principalId === "eve:app";
             observed.hasWaitUntil = typeof waitUntil === "function";
-            await receive(definition, {
-              message: "post the digest",
-              target: { channelId: "C0123ABC" },
+            await to(definition, { channelId: "C0123ABC" }).send("post the digest", {
               auth: appAuth,
             });
           },
@@ -125,9 +120,9 @@ describe("ScheduleDispatcher", () => {
         expect(observed.hasAppAuth).toBe(true);
         expect(observed.hasWaitUntil).toBe(true);
         expect(result.sessions).toHaveLength(1);
-        expect(runtime.run).toHaveBeenCalledTimes(1);
+        expect(runtime.createSession).toHaveBeenCalledTimes(1);
 
-        const runInput = vi.mocked(runtime.run).mock.calls[0]![0];
+        const runInput = vi.mocked(runtime.createSession).mock.calls[0]![0];
         expect(runInput.continuationToken).toMatch(
           /^slack:C0123ABC:[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/,
         );
@@ -154,7 +149,7 @@ describe("ScheduleDispatcher", () => {
       expect(result.sessions).toHaveLength(0);
     });
 
-    it("throws when args.receive(channel) is called with an unregistered channel", async () => {
+    it("throws when ctx.to(channel) is called with an unregistered channel", async () => {
       const runtime = createMockRuntime();
       const dispatcher = new ScheduleDispatcher({ runtime, channels: [] });
       const stranger = {
@@ -166,8 +161,8 @@ describe("ScheduleDispatcher", () => {
       await expect(
         dispatcher.trigger({
           scheduleId: "stranger",
-          async run({ receive }) {
-            await receive(stranger, { message: "x", target: {}, auth: null });
+          async run({ to }) {
+            await to(stranger, {}).send("x", { auth: null });
           },
         }),
       ).rejects.toThrow(/not registered in this agent/);

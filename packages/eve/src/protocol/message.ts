@@ -8,7 +8,11 @@ import {
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createEventId } from "#protocol/event-id.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
+import type {
+  RuntimeActionRequest,
+  RuntimeActionResult,
+  RuntimeToolResultActionResult,
+} from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -19,7 +23,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "20";
+export const EVE_MESSAGE_STREAM_VERSION = "21";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -128,26 +132,14 @@ export interface RuntimeIdentity {
  */
 export type HandleMessageRequestBody =
   | {
+      readonly inputResponses?: never;
       readonly message: string | UserContent;
       readonly clientContext?: string | readonly string[] | JsonObject;
       readonly outputSchema?: JsonObject;
     }
   | {
-      readonly continuationToken: string;
-      readonly message: string | UserContent;
-      readonly clientContext?: string | readonly string[] | JsonObject;
-      readonly outputSchema?: JsonObject;
-    }
-  | {
-      readonly continuationToken: string;
       readonly inputResponses: readonly InputResponse[];
-      readonly clientContext?: string | readonly string[] | JsonObject;
-      readonly outputSchema?: JsonObject;
-    }
-  | {
-      readonly continuationToken: string;
-      readonly inputResponses: readonly InputResponse[];
-      readonly message: string | UserContent;
+      readonly message?: never;
       readonly clientContext?: string | readonly string[] | JsonObject;
       readonly outputSchema?: JsonObject;
     };
@@ -252,6 +244,20 @@ export interface ActionResultStreamEvent {
     turnId: string;
   };
   type: "action.result";
+}
+
+/**
+ * Stream event emitted for a preliminary snapshot from a locally executed
+ * tool generator. The final snapshot is emitted as `action.result`.
+ */
+export interface ActionPartialStreamEvent {
+  data: {
+    result: RuntimeToolResultActionResult;
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "action.partial";
 }
 
 /**
@@ -476,6 +482,19 @@ export interface TurnCancelledStreamEvent {
 }
 
 /**
+ * Stream event emitted after the durable model-message history is cleared.
+ * The session itself and its non-message state remain active.
+ */
+export interface ContextClearedStreamEvent {
+  data: {
+    sequence: number;
+    sessionId: string;
+    turnId: string;
+  };
+  type: "context.cleared";
+}
+
+/**
  * Stream event emitted when the workflow decides to compact the current
  * visible session history before the next model fragment runs.
  */
@@ -564,7 +583,7 @@ export interface AuthorizationCompletedStreamEvent {
  */
 export interface SessionWaitingStreamEvent {
   data: {
-    /** Channel-owned resume handle for the next user turn. */
+    /** Channel-local continuation token, or the immutable session ID for an ID-only session. */
     continuationToken: string;
     wait: "next-user-message";
   };
@@ -598,6 +617,7 @@ export interface SessionCompletedStreamEvent {
  * consumers receive {@link MessageStreamEvent}.
  */
 export type UnstampedMessageStreamEvent =
+  | ContextClearedStreamEvent
   | CompactionCompletedStreamEvent
   | CompactionRequestedStreamEvent
   | AuthorizationCompletedStreamEvent
@@ -617,6 +637,7 @@ export type UnstampedMessageStreamEvent =
   | SubagentStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
+  | ActionPartialStreamEvent
   | ActionResultStreamEvent
   | ReasoningCompletedStreamEvent
   | StepCompletedStreamEvent
@@ -1068,6 +1089,24 @@ export function createActionResultEvent(input: {
   };
 }
 
+/** Creates an `action.partial` event for one preliminary tool-result snapshot. */
+export function createActionPartialEvent(input: {
+  readonly result: RuntimeToolResultActionResult;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}): ActionPartialStreamEvent {
+  return {
+    data: {
+      result: input.result,
+      sequence: input.sequence,
+      stepIndex: input.stepIndex,
+      turnId: input.turnId,
+    },
+    type: "action.partial",
+  };
+}
+
 /**
  * Creates the `subagent.called` event for one started child workflow session.
  */
@@ -1337,6 +1376,22 @@ export function createTurnCancelledEvent(input: {
   };
 }
 
+/** Creates the `context.cleared` event for one manual history clear. */
+export function createContextClearedEvent(input: {
+  readonly sequence: number;
+  readonly sessionId: string;
+  readonly turnId: string;
+}): ContextClearedStreamEvent {
+  return {
+    data: {
+      sequence: input.sequence,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+    },
+    type: "context.cleared",
+  };
+}
+
 /**
  * Creates the `compaction.requested` event for one runtime compaction pass.
  */
@@ -1384,7 +1439,7 @@ export function createCompactionCompletedEvent(input: {
  * wait.
  */
 export function createSessionWaitingEvent(
-  namespacedContinuationToken: string,
+  namespacedContinuationToken: string = "",
 ): SessionWaitingStreamEvent {
   return {
     data: {

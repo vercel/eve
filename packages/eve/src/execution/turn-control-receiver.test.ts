@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
-import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
+import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 
@@ -15,6 +16,10 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 
 vi.mock("./forward-turn-delivery-step.js", () => ({
   forwardTurnDeliveryStep: vi.fn(),
+}));
+
+vi.mock("./forward-turn-cancellation-step.js", () => ({
+  forwardTurnCancellationStep: vi.fn(),
 }));
 
 describe("TurnControlReceiver", () => {
@@ -58,21 +63,29 @@ describe("TurnControlReceiver", () => {
     expect(bufferedDeliveries).toEqual([delivery]);
   });
 
-  it("re-buffers an unresolved forwarded delivery when the turn terminates", async () => {
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "hello" }] };
+  it("keeps earlier remainders ahead of an unresolved delivery when the turn terminates", async () => {
+    const outstanding: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "outstanding" }],
+    };
+    const earlierRemainder: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "earlier remainder" }],
+    };
     installControlHook([
       deliveryRequest("req-1"),
       {
         action: { kind: "done", output: "bye", serializedContext: {}, sessionState: createState() },
+        bufferedDeliveries: [earlierRemainder],
         kind: "turn-result",
       },
     ]);
-    const bufferedDeliveries: DeliverHookPayload[] = [delivery];
+    const bufferedDeliveries: DeliverHookPayload[] = [outstanding];
 
     const action = await runReceiver(bufferedDeliveries);
 
     expect(action).toMatchObject({ kind: "done", output: "bye" });
-    expect(bufferedDeliveries).toEqual([delivery]);
+    expect(bufferedDeliveries).toEqual([earlierRemainder, outstanding]);
   });
 
   it("hands the turn's remainders back ahead of existing buffered deliveries", async () => {
@@ -94,14 +107,71 @@ describe("TurnControlReceiver", () => {
 
     await expect(runReceiver([])).rejects.toThrow("boom");
   });
+
+  it("buffers sends and context controls that arrive during a turn", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+    const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
+
+    const action = await runReceiver(bufferedDeliveries, {
+      bufferedSessionControls,
+      commandInbox: createCommandInbox([
+        { kind: "send", payload: { message: "follow up" } },
+        { kind: "clear" },
+        { kind: "compact" },
+        { kind: "session-timeout" },
+      ]),
+    });
+
+    expect(action.kind).toBe("park");
+    expect(bufferedDeliveries).toEqual([
+      {
+        auth: undefined,
+        caller: undefined,
+        kind: "deliver",
+        payloads: [{ message: "follow up" }],
+        requestId: undefined,
+      },
+    ]);
+    expect(bufferedSessionControls).toEqual(["clear", "compact", "expired"]);
+  });
+
+  it("forwards cancel and reset through the active turn's private hook", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
+
+    const action = await runReceiver([], {
+      bufferedSessionControls,
+      commandInbox: createCommandInbox([
+        { kind: "cancel", turnId: "turn_3" },
+        { kind: "reset", reason: "Start over" },
+      ]),
+    });
+
+    expect(action.kind).toBe("park");
+    expect(forwardTurnCancellationStep).toHaveBeenNthCalledWith(1, {
+      payload: { turnId: "turn_3" },
+      token: "turn-control:cancel",
+    });
+    expect(forwardTurnCancellationStep).toHaveBeenNthCalledWith(2, {
+      payload: {},
+      token: "turn-control:cancel",
+    });
+    expect(bufferedSessionControls).toEqual(["reset"]);
+  });
 });
 
 function runReceiver(
   bufferedDeliveries: DeliverHookPayload[],
+  options: {
+    readonly bufferedSessionControls?: Array<"clear" | "compact" | "expired" | "reset">;
+    readonly commandInbox?: SessionCommandInbox;
+  } = {},
 ): ReturnType<TurnControlReceiver["waitForAction"]> {
   const receiver = new TurnControlReceiver({
     bufferedDeliveries,
-    deliveryHook: createDeliveryHook(),
+    bufferedSessionControls: options.bufferedSessionControls ?? [],
+    commandInbox: options.commandInbox ?? createCommandInbox(),
     token: "turn-control",
   });
   return receiver.waitForAction().finally(() => receiver.dispose());
@@ -123,17 +193,26 @@ function parkResult(): Extract<TurnControlPayload, { readonly kind: "turn-result
   };
 }
 
-function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): SessionDeliveryHook {
+function createCommandInbox(
+  values: readonly SessionInboxPayload[] = [],
+  overrides: Partial<SessionCommandInbox> = {},
+): SessionCommandInbox {
+  const queue = [...values];
   return {
+    claimStable: vi.fn(),
     consumeNext: vi.fn(),
-    consumeSessionTimeout: vi.fn(() => false),
-    next: vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {})),
-    rekey: vi.fn(),
+    next: vi.fn(() => {
+      const value = queue.shift();
+      return value === undefined
+        ? new Promise<IteratorResult<SessionInboxPayload>>(() => {})
+        : Promise.resolve({ done: false, value });
+    }),
+    rekeyContinuation: vi.fn(),
     ...overrides,
   };
 }
 
-function installControlHook(values: readonly TurnControlPayload[]): void {
+function installControlHook(values: readonly TurnControlPayload[], delayed = false): void {
   const queue = [...values];
   createHookMock.mockReturnValue({
     token: "turn-control",
@@ -141,6 +220,7 @@ function installControlHook(values: readonly TurnControlPayload[]): void {
     [Symbol.asyncIterator]() {
       return {
         next: async () => {
+          if (delayed) await new Promise<void>((resolve) => setTimeout(resolve, 0));
           const value = queue.shift();
           return value === undefined ? { done: true, value: undefined } : { done: false, value };
         },

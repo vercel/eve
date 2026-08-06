@@ -1,5 +1,7 @@
 import { type ChannelCors } from "#channel/cors.js";
-import type { RouteDefinition, SendFn } from "#channel/routes.js";
+import type { UserContent } from "ai";
+import type { ChannelReceiveContext } from "#channel/channel-operations.js";
+import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
@@ -25,7 +27,7 @@ export type FetchFileFunction = (url: string) => Promise<Buffer | FetchFileResul
  * schedule proactively routes a message to it.
  */
 export interface GenericReceiveInput<TReceiveTarget = Record<string, unknown>> {
-  readonly message: string;
+  readonly message: string | UserContent;
   readonly target: Readonly<TReceiveTarget>;
   readonly auth: SessionAuthContext | null;
 }
@@ -64,15 +66,15 @@ export interface GenericChannelDefinition<
    *
    * Return the channel-owned context (thread handles, API clients, etc.). The
    * framework passes it as the `channel` argument to event handlers (with
-   * {@link ChannelSessionOps} injected) and passes {@link SessionContext} as a
-   * separate `ctx` argument.
+   * {@link ChannelContinuationOps} injected) and passes {@link SessionContext}
+   * as a separate `ctx` argument.
    */
   context?(state: NonNullable<TState>, session: SessionHandle): TCtx;
 
   readonly routes: readonly RouteDefinition<TState>[];
   receive?(
     input: GenericReceiveInput<TReceiveTarget>,
-    args: { send: SendFn<TState> },
+    ctx: ChannelReceiveContext<TState>,
   ): Promise<Session>;
 
   readonly events?: TEvents;

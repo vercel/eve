@@ -10,17 +10,19 @@ import { registerProjectCommands } from "#cli/commands/register-project-commands
 import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
 import {
+  registerAcpCommand,
+  type ResolveVerifiedRemoteDevelopmentClient,
+  type RunAcpServer,
+} from "#cli/acp/command.js";
+import {
   FORCED_EXIT_BACKSTOP_MS,
   installShutdownSignal,
   type CommandLifecycle,
   waitForShutdownSignal,
 } from "#cli/shutdown.js";
 import { waitForServerOrStop, waitForUiOrServer } from "#cli/dev/wait-for-ui.js";
-import {
-  parseDevelopmentHeaderOption,
-  resolveDevelopmentUrlTarget,
-  type DevelopmentRequestHeaders,
-} from "#cli/dev/url-target.js";
+import { parseDevelopmentHeaderOption, resolveDevelopmentUrlTarget } from "#cli/dev/url-target.js";
+import type { DevelopmentCliOptions, ProductionCliOptions } from "#cli/dev/command-options.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { EvalCliOptions } from "#evals/cli/eval.js";
 import {
@@ -48,39 +50,12 @@ import type {
   DevelopmentServerOptions,
   ProductionServerHandle,
 } from "#internal/nitro/host/types.js";
-import type {
-  AssistantResponseStatsMode,
-  LogDisplayMode,
-  TerminalPartDisplayMode,
-} from "#cli/dev/tui/types.js";
 
 export { resolveDevUiMode, resolveTuiDisplayOptions };
 
 interface CliLogger {
   error(message: string): void;
   log(message: string): void;
-}
-
-interface DevelopmentCliOptions {
-  assistantResponseStats?: AssistantResponseStatsMode;
-  connectionAuth?: TerminalPartDisplayMode;
-  contextSize?: number;
-  header?: DevelopmentRequestHeaders;
-  host?: string;
-  input?: string;
-  logs?: LogDisplayMode;
-  name?: string;
-  port?: number;
-  reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
-  tools?: TerminalPartDisplayMode;
-  ui?: boolean;
-  url?: string;
-}
-
-interface ProductionCliOptions {
-  host?: string;
-  port?: number;
 }
 
 interface CliRuntimeDependencies {
@@ -90,6 +65,8 @@ interface CliRuntimeDependencies {
     readonly serverUrl: string;
   }): Promise<boolean>;
   buildHost: BuildHost;
+  resolveVerifiedRemoteDevelopmentClient: ResolveVerifiedRemoteDevelopmentClient;
+  runAcpServer: RunAcpServer;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
@@ -297,6 +274,15 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     });
 
   registerRuntimeInvokeCommand({ appRoot, logger, program, runtime });
+
+  registerAcpCommand({
+    appRoot,
+    eveVersion: packageVersion,
+    program,
+    resolveVerifiedRemoteDevelopmentClient: runtime.resolveVerifiedRemoteDevelopmentClient,
+    runAcpServer: runtime.runAcpServer,
+    startHost: runtime.startHost,
+  });
 
   program
     .command("dev")
@@ -555,10 +541,14 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .command("traces [trace]")
     .usage("[options] [trace]\n       eve traces ls [options]")
     .description("Show a local `eve dev` trace (the most recent when trace is omitted).")
-    .action(async (reference: string | undefined) => {
-      const { runTraceShowCommand } = await import("#cli/commands/trace.js");
-      await runTraceShowCommand(logger, appRoot, reference);
-    });
+    .option("--verbose", "Expand every span with all attributes and events")
+    .option("--json", "Output as JSON")
+    .action(
+      async (reference: string | undefined, options: { json?: boolean; verbose?: boolean }) => {
+        const { runTraceShowCommand } = await import("#cli/commands/trace.js");
+        await runTraceShowCommand(logger, appRoot, reference, options);
+      },
+    );
 
   traces
     .command("ls")

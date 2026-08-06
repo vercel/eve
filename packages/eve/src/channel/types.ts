@@ -1,9 +1,9 @@
 import type { UserContent } from "ai";
 
 import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
-import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
+import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
@@ -27,27 +27,17 @@ export interface CancelTurnInput {
 }
 
 /** Result of requesting turn cancellation. Both statuses are successful. */
-export interface CancelTurnResult {
-  readonly status: CancelTurnStatus;
-  /**
-   * For `no_active_turn`: the error class that classified the target as
-   * inactive, distinguishing "already finished" (`HookNotFoundError`) from a
-   * transiently unreachable cancel hook (`EntityConflictError`).
-   */
-  readonly reason?: string;
-}
+export type CancelTurnResult = ProtocolCancelTurnResult;
 
-/** Identifies a session to transition permanently to a terminal state. */
-export interface TerminateSessionInput {
-  /** Human-readable reason recorded on the terminal workflow transition. */
-  readonly reason?: string;
-  readonly sessionId: string;
-}
+/** Result of queueing manual context compaction for a session. */
+export type CompactSessionResult =
+  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "no_active_session" };
 
-/** Result of attempting to terminally retire a session. */
-export type TerminateSessionResult =
-  | { readonly status: "terminated" }
-  | { readonly status: "already_terminal" };
+/** Result of queueing a manual context clear for a session. */
+export type ClearSessionResult =
+  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "no_active_session" };
 
 // ---------------------------------------------------------------------------
 // Lineage
@@ -84,6 +74,17 @@ export interface SessionParent {
   readonly turn: SessionTurn;
 }
 
+/**
+ * Serializable W3C span context identifying a parent's open trace window.
+ * Structural rather than an OTel `SpanContext` so the channel surface stays
+ * free of tracing dependencies.
+ */
+export interface SessionTraceContext {
+  readonly spanId: string;
+  readonly traceFlags: number;
+  readonly traceId: string;
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -116,6 +117,15 @@ export type EventEmitFn = (event: UnstampedMessageStreamEvent) => Promise<void>;
 // Deliver payload
 // ---------------------------------------------------------------------------
 
+/** Framework-internal caller waiting for one delegated conversation turn. */
+export interface TurnCaller {
+  readonly callId: string;
+  readonly subagentName: string;
+  readonly replyTo:
+    | { readonly kind: "hook"; readonly token: string }
+    | { readonly kind: "callback"; readonly url: string };
+}
+
 /**
  * Base deliver payload crossing the runtime boundary.
  *
@@ -136,6 +146,50 @@ export interface DeliverPayload {
   readonly [key: string]: unknown;
 }
 
+/** One command accepted by a durable session inbox. */
+export type SessionCommand =
+  | {
+      readonly auth?: SessionAuthContext | null;
+      readonly caller?: TurnCaller;
+      readonly kind: "send";
+      readonly payload: DeliverPayload;
+      readonly requestId?: string;
+    }
+  | { readonly kind: "cancel"; readonly turnId?: string }
+  | { readonly kind: "compact" }
+  | { readonly kind: "clear" }
+  | { readonly kind: "reset"; readonly reason?: string };
+
+export type SessionSendCommandResult =
+  | { readonly status: "accepted"; readonly sessionId: string }
+  | { readonly status: "session_not_active" };
+
+/** Result of terminally resetting a session. */
+export type ResetSessionResult =
+  | { readonly status: "reset"; readonly previousSessionId: string }
+  | { readonly status: "no_active_session" };
+
+export type SessionCommandResult<TCommand extends SessionCommand = SessionCommand> =
+  TCommand extends { readonly kind: "send" }
+    ? SessionSendCommandResult
+    : TCommand extends { readonly kind: "cancel" }
+      ? CancelTurnResult
+      : TCommand extends { readonly kind: "compact" }
+        ? CompactSessionResult
+        : TCommand extends { readonly kind: "clear" }
+          ? ClearSessionResult
+          : ResetSessionResult;
+
+export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
+  readonly command: TCommand;
+  readonly continuationToken: string;
+}
+
+export interface DispatchSessionInput<TCommand extends SessionCommand = SessionCommand> {
+  readonly command: TCommand;
+  readonly sessionId: string;
+}
+
 // ---------------------------------------------------------------------------
 // Hook payload
 // ---------------------------------------------------------------------------
@@ -143,29 +197,43 @@ export interface DeliverPayload {
 /**
  * Deliver payload sent through the workflow `resumeHook`.
  *
- * Wraps the raw {@link DeliverPayload} with an optional auth update so
- * deliver-time auth crosses the durable hook boundary without a process-local
- * side-channel.
+ * Wraps the raw {@link DeliverPayload} with optional auth and turn-caller
+ * metadata so both cross the durable hook boundary outside adapter-owned data.
  */
 export interface DeliverHookPayload {
   readonly auth?: SessionAuthContext | null;
+  /** Delegated caller waiting for this turn's settled result. */
+  readonly caller?: TurnCaller;
   /** Inbound channel request id used only for workflow attributes. */
   readonly requestId?: string;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
 }
 
-/** Internal deadline signal sent through the session's delivery hook. */
+/** Internal deadline signal sent through the stable session command inbox. */
 export interface SessionTimeoutHookPayload {
   readonly kind: "session-timeout";
 }
 
+/** Requests a context compaction without delivering model input. */
+export interface CompactSessionHookPayload {
+  readonly kind: "compact";
+}
+
+/** Requests a context clear without delivering model input. */
+export interface ClearSessionHookPayload {
+  readonly kind: "clear";
+}
+
 /**
- * Runtime-action results resumed back into a parked parent workflow.
+ * Child-produced subagent results resumed back into a parked parent workflow.
+ *
+ * The `runtime-action-result` discriminator predates this subagent-only inbox
+ * lane. Parent-produced dispatch results never travel through this hook.
  */
 export interface RuntimeActionResultHookPayload {
   readonly kind: "runtime-action-result";
-  readonly results: readonly RuntimeActionResult[];
+  readonly results: readonly RuntimeSubagentChildResult[];
 }
 
 /**
@@ -222,6 +290,8 @@ export interface SubagentAuthorizationEventHookPayload {
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
+  | ClearSessionHookPayload
+  | CompactSessionHookPayload
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
   | SessionTimeoutHookPayload
@@ -229,11 +299,13 @@ export type HookPayload =
   | SubagentInputRequestHookPayload;
 
 /**
- * Terminal callback metadata attached to a session at creation.
+ * Initial caller callback attached to a delegated session at creation.
  *
  * `url` is the absolute callback endpoint. `token` is the capability token
  * embedded in the framework-owned callback route. `callId` and `subagentName`
- * correlate the callee's terminal callback to the pending parent tool call.
+ * correlate the callee's result to the pending tool call. Task sessions send a
+ * terminal session result. Conversation sessions use this as their first turn's
+ * caller; each continuation supplies the caller for that turn.
  */
 export interface SessionCallback {
   readonly callId: string;
@@ -277,7 +349,7 @@ export interface SessionCapabilities {
 // ---------------------------------------------------------------------------
 
 /**
- * Single input shape consumed by {@link Runtime.run} for both root runs
+ * Single input shape consumed by {@link Runtime.createSession} for both root runs
  * (started by routes) and delegated child runs (started by the
  * subagent tool wrapper).
  */
@@ -310,16 +382,18 @@ export interface RunInput {
    */
   readonly title?: string;
   /**
-   * Optional terminal callback. When present, the runtime posts a single
-   * callback when the session completes or fails.
+   * Optional caller callback. Task sessions post when the session completes or
+   * fails. Conversation sessions use it for the first turn; continuations carry
+   * the caller for their own turn.
    */
   readonly callback?: SessionCallback;
   /**
    * Session continuation token for delivery and hook creation. Channels can
    * re-key the session during the first turn via
-   * `ctx.session.setContinuationToken(...)` (e.g. Slack adopts its first
+   * `ctx.session.continuation.rekey(...)` (e.g. Slack adopts its first
    * post's `ts` as the thread root), so an initial placeholder token is
-   * acceptable when full identity isn't known until the first message.
+   * acceptable when full identity isn't known until the first message. ID-only
+   * transports omit this field.
    */
   readonly continuationToken?: string;
   /**
@@ -337,6 +411,11 @@ export interface RunInput {
   readonly mode: RunMode;
   readonly parent?: SessionParent;
   /**
+   * Dispatching parent's open trace window. Handed down rather than looked up
+   * because trace state is scoped to one session's context.
+   */
+  readonly parentTraceContext?: SessionTraceContext;
+  /**
    * Runtime-supplied session limits. Delegated local subagents use this to
    * carry the parent's remaining quota and delegation caps with the same limit
    * fields authors configure on agents; `false` means no inherited token cap
@@ -353,12 +432,14 @@ export interface RunInput {
 
 export interface DeliverInput {
   /**
-   * Authenticated caller principal for this follow-up message.
+   * Authenticated principal for this follow-up message.
    * May differ from the session initiator when different users send
    * messages to the same session. The runtime updates `AuthKey` from
    * this field before calling the adapter's hooks.
    */
   readonly auth?: SessionAuthContext | null;
+  /** Delegated caller waiting for this turn's settled result. */
+  readonly caller?: TurnCaller;
   /** Inbound channel request id used to correlate workflow attributes. */
   readonly requestId?: string;
   readonly continuationToken: string;
@@ -376,13 +457,12 @@ export type RunResult =
   | { readonly status: "waiting" };
 
 /**
- * Handle returned immediately by `runtime.run()` before the step loop
- * completes.
+ * Handle returned by `runtime.createSession()` once the command inbox is ready,
+ * before the step loop completes.
  *
  * Carries the identifiers needed for stream endpoints.
  */
 export interface RunHandle {
-  readonly continuationToken: string;
   readonly events: ReadableStream<MessageStreamEvent>;
   /**
    * Runtime-owned identifier for this session. Stream and inspection APIs
@@ -402,25 +482,22 @@ export interface Runtime {
    * time), builds the seeded {@link AlsContext}, and drives the step loop to
    * completion.
    */
-  run(input: RunInput): Promise<RunHandle>;
+  createSession(input: RunInput): Promise<RunHandle>;
 
-  /** Requests cancellation of a session's in-flight turn. */
-  cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
+  dispatchContinuation<TCommand extends SessionCommand>(
+    input: DispatchContinuationInput<TCommand>,
+  ): Promise<SessionCommandResult<TCommand>>;
 
-  /** Terminally retires a session and releases its non-retained continuation hooks. */
-  terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult>;
-
-  /**
-   * Delivers a follow-up message to a parked session.
-   */
-  deliver(input: DeliverInput): Promise<{ sessionId: string }>;
+  dispatchSession<TCommand extends SessionCommand>(
+    input: DispatchSessionInput<TCommand>,
+  ): Promise<SessionCommandResult<TCommand>>;
 
   /**
    * Resolves the session that currently owns a continuation token without
    * delivering input or starting a run. Returns `undefined` when no session
    * owns the token.
    */
-  resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined>;
+  resolveContinuation(continuationToken: string): Promise<{ sessionId: string } | undefined>;
 
   /**
    * Returns a readable stream of lifecycle events for an existing session.

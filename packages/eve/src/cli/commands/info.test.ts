@@ -19,8 +19,8 @@ vi.mock("#services/inspect-application.js", () => ({ inspectApplication: vi.fn()
 
 const MESSAGING = {
   createSessionRoutePath: "/eve/v1/session",
-  continueSessionRoutePattern: "/eve/v1/session/:id",
-  streamRoutePattern: "/eve/v1/session/:id/stream",
+  sessionMessagesRoutePattern: "/eve/v1/session/:sessionId",
+  streamRoutePattern: "/eve/v1/session/:sessionId/stream",
 };
 
 const APP_ROOT = "/virtual/app";
@@ -201,7 +201,7 @@ describe("buildApplicationInfoJson", () => {
     expect(json.subagents).toEqual([]);
     expect(json.schedules).toEqual([]);
     expect(json.appRoot).toBe(APP_ROOT);
-    expect(json.messaging.stream).toBe("/eve/v1/session/:id/stream");
+    expect(json.messaging.stream).toBe("/eve/v1/session/:sessionId/stream");
   });
 });
 

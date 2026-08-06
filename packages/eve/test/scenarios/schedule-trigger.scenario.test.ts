@@ -57,27 +57,23 @@ interface CapturedRun {
 
 function createCapturingRuntime(captured: CapturedRun[]): Runtime {
   return {
-    async cancelTurn() {
-      throw new Error("cancelTurn should not be called in this scenario");
-    },
-    async resolveSession() {
-      throw new Error("resolveSession should not be called in this scenario");
-    },
-    async run(input) {
+    async createSession(input) {
       captured.push({
         adapter: input.adapter,
         input: input.input as { message: string },
       });
 
       const handle: RunHandle = {
-        continuationToken: "scenario-token",
         events: new ReadableStream<MessageStreamEvent>(),
         sessionId: "scenario-session",
       };
       return handle;
     },
-    async deliver() {
-      throw new Error("deliver should not be called in this scenario");
+    async dispatchContinuation() {
+      throw new Error("dispatchContinuation should not be called in this scenario");
+    },
+    async dispatchSession() {
+      throw new Error("dispatchSession should not be called in this scenario");
     },
     async getEventStream() {
       return new ReadableStream<MessageStreamEvent>();
@@ -85,8 +81,8 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     async getStreamTailIndex() {
       return -1;
     },
-    async terminateSession() {
-      throw new Error("terminateSession should not be called in this scenario");
+    async resolveContinuation() {
+      throw new Error("resolveContinuation should not be called in this scenario");
     },
   };
 }

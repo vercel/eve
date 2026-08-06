@@ -1,5 +1,138 @@
 # eve
 
+## 0.30.8
+
+### Patch Changes
+
+- e6f4808: Add a single `eve add linear` flow that installs and configures both the Linear Channel and Linear MCP connection.
+- f51f866: Tools can now use async generators to stream preliminary output snapshots. eve publishes local snapshots as `action.partial` events before the final `action.result`, and the default client reducer exposes provisional output with `partial: true`.
+
+## 0.30.7
+
+### Patch Changes
+
+- e5c9191: Add experimental agent messaging behind `experimental.subagentPersistentSessions` in `agent.ts`. Opted-in agents keep delegated children alive after they answer: each child is owned by a lifecycle handle, settles every turn with an explicit outcome carrying its per-turn token usage, and parks instead of terminating. The parent's subagent tools gain an `agentId` parameter to continue a parked child, discoverable from a per-model-call `<agents>` system injection that lists only parked (resumable) children. An omitted, empty, or unknown `agentId` starts a fresh child; continuing a child that is still starting or working fails with `AGENT_BUSY`. Without the opt-in, children keep running as one-shot tasks. The subagent tool input schema no longer includes the unused `description` field.
+- bd21332: Cancelling a turn with running delegated children no longer leaks their handles as permanently `running`. The cancellation epilogue now parks each abandoned child as `"(cancelled)"`, so cancelled children stay resumable and later cancellations no longer stall retrying already-dead children.
+- 1758161: Add guided GitHub channel setup through `eve add channel/github`. The flow provisions a Vercel Connect GitHub App, routes verified webhooks, scaffolds the channel, and explains how to install and use the app.
+- 56de47b: Show far more of what local traces record in `eve traces`: span rows carry inline token/cost/tool chips, the header aggregates models, token totals, cost, and errors, and two new flags expose everything else — `--verbose` expands every span with all attributes and events, and `--json` dumps the full trace machine-readably.
+
+## 0.30.6
+
+### Patch Changes
+
+- 7fa4d36: Accept unmodeled `SKILL.md` frontmatter when importing a skill from another runtime. These fields are no-ops in eve.
+
+## 0.30.5
+
+### Patch Changes
+
+- 5ee18e2: Prevent successful local `eve invoke` commands from logging a spurious Workflow queue 503 while their temporary development server shuts down.
+- d8fc092: Format registry search results as concise, width-aware entries and limit searches to 10 matches by default. Use `--limit` to request up to 100 results.
+- 557000b: Add skills.sh as a built-in registry, so `eve registry search --registry @skills <query>` and `eve add @skills/<skill>` work without project configuration.
+- 1953d20: Prevent sandbox abort listeners from accumulating across repeated operations in a turn.
+- 7086776: Route session controls and follow-up messages through one durable command inbox shared by stable session IDs and rekeyable channel addresses.
+
+## 0.30.4
+
+### Patch Changes
+
+- fc87d23: Dev runtime snapshots no longer copy the `.workflow-vitest` test cache. In
+  workspaces that had run integration tests, this directory was duplicated into
+  every generation under `.eve/dev-runtime/snapshots` — tens of megabytes per
+  rebuild that nothing at dev runtime reads.
+
+## 0.30.3
+
+### Patch Changes
+
+- 601fb13: Allow just-bash sandboxes to compose a custom filesystem around eve's durable, session-owned workspace.
+- c8bd9c0: Allow declared local subagents to mount extensions under their own `extensions/` directory. Contributions, configuration, and overrides are scoped to that subagent and do not extend the root agent.
+- 279b5e6: Use compatible POSIX search fallbacks in sandboxes whose `rg` implementation lacks the options required by eve, and surface command errors instead of reporting them as empty results.
+- c10ca06: Allow dynamic subagents to declare compile-time `build.externalDependencies`, so their authored modules can safely use packages that must remain external before runtime resolution.
+- 95b4183: Configure new Linear connectors to receive only Agent Session webhook events, avoiding unrelated default Linear webhook deliveries.
+- 95b4183: Add guided Linear Agent channel setup through `eve add channel/linear-agent`. The flow provisions a Vercel Connect Linear app, routes verified Agent Session events, scaffolds the channel, and explains how to install and use the agent in Linear.
+
+## 0.30.2
+
+### Patch Changes
+
+- 512808c: Allow agents to select Exa or Parallel for the built-in `web_search` tool by exporting `webSearch({ provider })` from `agent/tools/web_search.ts`. Parallel remains the default for AI Gateway models.
+
+## 0.30.1
+
+### Patch Changes
+
+- dae6f73: Upload Vercel sandbox workspace seed files in one compressed SDK request instead of one request per file, substantially reducing fresh template build times for large workspaces.
+
+## 0.30.0
+
+### Minor Changes
+
+- f43b22d: `localDev()` now grants the synthetic local principal based on the deployment (an `eve dev` or `vercel dev` process) instead of the request URL host, so a request `Host` header can no longer obtain local-dev access on a self-hosted server. The previously exported `isLoopbackRequest` helper is removed. The default eve channel now falls back to `[vercelOidc(), localDev(), placeholderAuth()]`, which keeps local dev working and rejects all production traffic.
+
+### Patch Changes
+
+- 021dbbf: Add `/new` as an alias of `/clear` in the eve dev TUI. It clears model-message history while preserving the current session and its durable resources.
+- 136749f: Make `Ctrl+C` cooperatively cancel or steer a running turn like `Esc` in the eve dev TUI. At the idle prompt, the first `Ctrl+C` now shows an exit warning and a second consecutive press exits.
+- 13420ab: Allow dynamic subagent resolvers to return `defineRemoteAgent(...)`. Session and turn selections can now conditionally expose a remote deployment and change its runtime connection settings.
+- ee50ae7: Prevent the dev TUI from duplicating setup panels when an integration setup error includes multiline command output.
+- e1cd7b7: Move eve's internal integration catalog from the Vercel npm scope to `@eve/catalog`.
+- 56651ee: Update eve's bundled Workflow SDK packages to the latest 5.0.0 beta releases, keeping the core runtime and workflow worlds aligned.
+
+## 0.29.5
+
+### Patch Changes
+
+- c0dc572: Rename the TUI `/new` command to `/reset` so session reset uses the same name across the client, HTTP, channel, and TUI APIs.
+- 3dce30a: Add manual session compaction through custom-channel helpers, the eve HTTP client, and the `eve dev` TUI's `/compact` command. Compaction preserves the session, queues behind an active turn, and does not send synthetic model input.
+- 910805e: Make a single `Esc` cancel the running turn in the eve dev TUI when no message is queued. Queued messages still use `Esc` to steer the oldest message into the next turn.
+- 9c51755: Connection search and discovered connection tools now use the same `defineDynamic` and `defineTool` pipeline as authored tools. Dynamic tool maps now reject entries that omit `defineTool` instead of accepting unsupported raw objects.
+- 84aa671: Clarify the dev TUI’s `/add` flow with consistent integration categories and category-specific browsing labels. MCP connections are now named explicitly, and the flow more clearly explains channels, extensions, and observability integrations.
+- 0c28eb7: Allow declared subagents to export `defineDynamic` from `agent.ts`. Session and turn resolvers can now return an agent configuration to expose it or nil to omit it from direct and Workflow delegation.
+- f3bb60d: Add manual session-context clearing through custom-channel helpers, the eve HTTP client, and the `eve dev` TUI's `/clear` command. Clearing removes model-message history while preserving the session, agent configuration, durable state, limits, and sandbox.
+- ac7d3c6: Add `/cancel` to the eve dev TUI. The command cooperatively cancels a running turn from either the live streaming input or the idle prompt while preserving the session and settled context.
+
+## 0.29.4
+
+### Patch Changes
+
+- e90a8c2: Launch local or deployed eve applications as stable ACP v1 agents with `eve acp [url]`, including streamed messages, tool activity, human input, cancellation, concurrent sessions, and verified Vercel authentication.
+- cec672d: Add guided Discord setup through `eve add channel/discord`, including Vercel Connect provisioning, trigger attachment, interactions endpoint configuration, slash-command registration, and channel scaffolding.
+- ed328e7: Render registry item titles with their exact registry-provided casing by loading manifests for each page of catalog results.
+- c875a67: Update the generated `AGENTS.md` to direct coding agents to the eve registry for discovering and installing integrations.
+- 5153b13: Add JSON output to `eve registry list` and `eve registry search` for scripts that inspect registry catalogs.
+- 155d46a: Connection registry items now configure their Vercel Connect connector during `eve add`, and registry setup commands close their IPC channel after reporting an outcome so `/add` returns instead of remaining stuck.
+- 6f3daca: Add `ClientSession.snapshot()` for reading a finite, cursor-consistent session event prefix that can hydrate server-rendered applications.
+- 67bfc76: Resolve sandbox skill roots and seed-file paths through the same `$HOME` resolver the file tools use, so the skills location is spelled once instead of twice.
+- a5acde8: Ensure exiting the dev TUI shuts down its owned server and any surviving workflow processes before the CLI exits. Persisted workflow messages now reach the ready worker during restart instead of being rejected while the file watcher starts.
+- 731464f: Give the local trace spool's on-disk layout a single owner: the shared trace reader now exposes the listing and segment-read primitives that `eve traces` and the `/traces` viewer both use, and payload formatting is shared between the detail panel and the conversation view.
+- f7ba3b3: Derive the `/traces` conversation viewer's line geometry from one prefix-sum helper so scroll, click, and wheel math cannot disagree, and reset the view through a single factory when the viewed trace changes.
+- 3f4bb9c: The `/traces` viewer now follows your terminal's colors instead of forcing a hardcoded black/grey truecolor palette. It probes the terminal's default background (OSC 11) and derives its card surfaces from your own theme — subtly elevated bands on dark and light backgrounds alike, with red bands for failures, and card titles that invert to black on light backgrounds so they stay legible. Terminals that don't answer the probe get a clean gutter-rail rendering drawn entirely with the shared TUI theme.
+- f5d0533: Derive the dev TUI's slash-command suggestion window from the command registry instead of a hand-maintained constant, and collapse the duplicated cursor step in the terminal line-wrap loop.
+
+## 0.29.3
+
+### Patch Changes
+
+- 22bfa02: Add guided Photon setup through `eve add channel/photon-imessage`, including project creation, phone registration, Vercel Connect or portable credentials, and channel scaffolding.
+- 0c0de19: Add an opt-in experimental steering policy to Chat SDK sends that cancels an active turn before delivering its replacement message.
+- b00a79d: Add `photonIMessageChannel`, a first-class Photon iMessage channel with lazy credentials, Vercel OIDC webhook verification, and automatic eve session routing.
+- 495e93b: Resolve leading `$HOME` paths in the built-in `read_file`, `write_file`, `glob`, and `grep` tools so agents can directly access packaged skill references advertised in their prompt.
+- bf01952: Local trace spans now capture model and tool payloads: the system prompt, prompt messages, and response text/reasoning/tool calls on model spans, and call arguments/results on tool spans, each capped at 32 KB with provider transport metadata stripped. Set `EVE_TRACES_CONTENT=off` to keep payloads out of the spool.
+- 680db59: Provider-executed tool calls (like a gateway's `web_search`) now show up in local traces: their calls and results are captured on the model span and the `/traces` viewer renders them as tool cards, with oversized outputs truncated to stay valid JSON.
+- 7ab6d8a: Terminal text wrapping in the dev TUI is now linear-time, so views rendering large single-line payloads (long tool results, big JSON) no longer stall on every repaint.
+- 52cee9c: Consolidate the three Vercel CLI subprocess runners onto one shared lifecycle. A `vercel` lookup killed by a signal (for example Ctrl-C during setup) now reports a cancellation failure instead of resolving as a success with truncated output.
+- 7703448: The local trace spool reader behind `eve traces` moved into a shared internal module; command behavior is unchanged.
+- 2d87acb: Subagent turn spans now record the dispatch that created them —
+  `agent.parent.session.id`, `agent.parent.turn.id`, `agent.parent.call_id`, and
+  `agent.subagent.name` — so a parent turn that fans out to several children can
+  be attributed to the exact tool call behind each one.
+- 3c846bc: The `/traces` viewer supports drag-to-select: dragging with the mouse highlights text and releasing copies it to the clipboard (OSC 52 with tmux passthrough, plus the platform clipboard command) with a confirmation toast. Clicks now act on release so drags never toggle cards, and Esc cancels an in-flight selection.
+- 3645c6e: The `/traces` viewer frame breathes: padding rows around the title and above the footer hints, the copy toast floats top-right as a small surface with a left edge bar, and the scroll wheel scrolls the attributes drawer when the pointer is over it.
+- 8858403: The local tracing subsystem (spool writer/reader, retention, the zero-config local OTel runtime, and agent span capture) moved from `src/harness` into its own `src/tracing` module; no behavior change.
+- 9adb455: Adds a `/traces` command to the dev TUI: a full-screen live viewer over the local trace spool that re-tells each trace as a chat-style conversation — system prompt, user and assistant messages, and tool calls render as expandable cards (arrow keys or mouse click to expand/collapse), with a right-side metadata drawer. Subagent turns are badged with their dispatch lineage (`subagent:<name>`), and the viewer opens on the trace containing the current session — including windowed sessions and subagent children recorded into a parent's trace. Expanded cards scroll line-by-line so content taller than the viewport is fully readable. Model spans with errors, token usage, or tool calls (but no text) now appear as cards instead of disappearing. Terminal escape sequences in trace payloads are stripped at render time. Tool-call arguments and results are captured without stripping domain-level `providerOptions`/`providerMetadata` keys. A single prompt message over 32 KiB is truncated at the text level so the serialized JSON stays parseable. Local spans capture system prompt, prompt messages, responses, reasoning, and tool arguments/results (`EVE_TRACES_CONTENT=off` to disable); long conversations truncate oldest messages first with an omission marker.
+- 275271d: Subagent runs now record into the trace of the session that dispatched them instead of a disconnected trace of their own, and `eve traces` resolves either session id to it. Local traces also open a real `agent.session` root span rather than a synthesized parent, so an authored OTel sampler's root rule decides whether a session is sampled, and a session long enough to outgrow one trace rolls into numbered windows that `eve traces <session-id>` lists oldest first. Rows whose lifetime outlives the worker that opened them — `agent.session` and `agent.turn` — now show the extent of their descendants instead of `0ms`.
+
 ## 0.29.2
 
 ### Patch Changes

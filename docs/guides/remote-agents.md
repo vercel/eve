@@ -30,6 +30,39 @@ export default defineRemoteAgent({
 | `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                  |
 | `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type the caller requires. Lowered to JSON Schema at compile time and enforced by the remote like any task-mode output schema.          |
 
+## Dynamic remote agents
+
+Wrap the file in `defineDynamic` when the target or its availability depends on
+the current session. Return `defineRemoteAgent(...)` to expose it and nil to
+omit it:
+
+```ts title="agent/subagents/weather.ts"
+import { defineDynamic, defineRemoteAgent } from "eve";
+
+export default defineDynamic({
+  events: {
+    "session.started": (_event, ctx) =>
+      ctx.session.auth.current?.attributes.region === "us"
+        ? defineRemoteAgent({
+            description: "Answers weather questions for US customers.",
+            url: "https://us-weather-agent.example.com",
+          })
+        : null,
+  },
+});
+```
+
+Dynamic remote subagents support `session.started` and `turn.started`. The
+returned definition may select different remote settings at either scope. eve
+resolves function-valued URLs when the event handler runs. Auth and headers
+remain lazy and resolve before each outbound request without entering durable
+workflow state.
+
+Author `auth` and `headers` directly in the `defineRemoteAgent({ ... })` object
+and keep their functions self-contained with module imports or environment
+variables. They are rehydrated outside the event handler, so they cannot close
+over `_event`, `ctx`, or handler-local values.
+
 ## Runtime URLs
 
 A string `url` is read at compile time and frozen into the build. When the target comes from a runtime env var — known only once the deployment runs — pass a function instead. eve calls it when it resolves the agent graph at runtime, so it can read `process.env`:

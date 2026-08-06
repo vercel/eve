@@ -22,30 +22,35 @@ const REGISTRY_CATEGORIES: ReadonlyArray<{
   prefix: `${RegistryCategory}/`;
   label: string;
   hint: string;
+  browseLabel: string;
 }> = [
   {
     value: "category:channel",
     prefix: "channel/",
-    label: "Chat channels",
-    hint: "Web, Slack, Discord, Teams",
+    label: "Channels",
+    hint: "Where people talk to your agent — Web, Slack, Discord, Teams",
+    browseLabel: "Browse channels",
   },
   {
     value: "category:connection",
     prefix: "connection/",
-    label: "Tools & data",
-    hint: "Linear, Notion, GitHub, Vercel",
+    label: "MCP connections",
+    hint: "Connect services like Linear, Notion, GitHub, and Vercel",
+    browseLabel: "Browse MCP connections",
   },
   {
     value: "category:extension",
     prefix: "extension/",
-    label: "Capabilities",
-    hint: "Browser automation, memory, developer tools",
+    label: "Extensions",
+    hint: "Add browser automation, memory, and developer tools",
+    browseLabel: "Browse extensions",
   },
   {
     value: "category:instrumentation",
     prefix: "instrumentation/",
     label: "Observability",
-    hint: "Sentry, Braintrust, Honeycomb",
+    hint: "Trace, evaluate, and monitor your agent",
+    browseLabel: "Browse observability integrations",
   },
 ];
 
@@ -85,11 +90,15 @@ function categoryRows(): SelectOption<RegistryRow>[] {
     })),
     {
       value: ALL,
-      label: "All integrations",
-      hint: "Search by name or enter an item address",
+      label: "Browse all",
+      hint: "Search every integration or enter an item address",
     },
-    { value: DONE, label: "Back to chat", trailingAction: true },
+    { value: DONE, label: "Return to chat", trailingAction: true },
   ];
+}
+
+function categoryFor(selectedCategory: RegistryRow) {
+  return REGISTRY_CATEGORIES.find((entry) => entry.value === selectedCategory);
 }
 
 function itemsForCategory(
@@ -97,7 +106,7 @@ function itemsForCategory(
   selectedCategory: RegistryRow,
 ): readonly RegistryCatalogItem[] {
   if (selectedCategory === ALL) return items;
-  const category = REGISTRY_CATEGORIES.find((entry) => entry.value === selectedCategory);
+  const category = categoryFor(selectedCategory);
   return category === undefined
     ? items
     : items.filter(
@@ -264,7 +273,7 @@ export async function runRegistryFlow(input: {
         })),
       ];
       const selectedCategory = await input.prompter.select<RegistryRow>({
-        message: "",
+        message: "Add an integration",
         options: categoryRows(),
         hintLayout: "inline",
         notices,
@@ -276,10 +285,10 @@ export async function runRegistryFlow(input: {
       const rows = itemRows(categoryItems);
       rows.push({ value: BACK, label: "Back", trailingAction: true });
       const selected = await input.prompter.select<RegistryRow>({
-        message: "Browse registry integrations",
+        message: categoryFor(selectedCategory)?.browseLabel ?? "Browse integrations",
         options: rows,
         search: true,
-        placeholder: "Search or enter an item address",
+        placeholder: "Search integrations or enter an item address",
         searchAction: {
           label: (query) => `Add “${query}”`,
           value: (query) => `${ADDRESS_PREFIX}${query.trim()}`,

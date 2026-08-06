@@ -20,6 +20,18 @@ export default defineAgent({
 
 Compaction also preserves the framework's own tool state automatically. It resets read-before-write tracking (so a write afterward re-reads the file whose read evidence was summarized away) and re-injects the active todo list, so the model keeps its task list across the summary. There is no per-tool hook to configure.
 
+Clients and channels can also request compaction between turns. Call
+`ClientSession.compact()`, a channel route's `compact(address)`, or
+`attachSession(sessionId).compact()`. The request does not append a user message;
+if a turn is running, eve queues it until that turn settles. A successful manual
+compaction emits the same `compaction.requested` and `compaction.completed`
+events as automatic compaction, followed by `session.waiting`.
+
+To discard model-message history instead of summarizing it, call the corresponding
+`clear()` method on any of those handles. Clearing preserves the session identity,
+system prompt, configured tools and skills, durable state, limits, and sandbox.
+Its stream boundary is `context.cleared` followed by `session.waiting`.
+
 ## Built-in tools
 
 Built-in tools require no imports. The exact set depends on the agent and session. `agent` is available only in the root session; `load_skill` and `connection_search` appear only when the agent declares the corresponding resources; `ask_question` requires a session that can request user input; and `web_search` requires a supported model provider. The harness advertises only the tools available to the current session.
@@ -41,12 +53,14 @@ The shell and file tools (`bash`, `read_file`, `write_file`, `glob`, `grep`) run
 | `load_skill`        | Pull an on-demand [skill](../skills)'s instructions into the current turn. Present only when the agent declares skills.                                                                                             | App runtime   |
 | `connection_search` | Discover tools across declared [connections](../connections); matched tools become directly callable. Present only when the agent declares connections.                                                             | App runtime   |
 
+The model-facing file tools accept absolute paths and paths beginning with `$HOME/`. eve resolves `$HOME` against the sandbox before invoking non-shell file operations, so packaged skill references such as `$HOME/.agents/skills/<skill>/references/...` work consistently across `read_file`, `write_file`, `glob`, and `grep`.
+
 Notes:
 
 - **`agent`** is available only in the root session. Its child uses the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and fresh [state](../guides/state). The child receives neither `agent` nor `Workflow`; declared subagents do not receive the built-in `agent` either. See [Subagents](../subagents).
 - **`load_skill`** only pulls instructions into context. It adds no new execution surface, because behavior still comes from the tools the agent already has.
 - **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. It's registered only when the agent has connections.
-- **`web_search`** has no local executor; the provider runs it. To supply your own implementation, override it with `defineTool()`.
+- **`web_search`** has no local executor; the provider runs it. AI Gateway models use Parallel by default. To use Exa instead, export `webSearch({ provider: "exa" })` from `agent/tools/web_search.ts`. Direct provider models continue to use their native search implementation. To supply your own implementation, override it with `defineTool()`.
 
 Review these built-in tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 
@@ -67,7 +81,17 @@ export default defineTool({
 });
 ```
 
-The framework defaults are importable from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `loadSkill`), so you can spread, wrap, or patch them. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` won't inherit the framework's durable state key.
+The framework defaults are importable from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `todo`, `loadSkill`), so you can spread, wrap, or patch them. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` won't inherit the framework's durable state key.
+
+Provider-managed web search has a dedicated configuration helper instead of an executable default:
+
+```ts title="agent/tools/web_search.ts"
+import { webSearch } from "eve/tools";
+
+export default webSearch({ provider: "exa" });
+```
+
+Set `provider` to `"parallel"` or `"exa"`. Without this file, AI Gateway models use Parallel.
 
 ## Disable a default
 

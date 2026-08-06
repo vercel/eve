@@ -34,7 +34,7 @@ describe("summarizeTurnEvents", () => {
       },
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:next", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ] satisfies UnstampedMessageStreamEvent[];
 
@@ -65,7 +65,7 @@ describe("summarizeTurnEvents", () => {
       },
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:next", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ] satisfies UnstampedMessageStreamEvent[];
 
@@ -82,7 +82,7 @@ describe("collectTurnEvents", () => {
     async function* stream(): AsyncGenerator<UnstampedMessageStreamEvent> {
       yield {
         type: "session.waiting",
-        data: { continuationToken: "eve:next", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       };
       yield { type: "session.completed" };
     }
@@ -90,7 +90,7 @@ describe("collectTurnEvents", () => {
     await expect(collectTurnEvents(stream())).resolves.toEqual([
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:next", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ]);
   });

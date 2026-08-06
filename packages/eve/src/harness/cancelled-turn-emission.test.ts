@@ -11,7 +11,6 @@ describe("emitCancelledTurn", () => {
         events.push(event);
       },
       { sessionStarted: true, sequence: 3, stepIndex: 2, turnId: "turn_3" },
-      "slack:C1:T1",
     );
 
     expect(events.map((event) => event.type)).toEqual(["turn.cancelled", "session.waiting"]);
@@ -20,7 +19,7 @@ describe("emitCancelledTurn", () => {
       type: "turn.cancelled",
     });
     expect(events[1]).toEqual({
-      data: { continuationToken: "C1:T1", wait: "next-user-message" },
+      data: { continuationToken: "", wait: "next-user-message" },
       type: "session.waiting",
     });
     expect(next).toEqual({ sessionStarted: true, sequence: 4, stepIndex: 0, turnId: "" });
@@ -37,7 +36,6 @@ describe("emitCancelledTurn", () => {
         events.push(event);
       },
       { sessionStarted: false, sequence: 0, stepIndex: 0, turnId: "" },
-      "eve:eve:test",
     );
 
     expect(events[0]).toMatchObject({

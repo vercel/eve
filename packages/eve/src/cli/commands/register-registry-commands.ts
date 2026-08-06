@@ -1,8 +1,25 @@
-import type { Command } from "#compiled/commander/index.js";
+import { InvalidArgumentError, type Command } from "#compiled/commander/index.js";
 
 interface RegistryCommandLogger {
   error(message: string): void;
   log(message: string): void;
+}
+
+const DEFAULT_SEARCH_LIMIT = 10;
+const MAX_SEARCH_LIMIT = 100;
+
+function parseSearchLimit(value: string): number {
+  if (!/^\d+$/u.test(value)) {
+    throw new InvalidArgumentError(`Expected a positive integer, received "${value}".`);
+  }
+
+  const limit = Number(value);
+  if (limit < 1 || limit > MAX_SEARCH_LIMIT) {
+    throw new InvalidArgumentError(
+      `Expected a limit between 1 and ${MAX_SEARCH_LIMIT}, received "${value}".`,
+    );
+  }
+  return limit;
 }
 
 /** Registers registry installation, configuration, and discovery commands. */
@@ -46,19 +63,29 @@ export function registerRegistryCommands(input: {
     .command("list")
     .description("List items from all registries or one source.")
     .option("-r, --registry <source>", "List items from one registry.")
-    .action(async (options: { registry?: string }) => {
+    .option("--json", "Output as JSON")
+    .action(async (options: { json?: boolean; registry?: string }) => {
       const { runRegistryListCommand } = await import("./registry.js");
-      await runRegistryListCommand(logger, appRoot, options.registry);
+      await runRegistryListCommand(logger, appRoot, options.registry, options);
     });
 
   registry
     .command("search <query>")
     .description("Search all registries or one source.")
     .option("-r, --registry <source>", "Search one registry.")
-    .action(async (query: string, options: { registry?: string }) => {
-      const { runRegistrySearchCommand } = await import("./registry.js");
-      await runRegistrySearchCommand(logger, appRoot, query, options.registry);
-    });
+    .option(
+      "--limit <count>",
+      `Maximum results to return (default: ${DEFAULT_SEARCH_LIMIT}).`,
+      parseSearchLimit,
+      DEFAULT_SEARCH_LIMIT,
+    )
+    .option("--json", "Output as JSON")
+    .action(
+      async (query: string, options: { json?: boolean; limit: number; registry?: string }) => {
+        const { runRegistrySearchCommand } = await import("./registry.js");
+        await runRegistrySearchCommand(logger, appRoot, query, options.registry, options);
+      },
+    );
 
   registry
     .command("view <item>")

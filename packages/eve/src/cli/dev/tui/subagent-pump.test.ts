@@ -91,7 +91,10 @@ function reasoningEvent(delta: string, index = 0): MessageStreamEvent {
 
 function boundaryEvent(index: number): MessageStreamEvent {
   return stampTestEvent(
-    { type: "session.waiting", data: { wait: "next-user-message" } } as UnstampedMessageStreamEvent,
+    {
+      type: "session.waiting",
+      data: { continuationToken: "session-id", wait: "next-user-message" },
+    } as UnstampedMessageStreamEvent,
     index,
   );
 }
@@ -104,7 +107,7 @@ describe("SubagentPump.settleAll", () => {
   it("closes live sections and stops stale child output after a cancelled turn", async () => {
     const child = pushableChildStream();
     const client = new Client({ host: "http://localhost:3000" });
-    vi.spyOn(client, "session").mockReturnValue({
+    vi.spyOn(client.sessions, "attach").mockReturnValue({
       stream: (options?: { signal?: AbortSignal }) => child.stream(options),
     } as never);
     const view = fakeView();
@@ -142,7 +145,7 @@ describe("SubagentPump child stream replay", () => {
     const transcript = [reasoningEvent("looked up the forecast", 0), boundaryEvent(1)];
     let opened = 0;
     const client = new Client({ host: "http://localhost:3000" });
-    vi.spyOn(client, "session").mockReturnValue({
+    vi.spyOn(client.sessions, "attach").mockReturnValue({
       stream: () => {
         opened += 1;
         return {

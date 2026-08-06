@@ -14,6 +14,8 @@ import {
   ReadFileStateKey,
 } from "../src/runtime/framework-tools/file-state.js";
 
+const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -42,7 +44,10 @@ function createFakeAccess(files: Record<string, string>): {
     resolvePath(path: string) {
       return path;
     },
-    async run(_options: { command: string }) {
+    async run({ command }: { command: string }) {
+      if (command === HOME_PROBE_COMMAND) {
+        return { exitCode: 0, stderr: "", stdout: "/home/agent\n" };
+      }
       return { exitCode: 0, stderr: "", stdout: "" };
     },
     async spawn() {
@@ -299,6 +304,26 @@ describe("executeWriteFileOnSandbox", () => {
         }),
       ),
     ).rejects.toThrow("filePath must be an absolute path");
+  });
+
+  it("shares read-before-write state with the resolved form of a $HOME path", async () => {
+    const filePath = "/home/agent/.agents/skills/research/references/catalog.md";
+    const { access, files, session } = createFakeAccess({ [filePath]: "original" });
+
+    const ctx = new ContextContainer();
+    ctx.set(SandboxKey, access);
+    ctx.set(ReadFileStateKey, { byTarget: {} });
+
+    const result = (await contextStorage.run(ctx, async () => {
+      await executeReadFileOnSandbox(session, { filePath });
+      return await executeWriteFileOnSandbox(session, {
+        content: "updated",
+        filePath: "$HOME/.agents/skills/research/references/catalog.md",
+      });
+    })) as WriteFileResult;
+
+    expect(result).toEqual({ existed: true, path: filePath });
+    expect(files[filePath]).toBe("updated");
   });
 
   // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import { exportJWK, exportSPKI, generateKeyPair, SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
 import {
@@ -28,7 +28,7 @@ import {
   withAuthChallenges,
 } from "#public/channels/auth.js";
 
-const TEST_ROUTE_URL = `https://example.com${EVE_CREATE_SESSION_ROUTE_PATH}`;
+const TEST_ROUTE_URL = `https://example.com${EVE_SESSION_ROUTE_PATH}`;
 
 describe("verifyHttpBasic", () => {
   it("returns ok with the authenticated principal when credentials match", () => {
@@ -324,19 +324,22 @@ describe("none", () => {
 });
 
 describe("localDev", () => {
-  // `localDev()` checks the request URL's hostname, not `process.env`.
-  // The env-based check it used to perform was unsafe on non-Vercel
-  // deployments (any host where `VERCEL` happens to be unset) and these
-  // tests pin the correct behaviour: only requests addressed to a
-  // loopback hostname authenticate, regardless of which platform the
-  // process happens to be running on.
+  // `localDev()` keys off the deployment (an `eve dev` or `vercel dev`
+  // process), never the inbound request. A spoofable request header such as
+  // `Host` must not be able to authenticate the local-dev principal.
   function requestFor(url: string): Request {
     return new Request(url, { method: "POST" });
   }
 
-  it("authenticates requests addressed to `localhost`", () => {
-    const result = localDev()(requestFor("http://localhost:3000/eve/v1/info"));
-    expect(result).toEqual({
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("authenticates when the process is an `eve dev` server", () => {
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("VERCEL_ENV", "");
+    expect(localDev()(requestFor("http://localhost:3000/eve/v1/info"))).toEqual({
       attributes: {},
       authenticator: "local-dev",
       principalId: "local-dev",
@@ -344,75 +347,35 @@ describe("localDev", () => {
     });
   });
 
-  it("authenticates requests addressed to `127.0.0.1`", () => {
-    expect(localDev()(requestFor("http://127.0.0.1:3000/eve/v1/info"))).toMatchObject({
+  it("authenticates when the process is a `vercel dev` server", () => {
+    vi.stubEnv("EVE_DEV", "");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "development");
+    expect(localDev()(requestFor("http://localhost:3000/"))).toMatchObject({
       principalType: "local-dev",
     });
   });
 
-  it("authenticates any address in the `127.0.0.0/8` loopback range", () => {
-    // Some dev setups bind to addresses other than `127.0.0.1` (e.g.
-    // `127.0.0.2` for multi-instance scenarios). The whole `/8` block
-    // is loopback per RFC 1122.
-    expect(localDev()(requestFor("http://127.5.6.7:3000/"))).toMatchObject({
-      principalType: "local-dev",
-    });
+  it("rejects a `Host: localhost` request on a production deployment", () => {
+    // On a self-hosted Node server the request URL host comes from the `Host`
+    // header. Neither dev flag is set on a production deployment, so a localhost
+    // host must not authenticate.
+    vi.stubEnv("EVE_DEV", "");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("VERCEL_ENV", "");
+    expect(localDev()(requestFor("http://localhost:3000/eve/v1/info"))).toBeNull();
+    expect(localDev()(requestFor("http://127.0.0.1:3000/"))).toBeNull();
+    expect(localDev()(requestFor("http://[::1]:3000/"))).toBeNull();
+    expect(localDev()(requestFor("http://agent.localhost:3000/"))).toBeNull();
   });
 
-  it("authenticates requests addressed to the IPv6 loopback `::1`", () => {
-    expect(localDev()(requestFor("http://[::1]:3000/"))).toMatchObject({
-      principalType: "local-dev",
-    });
-  });
-
-  it("authenticates any `*.localhost` subdomain per RFC 6761", () => {
-    // RFC 6761 reserves the entire `.localhost` TLD for loopback;
-    // dev setups that use subdomains (e.g. `agent.localhost`,
-    // `web.localhost`) must still authenticate.
-    expect(localDev()(requestFor("http://agent.localhost:3000/"))).toMatchObject({
-      principalType: "local-dev",
-    });
-  });
-
-  it("rejects requests addressed to a public hostname (returns null)", () => {
-    // Critical security case: a deployment behind any non-Vercel
-    // platform (Fly, Railway, self-hosted, etc.) must not authenticate
-    // arbitrary public traffic just because `process.env.VERCEL` is
-    // unset. The previous env-based implementation had this hole.
-    expect(localDev()(requestFor("https://example.com/eve/v1/info"))).toBeNull();
-    expect(localDev()(requestFor("https://myapp.fly.dev/eve/v1/info"))).toBeNull();
-    expect(localDev()(requestFor("https://myapp.vercel.app/eve/v1/info"))).toBeNull();
-  });
-
-  it("rejects requests addressed to a private (non-loopback) IP", () => {
-    // `192.168.x.x`, `10.x.x.x`, and other RFC 1918 ranges are LAN
-    // addresses, not loopback. A request from another machine on the
-    // dev network should not authenticate via `localDev`.
-    expect(localDev()(requestFor("http://192.168.1.5:3000/"))).toBeNull();
-    expect(localDev()(requestFor("http://10.0.0.5:3000/"))).toBeNull();
-  });
-
-  it("rejects requests addressed to `0.0.0.0`", () => {
-    // `0.0.0.0` is the "all interfaces" sentinel, not a loopback
-    // address. A request claiming `0.0.0.0` as its host could
-    // originate anywhere and is intentionally excluded.
-    expect(localDev()(requestFor("http://0.0.0.0:3000/"))).toBeNull();
-  });
-
-  it("ignores `process.env.VERCEL` and `VERCEL_ENV` entirely", () => {
-    // The host check is the only signal. Setting any combination of
-    // Vercel env vars must not change the decision for a given URL —
-    // this guards against regressions back to env-sniffing.
+  it("rejects public and preview requests when no dev flag is set", () => {
+    vi.stubEnv("EVE_DEV", "");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
-    try {
-      expect(localDev()(requestFor("http://localhost:3000/"))).toMatchObject({
-        principalType: "local-dev",
-      });
-      expect(localDev()(requestFor("https://example.com/"))).toBeNull();
-    } finally {
-      vi.unstubAllEnvs();
-    }
+    expect(localDev()(requestFor("https://example.com/eve/v1/info"))).toBeNull();
+    vi.stubEnv("VERCEL_ENV", "preview");
+    expect(localDev()(requestFor("https://myapp.fly.dev/"))).toBeNull();
   });
 });
 
@@ -1458,6 +1421,7 @@ describe("vercelOidc strategy helper", () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "");
     vi.stubEnv("VERCEL_TARGET_ENV", "");
     vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("EVE_DEV", "1");
     const issuer = await installMockedVercelIssuer("local-host-binding");
 
     try {

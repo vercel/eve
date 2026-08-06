@@ -2,8 +2,8 @@ import { defineEval } from "eve/evals";
 
 /**
  * Principal forwarding across a real remote-agent hop, end to end. The
- * fixture deployment plays both sides: `remote-loopback` is a
- * `defineRemoteAgent({ forwardPrincipal: true })` pointing back at this
+ * fixture deployment plays both sides: `remote-loopback` dynamically selects
+ * a `defineRemoteAgent({ forwardPrincipal: true })` pointing back at this
  * deployment, whose authored eve channel trusts principals only from the
  * hop's `router-app` bearer (`trustedForwarders`).
  *
@@ -24,15 +24,14 @@ const FORWARDED_MARKER =
 export default defineEval({
   tags: ["real-model"],
   description:
-    "Remote-agent principal forwarding: the child session runs as the parent's end user, with the distinct initiator preserved and the forwarder stamped.",
+    "Dynamic remote-agent selection and principal forwarding: the child session runs as the parent's end user, with the distinct initiator preserved and the forwarder stamped.",
   async test(t) {
     await t.send("Reply with the single word: ready.");
 
-    await t.send({
-      headers: { authorization: "Bearer e2e-principal-forwarding-second-user" },
-      message:
-        "Use the remote-loopback agent with this exact message and nothing else (no outputSchema): 'Run the whoami tool and reply with only its marker string, verbatim.' When it returns, reply with the agent's exact output included verbatim.",
-    });
+    await t.send(
+      "Use the remote-loopback agent with this exact message and nothing else (no outputSchema): 'Run the whoami tool and reply with only its marker string, verbatim.' When it returns, reply with the agent's exact output included verbatim.",
+      { headers: { authorization: "Bearer e2e-principal-forwarding-second-user" } },
+    );
 
     t.succeeded();
     t.calledSubagent("remote-loopback", {

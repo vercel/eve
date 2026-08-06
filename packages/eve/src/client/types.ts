@@ -2,7 +2,9 @@ import type { UserContent } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { MessageStreamEvent } from "#protocol/message.js";
-import type { CancelTurnStatus } from "#protocol/cancel-turn.js";
+import type { CancelTurnResult } from "#protocol/cancel-turn.js";
+import type { ClearStatus } from "#protocol/clear-session.js";
+import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -95,34 +97,17 @@ export interface ClientOptions {
    * redirect.
    */
   readonly redirect?: ClientRedirectPolicy;
-
-  /**
-   * Keep a session's continuation token after a normal `session.completed`
-   * boundary.
-   *
-   * By default, completed turns reset the client-side session so the next
-   * `send()` starts a fresh server-side conversation. Interactive clients can
-   * set this to preserve durable session state, including framework-managed
-   * sandbox state, across follow-up prompts until they explicitly create a new
-   * session.
-   *
-   * @default false
-   */
-  readonly preserveCompletedSessions?: boolean;
 }
 
 /**
- * Input payload for {@link ClientSession.send}. Pass a string as shorthand for
- * `{ message: string }`, or pass an object to include a message, HITL input
- * responses, one-turn client context, structured-output schema, abort signal,
- * and per-turn headers.
+ * Input object for creating a client session. The first message is required.
  */
-export type SendTurnInput<TOutput = unknown> = string | SendTurnPayload<TOutput>;
+export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutput> {
+  readonly message: string | UserContent;
+}
 
-/**
- * Object form accepted by {@link ClientSession.send}.
- */
-export interface SendTurnPayload<TOutput = unknown> {
+/** Options shared by message sends and HITL responses on a client session. */
+export interface SendTurnOptions<TOutput = unknown> {
   /**
    * Ephemeral client/page context for the next model call only.
    *
@@ -132,16 +117,6 @@ export interface SendTurnPayload<TOutput = unknown> {
    * itself and is never persisted to durable session history.
    */
   readonly clientContext?: string | readonly string[] | JsonObject;
-
-  /**
-   * HITL responses resolving pending approvals or questions.
-   */
-  readonly inputResponses?: readonly InputResponse[];
-
-  /**
-   * Optional follow-up user message for the same turn.
-   */
-  readonly message?: string | UserContent;
 
   /**
    * Optional schema the harness must satisfy before this turn terminates.
@@ -170,6 +145,20 @@ export interface SendTurnPayload<TOutput = unknown> {
    */
   readonly headers?: Readonly<Record<string, string>>;
 }
+
+/** Options for answering pending HITL input requests on a client session. */
+export type RespondTurnOptions<TOutput = unknown> = SendTurnOptions<TOutput>;
+
+/** @internal Transport envelope used by stores and command adapters. */
+export type SendTurnPayload<TOutput = unknown> =
+  | (SendTurnOptions<TOutput> & {
+      readonly inputResponses?: never;
+      readonly message: string | UserContent;
+    })
+  | (RespondTurnOptions<TOutput> & {
+      readonly inputResponses: readonly InputResponse[];
+      readonly message?: never;
+    });
 
 /** Retry and backoff settings for one kind of stream reconnection. */
 export interface StreamReconnectRetryPolicy {
@@ -230,22 +219,41 @@ export interface StreamOptions {
 }
 
 /** Result of requesting cancellation for a client session's active turn. */
-export interface CancelSessionResult {
-  /** Session whose active turn was targeted. */
-  readonly sessionId: string;
-  /** Both outcomes are successful; `no_active_turn` means there was nothing left to cancel. */
-  readonly status: CancelTurnStatus;
-}
+export type CancelSessionResult = CancelTurnResult;
+
+/** Result of requesting a context clear for a client session. */
+export type ClearResult =
+  | {
+      /** Session whose clear request was queued. */
+      readonly sessionId: string;
+      readonly status: Extract<ClearStatus, "accepted">;
+    }
+  | {
+      /** The fixed session ID was unknown or no longer active. */
+      readonly status: Extract<ClearStatus, "no_active_session">;
+    };
+
+/** Result of requesting context compaction for a client session. */
+export type CompactResult =
+  | {
+      /** Session whose compaction request was queued. */
+      readonly sessionId: string;
+      readonly status: Extract<CompactStatus, "accepted">;
+    }
+  | {
+      /** The fixed session ID was unknown or no longer active. */
+      readonly status: Extract<CompactStatus, "no_active_session">;
+    };
 
 /** Result of terminally resetting a client session. */
 export type ResetResult =
   | {
-      /** The prior session was retired and its continuation token released. */
+      /** The prior session was terminally retired. */
       readonly previousSessionId: string;
       readonly status: Extract<ResetStatus, "reset">;
     }
   | {
-      /** The client had no continuation token or the token was already free. */
+      /** The fixed session ID was unknown or no longer active. */
       readonly status: Extract<ResetStatus, "no_active_session">;
     };
 
@@ -303,11 +311,20 @@ export interface HealthResult {
 }
 
 /**
- * Serializable session cursor. Persist this value and pass it back to
- * {@link Client.session} to resume a conversation later.
+ * Serializable cursor for one fixed, ID-addressed client session.
  */
-export interface SessionState {
-  readonly continuationToken?: string;
-  readonly sessionId?: string;
+export interface ClientSessionState {
+  readonly sessionId: string;
   readonly streamIndex: number;
+}
+
+/**
+ * Finite, cursor-consistent prefix of one durable session stream.
+ */
+export interface SessionSnapshot {
+  /** Events from the start of the session through the durable tail observed when the read opened. */
+  readonly events: readonly MessageStreamEvent[];
+
+  /** Session cursor advanced exactly past {@link events}. */
+  readonly session: ClientSessionState;
 }

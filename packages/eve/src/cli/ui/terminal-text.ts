@@ -2,8 +2,8 @@ import { graphemes } from "#shared/text-boundaries.js";
 
 const ansiEscape = String.fromCharCode(27);
 
-export const ansiPattern = new RegExp(`${ansiEscape}\\[[0-?]*[ -/]*[@-~]`, "g");
-export const ansiPrefixPattern = new RegExp(`^${ansiEscape}\\[[0-?]*[ -/]*[@-~]`);
+const ansiPattern = new RegExp(`${ansiEscape}\\[[0-?]*[ -/]*[@-~]`, "g");
+const ansiPrefixPattern = new RegExp(`^${ansiEscape}\\[[0-?]*[ -/]*[@-~]`);
 const emojiPresentationPattern = /\p{Emoji_Presentation}/u;
 const extendedPictographicPattern = /\p{Extended_Pictographic}/u;
 const keycapPattern = /^[#*0-9]\u{fe0f}?\u{20e3}$/u;
@@ -43,14 +43,17 @@ export function visibleLength(input: string): number {
 }
 
 export function sliceVisible(input: string, width: number): string {
+  return sliceUnits(terminalTextUnits(input), 0, width);
+}
+
+function sliceUnits(units: readonly TerminalTextUnit[], from: number, width: number): string {
   if (width <= 0) {
     return "";
   }
 
   let output = "";
   let visible = 0;
-  const units = terminalTextUnits(input);
-  let index = 0;
+  let index = from;
   while (index < units.length && visible < width) {
     const unit = units[index]!;
     if (unit.width > 0 && visible + unit.width > width) break;
@@ -169,43 +172,69 @@ function terminalTextUnits(input: string): TerminalTextUnit[] {
  * Word-wraps a single logical line to `width` visible columns, preserving
  * ANSI styling and never splitting inside an escape sequence. Breaks on the
  * last space that fits; falls back to a hard cut for unbreakable runs.
+ *
+ * Tokenizes once and walks the units with a cursor, so a long unbroken
+ * payload wraps in linear time instead of re-measuring the remainder on
+ * every emitted row.
  */
 export function wrapVisibleLine(line: string, width: number): string[] {
   if (width <= 0) {
     return [line];
   }
 
-  if (line.length === 0) {
-    return [""];
-  }
+  const units = terminalTextUnits(line);
+  let remainingWidth = 0;
+  for (const unit of units) remainingWidth += unit.width;
 
   const lines: string[] = [];
-  let remaining = line;
+  let unitIndex = 0;
+  let charOffset = 0;
 
-  while (visibleLength(remaining) > width) {
-    const breakAt = findVisibleBreakPoint(remaining, width);
-    lines.push(remaining.slice(0, breakAt).trimEnd());
-    remaining = remaining.slice(breakAt).trimStart();
+  // The cursor moves one unit at a time: past the row just emitted, then past
+  // the whitespace the break consumed.
+  const consume = (): void => {
+    const unit = units[unitIndex]!;
+    charOffset += unit.text.length;
+    remainingWidth -= unit.width;
+    unitIndex += 1;
+  };
+
+  while (remainingWidth > width) {
+    const breakAt = findVisibleBreakPoint(units, unitIndex, width);
+    lines.push(line.slice(charOffset, charOffset + breakAt).trimEnd());
+    const rowEnd = charOffset + breakAt;
+    while (charOffset < rowEnd && unitIndex < units.length) consume();
+    while (unitIndex < units.length) {
+      const unit = units[unitIndex]!;
+      if (unit.ansi || unit.text.trimStart().length > 0) break;
+      consume();
+    }
   }
 
+  const remaining = line.slice(charOffset);
   if (remaining.length > 0 || lines.length === 0) lines.push(remaining);
   return lines;
 }
 
-function findVisibleBreakPoint(input: string, width: number): number {
-  const slice = sliceVisible(input, width + 1);
+function findVisibleBreakPoint(
+  units: readonly TerminalTextUnit[],
+  from: number,
+  width: number,
+): number {
+  const slice = sliceUnits(units, from, width + 1);
   const lastSpace = slice.lastIndexOf(" ");
 
   if (lastSpace > 0) {
     return lastSpace;
   }
 
-  const hardSlice = sliceVisible(input, width);
+  const hardSlice = sliceUnits(units, from, width);
   if (visibleLength(hardSlice) > 0) return hardSlice.length;
 
   let offset = 0;
   let foundVisibleUnit = false;
-  for (const unit of terminalTextUnits(input)) {
+  for (let index = from; index < units.length; index += 1) {
+    const unit = units[index]!;
     if (foundVisibleUnit && unit.width > 0) return offset;
     offset += unit.text.length;
     if (unit.width > 0) foundVisibleUnit = true;
@@ -213,7 +242,7 @@ function findVisibleBreakPoint(input: string, width: number): number {
   return offset;
 }
 
-export function codePointWidth(codePoint: number): number {
+function codePointWidth(codePoint: number): number {
   if (codePoint === 0x09) {
     return 4;
   }

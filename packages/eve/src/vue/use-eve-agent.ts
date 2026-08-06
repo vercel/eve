@@ -1,4 +1,5 @@
 import { shallowRef, computed, onScopeDispose, type ComputedRef } from "vue";
+import type { UserContent } from "ai";
 
 import {
   EveAgentStore,
@@ -12,7 +13,13 @@ import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import type { ClientAuth, HeadersValue, SendTurnPayload, SessionState } from "#client/types.js";
+import type {
+  ClientAuth,
+  HeadersValue,
+  RespondTurnOptions,
+  SendTurnOptions,
+  ClientSessionState,
+} from "#client/types.js";
 
 export type { PrepareSend };
 
@@ -44,10 +51,18 @@ export interface UseEveAgentReturn<TData> {
   readonly events: ComputedRef<readonly MessageStreamEvent[]>;
   /** Clear all state and start a new session. */
   readonly reset: () => void;
-  /** Send a turn with full structured input (message, attachments, input responses). */
-  readonly send: <TOutput = unknown>(input: SendTurnPayload<TOutput>) => Promise<void>;
+  /** Send a message with optional turn settings. */
+  readonly send: <TOutput = unknown>(
+    message: string | UserContent,
+    options?: SendTurnOptions<TOutput>,
+  ) => Promise<void>;
+  /** Answer pending HITL input requests. */
+  readonly respond: <TOutput = unknown>(
+    inputResponses: Parameters<ClientSession["respond"]>[0],
+    options?: RespondTurnOptions<TOutput>,
+  ) => Promise<void>;
   /** Current session identity and stream cursor. */
-  readonly session: ComputedRef<SessionState>;
+  readonly session: ComputedRef<ClientSessionState | undefined>;
   /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
   readonly status: ComputedRef<UseEveAgentStatus>;
   /** Abort the in-flight request. */
@@ -91,7 +106,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   /** Ordered prefix of the session stream used to rehydrate projected state. */
   readonly initialEvents?: readonly MessageStreamEvent[];
   /** Prior session cursor to resume from on mount. */
-  readonly initialSession?: SessionState;
+  readonly initialSession?: ClientSessionState;
   /**
    * Project submitted user messages before eve confirms them with a
    * `message.received` stream event.
@@ -131,7 +146,7 @@ export function useEveAgent<TData>(
  * Without a `reducer`, events project into `EveMessageData` via
  * `defaultMessageReducer()`; pass `reducer` to project into a custom `TData`.
  * Returns reactive refs (`data`, `error`, `events`, `session`, `status`) plus
- * `send`, `stop`, and `reset`. Configuration is read once on store creation;
+ * `send`, `respond`, `stop`, and `reset`. Configuration is read once on store creation;
  * remount to change it. On scope dispose, the in-flight request is aborted and
  * the store unsubscribed.
  */
@@ -177,7 +192,12 @@ export function useEveAgent<TData>(
     error: computed(() => snapshot.value.error),
     events: computed(() => snapshot.value.events),
     reset: () => store.reset(),
-    send: <TOutput = unknown>(input: SendTurnPayload<TOutput>) => store.send(input),
+    respond: <TOutput = unknown>(
+      inputResponses: Parameters<ClientSession["respond"]>[0],
+      options?: RespondTurnOptions<TOutput>,
+    ) => store.send({ ...options, inputResponses }),
+    send: <TOutput = unknown>(message: string | UserContent, options?: SendTurnOptions<TOutput>) =>
+      store.send({ ...options, message }),
     session: computed(() => snapshot.value.session),
     status: computed(() => snapshot.value.status),
     stop: () => store.stop(),

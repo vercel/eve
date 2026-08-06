@@ -59,7 +59,8 @@ describe("dispatchStreamEventHooks", () => {
     const registry = createRuntimeHookRegistry([
       hook("audit", {
         events: {
-          "session.completed": async () => {
+          "session.completed": async (_event, hookContext) => {
+            expect(hookContext.channel.continuationToken).toBe("test:continuation");
             calls.push("typed");
           },
         },

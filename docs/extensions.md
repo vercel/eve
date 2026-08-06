@@ -298,7 +298,7 @@ The `crm__` prefix is reserved for this directory mount. A consumer cannot overr
 
 ### Use an extension tool result in a hook
 
-To retain an extension tool's result type in a consumer hook, import its definition from `./tools` and pass it to [`toolResultFrom`](/guides/hooks#narrowing-tool-results):
+To retain an extension tool's result type in a consumer hook, import its definition from `./tools` and pass it to [`toolResultFrom`](/docs/guides/hooks#narrowing-tool-results):
 
 ```ts title="agent/hooks/narrow-crm.ts"
 import { defineHook } from "eve/hooks";
@@ -323,7 +323,7 @@ At build time, eve checks the extension's generated capability metadata. If the 
 
 ## What to read next
 
-- [Extension integrations](/integrations?filter=extension): browse ready-to-install extensions
+- [Integrations](/integrations): browse ready-to-install extensions using the Extensions filter
 - [Tools](/docs/tools): static tools, approval, and tool output
 - [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic tools, skills, and instructions
 - [Instructions](/docs/instructions): static and TypeScript instructions

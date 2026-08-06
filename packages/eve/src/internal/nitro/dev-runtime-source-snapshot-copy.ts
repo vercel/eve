@@ -25,6 +25,7 @@ const SNAPSHOT_SKIP_NAMES = new Set([
   ".turbo",
   ".vercel",
   ".workflow-data",
+  ".workflow-vitest",
   "node_modules",
 ]);
 const SNAPSHOT_APP_ROOT_SKIP_NAMES = new Set(["build", "dist"]);
@@ -296,14 +297,12 @@ function rewriteTsConfigExtendsSpecifier(input: {
 async function createSnapshotDependencyMounts(plan: DevelopmentSourceSnapshotPlan): Promise<void> {
   for (const dependencyMount of plan.dependencyMounts) {
     const snapshotMountPath = toSnapshotPathForPlan(plan, dependencyMount.mountPath);
-    const sourcePath =
-      dependencyMount.sourceKind === "workspace"
-        ? toSnapshotPathForPlan(plan, dependencyMount.sourcePath)
-        : dependencyMount.sourcePath;
-    const mountTarget =
-      dependencyMount.sourceKind === "workspace"
-        ? relative(dirname(snapshotMountPath), sourcePath) || "."
-        : sourcePath;
+    const sourcePath = dependencyMount.copied
+      ? toSnapshotPathForPlan(plan, dependencyMount.sourcePath)
+      : dependencyMount.sourcePath;
+    const mountTarget = dependencyMount.copied
+      ? relative(dirname(snapshotMountPath), sourcePath) || "."
+      : sourcePath;
 
     await mkdir(dirname(snapshotMountPath), { recursive: true });
     await symlink(mountTarget, snapshotMountPath, "junction");

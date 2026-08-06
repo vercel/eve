@@ -16,12 +16,14 @@ type ProtocolEvent<TType extends MessageStreamEvent["type"]> = Extract<
  * until eve exposes them here.
  */
 export interface HookEventMap {
+  readonly "action.partial": ProtocolEvent<"action.partial">;
   readonly "action.result": ProtocolEvent<"action.result">;
   readonly "actions.requested": ProtocolEvent<"actions.requested">;
   readonly "authorization.completed": ProtocolEvent<"authorization.completed">;
   readonly "authorization.required": ProtocolEvent<"authorization.required">;
   readonly "compaction.completed": ProtocolEvent<"compaction.completed">;
   readonly "compaction.requested": ProtocolEvent<"compaction.requested">;
+  readonly "context.cleared": ProtocolEvent<"context.cleared">;
   readonly "input.requested": ProtocolEvent<"input.requested">;
   readonly "message.appended": ProtocolEvent<"message.appended">;
   readonly "message.completed": ProtocolEvent<"message.completed">;

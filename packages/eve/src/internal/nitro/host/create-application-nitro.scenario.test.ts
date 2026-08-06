@@ -132,6 +132,7 @@ function createPreparedHost(): PreparedDevelopmentApplicationHost {
       manifest: {
         channels: [],
         config: { name: "weather-agent" },
+        extensionMounts: [],
         sandbox: null,
         subagents: [],
       },

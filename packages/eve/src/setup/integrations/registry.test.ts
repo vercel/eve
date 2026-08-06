@@ -38,6 +38,10 @@ describe("setup integrations", () => {
     });
   });
 
+  it("registers guided GitHub setup", () => {
+    expect(setupIntegration("github")).toMatchObject({ kind: "github", label: "GitHub" });
+  });
+
   it("rejects an unknown integration", () => {
     expect(() => setupIntegration("unknown")).toThrow(
       'Integration setup "unknown" is not available',

@@ -15,15 +15,19 @@ import type { SandboxSession } from "../src/shared/sandbox-session.js";
 interface FakeAccessOptions {
   readonly pathResolver?: (path: string) => string;
   /**
-   * Exit code returned by the `command -v rg` probe that runs before
+   * Exit code returned by the ripgrep capability probe that runs before
    * each grep call. Defaults to `0` (ripgrep is available) so the
-   * tests exercise the ripgrep code path by default. Set to a
-   * non-zero code to force the POSIX fallback branch.
+   * tests exercise the ripgrep code path by default. Set to a code
+   * other than `0` or `1` to force the POSIX fallback branch.
    */
   readonly probeExitCode?: number;
 }
 
-const PROBE_COMMAND = "command -v rg >/dev/null 2>&1";
+const PROBE_COMMAND =
+  "command -v rg >/dev/null 2>&1 || exit 127; " +
+  "rg --line-number --color=never --hidden --glob '!.git/*' --max-count 1 -- " +
+  "'__eve_ripgrep_probe_never_matches__' /workspace";
+const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 
 function createFakeAccess(
   commandHandler: (command: string) => { exitCode: number; stderr: string; stdout: string },
@@ -55,6 +59,9 @@ function createFakeAccess(
           return options.pathResolver ? options.pathResolver(path) : path;
         },
         async run({ command }: { command: string }) {
+          if (command === HOME_PROBE_COMMAND) {
+            return { exitCode: 0, stderr: "", stdout: "/home/agent\n" };
+          }
           if (command === PROBE_COMMAND) {
             return { exitCode: probeExitCode, stderr: "", stdout: "" };
           }
@@ -135,6 +142,28 @@ describe("executeGrepOnSandbox", () => {
         (sandbox) => executeGrepOnSandbox(sandbox, { pattern: "foo", path: "src" }),
       ),
     ).rejects.toThrow("filePath must be an absolute path");
+  });
+
+  it("expands a leading $HOME before searching", async () => {
+    let capturedCommand = "";
+    const result = (await runInContext(
+      (cmd) => {
+        capturedCommand = cmd;
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: "/home/agent/.agents/skills/research/SKILL.md:1:Research\n",
+        };
+      },
+      (sandbox) =>
+        executeGrepOnSandbox(sandbox, {
+          path: "$HOME/.agents/skills/research",
+          pattern: "Research",
+        }),
+    )) as GrepResult;
+
+    expect(capturedCommand).toContain("'/home/agent/.agents/skills/research'");
+    expect(result.path).toBe("/home/agent/.agents/skills/research");
   });
 
   // ---------------------------------------------------------------------------
@@ -464,7 +493,7 @@ describe("executeGrepOnSandbox", () => {
         };
       },
       (sandbox) => executeGrepOnSandbox(sandbox, { pattern: "foo" }),
-      { probeExitCode: 1 },
+      { probeExitCode: 127 },
     )) as GrepResult;
 
     // POSIX grep with -r -n, not ripgrep.
@@ -483,7 +512,7 @@ describe("executeGrepOnSandbox", () => {
           stdout: "",
         }),
         (sandbox) => executeGrepOnSandbox(sandbox, { pattern: "foo" }),
-        { probeExitCode: 1 },
+        { probeExitCode: 127 },
       ),
     ).rejects.toThrow(/grep failed \(exit 2\).*IO error/s);
   });
@@ -512,6 +541,15 @@ describe("executeGrepOnSandbox", () => {
     );
 
     expect(capturedCommand).not.toContain("--no-messages");
+  });
+
+  it("throws when ripgrep exits 1 with an error message", async () => {
+    await expect(
+      runInContext(
+        () => ({ exitCode: 1, stderr: "rg: invalid option\n", stdout: "" }),
+        (sandbox) => executeGrepOnSandbox(sandbox, { pattern: "needle" }),
+      ),
+    ).rejects.toThrow(/grep failed \(exit 1\).*invalid option/s);
   });
 
   it("treats exit 1 as legitimate 'no matches'", async () => {

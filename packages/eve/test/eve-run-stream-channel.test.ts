@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { MessageStreamEvent } from "../src/protocol/message.js";
 import { stampTestEvents } from "../src/internal/testing/events.js";
-import type { RouteHandlerArgs, GetSessionFn } from "../src/channel/routes.js";
+import { mockChannelContext } from "../src/internal/testing/mocks/mock-channel-operations.js";
+import type { AttachSessionFn, RouteHandlerArgs } from "../src/channel/routes.js";
 import type { Session } from "../src/channel/session.js";
-import { EVE_MESSAGE_STREAM_ROUTE_PATTERN } from "../src/protocol/routes.js";
+import { EVE_SESSION_STREAM_ROUTE_PATTERN } from "../src/protocol/routes.js";
 import { none } from "../src/public/channels/auth.js";
 import { eveChannel } from "../src/public/channels/eve.js";
 
@@ -22,14 +23,14 @@ import { eveChannel } from "../src/public/channels/eve.js";
 function createGetHandler() {
   const channel = eveChannel({ auth: none() });
   const getRoute = channel.routes.find(
-    (r) => r.method === "GET" && r.path === EVE_MESSAGE_STREAM_ROUTE_PATTERN,
+    (r) => r.method === "GET" && r.path === EVE_SESSION_STREAM_ROUTE_PATTERN,
   );
   if (!getRoute) throw new Error("No stream GET route found");
   return getRoute;
 }
 
 describe("eveChannel GET stream", () => {
-  it("forwards the startIndex query parameter into getSession/getEventStream", async () => {
+  it("forwards the startIndex query parameter into attachSession/getEventStream", async () => {
     const getRoute = createGetHandler();
     const events = createEvents(
       stampTestEvents([
@@ -45,76 +46,76 @@ describe("eveChannel GET stream", () => {
         },
       ]),
     );
-    const getSession = createMockGetSession(events);
+    const attachSession = createMockAttachSession(events);
 
     const response = await (getRoute as any).handler(
       new Request("https://example.com/eve/v1/session/session_xyz/stream?startIndex=42", {
         method: "GET",
       }),
-      createArgs({ getSession, params: { sessionId: "session_xyz" } }),
+      createArgs({ attachSession, params: { sessionId: "session_xyz" } }),
     );
 
     expect(response.status).toBe(200);
-    expect(getSession).toHaveBeenCalledTimes(1);
-    expect(getSession.mock.calls[0]?.[0]).toBe("session_xyz");
+    expect(attachSession).toHaveBeenCalledTimes(1);
+    expect(attachSession.mock.calls[0]?.[0]).toBe("session_xyz");
   });
 
   it("passes startIndex undefined when the query parameter is absent", async () => {
     const getRoute = createGetHandler();
-    const getSession = createMockGetSession(createEvents([]));
+    const attachSession = createMockAttachSession(createEvents([]));
 
     const response = await (getRoute as any).handler(
       new Request("https://example.com/eve/v1/session/session_xyz/stream", {
         method: "GET",
       }),
-      createArgs({ getSession, params: { sessionId: "session_xyz" } }),
+      createArgs({ attachSession, params: { sessionId: "session_xyz" } }),
     );
 
     expect(response.status).toBe(200);
-    expect(getSession).toHaveBeenCalledTimes(1);
+    expect(attachSession).toHaveBeenCalledTimes(1);
   });
 
   it("accepts negative tail-relative startIndex values", async () => {
     const getRoute = createGetHandler();
-    const getSession = createMockGetSession(createEvents([]));
+    const attachSession = createMockAttachSession(createEvents([]));
 
     const response = await (getRoute as any).handler(
       new Request("https://example.com/eve/v1/session/session_xyz/stream?startIndex=-3", {
         method: "GET",
       }),
-      createArgs({ getSession, params: { sessionId: "session_xyz" } }),
+      createArgs({ attachSession, params: { sessionId: "session_xyz" } }),
     );
 
     expect(response.status).toBe(200);
-    expect(getSession).toHaveBeenCalledTimes(1);
+    expect(attachSession).toHaveBeenCalledTimes(1);
   });
 
   it("rejects non-integer startIndex values with 400", async () => {
     const getRoute = createGetHandler();
-    const getSession = createMockGetSession(createEvents([]));
+    const attachSession = createMockAttachSession(createEvents([]));
 
     const response = await (getRoute as any).handler(
       new Request("https://example.com/eve/v1/session/session_xyz/stream?startIndex=banana", {
         method: "GET",
       }),
-      createArgs({ getSession, params: { sessionId: "session_xyz" } }),
+      createArgs({ attachSession, params: { sessionId: "session_xyz" } }),
     );
 
     expect(response.status).toBe(400);
-    expect(getSession).not.toHaveBeenCalled();
+    expect(attachSession).toHaveBeenCalledWith("session_xyz");
   });
 
   it("returns 400 when the sessionId path parameter is missing", async () => {
     const getRoute = createGetHandler();
-    const getSession = createMockGetSession(createEvents([]));
+    const attachSession = createMockAttachSession(createEvents([]));
 
     const response = await (getRoute as any).handler(
       new Request("https://example.com/eve/v1/session//stream", { method: "GET" }),
-      createArgs({ getSession, params: {} }),
+      createArgs({ attachSession, params: {} }),
     );
 
     expect(response.status).toBe(400);
-    expect(getSession).not.toHaveBeenCalled();
+    expect(attachSession).not.toHaveBeenCalled();
   });
 
   it("re-serializes the parsed event stream as NDJSON bytes", async () => {
@@ -132,16 +133,16 @@ describe("eveChannel GET stream", () => {
       },
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:test", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ]);
-    const getSession = createMockGetSession(createEvents(events));
+    const attachSession = createMockAttachSession(createEvents(events));
 
     const response = await (getRoute as any).handler(
       new Request("https://example.com/eve/v1/session/session_xyz/stream", {
         method: "GET",
       }),
-      createArgs({ getSession, params: { sessionId: "session_xyz" } }),
+      createArgs({ attachSession, params: { sessionId: "session_xyz" } }),
     );
 
     expect(response.status).toBe(200);
@@ -167,12 +168,26 @@ function createEvents(events: readonly MessageStreamEvent[]): ReadableStream<Mes
   });
 }
 
-function createMockGetSession(events: ReadableStream<MessageStreamEvent>) {
-  return vi.fn<GetSessionFn>().mockReturnValue({
+function createMockAttachSession(events: ReadableStream<MessageStreamEvent>) {
+  return vi.fn<AttachSessionFn>().mockReturnValue({
     id: "session_xyz",
-    continuationToken: "",
+    async send() {
+      return { sessionId: "session_xyz", status: "accepted" };
+    },
+    async respond() {
+      return { sessionId: "session_xyz", status: "accepted" };
+    },
     async cancel() {
       return { status: "no_active_turn" };
+    },
+    async compact() {
+      return { sessionId: "session_xyz", status: "accepted" };
+    },
+    async clear() {
+      return { sessionId: "session_xyz", status: "accepted" };
+    },
+    async reset() {
+      return { previousSessionId: "session_xyz", status: "reset" };
     },
     async getEventStream() {
       return events;
@@ -184,16 +199,13 @@ function createMockGetSession(events: ReadableStream<MessageStreamEvent>) {
 }
 
 function createArgs(input: {
-  readonly getSession: GetSessionFn;
+  readonly attachSession: AttachSessionFn;
   readonly params: Readonly<Record<string, string>>;
 }): RouteHandlerArgs {
   return {
-    send: vi.fn(),
-    resolveActiveSession: async () => undefined,
-    cancel: vi.fn(),
-    reset: vi.fn(),
-    getSession: input.getSession,
-    receive: vi.fn() as any,
+    ...mockChannelContext(vi.fn()),
+    attachSession: input.attachSession,
+    to: vi.fn() as any,
     params: input.params,
     waitUntil: () => undefined,
     requestIp: "127.0.0.1",

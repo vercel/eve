@@ -12,6 +12,7 @@ import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
 import { loadOptionalEnginePackage } from "#internal/application/optional-package-install.js";
 import type { SandboxBackendHandle } from "#public/definitions/sandbox-backend.js";
+import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import type {
   SandboxProcess,
@@ -74,6 +75,7 @@ async function loadJustBashModule(input: {
 export async function createBashSandbox(input: {
   readonly appRoot: string;
   readonly autoInstall: boolean;
+  readonly filesystem?: JustBashSandboxCreateOptions["filesystem"];
   readonly rootPath: string;
   readonly sessionKey: string;
 }): Promise<BashSandbox> {
@@ -87,11 +89,22 @@ export async function createBashSandbox(input: {
 
   await mkdir(filesystemRootPath, { recursive: true });
 
-  const filesystem = new ReadWriteFs({
+  const defaultFilesystem = new ReadWriteFs({
     allowSymlinks: true,
     maxFileReadSize: Number.MAX_SAFE_INTEGER,
     root: filesystemRootPath,
   });
+  let filesystem: IFileSystem = defaultFilesystem;
+  if (input.filesystem !== undefined) {
+    try {
+      filesystem = await input.filesystem({
+        appRoot: input.appRoot,
+        defaultFilesystem,
+      });
+    } catch (error) {
+      throw new Error("Failed to create the custom just-bash filesystem.", { cause: error });
+    }
+  }
 
   await ensureLocalSandboxDirectories(filesystem);
 

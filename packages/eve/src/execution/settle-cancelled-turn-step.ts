@@ -24,6 +24,7 @@ import {
   getProxyInputRequests,
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
+import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
@@ -34,6 +35,7 @@ import {
   stampMessageStreamEvent,
 } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 export interface CancelledTurnSettleResult {
   readonly serializedContext: Record<string, unknown>;
@@ -58,14 +60,15 @@ export async function settleCancelledTurnStep(input: {
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const bundle = ctx.require(BundleKey);
+  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const instrumentation = getInstrumentationRuntime();
 
   let session = hydrateDurableSession({
     compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+      thresholdPercent: effectiveAgent.thresholdPercent,
     },
     durable: durableSession,
-    turnAgent: bundle.turnAgent,
+    turnAgent: effectiveAgent.turnAgent,
   });
 
   let emissionState = getHarnessEmissionState(durableSession.state);
@@ -106,7 +109,7 @@ export async function settleCancelledTurnStep(input: {
             turnId: activeTurnId(emissionState),
           }) ?? baseEmit;
         return {
-          result: await emitCancelledTurn(emit, emissionState, enrichedSession.continuationToken),
+          result: await emitCancelledTurn(emit, emissionState),
           session: enrichedSession,
         };
       });
@@ -124,12 +127,19 @@ export async function settleCancelledTurnStep(input: {
   // discarded turn state). The pre-model gate re-raises the prompt while the
   // violation holds, so the next delivery gets a fresh prompt instead of
   // queueing forever behind a stale one.
+  //
+  // `abandonRunningAgentTurns`: `cancelDescendantTurnsStep` already ran and
+  // the cancelled turn's inbox is gone, so a child settlement can never
+  // reach this store again. This is the last write that can move those
+  // handles out of `running`.
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
     setHarnessEmissionState(
       clearPendingSessionLimitPrompt(
         clearAllProxyInputRequests(
-          clearPendingWorkflowInterrupt(clearPendingRuntimeActionBatch(session)),
+          clearPendingWorkflowInterrupt(
+            clearPendingRuntimeActionBatch(abandonRunningAgentTurns(session)),
+          ),
         ),
       ),
       emissionState,

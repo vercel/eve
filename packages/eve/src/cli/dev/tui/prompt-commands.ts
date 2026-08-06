@@ -4,10 +4,14 @@ type PromptCommandTarget = "local" | "remote";
 
 /** The slash commands the prompt accepts. */
 export type PromptCommand =
-  | { type: "new" }
+  | { type: "reset" }
+  | { type: "cancel" }
+  | { type: "clear" }
+  | { type: "compact" }
   | { type: "exit" }
   | { type: "help" }
   | { type: "loglevel"; argument: string }
+  | { type: "traces"; argument: string }
   | { type: "extension"; name: PromptCommandExtensionName; argument: string };
 
 /**
@@ -40,7 +44,7 @@ interface PromptCommandDefinition extends PromptCommandSpec {
  */
 const PROMPT_COMMAND_DEFINITIONS = [
   // `help` leads so that the typeahead's default highlight — what a bare `/`
-  // plus Enter submits — is the safest command, not session-resetting `/new`.
+  // plus Enter submits — is the safest command, not session-resetting `/reset`.
   {
     name: "help",
     aliases: [],
@@ -50,11 +54,35 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local", "remote"],
   },
   {
-    name: "new",
+    name: "reset",
     aliases: [],
     description: "Start a fresh session",
     takesArgument: false,
-    build: () => ({ type: "new" }),
+    build: () => ({ type: "reset" }),
+    targets: ["local", "remote"],
+  },
+  {
+    name: "cancel",
+    aliases: [],
+    description: "Cancel the running turn",
+    takesArgument: false,
+    build: () => ({ type: "cancel" }),
+    targets: ["local", "remote"],
+  },
+  {
+    name: "clear",
+    aliases: ["new"],
+    description: "Clear the current session context",
+    takesArgument: false,
+    build: () => ({ type: "clear" }),
+    targets: ["local", "remote"],
+  },
+  {
+    name: "compact",
+    aliases: [],
+    description: "Compact the current session context",
+    takesArgument: false,
+    build: () => ({ type: "compact" }),
     targets: ["local", "remote"],
   },
   {
@@ -92,9 +120,18 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local", "remote"],
   },
   {
+    name: "traces",
+    aliases: [],
+    description: "Open the local trace viewer",
+    argumentHint: "[trace]",
+    takesArgument: true,
+    build: (argument) => ({ type: "traces", argument }),
+    targets: ["local"],
+  },
+  {
     name: "add",
     aliases: [],
-    description: "Browse and add registry integrations",
+    description: "Add an integration from the registry",
     takesArgument: false,
     build: () => ({ type: "extension", name: "add", argument: "" }),
     targets: ["local"],
@@ -136,10 +173,12 @@ export function isPromptCommandAvailableFor(
 }
 
 /**
- * Recognizes the slash commands the prompt accepts. `/new` clears the
- * session and transcript; `/exit` (and `/quit`) terminate the TUI like
- * Ctrl+C; extension commands are dispatched outside the runner. Anything
- * else — including unknown `/text` — is a normal message.
+ * Recognizes the slash commands the prompt accepts. `/reset` clears the
+ * session and transcript; `/cancel` stops the running turn; `/clear` (and
+ * `/new`) clears context; `/compact` queues context compaction; `/exit` (and
+ * `/quit`) terminate the TUI like Ctrl+C; extension commands are dispatched
+ * outside the runner. Anything else — including unknown `/text` — is a normal
+ * message.
  */
 export function parsePromptCommand(prompt: string): PromptCommand | null {
   const trimmed = prompt.trim();

@@ -9,8 +9,16 @@ import {
 } from "./prompt-commands.js";
 
 describe("parsePromptCommand", () => {
-  it("parses /new", () => {
-    expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+  it("parses /reset", () => {
+    expect(parsePromptCommand("/reset")).toEqual({ type: "reset" });
+  });
+
+  it("parses /cancel", () => {
+    expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
+  });
+
+  it("parses /new as a context clear", () => {
+    expect(parsePromptCommand("/new")).toEqual({ type: "clear" });
   });
 
   it("parses /exit and its /quit alias", () => {
@@ -72,7 +80,7 @@ describe("parsePromptCommand", () => {
   });
 
   it("trims surrounding whitespace before matching", () => {
-    expect(parsePromptCommand("  /new  ")).toEqual({ type: "new" });
+    expect(parsePromptCommand("  /reset  ")).toEqual({ type: "reset" });
   });
 
   it("rejects near-misses and ordinary prompts", () => {
@@ -126,6 +134,7 @@ describe("promptCommandsFor", () => {
 
 describe("isPromptControlCommand", () => {
   it("is true exactly for recognized commands", () => {
+    expect(isPromptControlCommand("/reset")).toBe(true);
     expect(isPromptControlCommand("/new")).toBe(true);
     expect(isPromptControlCommand("/model gpt-5")).toBe(true);
     expect(isPromptControlCommand("/unknown")).toBe(false);

@@ -76,6 +76,7 @@ import {
   type SetupIssue,
 } from "./setup-issues.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
+import type { TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import type { RemoteDevelopmentTarget } from "./target.js";
 import type {
   AssistantResponseStatsMode,
@@ -125,11 +126,11 @@ export type AgentTUIStreamResult = {
   abort?: () => void;
   /**
    * Requests cooperative server-side cancellation of the streaming turn
-   * (Esc Esc, or an Esc steer pop). Unlike {@link abort} — which drops the
-   * client stream and forces a fresh session — the server settles the turn
-   * as `turn.cancelled` → `session.waiting`, so the stream reaches its
-   * boundary normally and the session keeps its context. Best-effort and
-   * idempotent; scoped to the turn the user observed when its id is known.
+   * (`/cancel`, Esc, or Ctrl+C; the keys steer when a message is queued). Unlike
+   * {@link abort} — which drops the client stream and forces a fresh session —
+   * the server settles the turn as `turn.cancelled` → `session.waiting`, so
+   * the stream reaches its boundary normally and the session keeps its context.
+   * Best-effort and idempotent; scoped to the turn the user observed when its id is known.
    */
   cancel?: () => void;
   turnState?: AgentTUITurnState;
@@ -258,6 +259,11 @@ export type AgentTUIRenderer = {
   renderCommandInvocation?(text: string, status?: "failed"): void;
   renderCommandResult?(text: string, tone?: "success" | "error"): void;
   readonly setupFlow?: SetupFlowRenderer;
+  /**
+   * The renderer's full-screen local trace viewer, opened by `/traces`.
+   * The returned promise resolves when the user closes the viewer.
+   */
+  readonly traceViewer?: TraceViewerRenderer;
   readPrompt?(options?: AgentTUISessionOptions): Promise<string | undefined>;
   /**
    * Consumes the next prompt produced by mid-turn input: the Esc-popped
@@ -270,7 +276,7 @@ export type AgentTUIRenderer = {
   /**
    * Reports the server session id backing the conversation — pushed by the
    * runner once a send is accepted, and overwritten when a later session's
-   * turn is accepted. Deliberately sticky across `/new` and interrupt
+   * turn is accepted. Deliberately sticky across `/reset` and interrupt
    * recovery: the terminal renderer echoes the LAST session this TUI talked
    * to in the parting line on exit, so an interrupted conversation (whose
    * replacement session never ran a turn) can still be found again
@@ -339,7 +345,7 @@ export type AgentTUIRenderer = {
   /**
    * Clears the rendered transcript and resets per-conversation display
    * state, leaving the UI interactive on a fresh screen. Used by the
-   * `/new` command to start a new session with a clean slate.
+   * `/reset` command to start a new session with a clean slate.
    */
   reset?(): void;
   /**
@@ -384,7 +390,7 @@ export interface PromptCommandHandler {
 }
 
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
-  session: ClientSession;
+  session?: ClientSession;
   /** Production TUI probe injected by the launcher; omitted in hermetic runners. */
   probeMcpConnection?: McpConnectionProbe;
   /**
@@ -454,7 +460,7 @@ function authIssueForStatus(status: VercelAuthStatus): SetupIssue | undefined {
 }
 
 export class EveTUIRunner {
-  #session: ClientSession;
+  #session: ClientSession | undefined;
   readonly #client?: Client;
   readonly #renderer: AgentTUIRenderer;
   readonly #name: string;
@@ -705,6 +711,7 @@ export class EveTUIRunner {
     let prompt: string | undefined;
     let pendingInputResponses: readonly InputResponse[] | undefined;
     let hasRunTurn = false;
+    let followCurrentSession = false;
     let streamWithoutPrompt = false;
     // `--input` seed: applied to the first prompt's editable buffer, then
     // cleared so later prompts open empty.
@@ -778,10 +785,48 @@ export class EveTUIRunner {
         const command = parsePromptCommand(prompt);
 
         if (command?.type === "exit") {
+          this.#lifecycle?.requestStop();
           return;
         }
 
-        if (command?.type === "new") {
+        if (command?.type === "cancel") {
+          if (this.#session === undefined) {
+            this.#renderCommandOutcome("No active turn to cancel.");
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          try {
+            const result = await this.#session.cancel();
+            this.#renderCommandOutcome(
+              result.status === "accepted"
+                ? "Turn cancellation requested."
+                : "No active turn to cancel.",
+            );
+            if (result.status === "no_active_turn") {
+              pendingInputResponses = undefined;
+              followCurrentSession = false;
+              streamWithoutPrompt = false;
+              prompt = undefined;
+              continue;
+            }
+          } catch (error) {
+            this.#renderCommandOutcome(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          pendingInputResponses = undefined;
+          followCurrentSession = true;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+        }
+
+        if (command?.type === "reset") {
           if (!(await this.#resetCurrentSession())) {
             pendingInputResponses = undefined;
             streamWithoutPrompt = false;
@@ -792,6 +837,80 @@ export class EveTUIRunner {
           streamWithoutPrompt = false;
           prompt = undefined;
           continue;
+        }
+
+        if (command?.type === "compact") {
+          if (this.#session === undefined) {
+            this.#renderCommandOutcome("No active session to compact.");
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          try {
+            const result = await this.#session.compact();
+            this.#renderCommandOutcome(
+              result.status === "accepted"
+                ? "Compaction requested."
+                : "No active session to compact.",
+            );
+            if (result.status === "no_active_session") {
+              pendingInputResponses = undefined;
+              followCurrentSession = false;
+              streamWithoutPrompt = false;
+              prompt = undefined;
+              continue;
+            }
+          } catch (error) {
+            this.#renderCommandOutcome(`Couldn't compact the session: ${toErrorMessage(error)}`);
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          pendingInputResponses = undefined;
+          followCurrentSession = true;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+        }
+
+        if (command?.type === "clear") {
+          if (this.#session === undefined) {
+            this.#renderCommandOutcome("No active session to clear.");
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          try {
+            const result = await this.#session.clear();
+            this.#renderCommandOutcome(
+              result.status === "accepted"
+                ? "Context clear requested."
+                : "No active session to clear.",
+            );
+            if (result.status === "no_active_session") {
+              pendingInputResponses = undefined;
+              followCurrentSession = false;
+              streamWithoutPrompt = false;
+              prompt = undefined;
+              continue;
+            }
+          } catch (error) {
+            this.#renderCommandOutcome(`Couldn't clear the session: ${toErrorMessage(error)}`);
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
+          pendingInputResponses = undefined;
+          followCurrentSession = true;
+          streamWithoutPrompt = false;
+          prompt = undefined;
         }
 
         // Help renders locally; unlike extension commands it must work even
@@ -814,6 +933,16 @@ export class EveTUIRunner {
           continue;
         }
 
+        // /traces is renderer-local too: the viewer reads the local spool
+        // from disk and owns the screen until the user closes it.
+        if (command?.type === "traces") {
+          await this.#openTraceViewer(command.argument);
+          pendingInputResponses = undefined;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+          continue;
+        }
+
         if (command?.type === "extension") {
           try {
             await this.#executeExtensionCommand(command, title, { trigger: "command" });
@@ -830,13 +959,15 @@ export class EveTUIRunner {
         hasRunTurn = true;
       }
 
-      let result = await this.#streamTurn({
-        prompt: streamWithoutPrompt ? undefined : prompt,
-        inputResponses: pendingInputResponses,
-      });
+      let result = followCurrentSession
+        ? this.#streamCurrentSession()
+        : await this.#streamTurn({
+            prompt: streamWithoutPrompt ? undefined : prompt,
+            inputResponses: pendingInputResponses,
+          });
       // The session id becomes known once the send is accepted; keep the
       // renderer's copy fresh so the parting line can name the session.
-      const acceptedSessionId = this.#session.state.sessionId;
+      const acceptedSessionId = this.#session?.state.sessionId;
       if (acceptedSessionId !== undefined) {
         this.#renderer.setSessionId?.(acceptedSessionId);
       }
@@ -918,7 +1049,7 @@ export class EveTUIRunner {
           }
 
           if (this.#enterPendingConnectionAuthorization(result)) {
-            result = this.#streamConnectionAuthorization();
+            result = this.#streamCurrentSession();
             submittedPrompt = undefined;
             continue;
           }
@@ -927,7 +1058,7 @@ export class EveTUIRunner {
             if (result.turnState.aborted) {
               this.#sessionFailed = true;
             } else {
-              const strandedSessionId = this.#session.state.sessionId;
+              const strandedSessionId = this.#session?.state.sessionId;
               this.#renderer.renderNotice?.(
                 strandedSessionId
                   ? `Lost the event stream — the turn may still be running on the server (session ${strandedSessionId}). Your next message resumes this session; use /cancel to stop the turn.`
@@ -949,11 +1080,12 @@ export class EveTUIRunner {
         continue;
       }
 
+      followCurrentSession = false;
       streamWithoutPrompt = false;
       pendingInputResponses = undefined;
       prompt = undefined;
 
-      // A staged Esc steer message, or messages queued during the turn,
+      // A staged key-driven steer message, or messages queued during the turn,
       // submit immediately as the next turn — but only across a clean turn
       // boundary. A failed session or a lost stream keeps them; the renderer
       // restores them into the next prompt's editable buffer instead of
@@ -993,7 +1125,7 @@ export class EveTUIRunner {
   /**
    * Resets all per-conversation runner state and, when a client is
    * available, replaces the active session with a fresh one so the next
-   * turn starts a new server-side conversation. Backs the `/new` command.
+   * turn starts a new server-side conversation. Backs the `/reset` command.
    * In-flight subagent child-session streams are aborted.
    */
   #startNewSession(): void {
@@ -1003,14 +1135,17 @@ export class EveTUIRunner {
     this.#pendingConnectionAuths.clear();
     this.#renderer.setConnectionAuthPendingCount?.(0);
 
-    if (this.#client) {
-      this.#session = this.#client.session();
-    }
+    this.#session = undefined;
     this.#runtimeArtifacts?.clear();
   }
 
   /** Resets the durable owner before clearing the local conversation view. */
   async #resetCurrentSession(): Promise<boolean> {
+    if (this.#session === undefined) {
+      this.#startNewSession();
+      this.#renderer.reset?.();
+      return true;
+    }
     try {
       await this.#session.reset();
     } catch (error) {
@@ -1085,7 +1220,7 @@ export class EveTUIRunner {
     prompt: string | undefined;
     inputResponses: readonly InputResponse[] | undefined;
   }): Promise<AgentTUIStreamResult> {
-    // Backs the result's `abort`: the renderer fires it on Ctrl+C so the
+    // Backs the result's `abort`: lifecycle interruption fires it so the
     // in-flight stream read settles instead of dangling until server close.
     const abortController = new AbortController();
     const sendInput: {
@@ -1112,7 +1247,25 @@ export class EveTUIRunner {
         this.#renderer.flushDelayedDevBuildErrors?.();
       }
 
-      response = await this.#session.send(sendInput);
+      if (this.#session === undefined) {
+        if (this.#client === undefined) {
+          throw new Error("Cannot create a session without an eve client.");
+        }
+        if (sendInput.message === undefined) {
+          throw new Error("Cannot answer an input request before the session starts.");
+        }
+        const created = await this.#client.sessions.create({
+          ...sendInput,
+          message: sendInput.message,
+        });
+        this.#session = created.session;
+        response = created.response;
+      } else {
+        response =
+          sendInput.inputResponses === undefined
+            ? await this.#session.send(sendInput.message!, { signal: sendInput.signal })
+            : await this.#session.respond(sendInput.inputResponses, { signal: sendInput.signal });
+      }
     } catch (error) {
       if (isInterruptedError(error)) throw error;
       // Dispatching the turn failed before any stream opened (transport
@@ -1135,9 +1288,9 @@ export class EveTUIRunner {
 
   /**
    * Requests cooperative cancellation of the streaming turn and retries
-   * while the turn stays live. An Esc that lands in the dispatch window —
-   * after the turn was sent but before the turn workflow claims its cancel
-   * hook (i.e. before `turn.started` reaches the client) — resolves as a
+   * while the turn stays live. A key-driven cancel that lands in the dispatch
+   * window — after the turn was sent but before the turn workflow claims its
+   * cancel hook (i.e. before `turn.started` reaches the client) — resolves as a
    * benign `no_active_turn` and would otherwise be silently lost, leaving
    * the TUI showing "Cancelling…" while the turn runs to completion.
    * Retrying until the stream reaches its boundary closes that window.
@@ -1149,9 +1302,9 @@ export class EveTUIRunner {
    * complete while the request is in flight, the cancel can land on the
    * next turn. Closing it needs turn-scoped cancel admission server-side
    * (the #867 ledger); until then the renderer backstops it — a
-   * `turn.cancelled` arriving without an Esc in that stream restores the
-   * submitted message into the prompt instead of losing it.
-   * Single-flight per turn: repeated Esc presses join the running loop.
+   * `turn.cancelled` arriving without a local cancel request in that stream
+   * restores the submitted message into the prompt instead of losing it.
+   * Single-flight per turn: repeated cancel keys join the running loop.
    */
   async #requestTurnCancellation(turnState: AgentTUITurnState): Promise<void> {
     if (turnState.cancelInFlight === true) return;
@@ -1161,13 +1314,13 @@ export class EveTUIRunner {
         if (turnState.boundaryEvent !== undefined || turnState.aborted === true) return;
         const turnId = turnState.turnId;
         try {
-          const result = await this.#session.cancel(turnId === undefined ? undefined : { turnId });
+          const result = await this.#session?.cancel(turnId === undefined ? undefined : { turnId });
           // Accepted means the turn's cancellation hook consumed the
           // request; the turn settles at its next safe boundary.
-          if (result.status === "accepted") return;
+          if (result?.status === "accepted") return;
         } catch {
           // No accepted session yet or a transport failure — retry below;
-          // Ctrl+C remains the hard client-side interrupt.
+          // lifecycle interruption remains the hard client-side escape hatch.
         }
         await delayMs(turnCancelRetryDelayMs);
       }
@@ -1176,12 +1329,11 @@ export class EveTUIRunner {
     }
   }
 
-  /**
-   * Follows the same session after an interactive authorization callback.
-   * `send()` stops at the parked `session.waiting` boundary; the callback's
-   * completion events arrive in the next durable turn on `session.stream()`.
-   */
-  #streamConnectionAuthorization(): AgentTUIStreamResult {
+  /** Follows the current session without dispatching another turn. */
+  #streamCurrentSession(): AgentTUIStreamResult {
+    if (this.#session === undefined) {
+      throw new Error("Cannot stream a session before its first turn is accepted.");
+    }
     const abortController = new AbortController();
     return this.#createTUIStreamResult(
       this.#session.stream({ signal: abortController.signal }),
@@ -1453,6 +1605,28 @@ export class EveTUIRunner {
   }
 
   /**
+   * Opens the renderer's trace viewer on the local spool. The viewer owns the
+   * screen until the user closes it; sessions without the capability (or
+   * without a local app root) get a one-line notice instead.
+   */
+  async #openTraceViewer(argument: string): Promise<void> {
+    if (this.#appRoot === undefined || this.#renderer.traceViewer === undefined) {
+      this.#renderCommandOutcome("/traces is only available in local dev sessions.");
+      return;
+    }
+    try {
+      await this.#renderer.traceViewer.open({
+        appRoot: this.#appRoot,
+        sessionId: this.#session?.state.sessionId,
+        reference: argument === "" ? undefined : argument,
+      });
+    } catch (error) {
+      if (isInterruptedError(error)) return;
+      throw error;
+    }
+  }
+
+  /**
    * Applies `/loglevel [all|stderr|sandbox|none]` against the renderer's buffered
    * log filter and returns the one-line outcome. A bare `/loglevel` reports
    * the current mode instead of changing it.
@@ -1700,7 +1874,7 @@ async function* eveEventsToTUIStream(
         break;
 
       case "turn.started":
-        // Recorded so Esc-driven cancellation can scope its request to the
+        // Recorded so key-driven cancellation can scope its request to the
         // turn the user is watching; a cancel that arrives after the
         // boundary then no-ops instead of hitting the next turn.
         turnState.turnId = event.data.turnId;
@@ -1988,7 +2162,7 @@ async function* eveEventsToTUIStream(
         break;
 
       case "turn.cancelled":
-        // A cooperative cancel (Esc Esc or an Esc steer) — not a failure.
+        // A cooperative cancel (`/cancel`, Esc, Ctrl+C, or a steer) — not a failure.
         // `session.waiting` follows and finishes the stream normally.
         onTurnCancelled?.();
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);

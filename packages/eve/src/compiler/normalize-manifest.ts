@@ -15,6 +15,7 @@ import {
   createCompiledAgentNodeManifest,
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
@@ -48,23 +49,9 @@ export async function compileAgentManifest(
     subagents: manifest.subagents,
   });
 
-  const extensionMounts: CompiledExtensionMount[] = manifest.resolvedExtensions.map((mount) => {
-    const mountRef = manifest.extensions.find(
-      (entry) => mountRefNamespace(entry.logicalPath) === mount.namespace,
-    );
-    return {
-      namespace: mount.namespace,
-      packageName: mount.packageName,
-      packageNamespace: packageStateNamespace(mount.packageName),
-      sourceRoot: mount.sourceRoot,
-      mountSourceId: mountRef?.sourceId ?? `extensions/${mount.namespace}`,
-      mountLogicalPath: mountRef?.logicalPath ?? `extensions/${mount.namespace}`,
-    };
-  });
-
   return createCompiledAgentManifest({
     ...compiledNode,
-    extensionMounts,
+    extensionMounts: compiledNode.extensionMounts,
     remoteAgents: subagentGraph.remoteAgents,
     subagentEdges: subagentGraph.edges,
     subagents: subagentGraph.nodes,
@@ -75,11 +62,16 @@ async function compileAgentNodeManifest(
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
   options: {
+    readonly agentConfigDefinition?: unknown;
     readonly externalDependencies?: readonly string[];
     readonly allowWorkflowConfig?: boolean;
   } = {},
 ): Promise<CompiledAgentNodeManifest> {
-  const rawConfig = await compileAgentConfig(manifest, context);
+  const rawConfig = Object.hasOwn(options, "agentConfigDefinition")
+    ? await compileAgentConfig(manifest, context, {
+        definition: options.agentConfigDefinition,
+      })
+    : await compileAgentConfig(manifest, context);
   if (options.allowWorkflowConfig === false && rawConfig.experimental?.workflow !== undefined) {
     throw new Error(
       `Workflow runtime configuration is only supported on the root agent config. Remove "experimental.workflow" from "${manifest.agentId}".`,
@@ -108,6 +100,7 @@ async function compileAgentNodeManifest(
   const dynamicTools: CompiledDynamicToolDefinition[] = [];
   const disabledFrameworkTools: string[] = [];
   let workflowTool: CompiledWorkflowToolDefinition | undefined;
+  let webSearchProvider: WebSearchProvider | undefined;
 
   for (const entry of compiledToolEntries) {
     if (entry.kind === "tool") {
@@ -116,6 +109,8 @@ async function compileAgentNodeManifest(
       dynamicTools.push(entry.definition);
     } else if (entry.kind === "workflow-tool") {
       workflowTool = { maxSubagents: entry.maxSubagents };
+    } else if (entry.kind === "web-search-tool") {
+      webSearchProvider = entry.provider;
     } else {
       disabledFrameworkTools.push(entry.name);
     }
@@ -243,11 +238,13 @@ async function compileAgentNodeManifest(
     agentRoot: manifest.agentRoot,
     appRoot: manifest.appRoot,
     channels: compiledChannels,
+    extensionMounts: compileExtensionMounts(manifest),
     config,
     connections,
     diagnosticsSummary: manifest.diagnosticsSummary,
     disabledFrameworkTools,
     workflowTool,
+    webSearchProvider,
     dynamicSkills,
     dynamicTools,
     hooks,
@@ -268,6 +265,22 @@ async function compileAgentNodeManifest(
     skills,
     instructions: composedInstructions,
     tools,
+  });
+}
+
+function compileExtensionMounts(manifest: AgentSourceManifest): CompiledExtensionMount[] {
+  return manifest.resolvedExtensions.map((mount) => {
+    const mountRef = manifest.extensions.find(
+      (entry) => mountRefNamespace(entry.logicalPath) === mount.namespace,
+    );
+    return {
+      namespace: mount.namespace,
+      packageName: mount.packageName,
+      packageNamespace: packageStateNamespace(mount.packageName),
+      sourceRoot: mount.sourceRoot,
+      mountSourceId: mountRef?.sourceId ?? `extensions/${mount.namespace}`,
+      mountLogicalPath: mountRef?.logicalPath ?? `extensions/${mount.namespace}`,
+    };
   });
 }
 

@@ -1,6 +1,7 @@
 import { relative } from "node:path";
 
 import {
+  buildOpaqueTypesStub,
   buildUniqueSymbolStub,
   collectFilesRecursively,
   createDeclarationCopier,
@@ -85,6 +86,11 @@ const copyDeclarations = createDeclarationCopier({
     "@workflow/world": {
       kind: "vendored",
       compiledPath: "@workflow/world",
+    },
+    devalue: {
+      kind: "stub",
+      stubBaseName: "_devalue",
+      build: buildOpaqueTypesStub,
     },
     ms: {
       kind: "stub",

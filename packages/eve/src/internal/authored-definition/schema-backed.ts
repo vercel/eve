@@ -2,6 +2,7 @@ import {
   isDisabledToolSentinel,
   isExperimentalWorkflowToolDefinition,
 } from "#public/definitions/tool.js";
+import { isWebSearchToolDefinition } from "#public/tools/web-search.js";
 import {
   expectFunction,
   expectObjectRecord,
@@ -43,6 +44,7 @@ type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
   | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
+  | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
   | {
       readonly kind: "dynamic-tool";
       readonly eventNames: readonly DynamicToolEventName[];
@@ -76,6 +78,15 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
           ? undefined
           : expectPositiveInteger(record.maxSubagents, message),
     };
+  }
+  if (isWebSearchToolDefinition(value)) {
+    const record = expectObjectRecord(value, message);
+    expectOnlyKnownKeys(record, ["kind", "provider"], message);
+    const provider = expectString(record.provider, message);
+    if (provider !== "exa" && provider !== "parallel") {
+      throw new Error(`${message} Expected "provider" to be one of: exa, parallel.`);
+    }
+    return { kind: "web-search-tool", provider };
   }
 
   const record = expectObjectRecord(value, message);
