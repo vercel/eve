@@ -6,13 +6,13 @@ import {
   connectionProtocols as protocolsForIdentity,
   extensionEntries,
   instrumentationEntries,
-} from "@vercel/eve-catalog";
+} from "@eve/catalog";
 import type { LogoKey } from "./logos";
 
 /**
  * The docs integration gallery layers presentation (logo, keywords, setup
  * markdown, auth modes) on top of the shared identity catalog
- * (`@vercel/eve-catalog`). Identity — slug, name, kind, tagline, and a
+ * (`@eve/catalog`). Identity — slug, name, kind, tagline, and a
  * connection's transport + model-facing description — comes from the catalog
  * and is never re-declared here; this module owns only the docs-facing overlay,
  * keyed by slug.
@@ -21,8 +21,8 @@ import type { LogoKey } from "./logos";
 export type IntegrationType = "channel" | "connection" | "extension" | "instrumentation";
 
 /** Wire protocol and transport identity types are owned by the shared catalog. */
-export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@vercel/eve-catalog";
-import type { ConnectionProtocol } from "@vercel/eve-catalog";
+export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@eve/catalog";
+import type { ConnectionProtocol } from "@eve/catalog";
 
 /**
  * How a connection authenticates. A mode uses either Vercel Connect (`user`,
@@ -125,10 +125,10 @@ const channelPresentations: Record<string, ChannelPresentation> = {
     logo: "slack",
     docsHref: "/docs/channels/slack",
     keywords: ["chat", "messaging", "bot", "webhook"],
-    install: `The eve CLI scaffolds the channel for you. \`eve channels add slack\` writes \`agent/channels/slack.ts\`, adds \`@vercel/connect\`, and runs the Connect setup flow:
+    install: `The eve CLI scaffolds the channel for you. \`eve add channel/slack\` writes \`agent/channels/slack.ts\`, adds \`@vercel/connect\`, and runs the Connect setup flow:
 
 \`\`\`bash
-eve channels add slack
+eve add channel/slack
 \`\`\`
 
 To wire it up by hand instead, install the framework and the Connect SDK. Slack channels use [Vercel Connect](https://vercel.com/docs/connect) for both the outbound bot token and inbound webhook verification:
@@ -314,7 +314,7 @@ export default linearChannel({
     install: `The eve CLI scaffolds the full Next.js web chat app alongside \`agent/channels/eve.ts\`:
 
 \`\`\`bash
-eve channels add web
+eve add channel/web
 \`\`\`
 
 To wire it up by hand instead, install the framework:
@@ -842,64 +842,29 @@ export default channel;
 See the [Kapso adapter documentation](https://chat-sdk.dev/adapters/vendor-official/kapso) for supported events, capabilities, and credentials.`,
     configure: `Connect a WhatsApp number in Kapso, set \`KAPSO_API_KEY\`, \`KAPSO_PHONE_NUMBER_ID\`, and \`KAPSO_WEBHOOK_SECRET\`, then point the Kapso webhook at \`/eve/v1/kapso\`. Use this provider-managed option when you do not want to integrate directly with the WhatsApp Cloud API. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
-  "chat-sdk-photon": {
+  photon: {
     logo: "photon",
-    docsHref: "/docs/channels/chat-sdk",
-    badge: "Provider official",
-    keywords: [
-      "chat sdk",
-      "imessage",
-      "apple messages",
-      "sms",
-      "mms",
-      "rcs",
-      "photon",
-      "sendblue",
-      "linq",
-      "agentphone",
-      "dial",
-    ],
-    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/imessage.ts\` and installs Chat SDK and its adapter dependencies:
+    docsHref: "/docs/channels/photon",
+    badge: "First-party",
+    keywords: ["imessage", "apple messages", "photon", "sms", "phone"],
+    install: `Add Photon from eve's registry, then follow the guided project, phone, and deployment setup:
 
 \`\`\`bash
-eve add channel/chat-sdk-photon
+eve add channel/photon-imessage
 \`\`\``,
-    quickStart: `Create \`agent/channels/imessage.ts\`:
+    quickStart: `Create \`agent/channels/photon.ts\`:
 
 \`\`\`ts
-// agent/channels/imessage.ts
-import { createiMessageAdapter } from "@photon-ai/chat-adapter-imessage";
-import { createMemoryState } from "@chat-adapter/state-memory";
-import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { connectPhotonCredentials } from "@vercel/connect/eve";
+import { photonIMessageChannel } from "eve/channels/photon";
 
-export const { bot, channel, send } = chatSdkChannel({
-  userName: "My Agent",
-  adapters: {
-    imessage: createiMessageAdapter({
-      local: false,
-      projectId: process.env.IMESSAGE_PROJECT_ID,
-      projectSecret: process.env.IMESSAGE_PROJECT_SECRET,
-    }),
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
+});
+\`\`\``,
+    configure: `The guided setup can create a dedicated Photon project or use existing credentials, register your phone, and choose Vercel Connect or portable environment credentials. Connect-backed setup creates a native Photon connector and routes verified triggers to \`/eve/v1/photon\`; portable setup registers a signed Photon webhook directly.`,
   },
-  state: createMemoryState(),
-});
 
-bot.onNewMention(async (thread: Thread, message: Message) => {
-  await thread.subscribe();
-  await send(message.text, { thread });
-});
-
-bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
-});
-
-export default channel;
-\`\`\`
-
-See the [Photon adapter documentation](https://chat-sdk.dev/adapters/vendor-official/photon) for all supported events and credentials.`,
-    configure: `Set \`IMESSAGE_PROJECT_ID\` and \`IMESSAGE_PROJECT_SECRET\`, then point Photon’s signed webhook at \`/eve/v1/imessage\`. Photon supports cloud, self-hosted, and local macOS deployments. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
-  },
   "chat-sdk-dial": {
     logo: "dial",
     docsHref: "/docs/channels/chat-sdk",
@@ -1469,7 +1434,7 @@ The extension also supports inline screenshots, session naming, proxies, and pro
 
 /**
  * Connection presentation overlay, keyed by catalog slug. Transport (`mcp`,
- * `openapi`) and the model-facing description come from `@vercel/eve-catalog`;
+ * `openapi`) and the model-facing description come from `@eve/catalog`;
  * this carries the docs-only auth modes, optional connector UID, and configure
  * note.
  */

@@ -1,6 +1,4 @@
 import { HumanActionRequiredError } from "#setup/human-action.js";
-import { runChannelsFlow } from "#setup/flows/channels.js";
-import { runConnectionsFlow } from "#setup/flows/connections.js";
 import { runDeployFlow } from "#setup/flows/deploy.js";
 import {
   runInstallVercelCliFlow,
@@ -9,9 +7,8 @@ import {
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import { runModelFlow, type ModelProviderOutcome } from "#setup/flows/model.js";
 import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
-import { openUrl } from "#setup/primitives/open-url.js";
+import { runRegistryFlow } from "#setup/flows/registry.js";
 import type { Prompter } from "#setup/prompter.js";
-import { slackMessageDeepLink } from "#setup/slack-connect.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import { createTuiPrompter, type TuiPrompterRenderer } from "./tui-prompter.js";
@@ -30,8 +27,7 @@ export const SETUP_FLOW_CONFIG = {
   "vc:install": { title: "Install the Vercel CLI", indicator: "pulse" },
   "vc:login": { title: "Log in to Vercel", indicator: "pulse" },
   model: { title: "Configure the agent model", indicator: "pulse" },
-  channels: { title: "Agent channels", indicator: "pulse" },
-  connect: { title: "Agent connections", indicator: "pulse" },
+  add: { title: "Add to your agent", indicator: "pulse" },
   deploy: { title: "Deploy to Vercel", indicator: "spinner" },
 } satisfies Record<TuiSetupCommand, { title: string; indicator: SetupFlowIndicator }>;
 
@@ -50,7 +46,8 @@ export interface TuiSetupCommandInput {
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
-  disabledConnectionReasons?: Readonly<Record<string, string>>;
+  /** Suspends development runtime artifacts while registry installation and setup mutate them. */
+  withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
   /** Test seam; defaults to the real TUI-native prompter over `renderer`. */
   createPrompter?: (renderer: TuiPrompterRenderer) => Prompter;
   /** Test seam; defaults to the real setup flows. */
@@ -62,17 +59,18 @@ export interface TuiSetupFlows {
   runInstallVercelCliFlow: typeof runInstallVercelCliFlow;
   runLoginFlow: typeof runLoginFlow;
   runModelFlow: typeof runModelFlow;
-  runChannelsFlow: typeof runChannelsFlow;
-  runConnectionsFlow: typeof runConnectionsFlow;
+  runRegistryFlow: typeof runRegistryFlow;
   runDeployFlow: typeof runDeployFlow;
 }
 
 export interface TuiSetupCommandResult {
   message: string;
+  /** Promotes an outcome to a top-level status. */
+  tone?: "success" | "error";
   /** Keep warning/error lines after the bordered panel closes. */
   preserveFlowDiagnostics: boolean;
   /** Status refresh required after the command settles. */
-  effect?: VercelStatusEffect | { kind: "connection-added" } | { kind: "model-access-changed" };
+  effect?: VercelStatusEffect | { kind: "model-access-changed" };
 }
 
 /**
@@ -83,6 +81,7 @@ export interface TuiSetupCommandResult {
 function muteableRenderer(
   renderer: TuiSetupCommandRenderer,
   isMuted: () => boolean,
+  withSuspendedRuntime?: TuiSetupCommandInput["withExclusiveTerminal"],
 ): MuteableSetupRenderer {
   return {
     readSelect: (options) =>
@@ -111,11 +110,15 @@ function muteableRenderer(
     renderOutput: (text) => {
       if (!isMuted()) renderer.renderOutput(text);
     },
+    withInheritedStdio: (task) => renderer.withInheritedStdio(task),
+    // Registry setup keeps the parent renderer attached; this capability now
+    // pauses runtime artifacts without handing the terminal to the child.
+    withExclusiveTerminal: (task) => withSuspendedRuntime?.(task) ?? task(),
   };
 }
 
 /**
- * Runs one TUI setup command (/model, /channels, /connect, /deploy) over the
+ * Runs one TUI setup command (/model, /add, /deploy) over the
  * shared setup flows, asking through the TUI's own bordered panel. Never throws:
  * every outcome — done, cancelled, failed — folds into the returned command
  * result. Ctrl-C or Esc on the working indicator (no question open) aborts the
@@ -128,7 +131,7 @@ export async function runTuiSetupCommand(
   const { command } = input;
   let interrupted = false;
   const controller = new AbortController();
-  const renderer = muteableRenderer(input.renderer, () => interrupted);
+  const renderer = muteableRenderer(input.renderer, () => interrupted, input.withExclusiveTerminal);
   const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
 
   const interrupt = input.renderer.waitForInterrupt();
@@ -164,8 +167,7 @@ async function executeSetupCommand(
     runInstallVercelCliFlow,
     runLoginFlow,
     runModelFlow,
-    runChannelsFlow,
-    runConnectionsFlow,
+    runRegistryFlow,
     runDeployFlow,
     ...input.flows,
   };
@@ -224,71 +226,22 @@ async function executeSetupCommand(
         }
         return outcome;
       }
-      case "channels": {
-        const result = await flows.runChannelsFlow({ appRoot, prompter, signal });
-        switch (result.kind) {
-          case "failed":
-            // A provisioning failure (login / forbidden / missing CLI) throws
-            // before any channel file lands, so it propagates to the catch below
-            // and routes to its fix command; a `failed` result here is a
-            // post-scaffold fault (e.g. a UID reconcile), reported as-is.
-            return pendingChannelsResult(
-              `Channel files changed, but /channels failed: ${result.message}`,
-            );
-          case "cancelled":
-            return { message: "/channels dismissed.", preserveFlowDiagnostics: true };
-          case "deploy-and-chat":
-            return await runDeployAndChat(flows, { appRoot, prompter, signal }, result.chat);
-          case "done":
-            if (result.addedChannels.length === 0) {
-              return { message: "No channels added.", preserveFlowDiagnostics: true };
-            }
-            return {
-              message: `Channels added: ${result.addedChannels.join(", ")} — run /deploy to ship them.`,
-              preserveFlowDiagnostics: true,
-              effect: { kind: "channels-added" },
-            };
+      case "add": {
+        const result = await flows.runRegistryFlow({ appRoot, prompter, signal });
+        if (result.kind === "cancelled") {
+          return { message: "/add dismissed.", preserveFlowDiagnostics: true };
         }
-      }
-      case "connect": {
-        const result = await flows.runConnectionsFlow({
-          appRoot,
-          prompter,
-          signal,
-          disabledConnectionReasons: input.disabledConnectionReasons,
-        });
-        switch (result.kind) {
-          case "cancelled":
-            return {
-              message: "/connect dismissed.",
-              preserveFlowDiagnostics: true,
-              effect: { kind: "model-access-changed" },
-            };
-          case "failed":
-            return {
-              message:
-                result.addedConnections.length === 0
-                  ? `/connect failed: ${result.message}`
-                  : `Connection files changed, but /connect failed: ${result.message}`,
-              preserveFlowDiagnostics: true,
-              effect:
-                result.addedConnections.length === 0
-                  ? { kind: "model-access-changed" }
-                  : { kind: "connection-added" },
-            };
-          case "done":
-            return {
-              message:
-                result.addedConnections.length === 0
-                  ? "No connections added."
-                  : `Connections added: ${result.addedConnections.join(", ")}.`,
-              preserveFlowDiagnostics: true,
-              effect:
-                result.addedConnections.length === 0
-                  ? { kind: "model-access-changed" }
-                  : { kind: "connection-added" },
-            };
+        if (result.addedItems.length > 0) {
+          return {
+            message: [
+              `Registry items added: ${result.addedItems.join(", ")}.`,
+              ...(result.output ?? []),
+            ].join("\n"),
+            tone: "success",
+            preserveFlowDiagnostics: true,
+          };
         }
+        return { message: "No registry items added.", preserveFlowDiagnostics: true };
       }
       case "deploy": {
         const result = await flows.runDeployFlow({ appRoot, prompter, interactive: true, signal });
@@ -329,6 +282,7 @@ async function executeSetupCommand(
     if (routed !== undefined) return routed;
     return {
       message: `/${command} failed: ${error instanceof Error ? error.message : String(error)}`,
+      tone: "error",
       preserveFlowDiagnostics: true,
     };
   }
@@ -427,9 +381,8 @@ function vercelCliUpgradeFailureMessage(command: string, reason?: string): strin
 /**
  * Translates a Vercel {@link HumanActionRequiredError} into the in-TUI routing
  * message, or `undefined` for anything else. One translator so every path that
- * can surface a provisioning action — the command catch, the `/channels`
- * partial-success result, and the deploy-and-chat continuation — routes
- * login, forbidden-scope, and CLI recovery actions the same way rather than
+ * can surface a provisioning action, routing login, forbidden-scope, and CLI
+ * recovery actions the same way rather than
  * leaking the raw error text.
  */
 function vercelActionOutcome(error: unknown, command: string): TuiSetupCommandResult | undefined {
@@ -452,60 +405,6 @@ function vercelActionMessage(kind: string, command: string): string | undefined 
     default:
       return undefined;
   }
-}
-
-/**
- * The "Deploy and chat" continuation of /channels: deploy the freshly added
- * Slack channel, then point the user at the workspace so they can message the
- * bot. A cancelled or unlinked deploy reports exactly like /deploy and drops
- * the chat hint — there is nothing live to chat with yet.
- */
-async function runDeployAndChat(
-  flows: TuiSetupFlows,
-  input: { appRoot: string; prompter: Prompter; signal: AbortSignal },
-  chat: { chatUrl?: string; workspaceName?: string },
-): Promise<TuiSetupCommandResult> {
-  let result: Awaited<ReturnType<TuiSetupFlows["runDeployFlow"]>>;
-  try {
-    result = await flows.runDeployFlow({ ...input, interactive: true });
-  } catch (error) {
-    if (error instanceof WizardCancelledError) {
-      return pendingChannelsResult(
-        "Channels added, but /deploy was dismissed. Run /deploy to ship them.",
-      );
-    }
-    const routed = vercelActionOutcome(error, "deploy");
-    if (routed !== undefined) return pendingChannelsResult(`Channels added. ${routed.message}`);
-    const message = error instanceof Error ? error.message : String(error);
-    return pendingChannelsResult(`Channels added, but /deploy failed: ${message}`);
-  }
-  if (result.kind === "cancelled") {
-    return pendingChannelsResult(
-      "Channels added, but /deploy was dismissed. Run /deploy to ship them.",
-    );
-  }
-  if (result.kind === "needs-link") {
-    return pendingChannelsResult(
-      "Channels added, but this directory is not linked to Vercel. Run /model, then /deploy.",
-    );
-  }
-  const live =
-    result.productionUrl === undefined ? "Deployed." : `Deployed: ${result.productionUrl}`;
-  let chatLine: string;
-  if (chat.chatUrl === undefined) {
-    chatLine = "Message your agent in Slack to see it live.";
-  } else {
-    // Open the bot's Messages tab (a DM compose) ourselves. Unlike
-    // `connect create`, nothing else opens a browser at this step.
-    const chatUrl = slackMessageDeepLink(chat.chatUrl);
-    openUrl(chatUrl);
-    chatLine = `Chat with your agent in Slack: ${chatUrl}`;
-  }
-  return {
-    message: `${live}\n${chatLine}`,
-    preserveFlowDiagnostics: true,
-    effect: { kind: "deployed" },
-  };
 }
 
 /** Folds an {@link InstallVercelCliResult} into the command's one-line outcome. */
@@ -563,14 +462,6 @@ function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
         preserveFlowDiagnostics: true,
       };
   }
-}
-
-function pendingChannelsResult(message: string): TuiSetupCommandResult {
-  return {
-    message,
-    preserveFlowDiagnostics: true,
-    effect: { kind: "channels-added" },
-  };
 }
 
 /**

@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => {
     close: vi.fn(async () => undefined),
     flush: vi.fn(async () => undefined),
     rebuild: vi.fn(async () => undefined),
+    resume: vi.fn(async () => undefined),
+    suspend: vi.fn(async () => undefined),
   };
   const mocksWorldInstance = {
     close: vi.fn(async () => undefined),
@@ -540,11 +542,14 @@ describe("createDevelopmentServer", () => {
     expect(mocks.files.has(developmentServerStatePath)).toBe(false);
   });
 
-  async function callControlHandler(url: string): Promise<Response | undefined> {
+  async function callControlHandler(
+    url: string,
+    init?: RequestInit,
+  ): Promise<Response | undefined> {
     const call = mocks.devServer.setControlHandler.mock.calls.at(-1);
     const handler = call?.[0] as ((request: Request) => Promise<Response | undefined>) | undefined;
     if (handler === undefined) throw new Error("Missing runtime rebuild handler.");
-    return await handler(new Request(url));
+    return await handler(new Request(url, init));
   }
 
   it("serves runtime artifact state from the parent-owned control handler", async () => {
@@ -565,11 +570,29 @@ describe("createDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     const handlerOrder = mocks.devServer.setControlHandler.mock.invocationCallOrder[0];
+    const workerOrder = mocks.devServer.replaceWorker.mock.invocationCallOrder[0];
     const startOrder = mocks.worldInstance.start.mock.invocationCallOrder[0];
     expect(handlerOrder).toBeDefined();
+    expect(workerOrder).toBeDefined();
     expect(startOrder).toBeDefined();
     expect(handlerOrder ?? Infinity).toBeLessThan(startOrder ?? 0);
+    expect(workerOrder ?? Infinity).toBeLessThan(startOrder ?? 0);
 
+    await server.close();
+  });
+
+  it("forwards persisted workflow deliveries while the file watcher starts", async () => {
+    let deliveryResponse: Response | undefined;
+    mocks.worldInstance.start.mockImplementationOnce(async () => {
+      deliveryResponse = await callControlHandler("http://localhost/.well-known/workflow/v1/flow", {
+        method: "POST",
+      });
+    });
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(deliveryResponse).toBeUndefined();
     await server.close();
   });
 

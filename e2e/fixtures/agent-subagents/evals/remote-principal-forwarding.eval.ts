@@ -2,8 +2,8 @@ import { defineEval } from "eve/evals";
 
 /**
  * Principal forwarding across a real remote-agent hop, end to end. The
- * fixture deployment plays both sides: `remote-loopback` is a
- * `defineRemoteAgent({ forwardPrincipal: true })` pointing back at this
+ * fixture deployment plays both sides: `remote-loopback` dynamically selects
+ * a `defineRemoteAgent({ forwardPrincipal: true })` pointing back at this
  * deployment, whose authored eve channel trusts principals only from the
  * hop's `router-app` bearer (`trustedForwarders`).
  *
@@ -22,8 +22,9 @@ const FORWARDED_MARKER =
   "WHOAMI current=user:e2e-user-2 initiator=user:e2e-user forwarded-by=router-app";
 
 export default defineEval({
+  tags: ["real-model"],
   description:
-    "Remote-agent principal forwarding: the child session runs as the parent's end user, with the distinct initiator preserved and the forwarder stamped.",
+    "Dynamic remote-agent selection and principal forwarding: the child session runs as the parent's end user, with the distinct initiator preserved and the forwarder stamped.",
   async test(t) {
     await t.send("Reply with the single word: ready.");
 

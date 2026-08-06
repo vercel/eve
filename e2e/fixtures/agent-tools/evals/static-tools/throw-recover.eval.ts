@@ -3,6 +3,7 @@ import { defineEval } from "eve/evals";
 // An authored tool throw surfaces as a failed action result (no turn.failed),
 // and the session stays responsive for a follow-up.
 export default defineEval({
+  tags: ["real-model"],
   description: "Static tools smoke: tool throw surfaces as failed and the session recovers.",
   async test(t) {
     const first = await t.send(

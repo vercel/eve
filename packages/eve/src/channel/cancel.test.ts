@@ -6,6 +6,8 @@ import type { Runtime } from "#channel/types.js";
 function createRuntime(overrides?: Partial<Runtime>): Runtime {
   return {
     cancelTurn: vi.fn().mockResolvedValue({ status: "accepted" }),
+    clearSession: vi.fn(),
+    compactSession: vi.fn(),
     deliver: vi.fn(),
     getEventStream: vi.fn(),
     getStreamTailIndex: vi.fn(),

@@ -36,7 +36,7 @@ import { SERVER_EXTERNAL_PACKAGES } from "#internal/nitro/host/server-external-p
 import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
-import { transformDynamicToolExecute } from "#internal/workflow-bundle/dynamic-tool-transform.js";
+import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
 /**
@@ -546,26 +546,12 @@ function addNitroStepTransformPlugin(
   });
 }
 
-/**
- * Adds the dynamic tool transform plugin that hoists execute functions
- * from defineDynamic event handlers to module scope. Runs
- * unconditionally for all tool files regardless of workflow mode.
- */
-function addDynamicToolTransformPlugin(nitro: Nitro): void {
+function addDynamicCapabilityTransformPlugin(nitro: Nitro): void {
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
       return;
     }
-
-    config.plugins.unshift({
-      async transform(code: string, id: string) {
-        if (!id.includes("/tools/")) return null;
-        const result = await transformDynamicToolExecute(id, code);
-        if (result === null) return null;
-        return { code: result.code, map: null };
-      },
-      name: "eve:dynamic-tool-transform",
-    });
+    config.plugins.unshift(createDynamicCapabilityTransformPlugin());
   });
 }
 
@@ -815,6 +801,7 @@ export async function createApplicationNitro(
   // Dynamic tool transform runs unconditionally — it needs to hoist
   // execute functions for all tool files, not just workflow step targets.
   addDynamicToolTransformPlugin(nitro);
+  addDynamicCapabilityTransformPlugin(nitro);
 
   if (preparedHost.compiledArtifacts.instrumentationSourcePath !== undefined) {
     addInstrumentationModuleSideEffectsPlugin(

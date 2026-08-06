@@ -84,6 +84,7 @@ void (async () => {
     );
   } catch (error) {
     input.ctrlC();
+    input.ctrlC();
     await runPromise.catch(() => {});
     throw error;
   }

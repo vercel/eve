@@ -75,6 +75,19 @@ describe("CLI command registration", () => {
     expect(help).not.toContain("--path");
   });
 
+  it("registers JSON output for registry discovery commands", async () => {
+    const output: string[] = [];
+    const logger = {
+      error: (message: string) => output.push(message),
+      log: (message: string) => output.push(message),
+    };
+
+    await runCli(["registry", "list", "--help"], logger).catch(() => {});
+    await runCli(["registry", "search", "--help"], logger).catch(() => {});
+
+    expect(output.join("\n")).toContain("--json");
+  });
+
   it("registers only supported shadcn registry commands", async () => {
     const output: string[] = [];
     const logger = {
@@ -114,10 +127,10 @@ describe("CLI command registration", () => {
       log: (message: string) => output.push(message),
     };
 
-    await runCli(["trace", "--help"], logger).catch(() => {});
+    await runCli(["traces", "--help"], logger).catch(() => {});
 
     const help = output.join("\n");
-    expect(help).toContain("Usage: eve trace [options] [trace]");
+    expect(help).toContain("Usage: eve traces [options] [trace]");
     expect(help).not.toContain("show <trace>");
     expect(help).toContain("ls");
   });
@@ -488,6 +501,111 @@ describe("eve dev --logs", () => {
   });
 });
 
+describe("eve acp", () => {
+  it("documents the client workspace boundary", async () => {
+    const output: string[] = [];
+
+    await runCli(["acp", "--help"], {
+      error: (message) => output.push(message),
+      log: (message) => output.push(message),
+    });
+
+    expect(output.join("\n")).toContain(
+      "ACP does not grant the agent access to the client's workspace or terminal.",
+    );
+  });
+
+  it("starts an isolated local server and hands it to the ACP stdio adapter", async () => {
+    const close = vi.fn(async () => {});
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close,
+    }));
+    const runAcpServer = vi.fn(async () => {});
+    const output: string[] = [];
+
+    await runCli(
+      ["acp"],
+      { error: (message) => output.push(message), log: (message) => output.push(message) },
+      { runAcpServer, startHost },
+    );
+
+    expect(startHost).toHaveBeenCalledWith(expect.any(String), {
+      existing: "reject",
+      host: "127.0.0.1",
+      output: "stderr",
+      port: 0,
+    });
+    expect(runAcpServer).toHaveBeenCalledWith({
+      eveVersion: expect.any(String),
+      serverUrl: "http://127.0.0.1:4321/",
+      signal: expect.any(AbortSignal),
+      workspaceRoot: "/canonical/app",
+    });
+    expect(close).toHaveBeenCalledOnce();
+    expect(output).toEqual([]);
+  });
+
+  it("resolves verified Vercel credentials for a remote ACP agent", async () => {
+    const runAcpServer = vi.fn(async () => {});
+    const resolveVerifiedRemoteDevelopmentClient = vi.fn(async () => ({
+      options: {
+        auth: { vercelOidc: { token: "oidc-token" } } as const,
+        headers: { "x-vercel-protection-bypass": "bypass" },
+        host: "https://agent.example.com/",
+      },
+      lastOidcTokenFailure: () => undefined,
+    }));
+
+    await runCli(
+      ["acp", "https://agent.example.com", "--scope", "vercel-internal-playground"],
+      { error: () => {}, log: () => {} },
+      { resolveVerifiedRemoteDevelopmentClient, runAcpServer },
+    );
+
+    expect(resolveVerifiedRemoteDevelopmentClient).toHaveBeenCalledWith({
+      headers: undefined,
+      serverUrl: "https://agent.example.com/",
+      signal: expect.any(AbortSignal),
+      vercelScope: "vercel-internal-playground",
+      workspaceRoot: expect.any(String),
+    });
+    expect(runAcpServer).toHaveBeenCalledWith({
+      auth: { vercelOidc: { token: "oidc-token" } },
+      eveVersion: expect.any(String),
+      headers: { "x-vercel-protection-bypass": "bypass" },
+      serverUrl: "https://agent.example.com/",
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it("connects ACP to a remote agent without starting a local server", async () => {
+    const startHost = vi.fn();
+    const runAcpServer = vi.fn(async () => {});
+
+    await runCli(
+      ["acp", "https://user:pass@example.com", "-H", "X-Tenant: acme"],
+      { error: () => {}, log: () => {} },
+      { runAcpServer, startHost },
+    );
+
+    expect(startHost).not.toHaveBeenCalled();
+    expect(runAcpServer).toHaveBeenCalledWith({
+      eveVersion: expect.any(String),
+      headers: {
+        Authorization: `Basic ${btoa("user:pass")}`,
+        "X-Tenant": "acme",
+      },
+      serverUrl: "https://example.com/",
+      signal: expect.any(AbortSignal),
+    });
+  });
+});
+
 describe("eve dev boot progress", () => {
   it("passes one reporter through local startup and clears the row on failure", async () => {
     const writes: string[] = [];
@@ -553,6 +671,7 @@ describe("eve dev local server ownership", () => {
       existing: "attach-if-unconfigured",
       host: undefined,
       onBootProgress: expect.any(Function),
+      output: undefined,
       port: undefined,
     });
     expect(runDevelopmentTui).toHaveBeenCalledWith(

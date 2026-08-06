@@ -236,7 +236,7 @@ function describeError(error: unknown): string {
  * host framework the project declares on disk (e.g. Next.js).
  *
  * A project created as a standalone eve agent keeps the `eve` preset; adding a
- * host framework via `eve channels add web` leaves it stale, so the deploy would
+ * host framework via `eve add channel/web` leaves it stale, so the deploy would
  * build the agent instead of the host app. Since that command already deploys on
  * the user's behalf, this switches the preset directly (no prompt) and notes the
  * change. No host framework, an unlinked directory, or an already-correct preset

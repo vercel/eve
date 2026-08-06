@@ -51,8 +51,10 @@ void (async () => {
     console.log(theme.muted("[tui-transport-error] runner returned to prompt"));
 
     input.ctrlC();
+    input.ctrlC();
     await runPromise;
   } catch (error) {
+    input.ctrlC();
     input.ctrlC();
     await runPromise.catch(() => {});
     throw error;

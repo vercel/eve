@@ -4,10 +4,69 @@ import type { SessionAuthContext } from "#channel/types.js";
 import {
   cancelRemoteAgentTurn,
   isRetryableRemoteAgentCancelError,
+  resolveRemoteAgentForAction,
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
+
+describe("resolveRemoteAgentForAction", () => {
+  it("overlays a selected dynamic remote config on the compiled delegation node", async () => {
+    const definition = {
+      dynamic: {
+        eventNames: ["session.started"],
+        events: { "session.started": () => null },
+        logicalPath: "subagents/research.ts",
+        sourceId: "subagents/research.ts",
+        sourceKind: "module",
+      },
+      kind: "subagent",
+      logicalPath: "subagents/research.ts",
+      name: "research",
+      nodeId: "subagents/research.ts",
+      sourceId: "subagents/research.ts",
+      sourceKind: "module",
+    } as const;
+
+    const credentialsStepId = "eve:dynamic-remote-agent//selected-research";
+    const registryKey = Symbol.for("@workflow/core//registeredSteps");
+    const globalRecord = globalThis as Record<symbol, Map<string, Function> | undefined>;
+    const stepRegistry = globalRecord[registryKey] ?? new Map<string, Function>();
+    globalRecord[registryKey] = stepRegistry;
+    stepRegistry.set(credentialsStepId, () => ({
+      auth: async () => ({ headers: { authorization: "Bearer selected" } }),
+      headers: { "x-selected": "yes" },
+    }));
+
+    const resolved = await resolveRemoteAgentForAction({
+      dynamicRemoteAgent: {
+        credentialsStepId,
+        description: "Selected remote research.",
+        path: "/custom/session",
+        url: "https://selected.example.com",
+      },
+      nodeId: definition.nodeId,
+      registry: new Map([[definition.nodeId, { definition }]]),
+      remoteAgentName: "research",
+    });
+
+    expect(resolved).toMatchObject({
+      description: "Selected remote research.",
+      headers: { "x-selected": "yes" },
+      kind: "remote",
+      logicalPath: "subagents/research.ts",
+      name: "research",
+      nodeId: "subagents/research.ts",
+      path: "/custom/session",
+      sourceId: "subagents/research.ts",
+      sourceKind: "module",
+      url: "https://selected.example.com",
+    });
+    await expect(resolved.auth?.()).resolves.toEqual({
+      headers: { authorization: "Bearer selected" },
+    });
+  });
+});
 
 describe("startRemoteAgentSession", () => {
   afterEach(() => {

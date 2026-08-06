@@ -252,6 +252,12 @@ function createCancelRouteCaller(): (
         cancel: () => {
           throw new Error("cancel route must not use the channel cancel helper");
         },
+        clear: () => {
+          throw new Error("cancel route must not clear session context");
+        },
+        compact: () => {
+          throw new Error("cancel route must not compact a session");
+        },
         reset: () => {
           throw new Error("cancel route must not reset a session");
         },
@@ -489,7 +495,10 @@ describe("turn cancellation integration", () => {
         // settled and its cancel hook swept, it reports the benign status.
         await waitForHookSweep(sessionCancelHookToken(run.runId));
         const session = createSession(run.runId, rawToken, workflowRuntime);
-        await expect(session.cancel()).resolves.toEqual({ status: "no_active_turn" });
+        await expect(session.cancel()).resolves.toEqual({
+          reason: "HookNotFoundError",
+          status: "no_active_turn",
+        });
 
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {

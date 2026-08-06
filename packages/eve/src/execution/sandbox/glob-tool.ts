@@ -1,5 +1,5 @@
 import { normalizeModelPath } from "#runtime/framework-tools/file-state.js";
-import { validateAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
+import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { ripgrepIsAvailable } from "#execution/sandbox/ripgrep-probe.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
@@ -49,9 +49,8 @@ export async function executeGlobOnSandbox(
 ): Promise<GlobResult> {
   const effectivePath = args.path ?? DEFAULT_PATH;
 
-  validateAbsoluteFilePath(effectivePath);
-
-  const normalizedPath = normalizeModelPath(effectivePath);
+  const resolvedPath = await resolveAbsoluteFilePath(sandbox, effectivePath);
+  const normalizedPath = normalizeModelPath(resolvedPath);
   const effectiveLimit = Math.min(Math.max(1, args.limit ?? DEFAULT_GLOB_LIMIT), MAX_GLOB_LIMIT);
 
   const command = (await ripgrepIsAvailable(sandbox))

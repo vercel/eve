@@ -33,9 +33,7 @@ const IntegrationsPage = async ({ searchParams }: PageProps<"/[lang]/integration
   return (
     <main className="mx-auto w-full min-w-0 max-w-[1080px] px-4 pb-32 sm:px-6">
       <section className="flex min-w-0 flex-col items-center px-0 pt-24 pb-12 text-center sm:px-4">
-        <h1 className="font-bold text-5xl text-gray-1000 tracking-tighter sm:text-6xl">
-          Integrations
-        </h1>
+        <h1 className="text-gray-1000 text-heading-48 sm:text-heading-64">Integrations</h1>
         <p className="mt-5 max-w-2xl text-gray-900 text-lg">
           Add the channels where people reach your agent, connections to external services,
           extensions that package reusable capabilities, and instrumentation providers that receive
@@ -44,9 +42,7 @@ const IntegrationsPage = async ({ searchParams }: PageProps<"/[lang]/integration
       </section>
       <Gallery filter={filter} integrations={integrations} />
       <section className="mt-12 rounded-lg border border-dashed px-6 py-10 text-center">
-        <h2 className="font-medium text-gray-1000 text-xl tracking-tight">
-          Don&apos;t see your integration?
-        </h2>
+        <h2 className="text-gray-1000 text-heading-20">Don&apos;t see your integration?</h2>
         <p className="mt-2 text-gray-800 text-sm">
           <a
             className="font-medium text-gray-1000 underline underline-offset-4"

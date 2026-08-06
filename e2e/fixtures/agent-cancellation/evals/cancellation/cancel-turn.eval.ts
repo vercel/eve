@@ -13,6 +13,7 @@ const TOOL_NAME = "wait-for-cancellation";
  * `no_active_turn` outcome.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Cancel an in-flight turn over the eve HTTP cancel route.",
   timeoutMs: 240_000,
 

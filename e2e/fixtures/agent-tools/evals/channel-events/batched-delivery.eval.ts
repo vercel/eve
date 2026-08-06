@@ -5,6 +5,7 @@ import { equals } from "eve/evals/expect";
 import { coalesceDeliverPayloads } from "../../../../../packages/eve/src/execution/deliver-payloads.js";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Delivery batching smoke: queued messages and context coalesce in arrival order.",
   async test(t) {
     const firstMessage = "Remember synthetic marker BATCH-FIRST.";

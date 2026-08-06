@@ -15,6 +15,10 @@ body {
   background-color: var(--ds-background-200);
 }
 
+:root {
+  --shiki-token-parameter: var(--shiki-color-text);
+}
+
 /* Tint the global footer to match the landing background, but only on the
    home route (`/`), which renders the [data-home-route] marker. */
 body:has([data-home-route]) footer {

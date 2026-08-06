@@ -13,12 +13,21 @@ export function registerIntegrationCommands(input: {
 }): void {
   const { appRoot, logger, program } = input;
 
-  program
-    .command("integration", { hidden: true })
+  const integration = program.command("integration", { hidden: true });
+
+  integration
     .command("setup <kind>")
     .option("-y, --yes")
     .action(async (kind: string, options: { yes?: boolean }) => {
       const { runIntegrationSetupCommand } = await import("./integration-setup.js");
       await runIntegrationSetupCommand(logger, appRoot, kind, { yes: options.yes });
+    });
+
+  integration
+    .command("connect <slug> <service> [canonical-name]")
+    .option("-y, --yes")
+    .action(async (slug: string, service: string, canonicalName: string | undefined) => {
+      const { runIntegrationConnectCommand } = await import("./integration-connect.js");
+      await runIntegrationConnectCommand(logger, appRoot, slug, service, canonicalName);
     });
 }

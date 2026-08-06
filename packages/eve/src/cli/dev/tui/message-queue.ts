@@ -4,11 +4,11 @@
  *
  * Enter queues the draft (up to {@link MESSAGE_QUEUE_LIMIT}); each queued
  * message waits for the turn to end, where the whole queue coalesces into
- * the next turn's message. Esc pops the oldest message to steer the
+ * the next turn's message. Esc or Ctrl+C pops the oldest message to steer the
  * conversation instead of waiting: the renderer requests cooperative turn
  * cancellation and the runner submits the popped message as the next turn.
- * Esc on an empty queue arms cancellation; a second Esc cancels the turn
- * without a replacement message.
+ * `/cancel` requests cancellation directly. Either key on an empty queue
+ * cancels the turn immediately without a replacement message.
  *
  * The renderer owns lifecycle (keys, cancel requests, when the runner drains
  * the queue); this module only holds the queue state machine and paints rows.
@@ -29,9 +29,7 @@ export type MessageQueueEscapeOutcome =
    * into the same staged steer payload and re-request cancellation.
    */
   | "steer"
-  /** Queue empty: cancellation armed; the next Esc cancels. */
-  | "armed"
-  /** Second Esc on an empty queue — the caller should cancel the turn. */
+  /** Empty queue — the caller should cancel the turn. */
   | "cancel";
 
 /** Read-only projection consumed by {@link renderMessageQueueRows}. */
@@ -40,16 +38,13 @@ export interface MessageQueueView {
   readonly full: boolean;
   /** A popped message is staged and turn cancellation was requested. */
   readonly steering: boolean;
-  /** First Esc on an empty queue landed; the next one cancels. */
-  readonly armed: boolean;
-  /** Esc Esc on an empty queue landed; cancellation was requested. */
+  /** A cancel key on an empty queue landed; cancellation was requested. */
   readonly cancelling: boolean;
 }
 
 export class MessageQueue {
   #messages: string[] = [];
   #steerMessage: string | undefined;
-  #escArmed = false;
   #cancelRequested = false;
 
   get size(): number {
@@ -60,13 +55,10 @@ export class MessageQueue {
     return this.#messages.length >= MESSAGE_QUEUE_LIMIT;
   }
 
-  /** True when nothing is queued, staged, armed, or cancelling. */
+  /** True when nothing is queued, staged, or cancelling. */
   get idle(): boolean {
     return (
-      this.#messages.length === 0 &&
-      this.#steerMessage === undefined &&
-      !this.#escArmed &&
-      !this.#cancelRequested
+      this.#messages.length === 0 && this.#steerMessage === undefined && !this.#cancelRequested
     );
   }
 
@@ -74,14 +66,13 @@ export class MessageQueue {
   enqueue(message: string): boolean {
     if (this.full) return false;
     this.#messages.push(message);
-    this.#escArmed = false;
     return true;
   }
 
   /**
-   * Applies one Esc press. Pops the oldest queued message into the staged
-   * steer payload while any remain; with an empty queue, arms and then
-   * requests cancellation.
+   * Applies one Esc or Ctrl+C press. Pops the oldest queued message into the
+   * staged steer payload while any remain; with an empty queue, requests
+   * cancellation immediately.
    */
   handleEscape(): MessageQueueEscapeOutcome {
     const popped = this.#messages.shift();
@@ -93,22 +84,17 @@ export class MessageQueue {
       // Already steering: re-request cancellation (idempotent server-side).
       return "steer";
     }
-    if (!this.#escArmed) {
-      this.#escArmed = true;
-      return "armed";
-    }
     this.#cancelRequested = true;
     return "cancel";
   }
 
-  /** Any non-Esc activity backs out of the armed press-again state. */
-  disarm(): void {
-    this.#escArmed = false;
+  /** Marks a direct cancellation request without consuming queued messages. */
+  requestCancellation(): void {
+    this.#cancelRequested = true;
   }
 
   /** Clears per-turn Esc state when a new stream starts rendering. */
   beginTurn(): void {
-    this.#escArmed = false;
     this.#cancelRequested = false;
   }
 
@@ -118,7 +104,6 @@ export class MessageQueue {
    * steered turn), otherwise the whole queue coalesced into one message.
    */
   takePrompt(): string | undefined {
-    this.#escArmed = false;
     this.#cancelRequested = false;
     const steer = this.#steerMessage;
     if (steer !== undefined) {
@@ -134,7 +119,6 @@ export class MessageQueue {
    * a clean boundary (interrupt, transport failure). Clears the queue.
    */
   restoreDraft(): string | undefined {
-    this.#escArmed = false;
     this.#cancelRequested = false;
     const steer = this.#steerMessage;
     this.#steerMessage = undefined;
@@ -144,7 +128,6 @@ export class MessageQueue {
   reset(): void {
     this.#messages = [];
     this.#steerMessage = undefined;
-    this.#escArmed = false;
     this.#cancelRequested = false;
   }
 
@@ -153,7 +136,6 @@ export class MessageQueue {
       messages: [...this.#messages],
       full: this.full,
       steering: this.#steerMessage !== undefined,
-      armed: this.#escArmed,
       cancelling: this.#cancelRequested,
     };
   }
@@ -179,7 +161,7 @@ export interface MessageQueuePanelRowsInput {
   readonly view: MessageQueueView;
   readonly width: number;
   readonly theme: Theme;
-  /** True while a turn streams — the only state in which Esc steers. */
+  /** True while a turn streams — the only state in which keys steer. */
   readonly working: boolean;
 }
 
@@ -199,14 +181,6 @@ export function renderMessageQueueRows(input: MessageQueuePanelRowsInput): strin
     if (!working) return [];
     if (view.cancelling) {
       return [clipVisible(`${lead}${c.yellow(g.dotActive)} ${c.dim("Cancelling turn…")}`, width)];
-    }
-    if (view.armed) {
-      return [
-        clipVisible(
-          `${lead}${c.yellow(g.dotActive)} ${c.dim("Press esc again to cancel the turn")}`,
-          width,
-        ),
-      ];
     }
     return [];
   }
@@ -231,7 +205,7 @@ function headerBody(view: MessageQueueView, working: boolean, theme: Theme): str
     return c.dim(`Steering — cancelling the running turn…${remaining}`);
   }
   const fullness = view.full ? `${dot}queue full` : "";
-  const hint = working ? `${dot}esc steers with the next message` : "";
+  const hint = working ? `${dot}esc or ctrl+c steers with the next message` : "";
   return `${c.bold("Queue")} ${c.dim(`${count}${fullness}${hint}`)}`;
 }
 

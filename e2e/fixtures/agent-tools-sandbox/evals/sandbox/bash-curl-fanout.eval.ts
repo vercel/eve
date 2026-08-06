@@ -25,6 +25,7 @@ interface CurlBarrierResult {
 }
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Sandbox Bash: at least ten curls reach a concurrency barrier.",
   async test(t) {
     const turn = await t.send(

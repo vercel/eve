@@ -169,19 +169,23 @@ describe("createWorkflowRuntime#cancelTurn", () => {
     expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", {});
   });
 
-  it("maps missing and terminal targets to 'no_active_turn'", async () => {
+  it("maps missing and terminal targets to 'no_active_turn' with a classified reason", async () => {
     const { EntityConflictError, HookNotFoundError, RunExpiredError, WorkflowRunNotFoundError } =
       await import("#compiled/@workflow/errors/index.js");
     const errors = [
-      new HookNotFoundError("session-1:cancel"),
-      new WorkflowRunNotFoundError("turn-run"),
-      new RunExpiredError("turn already completed"),
-      new EntityConflictError("turn completed during cancellation"),
+      { error: new HookNotFoundError("session-1:cancel"), reason: "HookNotFoundError" },
+      { error: new WorkflowRunNotFoundError("turn-run"), reason: "WorkflowRunNotFoundError" },
+      { error: new RunExpiredError("turn already completed"), reason: "RunExpiredError" },
+      {
+        error: new EntityConflictError("turn completed during cancellation"),
+        reason: "EntityConflictError",
+      },
     ];
 
-    for (const error of errors) {
+    for (const { error, reason } of errors) {
       resumeHookMock.mockRejectedValueOnce(error);
       await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).resolves.toEqual({
+        reason,
         status: "no_active_turn",
       });
     }
@@ -192,6 +196,64 @@ describe("createWorkflowRuntime#cancelTurn", () => {
     resumeHookMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).rejects.toBe(failure);
+  });
+});
+
+describe("createWorkflowRuntime#compactSession", () => {
+  function buildRuntime() {
+    return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
+  }
+
+  it("queues compaction on the continuation hook and returns its owner", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "session-1" });
+
+    await expect(
+      buildRuntime().compactSession({ continuationToken: "eve:token" }),
+    ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
+    expect(resumeHookMock).toHaveBeenCalledWith("eve:token", { kind: "compact" });
+  });
+
+  it("reports a missing continuation hook as an inactive session", async () => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("eve:missing"));
+
+    await expect(
+      buildRuntime().compactSession({ continuationToken: "eve:missing" }),
+    ).resolves.toEqual({ status: "no_active_session" });
+  });
+
+  it("treats a terminal owner race as an inactive session", async () => {
+    const { RunExpiredError } = await import("#compiled/@workflow/errors/index.js");
+    resumeHookMock.mockRejectedValue(new RunExpiredError("session already completed"));
+
+    await expect(
+      buildRuntime().compactSession({ continuationToken: "eve:completed" }),
+    ).resolves.toEqual({ status: "no_active_session" });
+  });
+});
+
+describe("createWorkflowRuntime#clearSession", () => {
+  function buildRuntime() {
+    return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
+  }
+
+  it("queues a clear on the continuation hook and returns its owner", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "session-1" });
+
+    await expect(buildRuntime().clearSession({ continuationToken: "eve:token" })).resolves.toEqual({
+      sessionId: "session-1",
+      status: "accepted",
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith("eve:token", { kind: "clear" });
+  });
+
+  it("reports a missing continuation hook as an inactive session", async () => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("eve:missing"));
+
+    await expect(
+      buildRuntime().clearSession({ continuationToken: "eve:missing" }),
+    ).resolves.toEqual({ status: "no_active_session" });
   });
 });
 
@@ -381,6 +443,39 @@ describe("createWorkflowRuntime#run", () => {
     expect(workflowInput).toMatchObject({
       input: { message: "hello" },
       sessionTimeoutMs: 86_400_000,
+    });
+  });
+
+  it("serializes the selected dynamic subagent config for the child workflow", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource, 86_400_000);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await createWorkflowRuntime({
+      compiledArtifactsSource,
+      dynamicSubagentAgentConfig: {
+        description: "Perform deep research.",
+        limits: { sessionTimeoutMs: 120_000 },
+        model: { id: "anthropic/claude-opus-4.6" },
+      },
+      nodeId: "subagents/researcher",
+    }).run({
+      adapter,
+      auth: null,
+      input: { message: "research this" },
+      mode: "task",
+    });
+
+    const [, [workflowInput]] = startMock.mock.calls[0]!;
+    expect(workflowInput).toMatchObject({
+      serializedContext: {
+        "eve.dynamicSubagentAgentConfig": {
+          description: "Perform deep research.",
+          limits: { sessionTimeoutMs: 120_000 },
+          model: { id: "anthropic/claude-opus-4.6" },
+        },
+      },
+      sessionTimeoutMs: 120_000,
     });
   });
 
