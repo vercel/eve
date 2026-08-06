@@ -181,6 +181,25 @@ cron: "0 8 * * *"
 Send the user a daily weather
 digest for their saved cities.`,
   },
+  {
+    label: "Evals",
+    name: "evals/",
+    fileName: "evals/weather/brooklyn-forecast.eval.ts",
+    lang: "typescript",
+    NavIcon: IconFileText,
+    description:
+      "Evals run the agent through real sessions and score the result, so you can catch regressions as it evolves.",
+    code: `import { defineEval } from "eve/evals";
+import { includes } from "eve/evals/expect";
+
+export default defineEval({
+  async test(t) {
+    await t.send("What is the weather in Brooklyn?");
+    t.succeeded();
+    t.check(t.reply, includes("Sunny"));
+  },
+});`,
+  },
 ];
 
 export async function FileTree() {
