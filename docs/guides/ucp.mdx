@@ -13,7 +13,7 @@ With eve, you can support UCP in three steps:
 
 ## Author the profile
 
-Your profile is a plain JSON object that follows the [UCP spec](https://ucp.dev/). This spec outlines the `version`, `services`, `payment_handlers` and `capabilities` of your business. It also includes `signing_keys` that allow agents and businesses to verify requests between them.
+Your profile is a plain JSON object that follows the [UCP spec](https://ucp.dev/). This spec outlines the `version`, `services`, `payment_handlers` and `capabilities` of your business. It also includes `signing_keys`, the public keys agents use to verify your business's signed messages.
 
 ```ts
 // agent/ucp-profile.ts
@@ -27,7 +27,7 @@ export const profile = {
           spec: "https://ucp.dev/2026-04-08/specification/overview",
           transport: "rest",
           schema: "https://ucp.dev/2026-04-08/services/shopping/rest.openapi.json",
-          endpoint: "https://your-domain.com/ucp/shopping",
+          endpoint: "https://your_deployment_url_here/ucp/shopping",
         },
       ],
     },
@@ -147,11 +147,17 @@ export default defineChannel({
 });
 ```
 
-Keep the `endpoint` in your profile in sync with the route path you mount here.
+Routes are relative to the `endpoint` base in your profile, per the service's OpenAPI schema. Keep them in sync with the paths you mount here.
 
 ## Verify
 
-Fetch the well-known document from your deployment:
+Start the dev server with `eve dev` and fetch the well-known document locally:
+
+```sh
+curl -i http://localhost:2000/.well-known/ucp
+```
+
+Then fetch it from your deployment:
 
 ```sh
 curl -i https://your_deployment_url_here/.well-known/ucp
