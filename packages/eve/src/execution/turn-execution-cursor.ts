@@ -1,4 +1,7 @@
-import type { DeliverHookPayload } from "#channel/types.js";
+import type {
+  DeliverHookPayload,
+  ForwardedSubagentStream,
+} from "#channel/types.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { sendTurnControlStep } from "#execution/turn-control-protocol.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -32,6 +35,7 @@ type TurnTerminalAction =
 /** Owns the mutable durable state cursor for one active turn workflow. */
 export class TurnExecutionCursor {
   readonly controlToken: string;
+  readonly forwardedSubagentStream: ForwardedSubagentStream | undefined;
   readonly parentWritable: WritableStream<Uint8Array>;
 
   private currentSerializedContext: Record<string, unknown>;
@@ -40,6 +44,7 @@ export class TurnExecutionCursor {
 
   constructor(input: {
     readonly controlToken: string;
+    readonly forwardedSubagentStream?: ForwardedSubagentStream;
     readonly parentWritable: WritableStream<Uint8Array>;
     readonly serializedContext: Record<string, unknown>;
     readonly sessionState: DurableSessionState;
@@ -47,6 +52,7 @@ export class TurnExecutionCursor {
     this.controlToken = input.controlToken;
     this.currentSerializedContext = input.serializedContext;
     this.currentSessionState = input.sessionState;
+    this.forwardedSubagentStream = input.forwardedSubagentStream;
     this.lastReportedContinuationToken = input.sessionState.continuationToken;
     this.parentWritable = input.parentWritable;
   }
@@ -74,13 +80,21 @@ export class TurnExecutionCursor {
 
   /** Builds the next atomic turn-step input from the cursor's current state. */
   createStepInput(input: TurnStepPayload | undefined, abortSignal?: AbortSignal): TurnStepInput {
-    return {
+    const stepInput: {
+      -readonly [K in keyof TurnStepInput]: TurnStepInput[K];
+    } = {
       abortSignal,
       input,
       parentWritable: this.parentWritable,
       serializedContext: this.currentSerializedContext,
       sessionState: this.currentSessionState,
     };
+
+    if (this.forwardedSubagentStream !== undefined) {
+      stepInput.forwardedSubagentStream = this.forwardedSubagentStream;
+    }
+
+    return stepInput;
   }
 
   /**

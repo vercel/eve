@@ -215,6 +215,7 @@ export async function dispatchRuntimeActionsStep(input: {
             initiatorAuth,
             parentContinuationToken: input.parentContinuationToken,
             parentTraceContext,
+            parentWritable: input.parentWritable,
             persistentSessions,
             session,
             target: entry.target,
@@ -433,6 +434,7 @@ async function startSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly parentWritable: WritableStream<Uint8Array>;
   readonly persistentSessions: boolean;
   readonly session: RuntimeSession;
   readonly target: DispatchStartTarget;
@@ -452,6 +454,7 @@ async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext: input.parentTraceContext,
+        parentWritable: input.parentWritable,
         persistentSessions: input.persistentSessions,
         session: input.session,
         source: input.target.source,
@@ -490,6 +493,7 @@ async function startLocalSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly parentWritable: WritableStream<Uint8Array>;
   readonly persistentSessions: boolean;
   readonly session: RuntimeSession;
   readonly source: SubagentInputSource;
@@ -536,7 +540,14 @@ async function startLocalSubagent(input: {
 
   let childSessionId: string;
   try {
-    const handle = await childRuntime.createSession(runInput);
+    const handle = await childRuntime.createSession({
+      ...runInput,
+      forwardedSubagentStream: {
+        callId: action.callId,
+        parentWritable: input.parentWritable,
+        subagentName: action.subagentName,
+      },
+    });
     childSessionId = handle.sessionId;
   } catch (error) {
     logError(log, "local subagent start failed", error, {

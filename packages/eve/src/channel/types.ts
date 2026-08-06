@@ -85,6 +85,19 @@ export interface SessionTraceContext {
   readonly traceId: string;
 }
 
+/**
+ * Framework-internal stream forwarding target for delegated subagent sessions.
+ *
+ * When present on a child run, the runtime appends each child stream event to
+ * the child's own durable stream and also appends a wrapped `subagent.event`
+ * to the immediate parent's durable stream.
+ */
+export interface ForwardedSubagentStream {
+  readonly callId: string;
+  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly subagentName: string;
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -410,6 +423,7 @@ export interface RunInput {
   };
   readonly mode: RunMode;
   readonly parent?: SessionParent;
+  readonly forwardedSubagentStream?: ForwardedSubagentStream;
   /**
    * Dispatching parent's open trace window. Handed down rather than looked up
    * because trace state is scoped to one session's context.

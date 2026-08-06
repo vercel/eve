@@ -63,6 +63,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const iterator = inbox[Symbol.asyncIterator]();
   const cursor = new TurnExecutionCursor({
     controlToken: input.completionToken,
+    forwardedSubagentStream: input.stepInput.forwardedSubagentStream,
     parentWritable: input.stepInput.parentWritable,
     serializedContext: input.stepInput.serializedContext,
     sessionState: input.stepInput.sessionState,
@@ -449,6 +450,7 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
       currentStepInput = {
         input: undefined,
         parentWritable: currentStepInput.parentWritable,
+        forwardedSubagentStream: currentStepInput.forwardedSubagentStream,
         serializedContext: result.serializedContext,
         sessionState: result.sessionState,
       };

@@ -161,6 +161,9 @@ export function createWorkflowRuntime(config: {
 
       let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
       try {
+        if (input.forwardedSubagentStream !== undefined) {
+          workflowInput.forwardedSubagentStream = input.forwardedSubagentStream;
+        }
         run = await startWorkflowPreferLatest(workflowEntryReference, [workflowInput], {
           allowReservedAttributes: true,
           attributes: normalizeEveAttributes(attributes),

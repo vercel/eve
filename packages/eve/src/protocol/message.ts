@@ -299,7 +299,7 @@ export interface SubagentStartedStreamEvent {
 export interface SubagentChildEventStreamEvent {
   data: {
     callId: string;
-    event: UnstampedMessageStreamEvent;
+    event: HandleMessageStreamEvent;
     subagentName: string;
   };
   type: "subagent.event";
@@ -1136,6 +1136,24 @@ export function createSubagentCalledEvent(input: {
       workflowId: input.workflowId,
     },
     type: "subagent.called",
+  };
+}
+
+/**
+ * Creates a `subagent.event` wrapper around one child stream event.
+ */
+export function createSubagentChildEvent(input: {
+  readonly callId: string;
+  readonly event: HandleMessageStreamEvent;
+  readonly subagentName: string;
+}): SubagentChildEventStreamEvent {
+  return {
+    data: {
+      callId: input.callId,
+      event: input.event,
+      subagentName: input.subagentName,
+    },
+    type: "subagent.event",
   };
 }
 
