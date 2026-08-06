@@ -26,6 +26,7 @@ const WATCHED_LOCKFILE_NAMES = [
 const WATCH_ROOT_MARKER_NAMES = [".git", "pnpm-workspace.yaml"] as const;
 const TS_CONFIG_GLOB_NAME = "tsconfig.*.json";
 const WATCHER_IGNORED_DIRECTORY_NAMES = new Set([
+  ".devtools",
   ".generated",
   ".eve",
   ".git",
