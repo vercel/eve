@@ -72,6 +72,9 @@ export function buildToolSet(input: {
       execute: wrapToolExecute(definition),
       inputSchema: definition.inputSchema,
       outputSchema: definition.outputSchema,
+      ...(definition.providerOptions !== undefined
+        ? { providerOptions: definition.providerOptions as ToolSet[string]["providerOptions"] }
+        : {}),
       ...(definition.execute !== undefined
         ? {
             toModelOutput: async ({

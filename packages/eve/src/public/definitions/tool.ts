@@ -1,7 +1,11 @@
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
 import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
-import type { PublicToolDefinition, ToolModelOutput } from "#shared/tool-definition.js";
+import type {
+  PublicToolDefinition,
+  ToolModelOutput,
+  ToolProviderOptions,
+} from "#shared/tool-definition.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { Approval } from "#public/definitions/approval.js";
 import type { JsonObject } from "#shared/json.js";
@@ -164,6 +168,8 @@ export function defineTool<
     | StandardJSONSchemaV1.InferOutput<TOutputSchema>
     | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
   approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
+  /** Provider-specific tool options — see {@link ToolProviderOptions}. */
+  providerOptions?: ToolProviderOptions;
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -184,6 +190,8 @@ export function defineTool<
     ctx: ToolContext,
   ): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
   approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, unknown>["approval"];
+  /** Provider-specific tool options — see {@link ToolProviderOptions}. */
+  providerOptions?: ToolProviderOptions;
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
 }): ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, TOutput>;
 export function defineTool<
@@ -200,6 +208,8 @@ export function defineTool<
     | StandardJSONSchemaV1.InferOutput<TOutputSchema>
     | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
+  /** Provider-specific tool options — see {@link ToolProviderOptions}. */
+  providerOptions?: ToolProviderOptions;
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -214,6 +224,8 @@ export function defineTool<TOutput>(definition: {
     ctx: ToolContext,
   ): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
+  /** Provider-specific tool options — see {@link ToolProviderOptions}. */
+  providerOptions?: ToolProviderOptions;
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
 }): ToolDefinition<Record<string, unknown>, TOutput>;
 export function defineTool<TInput = unknown, TOutput = unknown>(

@@ -265,6 +265,7 @@ function resolveHarnessToolDefinition(input: {
     approval: def.approval,
     outputSchema: def.outputSchema,
     toModelOutput: def.toModelOutput,
+    providerOptions: def.providerOptions,
   };
 }
 

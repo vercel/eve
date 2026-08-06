@@ -13,8 +13,21 @@ export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   options: ToolExecuteOptions,
 ) => Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
 
+/**
+ * Provider-specific tool options forwarded verbatim to the AI SDK tool.
+ * Enables provider features that are configured per tool — for example
+ * `{ anthropic: { deferLoading: true } }` marks the tool as deferred for
+ * provider-native tool search.
+ */
+export type ToolProviderOptions = Record<string, JsonObject>;
+
 interface ToolDefinitionBase {
   readonly description: string;
+  /**
+   * Optional provider-specific tool options forwarded verbatim to the AI
+   * SDK tool — see {@link ToolProviderOptions}.
+   */
+  readonly providerOptions?: ToolProviderOptions;
 }
 
 /**

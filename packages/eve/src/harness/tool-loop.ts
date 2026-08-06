@@ -168,7 +168,12 @@ import {
   detectPromptCachePath,
   getAnthropicCacheMarker,
 } from "#harness/prompt-cache.js";
-import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
+import {
+  isDeferredTool,
+  resolveFrameworkToolFromUpstreamType,
+  resolveToolSearchBackend,
+  resolveToolSearchProviderTool,
+} from "#harness/provider-tools.js";
 import {
   createRuntimeActionRequestFromToolCall,
   resolvePendingRuntimeActions,
@@ -959,7 +964,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
       modelCallRuntimeActionTools = advertisedHarnessTools;
 
-      const flatTools = await buildToolSetWithProviderTools({
+      let flatTools = await buildToolSetWithProviderTools({
         approvedTools,
         capabilities: config.capabilities,
         disabledProviderTools: opts.disabledProviderTools,
@@ -985,6 +990,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             throw new Error(`Dynamic tool "${name}" collides with a runtime-visible subagent.`);
           }
           flatTools[name] = toolDefinition;
+        }
+      }
+
+      // Provider-native tool search: when any advertised tool is deferred
+      // (`providerOptions.<provider>.deferLoading`), inject the provider's
+      // search tool so deferred schemas are discovered and loaded on demand.
+      // The search tool is prepended so applyLastToolCacheBreakpoint keeps
+      // landing the Anthropic cache marker on a function tool
+      // (provider-defined tools do not carry providerOptions on the wire).
+      // Object.assign preserves tool object identities, so per-tool approval
+      // registrations keyed on those objects stay valid.
+      if (Object.values(flatTools).some(isDeferredTool)) {
+        const toolSearchBackend = resolveToolSearchBackend(session.agent.modelReference);
+        if (toolSearchBackend !== null) {
+          const toolSearch = await resolveToolSearchProviderTool(toolSearchBackend);
+          if (flatTools[toolSearch.name] === undefined) {
+            flatTools = Object.assign({ [toolSearch.name]: toolSearch.tool }, flatTools);
+          }
         }
       }
 

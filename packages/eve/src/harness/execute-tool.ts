@@ -1,7 +1,7 @@
 import type { FlexibleSchema } from "ai";
 
 import type { Approval } from "#public/definitions/approval.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import type { ToolExecuteOptions, ToolProviderOptions } from "#shared/tool-definition.js";
 
 /**
  * Runtime-owned action metadata attached to one harness-visible tool.
@@ -29,4 +29,5 @@ export interface HarnessToolDefinition {
   readonly outputSchema?: FlexibleSchema;
   readonly runtimeAction?: HarnessRuntimeActionDefinition;
   readonly toModelOutput?: (output: unknown) => unknown;
+  readonly providerOptions?: ToolProviderOptions;
 }
