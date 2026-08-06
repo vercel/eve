@@ -1,5 +1,34 @@
 # eve
 
+## 0.31.0
+
+### Minor Changes
+
+- 40b09e6: Replace continuation-token session APIs with fixed, ID-addressed handles and consistent channel-local operations. This is a breaking migration across the following public surfaces:
+
+  - TypeScript clients now use `client.sessions.create(input)` to start a session and `client.sessions.attach(sessionId)` to obtain a fixed handle; `client.session(...)` and continuation-token client state are removed.
+  - Client, eval, frontend, fixed-session, and Slack message delivery now use positional `send(message, options)`. HITL replies use the separate `respond(inputResponses, options)` method, and `message` and `inputResponses` are mutually exclusive.
+  - Custom channels use `from(address)` for channel-local operations, top-level `resolveSession(address)` to resolve the current owner, `attachSession(sessionId)` for an immutable session handle, and `to(channel, target)` for cross-channel delivery.
+  - Slack message and interaction hooks expose `ctx.send`, `ctx.respond`, `ctx.cancel`, `ctx.compact`, `ctx.clear`, `ctx.reset`, and `ctx.resolveSession`. For generic events, the target is passed in each operation's options; `ctx.receive` and `resolveActiveSession` are removed.
+  - Schedule handlers replace `receive(channel, { message, target, auth })` with `to(channel, target).send(message, { auth })`.
+  - Channel event session identity moves to `ctx.session.id`, while `session.failed` includes `sessionId` in its event data.
+  - The eve HTTP API keeps `POST /eve/v1/session` for creation and `POST /eve/v1/session/:sessionId` for follow-ups. Clear, compact, and reset move from continuation-token body routes to `POST /eve/v1/session/:sessionId/{clear,compact,reset}`; cancel and streaming remain ID-addressed.
+  - Session message and control bodies no longer accept or return continuation tokens. Accepted asynchronous work returns HTTP `202`; no-active operation results omit `sessionId`, and inactive follow-ups return HTTP `409` with `code: "session_not_active"`, available as `ClientError.code`.
+  - Canonical eve `onMessage` hooks can no longer drop an otherwise authorized delivery by returning `null`.
+
+### Patch Changes
+
+- 2054b9f: Agent-messaging `<agents>` listings are now announced as framework-injected user-role notes instead of assistant messages appended to history. This fixes parent resume failures on models that reject assistant-final requests (e.g. `This model does not support assistant message prefill` from Claude via AI Gateway) after a persistent child parks, keeps the announcement append-only so provider prompt caches stay warm, and the agent-messaging system prompt now declares the `[Agents]` note as framework-injected.
+- 84c3dfc: Flush local development streaming response headers immediately so pending Workflow streams can be cancelled without accumulating listeners.
+- b7a2a14: Dev runtime snapshots now mount workspace dependency packages in place
+  instead of copying them. Only roots that host runtime-hydrated authored
+  source — the app root, extension mount roots, and tsconfig path-alias
+  targets — are still copied, matching how installed dependencies already
+  resolved. In monorepos this removes the largest per-generation copy: a
+  workspace-linked framework package (hundreds of files and tens of
+  megabytes per rebuild) no longer lands under
+  `.eve/dev-runtime/snapshots/`.
+
 ## 0.30.8
 
 ### Patch Changes
