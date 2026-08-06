@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
+import { z } from "#compiled/zod/index.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
@@ -60,6 +61,23 @@ describe("definition helper exact inputs", () => {
 
     expectTypeOf(streamedTool).toMatchTypeOf<
       ToolDefinition<Record<string, unknown>, { phase: string }>
+    >();
+    expectTypeOf<ReturnType<typeof streamedTool.execute>>().toEqualTypeOf<
+      AsyncGenerator<{ phase: string }, void, unknown>
+    >();
+  });
+
+  it("preserves ordinary async tool executor return types", () => {
+    const ordinaryTool = defineTool({
+      description: "React to a message.",
+      inputSchema: z.object({ reaction: z.string() }),
+      async execute(input) {
+        return { ok: input.reaction.length > 0 };
+      },
+    });
+
+    expectTypeOf<ReturnType<typeof ordinaryTool.execute>>().toEqualTypeOf<
+      Promise<{ ok: boolean }>
     >();
   });
 
