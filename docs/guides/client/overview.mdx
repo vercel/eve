@@ -15,7 +15,7 @@ A `Client` binds one host, auth policy, and header policy:
 import { Client } from "eve/client";
 
 const client = new Client({
-  host: "http://127.0.0.1:3000",
+  host: "http://127.0.0.1:2000",
 });
 ```
 
@@ -100,8 +100,7 @@ Set `redirect` to `"manual"` or `"error"` on credential-bearing clients so fetch
 Per-request headers can be attached to an individual turn:
 
 ```ts
-const response = await session.send({
-  message: "Run the check.",
+const response = await session.send("Run the check.", {
   headers: { "x-request-id": requestId },
 });
 
@@ -112,23 +111,53 @@ Per-request headers override client-level values with the same name. For example
 
 ## Sessions
 
-Create a `ClientSession` for each conversation:
+For an ID-addressed session, create it explicitly with the first message:
 
 ```ts
-const session = client.session();
+const { session, response } = await client.sessions.create({ message: "Summarize account A." });
+await response.result();
+
+await (await session.send("Now list the risks.")).result();
+await session.compact();
+await session.clear();
 ```
 
-A client can own many sessions at once. Each session tracks its own `sessionId`, `continuationToken`, and stream cursor:
+If you already know the durable ID, attach a fixed handle without performing I/O:
 
 ```ts
-const alice = client.session();
-const bob = client.session();
+const session = client.sessions.attach("wrun_A");
+```
 
-const aliceResponse = await alice.send("Summarize account A.");
-await aliceResponse.result();
+The fixed client handle exposes the full lifecycle around that ID. The calls below show the available shapes independently:
 
-const bobResponse = await bob.send("Summarize account B.");
-await bobResponse.result();
+```ts
+const response = await session.send("Continue the analysis.");
+await response.result();
+
+await session.cancel({ turnId: "turn_123" });
+await session.compact();
+await session.clear();
+
+for await (const event of session.stream({ follow: false })) {
+  console.log(event.type);
+}
+
+await session.reset({ reason: "User requested a fresh session" });
+```
+
+`client.sessions` stores only the session ID and stream cursor. Every method calls an ID-addressed `/eve/v1/session/:sessionId/...` route. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement, and reset leaves the handle pinned to the retired ID.
+
+A client can own many independent fixed sessions at once:
+
+```ts
+const { session: alice, response: aliceResponse } = await client.sessions.create({
+  message: "Summarize account A.",
+});
+const { session: bob, response: bobResponse } = await client.sessions.create({
+  message: "Summarize account B.",
+});
+
+await Promise.all([aliceResponse.result(), bobResponse.result()]);
 ```
 
 The next pages cover the session lifecycle:

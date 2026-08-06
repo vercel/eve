@@ -5,58 +5,7 @@ import type {
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
-import type { SessionState } from "#client/types.js";
 import type { InputRequest } from "#runtime/input/types.js";
-
-/**
- * Returns a fresh session state with no active run.
- */
-export function createInitialSessionState(): SessionState {
-  return { streamIndex: 0 };
-}
-
-/**
- * Advances the session cursor after one streamed turn completes.
- *
- * When the boundary event is `session.waiting`, the session is preserved for
- * the next message. For `session.completed` and `session.failed`, the session
- * resets so the next call starts a new conversation. Without a boundary, the
- * session stays resumable from its advanced cursor.
- */
-export function advanceSession(input: {
-  readonly continuationToken?: string;
-  readonly events: readonly UnstampedMessageStreamEvent[];
-  readonly preserveCompletedSessions?: boolean;
-  readonly sessionId: string;
-  readonly session: SessionState;
-}): SessionState {
-  const boundaryEvent = findBoundaryEvent(input.events);
-  const streamIndex = input.session.streamIndex + input.events.length;
-
-  if (
-    boundaryEvent?.type === "session.waiting" ||
-    (input.preserveCompletedSessions === true && boundaryEvent?.type === "session.completed")
-  ) {
-    return {
-      continuationToken:
-        boundaryEvent?.type === "session.waiting"
-          ? boundaryEvent.data.continuationToken
-          : (input.continuationToken ?? input.session.continuationToken),
-      sessionId: input.sessionId,
-      streamIndex,
-    };
-  }
-
-  if (boundaryEvent === undefined) {
-    return {
-      continuationToken: input.continuationToken ?? input.session.continuationToken,
-      sessionId: input.sessionId,
-      streamIndex,
-    };
-  }
-
-  return createInitialSessionState();
-}
 
 /** A connection authorization challenge that remains unresolved at a turn boundary. */
 export interface PendingAuthorization {
@@ -124,16 +73,6 @@ export async function collectTurnEvents(
     if (isCurrentTurnBoundaryEvent(event)) break;
   }
   return events;
-}
-
-function findBoundaryEvent(
-  events: readonly UnstampedMessageStreamEvent[],
-): UnstampedMessageStreamEvent | undefined {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event !== undefined && isCurrentTurnBoundaryEvent(event)) return event;
-  }
-  return undefined;
 }
 
 function isFinalMessageCompleted(

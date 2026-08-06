@@ -227,10 +227,7 @@ export class SubagentPump {
     void (async () => {
       let boundaryReached = false;
       try {
-        const childSession = client.session({
-          sessionId: called.data.childSessionId,
-          streamIndex: 0,
-        });
+        const childSession = client.sessions.attach(called.data.childSessionId);
         const stream = childSession.stream({ signal: controller.signal });
         for await (const event of stream) {
           if (controller.signal.aborted) break;

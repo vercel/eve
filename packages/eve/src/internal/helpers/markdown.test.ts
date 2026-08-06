@@ -54,13 +54,15 @@ Research complex weather questions before replying.`;
     );
   });
 
-  it("silently ignores authored name fields in skill markdown frontmatter", () => {
-    // SKILL.md files in the broader Agent Skills ecosystem typically declare
-    // `name`; eve derives identity from the file path, so we accept and drop
-    // the field rather than rejecting otherwise-valid skill markdown.
+  it("ignores unmodeled skill frontmatter", () => {
     const markdown = `---
 name: get-weather
 description: Use the weather tool before answering forecast questions.
+allowed-tools: Bash Read
+argument-hint: "[city]"
+compatibility: Requires a weather API key.
+disable-model-invocation: true
+user-invocable: false
 ---
 When the user asks about weather, call the weather tool before answering.`;
 
@@ -91,14 +93,19 @@ Research complex weather questions before replying.`;
     );
   });
 
-  it("rejects unsupported frontmatter fields in skills instead of silently dropping them", () => {
-    expect(() =>
+  it("treats unknown skill frontmatter as a no-op", () => {
+    expect(
       lowerSkillMarkdown(`---
 description: Use the weather tool before answering forecast questions.
 category: routing
 ---
 When the user asks about weather, call the weather tool before answering.`),
-    ).toThrow("Expected authored skill markdown to match the public eve shape.");
+    ).toEqual(
+      defineSkill({
+        description: "Use the weather tool before answering forecast questions.",
+        markdown: "When the user asks about weather, call the weather tool before answering.",
+      }),
+    );
   });
 
   it("derives flat skill metadata from plain markdown when no frontmatter is present", () => {

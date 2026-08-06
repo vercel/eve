@@ -1,6 +1,11 @@
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
-import { createEveCallbackRoutePath, createEveCancelTurnRoutePath } from "#protocol/routes.js";
+import { AgentHandleError } from "#protocol/agent-handle-error.js";
+import {
+  createEveCallbackRoutePath,
+  createEveSessionCancelRoutePath,
+  createEveSessionRoutePath,
+} from "#protocol/routes.js";
 import type { CancelTurnResult, SessionAuthContext } from "#channel/types.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import type { HeadersValue } from "#client/types.js";
@@ -15,6 +20,17 @@ import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
+import type { JsonObject } from "#shared/json.js";
+
+const CreateSessionResponseSchema = z.object({
+  ok: z.literal(true),
+  sessionId: z.string().min(1),
+  status: z.literal("accepted"),
+});
+
+type RemoteAgentSessionCoordinates = {
+  readonly sessionId: string;
+};
 
 class RemoteAgentCancelRequestError extends Error {
   readonly retryable: boolean;
@@ -34,9 +50,15 @@ export async function startRemoteAgentSession(input: {
   readonly callbackToken?: string;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
+  /**
+   * Whether the dispatching agent opted into
+   * `experimental.subagentPersistentSessions`. Persistent remote children run
+   * in conversation mode so their sessions accept follow-up messages.
+   */
+  readonly persistentSessions?: boolean;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
-}): Promise<string> {
+}): Promise<RemoteAgentSessionCoordinates> {
   const callbackToken = input.callbackToken ?? input.session.continuationToken;
   if (!callbackToken) {
     throw new Error("Cannot dispatch remote agent without a parent continuation token.");
@@ -47,6 +69,7 @@ export async function startRemoteAgentSession(input: {
 
   const forwardedPrincipal = buildForwardedPrincipalField(input);
   const requestBody: {
+    capabilities: {};
     callback: {
       callId: string;
       subagentName: string;
@@ -55,9 +78,10 @@ export async function startRemoteAgentSession(input: {
     };
     forwardedPrincipal?: ForwardedPrincipal;
     message: string;
-    mode: "task";
+    mode: "conversation" | "task";
     outputSchema?: object;
   } = {
+    capabilities: {},
     callback: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
@@ -67,8 +91,12 @@ export async function startRemoteAgentSession(input: {
         createEveCallbackRoutePath(callbackToken),
       ),
     },
-    message: formatRemoteAgentCallInputMessage({ action: input.action, remote: input.remote }),
-    mode: "task",
+    message: formatRemoteAgentCallInputMessage({
+      action: input.action,
+      persistentSession: input.persistentSessions,
+      remote: input.remote,
+    }),
+    mode: input.persistentSessions === true ? "conversation" : "task",
     outputSchema:
       normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
   };
@@ -92,23 +120,104 @@ export async function startRemoteAgentSession(input: {
     );
   }
 
-  const sessionIdFromHeader = response.headers.get(EVE_SESSION_ID_HEADER);
-  if (sessionIdFromHeader !== null && sessionIdFromHeader.length > 0) {
-    return sessionIdFromHeader;
-  }
-
+  let body: unknown;
   try {
-    const body = (await response.json()) as { readonly sessionId?: unknown };
-    if (typeof body.sessionId === "string" && body.sessionId.length > 0) {
-      return body.sessionId;
-    }
+    body = await response.json();
   } catch {
-    // Fall through to the generic error below.
+    throw new Error(
+      `Remote agent "${input.action.remoteAgentName}" create-session response was not valid JSON.`,
+    );
   }
 
-  throw new Error(
-    `Remote agent "${input.action.remoteAgentName}" create-session response did not include a session id.`,
-  );
+  const parsed = CreateSessionResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new Error(
+      `Remote agent "${input.action.remoteAgentName}" create-session response was invalid.`,
+    );
+  }
+
+  return { sessionId: parsed.data.sessionId };
+}
+
+/** Continues one remote-agent session by its immutable session ID. */
+export async function continueRemoteAgentSession(input: {
+  readonly callback: {
+    readonly callId: string;
+    readonly subagentName: string;
+    readonly token: string;
+    readonly url: string;
+  };
+  readonly message: string;
+  readonly outputSchema?: JsonObject;
+  readonly remote: ResolvedRuntimeRemoteAgentNode;
+  readonly sessionId: string;
+}): Promise<void> {
+  const response = await fetch(createRemoteAgentContinueUrl(input.remote, input.sessionId), {
+    body: JSON.stringify({
+      callback: input.callback,
+      message: input.message,
+      outputSchema: input.outputSchema,
+    }),
+    headers: {
+      "content-type": "application/json",
+      ...(await resolveRemoteAgentRequestHeaders(input.remote)),
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const responseCode = await readRemoteAgentErrorCode(response);
+    const permanent =
+      response.status === 404 || responseCode === AgentHandleError.SessionNotResumable.code;
+    throw new RemoteAgentContinueRequestError(
+      `Remote agent "${input.remote.name}" continue-session request failed${
+        permanent ? " permanently" : ""
+      } with HTTP ${response.status}.`,
+      { retryable: !permanent },
+    );
+  }
+}
+
+/**
+ * Failure of a continue-session request, classified at the HTTP boundary.
+ * Exported so tests can exercise {@link isRetryableRemoteAgentContinueError}
+ * with real instances instead of re-encoding the classification.
+ */
+export class RemoteAgentContinueRequestError extends Error {
+  readonly retryable: boolean;
+
+  constructor(message: string, options: { readonly retryable: boolean }) {
+    super(message);
+    this.name = "RemoteAgentContinueRequestError";
+    this.retryable = options.retryable;
+  }
+}
+
+/**
+ * Returns true when a failed continue request may be retried. Only a
+ * session that no longer exists (404 / SESSION_NOT_RESUMABLE) is permanent;
+ * transient HTTP and network failures stay retryable so the dispatch step
+ * keeps the agent handle and surfaces a retryable error instead of
+ * discarding it — the model decides whether to try the same agentId again
+ * (the step itself never re-sends: the callee may have accepted a delivery
+ * whose response was lost).
+ */
+export function isRetryableRemoteAgentContinueError(error: unknown): boolean {
+  return !(error instanceof RemoteAgentContinueRequestError) || error.retryable;
+}
+
+async function readRemoteAgentErrorCode(response: Response): Promise<string | undefined> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return undefined;
+  }
+  if (body === null || typeof body !== "object") {
+    return undefined;
+  }
+  const code = Reflect.get(body, "code");
+  return typeof code === "string" ? code : undefined;
 }
 
 function buildForwardedPrincipalField(input: {
@@ -161,26 +270,31 @@ export async function cancelRemoteAgentTurn(input: {
   }
 
   const result = CancelTurnResponseSchema.safeParse(body);
-  if (!result.success || result.data.sessionId !== input.sessionId) {
+  if (
+    !result.success ||
+    (result.data.status === "accepted" && result.data.sessionId !== input.sessionId)
+  ) {
     throw new RemoteAgentCancelRequestError(
       `Remote agent "${input.remote.name}" cancel-turn response was invalid.`,
       { retryable: false },
     );
   }
 
-  return { status: result.data.status };
+  return result.data.status === "accepted"
+    ? { sessionId: result.data.sessionId, status: "accepted" }
+    : { status: "no_active_turn" };
 }
 
 export function isRetryableRemoteAgentCancelError(error: unknown): boolean {
   return !(error instanceof RemoteAgentCancelRequestError) || error.retryable;
 }
 
-export async function resolveRemoteAgentForAction(input: {
+export function resolveRemoteAgentForAction(input: {
   readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
   readonly nodeId: string;
   readonly registry: RuntimeSubagentRegistry["subagentsByNodeId"];
   readonly remoteAgentName: string;
-}): Promise<ResolvedRuntimeRemoteAgentNode> {
+}): ResolvedRuntimeRemoteAgentNode {
   const registered = input.registry.get(input.nodeId);
   const definition = registered?.definition;
   if (input.dynamicRemoteAgent !== undefined) {
@@ -291,7 +405,14 @@ function createRemoteAgentCancelTurnUrl(
   remote: ResolvedRuntimeRemoteAgentNode,
   sessionId: string,
 ): string {
-  return createRemoteAgentRouteUrl(remote.url, createEveCancelTurnRoutePath(sessionId));
+  return createRemoteAgentRouteUrl(remote.url, createEveSessionCancelRoutePath(sessionId));
+}
+
+function createRemoteAgentContinueUrl(
+  remote: ResolvedRuntimeRemoteAgentNode,
+  sessionId: string,
+): string {
+  return createRemoteAgentRouteUrl(remote.url, createEveSessionRoutePath(sessionId));
 }
 
 function createRemoteAgentRouteUrl(baseUrl: string, routePath: string): string {
@@ -320,6 +441,7 @@ async function resolveRemoteAgentRequestHeaders(
 
 function formatRemoteAgentCallInputMessage(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
+  readonly persistentSession?: boolean;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
 }): string {
   const message = typeof input.action.input.message === "string" ? input.action.input.message : "";
@@ -327,6 +449,7 @@ function formatRemoteAgentCallInputMessage(input: {
     description: input.remote.description,
     message,
     name: input.action.remoteAgentName,
+    persistentSession: input.persistentSession,
     type: "remote",
   }).message;
 }

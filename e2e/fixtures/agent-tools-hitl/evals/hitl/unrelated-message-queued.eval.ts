@@ -27,10 +27,12 @@ export default defineEval({
     });
     queued.event("session.waiting", { count: 1 });
 
-    const approved = await t.respond({
-      requestId: request.requestId,
-      optionId: "approve",
-    });
+    const approved = await t.respond([
+      {
+        requestId: request.requestId,
+        optionId: "approve",
+      },
+    ]);
     approved.expectOk();
     approved.event("action.result", {
       data: {

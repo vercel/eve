@@ -36,7 +36,7 @@ void (async () => {
     captureForeignOutput: true,
     logs: "all",
   });
-  const options: EveTUIRunnerOptions = { session: client.session(), client, renderer };
+  const options: EveTUIRunnerOptions = { client, renderer };
   const runner = new EveTUIRunner(options);
 
   const runPromise = runner.run().catch((error: unknown) => {

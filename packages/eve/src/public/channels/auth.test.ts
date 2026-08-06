@@ -1,7 +1,7 @@
 import { exportJWK, exportSPKI, generateKeyPair, SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
 import {
@@ -28,7 +28,7 @@ import {
   withAuthChallenges,
 } from "#public/channels/auth.js";
 
-const TEST_ROUTE_URL = `https://example.com${EVE_CREATE_SESSION_ROUTE_PATH}`;
+const TEST_ROUTE_URL = `https://example.com${EVE_SESSION_ROUTE_PATH}`;
 
 describe("verifyHttpBasic", () => {
   it("returns ok with the authenticated principal when credentials match", () => {

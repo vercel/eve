@@ -12,13 +12,15 @@ Run `eve add` from an eve agent project. This installs the integration's depende
 
 ```bash
 eve add extension/agent-browser
-eve add connection/linear
+eve add linear
 eve add instrumentation/braintrust
 ```
 
 Extensions may create a mount under `agent/extensions/`. Connections write their initial definition under `agent/connections/` and install `@vercel/connect` when required. Instrumentation providers write `agent/instrumentation.ts`; because an agent has one instrumentation file, compose multiple exporters there by hand. Configure generated files and required environment variables before running your agent.
 
-When an official item has an interactive setup flow, eve asks whether to run it after installation. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later.
+Some integrations package several independently installable components. For example, `eve add linear` lets you choose the Linear Channel, Linear MCP, or both; both are selected by default. The specific `eve add channel/linear-agent` and `eve add connection/linear` commands remain available.
+
+When an official item declares an interactive setup flow or flows, eve asks whether to run them after installation and runs multiple flows in declaration order. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later; it reruns the selected components' declared flows from the beginning.
 
 ## Find an integration
 
@@ -30,10 +32,10 @@ List every official integration and configured third-party source:
 eve registry list
 ```
 
-Search the catalog when you know what capability you need:
+Search the catalog when you know what capability you need. Search returns up to 10 matches by default; use `--limit` to request between 1 and 100:
 
 ```bash
-eve registry search browser
+eve registry search browser --limit 5
 ```
 
 Inspect an integration before you install it:
@@ -42,7 +44,17 @@ Inspect an integration before you install it:
 eve registry view extension/agent-browser
 ```
 
-`list` and `search` include the official eve catalog and every source you add to the project.
+`list` includes the official eve catalog and every source you add to the project. `search` also includes [skills.sh](https://skills.sh), available as the built-in `@skills` source.
+
+## Add a skill
+
+Add a known [skills.sh](https://skills.sh) item directly:
+
+```bash
+eve add @skills/vercel-labs/agent-skills/vercel-react-best-practices
+```
+
+Skills from skills.sh are community-authored project files. Review their source and the resulting diff before you run your agent.
 
 ## Add a third-party source
 

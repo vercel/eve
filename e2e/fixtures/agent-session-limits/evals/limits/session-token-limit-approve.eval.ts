@@ -16,16 +16,11 @@ export default defineEval({
     );
     await active.waitForEvent("actions.requested");
 
-    const continuationToken = t.state.continuationToken;
-    if (continuationToken === undefined) {
-      throw new Error("The active session did not expose a continuation token.");
-    }
-
     const deliverWhileActive = async (message: string): Promise<void> => {
       const response = await t.target.fetch(
         `/eve/v1/session/${encodeURIComponent(active.sessionId)}`,
         {
-          body: JSON.stringify({ continuationToken, message }),
+          body: JSON.stringify({ message }),
           headers: { "content-type": "application/json" },
           method: "POST",
         },
@@ -46,8 +41,12 @@ export default defineEval({
       toolName: "session_limit_continuation",
     });
 
+    const activeState = t.state;
+    if (activeState === undefined) {
+      throw new Error("The active eval session did not expose client state.");
+    }
     const queuedSession = t.target.watchTurn(active.sessionId, {
-      startIndex: t.state.streamIndex,
+      startIndex: activeState.streamIndex,
     });
     const queuedA = await queuedSession.result();
     queuedA.event("message.received", { count: 1 });
@@ -56,8 +55,12 @@ export default defineEval({
       const received = events.find((event) => event.type === "message.received");
       return received !== undefined && received.data.message.includes("Queued message A");
     });
+    const queuedState = queuedSession.session.state;
+    if (queuedState === undefined) {
+      throw new Error("The attached eval session did not expose client state.");
+    }
     const queuedBSession = t.target.watchTurn(active.sessionId, {
-      startIndex: queuedSession.session.state.streamIndex,
+      startIndex: queuedState.streamIndex,
     });
     const queuedB = await queuedBSession.result();
     queuedB.event("message.received", { count: 1 });
@@ -73,16 +76,18 @@ export default defineEval({
       equals(1),
     );
 
-    const resumed = await queuedBSession.session.respond({
-      optionId: "continue",
-      requestId: request.requestId,
-    });
+    const resumed = await queuedBSession.session.respond([
+      {
+        optionId: "continue",
+        requestId: request.requestId,
+      },
+    ]);
     resumed.expectOk();
     resumed.event("step.started");
     resumed.notEvent("input.requested");
     resumed.messageIncludes("approved");
     t.check(resumed.sessionId, equals(active.sessionId));
-    t.check(queuedBSession.session.state.sessionId, equals(active.sessionId));
+    t.check(queuedBSession.session.sessionId, equals(active.sessionId));
 
     const nextPrompt = await queuedBSession.session.send(
       'Post-approval probe: reply with exactly "same session".',
@@ -91,7 +96,7 @@ export default defineEval({
     nextPrompt.notEvent("message.completed");
     t.check(nextPrompt.sessionId, equals(active.sessionId));
     t.check(nextPrompt.status, equals("waiting"));
-    t.check(queuedBSession.session.state.sessionId, equals(active.sessionId));
+    t.check(queuedBSession.session.sessionId, equals(active.sessionId));
 
     const nextRequest = queuedBSession.session.requireInputRequest({
       display: "confirmation",

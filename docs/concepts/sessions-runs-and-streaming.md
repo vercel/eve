@@ -1,18 +1,20 @@
 ---
 title: "Sessions, Runs & Streaming"
-description: "The session and run contract you touch: continuation tokens, stream handles, the NDJSON event stream, and reconnecting."
+description: "The ID-addressed session contract: messages, controls, the NDJSON event stream, and reconnecting."
 ---
 
 Every eve app speaks the same stable HTTP API to a [durable session](./execution-model-and-durability). This page is the contract you hold: the handles you get back, the events you stream, and how to reconnect.
 
-## The two handles
+## Identity by surface
 
-Two handles do two jobs, and mixing them up is the most common mistake. One handle creates and resumes a session; a different one streams and inspects it.
+The HTTP API and TypeScript client use one durable `sessionId` for messages,
+controls, and streams. Every operation targets that exact session; none follows
+or creates a replacement implicitly.
 
-- **`continuationToken`**: the resume handle. Use it to send a follow-up message to the same conversation. Owned by the channel.
-- **`sessionId` / `runId`**: the stream-and-inspect handle. Use it to attach to the event stream and watch a run. Owned by the runtime.
-
-A session has one active continuation at a time: each follow-up uses the current `continuationToken`, and a stale one is rejected.
+Authored channels also have channel-local continuation tokens. A token addresses
+whichever session currently owns a platform conversation, such as a Slack thread.
+That identity stays behind the channel boundary and is never accepted or returned
+by the eve HTTP session API. See [Custom channels](../channels/custom#address-and-session-handles).
 
 Sessions last 30 days by default; configure `limits.sessionTimeoutMs` in
 `agent.ts`, or set it to `false` to disable the deadline. At expiration, eve
@@ -30,7 +32,8 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session \
   -d '{"message":"Summarize the latest forecast."}'
 ```
 
-eve responds right away. The JSON body carries a `sessionId` and a `continuationToken`, and the `x-eve-session-id` header names the durable session to stream.
+eve responds right away with the durable `sessionId` in the JSON body and
+`x-eve-session-id` header.
 
 ## Stream a session
 
@@ -47,6 +50,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `message.received`        | An inbound user message was accepted; carries flattened text plus structured text/file parts.                    |
 | `step.started`            | A model step began.                                                                                              |
 | `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                    |
+| `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                         |
 | `action.result`           | A tool call returned.                                                                                            |
 | `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |
@@ -65,11 +69,13 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `turn.completed`          | The turn finished.                                                                                               |
 | `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                          |
 | `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                   |
-| `session.waiting`         | The session parked for the next input; carries the current channel-owned `continuationToken`.                    |
+| `session.waiting`         | The session parked and is ready for the next message.                                                            |
 | `session.failed`          | The session failed.                                                                                              |
 | `session.completed`       | The session reached a terminal end.                                                                              |
 
 `reasoning.appended` and `message.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas of the same type; the text remains in source order, and any other event forms an ordering barrier. Each append carries both the new delta and the cumulative text for the current block. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
+
+`action.partial` carries one complete preliminary output snapshot from an authored async-generator tool. A later partial for the same `callId` replaces it, and `action.result` is the final snapshot. When the durable writer is busy, eve may keep only the newest adjacent partial for a call. Treat partials as last-write-wins: a durable step can retry and replay overlapping event runs. Provider-executed tool progress and MCP progress notifications are not projected as `action.partial` events.
 
 Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning events in your application.
 
@@ -134,12 +140,12 @@ Authored [hooks](../guides/hooks) receive the same envelope, but observe each ev
 
 ## Send a follow-up message
 
-Once the session is waiting (you'll see `session.waiting`), POST your follow-up to the session endpoint with `event.data.continuationToken`:
+Once the session is waiting (you'll see `session.waiting`), POST your follow-up to its ID-addressed messages endpoint:
 
 ```bash
 curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
   -H 'content-type: application/json' \
-  -d '{"continuationToken":"<token>","message":"Now send the short version."}'
+  -d '{"message":"Now send the short version."}'
 ```
 
 The follow-up reuses the same durable session: same history, same state.
@@ -163,9 +169,30 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 # {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
 ```
 
-`"accepted"` means a cancellation hook accepted the request. Confirm cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. If the turn is waiting on active local or remote subagents, eve also requests cancellation of every adopted child, recursively, before settling the parent. Each child reports its own cancellation boundary on its child-session stream; the parent does not emit `subagent.completed` for cancelled work. `"no_active_turn"` means no resumable cancellation target exists, including an unknown session or an already-settled turn. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+`"accepted"` means the live session durably queued the request. Confirm an actual cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. If the turn is waiting on active local or remote subagents, eve also requests cancellation of every adopted child, recursively, before settling the parent. Each child reports its own cancellation boundary on its child-session stream; the parent does not emit `subagent.completed` for cancelled work. A live but already-parked session also returns `"accepted"` and consumes the command as a no-op. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
 
-Custom channel routes request the same cancellation without knowing the session id: the `cancel` route helper is addressed by the channel-local continuation token, and `Session.cancel()` by session id. See [custom channels](../channels/custom#cancel-a-turn).
+The HTTP route returns `202` for `"accepted"` and `200` for
+`"no_active_turn"`. Only the accepted result includes `sessionId`.
+
+Custom channel routes request the same cancellation through
+`from(address).cancel()` or `attachSession(sessionId).cancel()`. See
+[custom channels](../channels/custom#channel-operations-and-session-handles).
+
+## Compact, clear, and reset
+
+All session controls are ID-addressed and accept no continuation token:
+
+```bash
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/compact
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/clear
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/reset \
+  -H 'content-type: application/json' \
+  -d '{"reason":"Start over"}'
+```
+
+Compaction summarizes context, clear removes model-message history in place,
+and reset terminally retires the session. A reset ID never becomes a new session;
+create another session explicitly for a fresh conversation.
 
 ## Reconnect and rewind
 
@@ -183,7 +210,9 @@ A negative `startIndex` reads relative to the stream's current tail. For example
 curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=-1"
 ```
 
-This gives a consumer that only persisted `sessionId` a lightweight way to recover the current `continuationToken`. Because a tail-relative position does not resolve to an absolute consumed-event count, client tail reads do not automatically reconnect or advance the stored cursor.
+Because a tail-relative position does not resolve to an absolute consumed-event
+count, client tail reads do not automatically reconnect or advance the stored
+cursor.
 
 For a catch-up read that stops instead of following the live stream, pass `includeTailIndex=1`. The response then carries the `x-eve-stream-tail-index` header: the zero-based index of the last durably recorded event, or `-1` before the first. Read from your cursor until it passes that tail, then disconnect — reconnecting from the updated cursor if the connection drops first:
 
@@ -198,7 +227,7 @@ The lookup is opt-in; requests without the parameter get no header. The TypeScri
 
 For scripts, server-to-server calls, tests, evals, and custom UIs, `eve/client` wraps these routes in a typed client so you don't hand-roll the POST and NDJSON stream loop.
 
-Start with the [TypeScript SDK](../guides/client/overview) guide. It covers basic usage, sending messages, continuations, streaming, and per-turn `outputSchema` results.
+Start with the [TypeScript SDK](../guides/client/overview) guide. It covers basic usage, sending messages, session state, streaming, and per-turn `outputSchema` results.
 
 ## Inspect the agent over HTTP
 
@@ -224,6 +253,6 @@ The order is structural, not incidental. By the time a resolver or hook reads ch
 ## What to read next
 
 - [Execution model & durability](./execution-model-and-durability): what makes a session durable and how parked work resumes.
-- [Channels](../channels/overview): what owns the continuation token and delivery.
+- [Channels](../channels/overview): how platform addresses map to durable sessions.
 - [TypeScript SDK](../guides/client/overview): call these routes from scripts and server-side code.
 - [Frontend](../guides/frontend/overview): `useEveAgent` instead of raw routes.

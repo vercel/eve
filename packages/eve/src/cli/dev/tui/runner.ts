@@ -390,7 +390,7 @@ export interface PromptCommandHandler {
 }
 
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
-  session: ClientSession;
+  session?: ClientSession;
   /** Production TUI probe injected by the launcher; omitted in hermetic runners. */
   probeMcpConnection?: McpConnectionProbe;
   /**
@@ -460,7 +460,7 @@ function authIssueForStatus(status: VercelAuthStatus): SetupIssue | undefined {
 }
 
 export class EveTUIRunner {
-  #session: ClientSession;
+  #session: ClientSession | undefined;
   readonly #client?: Client;
   readonly #renderer: AgentTUIRenderer;
   readonly #name: string;
@@ -790,7 +790,7 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "cancel") {
-          if (this.#session.state.sessionId === undefined) {
+          if (this.#session === undefined) {
             this.#renderCommandOutcome("No active turn to cancel.");
             pendingInputResponses = undefined;
             followCurrentSession = false;
@@ -840,6 +840,14 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "compact") {
+          if (this.#session === undefined) {
+            this.#renderCommandOutcome("No active session to compact.");
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
           try {
             const result = await this.#session.compact();
             this.#renderCommandOutcome(
@@ -869,6 +877,14 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "clear") {
+          if (this.#session === undefined) {
+            this.#renderCommandOutcome("No active session to clear.");
+            pendingInputResponses = undefined;
+            followCurrentSession = false;
+            streamWithoutPrompt = false;
+            prompt = undefined;
+            continue;
+          }
           try {
             const result = await this.#session.clear();
             this.#renderCommandOutcome(
@@ -951,7 +967,7 @@ export class EveTUIRunner {
           });
       // The session id becomes known once the send is accepted; keep the
       // renderer's copy fresh so the parting line can name the session.
-      const acceptedSessionId = this.#session.state.sessionId;
+      const acceptedSessionId = this.#session?.state.sessionId;
       if (acceptedSessionId !== undefined) {
         this.#renderer.setSessionId?.(acceptedSessionId);
       }
@@ -1042,7 +1058,7 @@ export class EveTUIRunner {
             if (result.turnState.aborted) {
               this.#sessionFailed = true;
             } else {
-              const strandedSessionId = this.#session.state.sessionId;
+              const strandedSessionId = this.#session?.state.sessionId;
               this.#renderer.renderNotice?.(
                 strandedSessionId
                   ? `Lost the event stream — the turn may still be running on the server (session ${strandedSessionId}). Your next message resumes this session; use /cancel to stop the turn.`
@@ -1119,14 +1135,17 @@ export class EveTUIRunner {
     this.#pendingConnectionAuths.clear();
     this.#renderer.setConnectionAuthPendingCount?.(0);
 
-    if (this.#client) {
-      this.#session = this.#client.session();
-    }
+    this.#session = undefined;
     this.#runtimeArtifacts?.clear();
   }
 
   /** Resets the durable owner before clearing the local conversation view. */
   async #resetCurrentSession(): Promise<boolean> {
+    if (this.#session === undefined) {
+      this.#startNewSession();
+      this.#renderer.reset?.();
+      return true;
+    }
     try {
       await this.#session.reset();
     } catch (error) {
@@ -1228,7 +1247,25 @@ export class EveTUIRunner {
         this.#renderer.flushDelayedDevBuildErrors?.();
       }
 
-      response = await this.#session.send(sendInput);
+      if (this.#session === undefined) {
+        if (this.#client === undefined) {
+          throw new Error("Cannot create a session without an eve client.");
+        }
+        if (sendInput.message === undefined) {
+          throw new Error("Cannot answer an input request before the session starts.");
+        }
+        const created = await this.#client.sessions.create({
+          ...sendInput,
+          message: sendInput.message,
+        });
+        this.#session = created.session;
+        response = created.response;
+      } else {
+        response =
+          sendInput.inputResponses === undefined
+            ? await this.#session.send(sendInput.message!, { signal: sendInput.signal })
+            : await this.#session.respond(sendInput.inputResponses, { signal: sendInput.signal });
+      }
     } catch (error) {
       if (isInterruptedError(error)) throw error;
       // Dispatching the turn failed before any stream opened (transport
@@ -1277,10 +1314,10 @@ export class EveTUIRunner {
         if (turnState.boundaryEvent !== undefined || turnState.aborted === true) return;
         const turnId = turnState.turnId;
         try {
-          const result = await this.#session.cancel(turnId === undefined ? undefined : { turnId });
+          const result = await this.#session?.cancel(turnId === undefined ? undefined : { turnId });
           // Accepted means the turn's cancellation hook consumed the
           // request; the turn settles at its next safe boundary.
-          if (result.status === "accepted") return;
+          if (result?.status === "accepted") return;
         } catch {
           // No accepted session yet or a transport failure — retry below;
           // lifecycle interruption remains the hard client-side escape hatch.
@@ -1294,6 +1331,9 @@ export class EveTUIRunner {
 
   /** Follows the current session without dispatching another turn. */
   #streamCurrentSession(): AgentTUIStreamResult {
+    if (this.#session === undefined) {
+      throw new Error("Cannot stream a session before its first turn is accepted.");
+    }
     const abortController = new AbortController();
     return this.#createTUIStreamResult(
       this.#session.stream({ signal: abortController.signal }),
@@ -1577,7 +1617,7 @@ export class EveTUIRunner {
     try {
       await this.#renderer.traceViewer.open({
         appRoot: this.#appRoot,
-        sessionId: this.#session.state.sessionId,
+        sessionId: this.#session?.state.sessionId,
         reference: argument === "" ? undefined : argument,
       });
     } catch (error) {

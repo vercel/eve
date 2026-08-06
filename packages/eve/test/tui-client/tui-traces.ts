@@ -45,7 +45,6 @@ void (async () => {
   const screen = new MockScreen({ columns: 110, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    session: client.session(),
     client,
     screen,
     userInput: input,
@@ -329,7 +328,6 @@ function bootRunner(appRoot: string) {
   const screen = new MockScreen({ columns: 110, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    session: client.session(),
     client,
     screen,
     userInput: input,

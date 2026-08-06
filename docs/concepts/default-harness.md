@@ -20,9 +20,17 @@ export default defineAgent({
 
 Compaction also preserves the framework's own tool state automatically. It resets read-before-write tracking (so a write afterward re-reads the file whose read evidence was summarized away) and re-injects the active todo list, so the model keeps its task list across the summary. There is no per-tool hook to configure.
 
-Clients and channels can also request compaction between turns. Call `ClientSession.compact()` or a custom route's `compact({ continuationToken })` helper. The request does not append a user message; if a turn is running, eve queues it until that turn settles. A successful manual compaction emits the same `compaction.requested` and `compaction.completed` events as automatic compaction, followed by `session.waiting`.
+Clients and channels can also request compaction between turns. Call
+`ClientSession.compact()`, a channel route's `compact(address)`, or
+`attachSession(sessionId).compact()`. The request does not append a user message;
+if a turn is running, eve queues it until that turn settles. A successful manual
+compaction emits the same `compaction.requested` and `compaction.completed`
+events as automatic compaction, followed by `session.waiting`.
 
-To discard model-message history instead of summarizing it, call `ClientSession.clear()` or a custom route's `clear({ continuationToken })` helper. Clearing preserves the session identity, system prompt, configured tools and skills, durable state, limits, and sandbox. Its stream boundary is `context.cleared` followed by `session.waiting`.
+To discard model-message history instead of summarizing it, call the corresponding
+`clear()` method on any of those handles. Clearing preserves the session identity,
+system prompt, configured tools and skills, durable state, limits, and sandbox.
+Its stream boundary is `context.cleared` followed by `session.waiting`.
 
 ## Built-in tools
 
@@ -52,7 +60,7 @@ Notes:
 - **`agent`** is available only in the root session. Its child uses the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and fresh [state](../guides/state). The child receives neither `agent` nor `Workflow`; declared subagents do not receive the built-in `agent` either. See [Subagents](../subagents).
 - **`load_skill`** only pulls instructions into context. It adds no new execution surface, because behavior still comes from the tools the agent already has.
 - **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. It's registered only when the agent has connections.
-- **`web_search`** has no local executor; the provider runs it. To supply your own implementation, override it with `defineTool()`.
+- **`web_search`** has no local executor; the provider runs it. AI Gateway models use Parallel by default. To use Exa instead, export `webSearch({ provider: "exa" })` from `agent/tools/web_search.ts`. Direct provider models continue to use their native search implementation. To supply your own implementation, override it with `defineTool()`.
 
 Review these built-in tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 
@@ -73,7 +81,17 @@ export default defineTool({
 });
 ```
 
-The framework defaults are importable from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `loadSkill`), so you can spread, wrap, or patch them. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` won't inherit the framework's durable state key.
+The framework defaults are importable from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `todo`, `loadSkill`), so you can spread, wrap, or patch them. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` won't inherit the framework's durable state key.
+
+Provider-managed web search has a dedicated configuration helper instead of an executable default:
+
+```ts title="agent/tools/web_search.ts"
+import { webSearch } from "eve/tools";
+
+export default webSearch({ provider: "exa" });
+```
+
+Set `provider` to `"parallel"` or `"exa"`. Without this file, AI Gateway models use Parallel.
 
 ## Disable a default
 

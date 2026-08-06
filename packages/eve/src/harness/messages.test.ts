@@ -1,6 +1,7 @@
 import type { FilePart, ModelMessage, UserContent } from "ai";
 import { describe, expect, it } from "vitest";
 import {
+  coalesceDeliveries,
   coalesceTurnInputs,
   normalizeUserContent,
   resolveAssistantStepText,
@@ -18,6 +19,40 @@ function textFilePart(overrides: {
     type: "file",
   };
 }
+
+describe("coalesceDeliveries", () => {
+  const caller = {
+    callId: "call-1",
+    replyTo: { kind: "hook" as const, token: "turn-caller" },
+    subagentName: "research",
+  };
+
+  it("preserves the only caller in a delivery batch", () => {
+    expect(
+      coalesceDeliveries([
+        { kind: "deliver", payloads: [{ context: ["background"] }] },
+        { caller, kind: "deliver", payloads: [{ message: "question" }] },
+      ]),
+    ).toEqual({
+      caller,
+      kind: "deliver",
+      payloads: [{ context: ["background"] }, { message: "question" }],
+    });
+  });
+
+  it("rejects a batch with more than one turn caller", () => {
+    expect(() =>
+      coalesceDeliveries([
+        { caller, kind: "deliver", payloads: [{ message: "first" }] },
+        {
+          caller: { ...caller, callId: "call-2" },
+          kind: "deliver",
+          payloads: [{ message: "second" }],
+        },
+      ]),
+    ).toThrow("Cannot coalesce deliveries from different turns.");
+  });
+});
 
 describe("coalesceTurnInputs", () => {
   it("joins two messages with a double newline", () => {

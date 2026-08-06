@@ -1,13 +1,11 @@
-import { ArrowLeftIcon, ArrowUpRightIcon } from "lucide-react";
+import { ArrowLeftIcon } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import {
-  buildConnectionConfigure,
-  buildConnectionInstall,
-  buildConnectionSetup,
-} from "@/lib/integrations/connection-setup";
+import { canonicalAlternates, integrationPath } from "@/lib/geistdocs/canonical";
+import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
+import { buildConnectionInstall, buildConnectionSetup } from "@/lib/integrations/connection-setup";
 import {
   getIntegration,
   integrations,
@@ -18,6 +16,7 @@ import { logos } from "@/lib/integrations/logos";
 import { translations } from "@/geistdocs";
 import { Markdown } from "../components/markdown";
 import { SetupTabs } from "../components/setup-tabs";
+import { IntegrationDocsLink } from "./integration-docs-link";
 
 const typeLabel = {
   channel: "Channel",
@@ -41,9 +40,17 @@ export const generateMetadata = async ({
   if (!integration) {
     return {};
   }
+  const title = `${integration.name} Integration`;
+  const titleMetadata = pageTitleMetadata(title);
   return {
-    title: `${integration.name} Integration`,
+    ...titleMetadata,
     description: integration.tagline,
+    alternates: canonicalAlternates(integrationPath(integration.slug)),
+    openGraph: titleMetadata.openGraph,
+    twitter: {
+      ...titleMetadata.twitter,
+      card: "summary_large_image",
+    },
   };
 };
 
@@ -66,9 +73,7 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
 
   const isConnection = Boolean(integration.connection);
   const install = isConnection ? buildConnectionInstall(integration) : (integration.install ?? "");
-  const configure = isConnection
-    ? buildConnectionConfigure(integration)
-    : (integration.configure ?? "");
+  const configure = integration.configure ?? "";
   const setup = isConnection ? buildConnectionSetup(integration) : null;
 
   return (
@@ -107,18 +112,18 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
           </div>
           <p className="text-gray-900 text-lg">{integration.tagline}</p>
         </div>
-        <Link
-          className="inline-flex w-fit items-center gap-1 text-gray-900 text-sm transition-colors hover:text-gray-1000"
+        <IntegrationDocsLink
           href={integration.docsHref}
-        >
-          Read the full {typeLabel[integration.type].toLowerCase()} docs
-          <ArrowUpRightIcon className="size-3.5" />
-        </Link>
+          integration={integration.slug}
+          type={typeLabel[integration.type]}
+        />
       </header>
 
       <div className="mt-10 flex flex-col">
         <Section title="Install">
-          <Markdown>{install}</Markdown>
+          <Markdown analytics={{ integration: integration.slug, section: "install" }}>
+            {install}
+          </Markdown>
         </Section>
         <Section title="Quick start">
           {setup ? (
@@ -130,17 +135,39 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
               }
             >
               <SetupTabs
+                analytics={{ integration: integration.slug, section: "quick_start" }}
                 authModes={setup.authModes}
                 protocols={setup.protocols}
                 variants={setup.variants}
               />
             </Suspense>
           ) : (
-            <Markdown>{integration.quickStart ?? ""}</Markdown>
+            <Markdown analytics={{ integration: integration.slug, section: "quick_start" }}>
+              {integration.quickStart ?? ""}
+            </Markdown>
           )}
         </Section>
         <Section title="Configure">
-          <Markdown>{configure}</Markdown>
+          {setup ? (
+            <Suspense
+              fallback={
+                <Markdown>
+                  {setup.configureVariants[`${setup.protocols[0]}:${setup.authModes[0]}`] ?? ""}
+                </Markdown>
+              }
+            >
+              <SetupTabs
+                analytics={{ integration: integration.slug, section: "configure" }}
+                authModes={setup.authModes}
+                protocols={setup.protocols}
+                variants={setup.configureVariants}
+              />
+            </Suspense>
+          ) : (
+            <Markdown analytics={{ integration: integration.slug, section: "configure" }}>
+              {configure}
+            </Markdown>
+          )}
         </Section>
       </div>
     </main>

@@ -78,6 +78,12 @@ function subagentResult(input: {
       result: {
         callId: input.callId,
         kind: "subagent-result",
+        origin: "child",
+        outcome: {
+          kind: "terminal",
+          result: { kind: "succeeded", output: input.output as never },
+          usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
+        },
         output: input.output as never,
         subagentName: input.subagentName,
       },
@@ -428,7 +434,7 @@ describe("deriveRunFacts", () => {
       { type: "turn.completed", data: { sequence: 1, turnId: "t1" } },
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:test", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ] as UnstampedMessageStreamEvent[];
 
@@ -447,7 +453,7 @@ describe("deriveRunFacts", () => {
       { type: "turn.completed", data: { sequence: 3, turnId: "t1" } },
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:test", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ] as UnstampedMessageStreamEvent[];
 

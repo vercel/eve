@@ -16,6 +16,7 @@ function span(spanId: string, sessionId: string): LocalTraceSpan {
       "agent.turn.id": "turn_0",
     },
     endTimeNs: 1_000_000n,
+    events: [],
     name: "agent.turn",
     spanId,
     startTimeNs: 1_000_000n,

@@ -1,7 +1,7 @@
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/channel.js";
+import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -94,8 +94,8 @@ export interface GitHubChannelContext {
   state: GitHubChannelState;
 }
 
-/** Event-handler GitHub context, including session operations. */
-export interface GitHubEventContext extends GitHubChannelContext, ChannelSessionOps {}
+/** Event-handler GitHub context, including continuation routing. */
+export interface GitHubEventContext extends GitHubChannelContext, ChannelContinuationOps {}
 
 /**
  * Result of a GitHub inbound hook. Return `null` to acknowledge without
@@ -132,6 +132,7 @@ type GitHubSessionFailedHandler = (
  * that key rather than running alongside it.
  */
 export interface GitHubChannelEvents {
+  readonly "action.partial"?: GitHubEventHandler<"action.partial">;
   readonly "action.result"?: GitHubEventHandler<"action.result">;
   readonly "actions.requested"?: GitHubEventHandler<"actions.requested">;
   readonly "authorization.completed"?: GitHubEventHandler<"authorization.completed">;
@@ -239,7 +240,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     routes: [
       POST<GitHubChannelState>(
         config.route ?? GITHUB_CHANNEL_DEFAULT_ROUTE,
-        async (req, { send, waitUntil }) => {
+        async (req, { from, waitUntil }) => {
           const body = await verifyInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
           const missingHeaders = missingGitHubWebhookHeaders(req.headers);
@@ -283,7 +284,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
                 handler:
                   config.onComment ??
                   ((ctx, comment) => defaultOnComment(ctx, comment, dispatchOptions)),
-                send,
+                from,
               }),
             );
             return jsonOk({ ok: true });
@@ -298,7 +299,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
                 handler:
                   config.onComment ??
                   ((ctx, comment) => defaultOnComment(ctx, comment, dispatchOptions)),
-                send,
+                from,
               }),
             );
             return jsonOk({ ok: true });
@@ -310,7 +311,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
                 config,
                 event,
                 handler: config.onIssue,
-                send,
+                from,
               }),
             );
             return jsonOk({ ok: true });
@@ -322,7 +323,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
                 config,
                 event,
                 handler: config.onPullRequest,
-                send,
+                from,
               }),
             );
             return jsonOk({ ok: true });
@@ -334,7 +335,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
                 config,
                 event,
                 handler: config.onCheckSuite,
-                send,
+                from,
               }),
             );
             return jsonOk({ ok: true });
@@ -346,7 +347,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
                 config,
                 event,
                 handler: config.onCheckRun,
-                send,
+                from,
               }),
             );
             return jsonOk({ ok: true });
@@ -358,7 +359,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
                 config,
                 event,
                 handler: config.onWorkflowRun,
-                send,
+                from,
               }),
             );
             return jsonOk({ ok: true });
@@ -369,7 +370,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
       ),
     ],
 
-    async receive(input, { send }) {
+    async receive(input, { from }) {
       const target = input.target as Partial<GitHubReceiveTarget>;
       const owner = readNonEmptyString(target.owner);
       const repo = readNonEmptyString(target.repo);
@@ -411,9 +412,8 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
         await thread.post(target.initialMessage);
       }
 
-      return send(input.message, {
+      return from(continuationTokenFromState(state)).send(input.message, {
         auth: input.auth,
-        continuationToken: continuationTokenFromState(state),
         state,
       });
     },

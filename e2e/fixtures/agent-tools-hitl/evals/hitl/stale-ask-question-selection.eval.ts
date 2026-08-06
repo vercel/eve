@@ -56,10 +56,12 @@ export default defineEval({
       throw new Error("The second ask_question call reused the stale request ID.");
     }
 
-    const staleSelection = await t.respond({
-      requestId: request.requestId,
-      optionId: "candidate",
-    });
+    const staleSelection = await t.respond([
+      {
+        requestId: request.requestId,
+        optionId: "candidate",
+      },
+    ]);
     staleSelection.expectOk();
     staleSelection.event("message.received", {
       count: 1,

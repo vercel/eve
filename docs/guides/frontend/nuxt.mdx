@@ -48,7 +48,7 @@ async function handleSubmit() {
   const text = message.value.trim();
   if (!text || isBusy.value) return;
   message.value = "";
-  await send({ message: text });
+  await send(text);
 }
 </script>
 

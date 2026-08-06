@@ -1,7 +1,7 @@
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { HeadersValue } from "#client/types.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
-import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -79,6 +79,6 @@ export function defineRemoteAgent(input: RemoteAgentDefinitionInput): RemoteAgen
   return {
     ...input,
     kind: "remote",
-    path: input.path ?? EVE_CREATE_SESSION_ROUTE_PATH,
+    path: input.path ?? EVE_SESSION_ROUTE_PATH,
   };
 }

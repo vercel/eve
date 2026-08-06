@@ -4,10 +4,10 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { clearActiveSandboxHandlesForTest } from "#execution/sandbox/active-handles.js";
-import { sessionDeliveryHookWorkflow } from "#internal/testing/session-delivery-hook-workflow.js";
+import { sessionCommandInboxWorkflow } from "#internal/testing/session-command-inbox-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { getWorld, start } from "#internal/workflow/runtime.js";
+import { start } from "#internal/workflow/runtime.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -22,31 +22,28 @@ describe("session reset integration", () => {
       compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
     });
     const sandboxes = createSessionSandboxHarness();
-    const first = await start(sessionDeliveryHookWorkflow, [
-      { nextToken: continuationToken, token: "http:session-reset-placeholder-1" },
-    ]);
+    const first = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }]);
 
     try {
       await waitForHook(first, { token: continuationToken });
       await expect(sandboxes.open(first.runId)).resolves.toMatchObject({ id: "sandbox-1" });
 
       await expect(
-        runtime.terminateSession({ reason: "User requested /new", sessionId: first.runId }),
-      ).resolves.toEqual({ status: "terminated" });
+        runtime.dispatchContinuation({
+          command: { kind: "reset", reason: "User requested /new" },
+          continuationToken,
+        }),
+      ).resolves.toEqual({ previousSessionId: first.runId, status: "reset" });
 
-      await expect(runtime.resolveSession(continuationToken)).resolves.toBeUndefined();
-      await expect(getWorld().then((world) => world.runs.get(first.runId))).resolves.toMatchObject({
-        status: "cancelled",
-      });
+      await expect(first.returnValue).resolves.toEqual([]);
+      await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
 
-      const second = await start(sessionDeliveryHookWorkflow, [
-        { nextToken: continuationToken, token: "http:session-reset-placeholder-2" },
-      ]);
+      const second = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }]);
       try {
         await expect(waitForHook(second, { token: continuationToken })).resolves.toMatchObject({
           runId: second.runId,
         });
-        await expect(runtime.resolveSession(continuationToken)).resolves.toEqual({
+        await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
           sessionId: second.runId,
         });
         await expect(sandboxes.open(second.runId)).resolves.toMatchObject({ id: "sandbox-2" });
@@ -57,7 +54,8 @@ describe("session reset integration", () => {
         await second.cancel();
       }
     } finally {
-      await first.cancel();
+      const status = await first.status;
+      if (status === "pending" || status === "running") await first.cancel();
       clearActiveSandboxHandlesForTest();
     }
   });

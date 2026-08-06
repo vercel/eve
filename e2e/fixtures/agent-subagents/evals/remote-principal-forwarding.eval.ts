@@ -28,11 +28,10 @@ export default defineEval({
   async test(t) {
     await t.send("Reply with the single word: ready.");
 
-    await t.send({
-      headers: { authorization: "Bearer e2e-principal-forwarding-second-user" },
-      message:
-        "Use the remote-loopback agent with this exact message and nothing else (no outputSchema): 'Run the whoami tool and reply with only its marker string, verbatim.' When it returns, reply with the agent's exact output included verbatim.",
-    });
+    await t.send(
+      "Use the remote-loopback agent with this exact message and nothing else (no outputSchema): 'Run the whoami tool and reply with only its marker string, verbatim.' When it returns, reply with the agent's exact output included verbatim.",
+      { headers: { authorization: "Bearer e2e-principal-forwarding-second-user" } },
+    );
 
     t.succeeded();
     t.calledSubagent("remote-loopback", {

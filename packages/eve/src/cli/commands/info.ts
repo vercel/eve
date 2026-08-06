@@ -25,7 +25,7 @@ export interface ApplicationInfoJson {
   subagents: string[];
   schedules: string[];
   channels: { name: string; kind: string | null; method: string | null; urlPath: string | null }[];
-  messaging: { create: string; continue: string; stream: string };
+  messaging: { create: string; messages: string; stream: string };
   artifacts: {
     compiledManifest: string;
     discoveryManifest: string;
@@ -71,7 +71,7 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
     ),
     messaging: {
       create: messaging.createSessionRoutePath,
-      continue: messaging.continueSessionRoutePattern,
+      messages: messaging.sessionMessagesRoutePattern,
       stream: messaging.streamRoutePattern,
     },
     artifacts: compiledState
@@ -273,9 +273,9 @@ export async function printApplicationInfo(
             value: `POST ${inspection.messaging.createSessionRoutePath}`,
           },
           {
-            label: "Continue",
+            label: "Messages",
             tone: "info",
-            value: `POST ${inspection.messaging.continueSessionRoutePattern}`,
+            value: `POST ${inspection.messaging.sessionMessagesRoutePattern}`,
           },
           {
             label: "Stream",

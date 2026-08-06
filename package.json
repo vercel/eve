@@ -48,7 +48,7 @@
     "syncpack": "15.3.2",
     "turbo": "2.9.18",
     "typescript": "catalog:",
-    "vercel": "58.4.0",
+    "vercel": "58.5.1",
     "vitest": "catalog:"
   },
   "simple-git-hooks": {

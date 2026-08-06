@@ -1,3 +1,5 @@
+import { getEventListeners } from "node:events";
+
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -85,8 +87,44 @@ describe("bindSandboxAbortSignal", () => {
       "removePath",
     ]);
     for (const call of calls) {
-      expect(call.abortSignal).toBe(signal);
+      expect(call.abortSignal).not.toBe(signal);
+      expect(call.abortSignal?.aborted).toBe(false);
     }
+    expect(new Set(calls.map((call) => call.abortSignal)).size).toBe(calls.length);
+  });
+
+  it("does not accumulate backend listeners on the bound signal", async () => {
+    const calls: RecordedCall[] = [];
+    const recordingSession = createRecordingSession(calls);
+    const listenerSession: SandboxSession = {
+      ...recordingSession,
+      run: async (options) => {
+        options.abortSignal?.addEventListener("abort", () => {}, { once: true });
+        return recordingSession.run(options);
+      },
+    };
+    const controller = new AbortController();
+    const bound = bindSandboxAbortSignal(listenerSession, controller.signal);
+
+    for (let index = 0; index < 20; index += 1) {
+      await bound.run({ command: "echo hi" });
+    }
+
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+  });
+
+  it("propagates the bound abort signal to a default operation signal", async () => {
+    const calls: RecordedCall[] = [];
+    const controller = new AbortController();
+    const bound = bindSandboxAbortSignal(createRecordingSession(calls), controller.signal);
+
+    await bound.run({ command: "echo hi" });
+    const operationSignal = calls[0]?.abortSignal;
+    const reason = new Error("turn cancelled");
+    controller.abort(reason);
+
+    expect(operationSignal?.aborted).toBe(true);
+    expect(operationSignal?.reason).toBe(reason);
   });
 
   it("composes a call-level signal with the bound signal instead of replacing it", async () => {

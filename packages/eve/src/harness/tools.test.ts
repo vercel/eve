@@ -9,11 +9,13 @@ import { always, never, once } from "#public/tools/approval/approval-helpers.js"
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
+  WEB_SEARCH_EXA_OUTPUT_SCHEMA,
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
 } from "#runtime/framework-tools/web-search.js";
 import type { JsonObject } from "#shared/json.js";
+import { isAsyncIterable } from "#shared/async-iterable.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
@@ -164,6 +166,54 @@ describe("buildToolSet", () => {
     );
 
     expect(receivedSignal).toBe(abortController.signal);
+  });
+
+  it("preserves authored async generators for the AI SDK", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "stream_progress",
+        {
+          description: "Stream progress.",
+          execute: createToolExecuteWithAuth({
+            async *execute() {
+              yield { stage: "started" };
+              yield { stage: "complete" };
+            },
+            scope: "stream_progress",
+          }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "stream_progress",
+        },
+      ],
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+
+    await contextStorage.run(ctx, async () => {
+      const result = buildToolSet({ tools });
+      const execute = (
+        result.stream_progress as {
+          readonly execute?: (
+            input: unknown,
+            options: ToolExecuteOptions,
+          ) => Promise<unknown> | AsyncIterable<unknown>;
+        }
+      ).execute;
+      expect(execute).toBeTypeOf("function");
+
+      const output = execute!({}, { messages: [], toolCallId: "call_stream" });
+      expect(isAsyncIterable(output)).toBe(true);
+
+      const values: unknown[] = [];
+      for await (const value of output as AsyncIterable<unknown>) {
+        values.push(value);
+      }
+      expect(values).toEqual([{ stage: "started" }, { stage: "complete" }]);
+    });
   });
 
   it("supplies an inert abort signal when the SDK provides none", async () => {
@@ -397,6 +447,27 @@ describe("buildToolSet", () => {
       expect(getOutputJsonSchema(result.web_search)).toEqual(expectedOutputSchema);
     },
   );
+
+  it("injects Exa when configured for an AI Gateway model", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "web_search",
+        {
+          description: "Web search.",
+          inputSchema: jsonSchema({}),
+          name: "web_search",
+        },
+      ],
+    ]);
+
+    const result = await buildToolSetWithProviderTools({
+      modelReference: { id: "openai/gpt-5.4" },
+      tools,
+      webSearchProvider: "exa",
+    });
+
+    expect(getOutputJsonSchema(result.web_search)).toEqual(WEB_SEARCH_EXA_OUTPUT_SCHEMA);
+  });
 
   it("omits provider-managed web_search when no provider backend is available", async () => {
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([

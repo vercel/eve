@@ -1,5 +1,84 @@
 # eve
 
+## 0.30.8
+
+### Patch Changes
+
+- e6f4808: Add a single `eve add linear` flow that installs and configures both the Linear Channel and Linear MCP connection.
+- f51f866: Tools can now use async generators to stream preliminary output snapshots. eve publishes local snapshots as `action.partial` events before the final `action.result`, and the default client reducer exposes provisional output with `partial: true`.
+
+## 0.30.7
+
+### Patch Changes
+
+- e5c9191: Add experimental agent messaging behind `experimental.subagentPersistentSessions` in `agent.ts`. Opted-in agents keep delegated children alive after they answer: each child is owned by a lifecycle handle, settles every turn with an explicit outcome carrying its per-turn token usage, and parks instead of terminating. The parent's subagent tools gain an `agentId` parameter to continue a parked child, discoverable from a per-model-call `<agents>` system injection that lists only parked (resumable) children. An omitted, empty, or unknown `agentId` starts a fresh child; continuing a child that is still starting or working fails with `AGENT_BUSY`. Without the opt-in, children keep running as one-shot tasks. The subagent tool input schema no longer includes the unused `description` field.
+- bd21332: Cancelling a turn with running delegated children no longer leaks their handles as permanently `running`. The cancellation epilogue now parks each abandoned child as `"(cancelled)"`, so cancelled children stay resumable and later cancellations no longer stall retrying already-dead children.
+- 1758161: Add guided GitHub channel setup through `eve add channel/github`. The flow provisions a Vercel Connect GitHub App, routes verified webhooks, scaffolds the channel, and explains how to install and use the app.
+- 56de47b: Show far more of what local traces record in `eve traces`: span rows carry inline token/cost/tool chips, the header aggregates models, token totals, cost, and errors, and two new flags expose everything else — `--verbose` expands every span with all attributes and events, and `--json` dumps the full trace machine-readably.
+
+## 0.30.6
+
+### Patch Changes
+
+- 7fa4d36: Accept unmodeled `SKILL.md` frontmatter when importing a skill from another runtime. These fields are no-ops in eve.
+
+## 0.30.5
+
+### Patch Changes
+
+- 5ee18e2: Prevent successful local `eve invoke` commands from logging a spurious Workflow queue 503 while their temporary development server shuts down.
+- d8fc092: Format registry search results as concise, width-aware entries and limit searches to 10 matches by default. Use `--limit` to request up to 100 results.
+- 557000b: Add skills.sh as a built-in registry, so `eve registry search --registry @skills <query>` and `eve add @skills/<skill>` work without project configuration.
+- 1953d20: Prevent sandbox abort listeners from accumulating across repeated operations in a turn.
+- 7086776: Route session controls and follow-up messages through one durable command inbox shared by stable session IDs and rekeyable channel addresses.
+
+## 0.30.4
+
+### Patch Changes
+
+- fc87d23: Dev runtime snapshots no longer copy the `.workflow-vitest` test cache. In
+  workspaces that had run integration tests, this directory was duplicated into
+  every generation under `.eve/dev-runtime/snapshots` — tens of megabytes per
+  rebuild that nothing at dev runtime reads.
+
+## 0.30.3
+
+### Patch Changes
+
+- 601fb13: Allow just-bash sandboxes to compose a custom filesystem around eve's durable, session-owned workspace.
+- c8bd9c0: Allow declared local subagents to mount extensions under their own `extensions/` directory. Contributions, configuration, and overrides are scoped to that subagent and do not extend the root agent.
+- 279b5e6: Use compatible POSIX search fallbacks in sandboxes whose `rg` implementation lacks the options required by eve, and surface command errors instead of reporting them as empty results.
+- c10ca06: Allow dynamic subagents to declare compile-time `build.externalDependencies`, so their authored modules can safely use packages that must remain external before runtime resolution.
+- 95b4183: Configure new Linear connectors to receive only Agent Session webhook events, avoiding unrelated default Linear webhook deliveries.
+- 95b4183: Add guided Linear Agent channel setup through `eve add channel/linear-agent`. The flow provisions a Vercel Connect Linear app, routes verified Agent Session events, scaffolds the channel, and explains how to install and use the agent in Linear.
+
+## 0.30.2
+
+### Patch Changes
+
+- 512808c: Allow agents to select Exa or Parallel for the built-in `web_search` tool by exporting `webSearch({ provider })` from `agent/tools/web_search.ts`. Parallel remains the default for AI Gateway models.
+
+## 0.30.1
+
+### Patch Changes
+
+- dae6f73: Upload Vercel sandbox workspace seed files in one compressed SDK request instead of one request per file, substantially reducing fresh template build times for large workspaces.
+
+## 0.30.0
+
+### Minor Changes
+
+- f43b22d: `localDev()` now grants the synthetic local principal based on the deployment (an `eve dev` or `vercel dev` process) instead of the request URL host, so a request `Host` header can no longer obtain local-dev access on a self-hosted server. The previously exported `isLoopbackRequest` helper is removed. The default eve channel now falls back to `[vercelOidc(), localDev(), placeholderAuth()]`, which keeps local dev working and rejects all production traffic.
+
+### Patch Changes
+
+- 021dbbf: Add `/new` as an alias of `/clear` in the eve dev TUI. It clears model-message history while preserving the current session and its durable resources.
+- 136749f: Make `Ctrl+C` cooperatively cancel or steer a running turn like `Esc` in the eve dev TUI. At the idle prompt, the first `Ctrl+C` now shows an exit warning and a second consecutive press exits.
+- 13420ab: Allow dynamic subagent resolvers to return `defineRemoteAgent(...)`. Session and turn selections can now conditionally expose a remote deployment and change its runtime connection settings.
+- ee50ae7: Prevent the dev TUI from duplicating setup panels when an integration setup error includes multiline command output.
+- e1cd7b7: Move eve's internal integration catalog from the Vercel npm scope to `@eve/catalog`.
+- 56651ee: Update eve's bundled Workflow SDK packages to the latest 5.0.0 beta releases, keeping the core runtime and workflow worlds aligned.
+
 ## 0.29.5
 
 ### Patch Changes

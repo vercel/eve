@@ -11,6 +11,7 @@ import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessInstrumentation } from "#harness/instrumentation-runtime.js";
@@ -171,6 +172,11 @@ export type StepNext = StepDone | StepFn | null;
 export interface SettledTurn {
   readonly output: unknown;
   readonly isError?: boolean;
+  /**
+   * Usage this turn added to the child's session subtree. The harness never
+   * sets it; the durable turn step fills it with the per-turn delta before
+   * the answer crosses the park boundary to the delegated caller.
+   */
   readonly usage?: TokenUsage;
 }
 
@@ -257,6 +263,8 @@ export interface ToolLoopHarnessConfig {
    * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
    */
   readonly workflowMaxSubagents?: number;
+  /** AI Gateway provider selected for the framework `web_search` tool. */
+  readonly webSearchProvider?: WebSearchProvider;
   readonly handleEvent?: HandleEventFn;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
@@ -278,6 +286,12 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
+  /**
+   * Whether the agent opted into `experimental.subagentPersistentSessions`.
+   * Gates delegated-agent handle tracking and the model-visible `<agents>`
+   * listing appended after runtime-action batches resolve.
+   */
+  readonly persistentSubagentSessions?: boolean;
   readonly dispatchDynamicModelEvent?: (input: {
     readonly ctx: AlsContext;
     readonly event: UnstampedMessageStreamEvent;

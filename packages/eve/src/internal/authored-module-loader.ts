@@ -269,10 +269,13 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     moduleMapPath: input.moduleMapPath,
   });
   const extensionScopePlugin = createExtensionScopePlugin(
-    input.manifest.extensionMounts.map((mount) => ({
-      packageNamespace: mount.packageNamespace,
-      sourceRoot: mount.sourceRoot,
-    })),
+    [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
+      (node) =>
+        node.extensionMounts.map((mount) => ({
+          packageNamespace: mount.packageNamespace,
+          sourceRoot: mount.sourceRoot,
+        })),
+    ),
   );
   const plugins = [
     createVirtualGenerationModuleMapPlugin({

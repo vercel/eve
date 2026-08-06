@@ -3,8 +3,7 @@ declare const receiveTargetMarker: unique symbol;
 /**
  * Structural marker that channel factories (e.g. `slackChannel`,
  * `twilioChannel`) add to declare the target type their `receive()` accepts.
- * `receive(channel, { target })` helpers and the route-handler
- * `args.receive(channel, ...)` read this marker to infer typed targets
+ * `ctx.to(channel, target)` helpers read this marker to infer typed targets
  * from a plain channel import.
  */
 export interface TypedReceiveTarget<TTarget = Record<string, unknown>> {

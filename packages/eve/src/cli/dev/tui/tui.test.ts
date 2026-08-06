@@ -24,7 +24,7 @@ describe("runDevelopmentTui", () => {
     mocks.runnerOptions.length = 0;
   });
 
-  it("creates a fresh client session for every TUI attached to the same server", async () => {
+  it("creates a fresh client and defers session creation until the first prompt", async () => {
     const target = {
       kind: "local",
       serverUrl: "http://127.0.0.1:4321/",
@@ -39,7 +39,8 @@ describe("runDevelopmentTui", () => {
       throw new Error("Expected two TUI runner invocations.");
     }
     expect(first.client).not.toBe(second.client);
-    expect(first.session).not.toBe(second.session);
+    expect(first.session).toBeUndefined();
+    expect(second.session).toBeUndefined();
   });
 
   it.each([
