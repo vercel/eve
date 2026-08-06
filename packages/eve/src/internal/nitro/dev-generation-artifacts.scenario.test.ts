@@ -82,6 +82,65 @@ describe("development generation artifacts", () => {
     expect(subagentTool.default.execute()).toBe(sharedMarker);
   });
 
+  it("materializes dynamic remote credential metadata for the development runtime", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "Use the available tools.",
+        "agent/subagents/remote.mjs": [
+          'const defineDynamic = (definition) => ({ ...definition, kind: "eve:dynamic" });',
+          "const defineRemoteAgent = (definition) => ({",
+          "  ...definition,",
+          '  kind: "remote",',
+          '  path: "/eve/v1/session",',
+          "});",
+          "export default defineDynamic({",
+          "  events: {",
+          '    "session.started": () =>',
+          "      defineRemoteAgent({",
+          '        description: "Remote research.",',
+          '        headers: () => ({ authorization: "Bearer fresh" }),',
+          '        url: "https://research.example.com",',
+          "      }),",
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+      },
+      name: "dynamic-remote-development-generation",
+    });
+
+    const compileResult = await compileAgent({ startPath: app.appRoot });
+    const snapshot = await stageDevelopmentGeneration(compileResult);
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+        snapshot.runtimeAppRoot,
+      ),
+    });
+    const subagent = compileResult.manifest.subagents[0];
+    const sourceId = subagent?.agent.config.source?.sourceId;
+    expect(sourceId).toBeDefined();
+    const moduleNamespace = moduleMap.nodes[subagent!.nodeId]?.modules[sourceId!] as {
+      default: { events: Record<string, Function> };
+    };
+    const handler = moduleNamespace.default.events["session.started"];
+    expect(handler).toBeDefined();
+    const remote = handler!() as Record<string, unknown>;
+    const credentialsFactory = remote.__eveResolveRemoteAgentCredentials as {
+      stepId?: string;
+    };
+
+    expect(Object.keys(remote)).not.toContain("__eveResolveRemoteAgentCredentials");
+    expect(credentialsFactory.stepId).toMatch(/^eve:dynamic-remote-agent\/\//);
+    const registry = (globalThis as Record<symbol, Map<string, Function> | undefined>)[
+      Symbol.for("@workflow/core//registeredSteps")
+    ];
+    const registered = registry?.get(credentialsFactory.stepId!);
+    expect(registered).toBeDefined();
+    const credentials = registered!() as { headers(): Record<string, string> };
+    expect(credentials.headers()).toEqual({ authorization: "Bearer fresh" });
+  });
+
   it("preserves extension scope in a shared generation graph", async () => {
     const packageName = "@acme/shared-graph-extension";
     const app = await scenarioApp({

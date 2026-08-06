@@ -28,7 +28,9 @@
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import {
   collectReferencedIdentifierNames,
+  findProperty,
   type DynamicToolAstNode as AstNode,
+  walkNode,
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
 interface HandlerInfo {
@@ -555,47 +557,6 @@ function applyTransform(source: string, handlers: HandlerInfo[]): { code: string
   }
 
   return { code: result };
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function walkNode(node: AstNode, visitor: (node: AstNode) => boolean): void {
-  if (!visitor(node)) return;
-
-  if (Array.isArray(node.body)) {
-    for (const child of node.body) walkNode(child, visitor);
-  } else if (node.body && typeof node.body === "object" && "type" in node.body) {
-    walkNode(node.body as AstNode, visitor);
-  }
-  if (node.declarations) {
-    for (const decl of node.declarations) walkNode(decl, visitor);
-  }
-  if (node.init) walkNode(node.init, visitor);
-  if (node.expression) walkNode(node.expression, visitor);
-  if (node.declaration) walkNode(node.declaration, visitor);
-  if (node.argument) walkNode(node.argument, visitor);
-  if (node.arguments) {
-    for (const arg of node.arguments) walkNode(arg, visitor);
-  }
-  if (node.properties) {
-    for (const prop of node.properties) {
-      walkNode(prop, visitor);
-      if (prop.value && typeof prop.value === "object" && "type" in (prop.value as AstNode)) {
-        walkNode(prop.value as AstNode, visitor);
-      }
-    }
-  }
-  if (node.left) walkNode(node.left, visitor);
-  if (node.right) walkNode(node.right, visitor);
-}
-
-function findProperty(obj: AstNode, name: string): AstNode | undefined {
-  return obj.properties?.find(
-    (p) =>
-      p.type === "Property" && !p.computed && p.key?.type === "Identifier" && p.key.name === name,
-  );
 }
 
 /**

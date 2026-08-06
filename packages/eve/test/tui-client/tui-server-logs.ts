@@ -32,7 +32,7 @@ void (async () => {
     logs: "all",
     unicode: true,
   });
-  const runner = new EveTUIRunner({ session: client.session(), client, renderer });
+  const runner = new EveTUIRunner({ client, renderer });
 
   const runPromise = runner.run().catch((error: unknown) => {
     if (error instanceof Error && error.message === "Interrupted") {

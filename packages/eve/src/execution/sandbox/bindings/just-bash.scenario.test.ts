@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { MountableFs, ReadWriteFs } from "just-bash";
 import { describe, expect, it } from "vitest";
 
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -9,7 +10,10 @@ import {
   createJustBashSandboxBackend,
   pruneJustBashSandboxTemplates,
 } from "#execution/sandbox/bindings/just-bash.js";
+import { executeGlobOnSandbox } from "#execution/sandbox/glob-tool.js";
+import { executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
 import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
+import { justbash } from "#public/sandbox/backends/just-bash.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -64,6 +68,92 @@ async function collectStream(stream: ReadableStream<Uint8Array>): Promise<string
 }
 
 describe("just-bash sandbox file API", () => {
+  it("composes a custom filesystem alongside the workspace", async () => {
+    const appRoot = await createTemporaryCacheDirectory("custom-filesystem-app");
+    const sourceRoot = join(appRoot, "agent");
+    await mkdir(sourceRoot, { recursive: true });
+    await writeFile(join(sourceRoot, "instructions.md"), "before");
+    let factoryCalls = 0;
+    const backend = justbash({
+      async filesystem(context) {
+        factoryCalls += 1;
+        expect(context.appRoot).toBe(appRoot);
+        await context.defaultFilesystem.mkdir("/source", { recursive: true });
+        return new MountableFs({
+          base: context.defaultFilesystem,
+          mounts: [
+            {
+              filesystem: new ReadWriteFs({
+                allowSymlinks: false,
+                maxFileReadSize: Number.MAX_SAFE_INTEGER,
+                root: sourceRoot,
+              }),
+              mountPoint: "/source",
+            },
+          ],
+        });
+      },
+    });
+
+    const handle = await backend.create({
+      runtimeContext: { appRoot },
+      sessionKey: "session-custom-filesystem",
+      templateKey: null,
+    });
+
+    expect(factoryCalls).toBe(1);
+    expect(await handle.session.readTextFile({ path: "/source/instructions.md" })).toBe("before");
+    await expect(
+      executeGlobOnSandbox(handle.session, { path: "/source", pattern: "*" }),
+    ).resolves.toMatchObject({
+      content: "/source/instructions.md",
+      count: 1,
+      path: "/source",
+    });
+    await expect(
+      executeGrepOnSandbox(handle.session, { path: "/source", pattern: "before" }),
+    ).resolves.toMatchObject({
+      content: "/source/instructions.md:1:before",
+      matchCount: 1,
+      path: "/source",
+    });
+    await handle.session.writeTextFile({
+      content: "after",
+      path: "/source/instructions.md",
+    });
+    await handle.session.writeTextFile({ content: "scratch", path: "scratch.txt" });
+    expect(await readFile(join(sourceRoot, "instructions.md"), "utf8")).toBe("after");
+    expect(existsSync(join(sourceRoot, "scratch.txt"))).toBe(false);
+    await handle.shutdown();
+  });
+
+  it("applies the filesystem factory only to live sessions", async () => {
+    const appRoot = await createTemporaryCacheDirectory("filesystem-factory-lifecycle");
+    let factoryCalls = 0;
+    const backend = justbash({
+      async filesystem({ defaultFilesystem }) {
+        factoryCalls += 1;
+        return defaultFilesystem;
+      },
+    });
+
+    await backend.prewarm({
+      runtimeContext: { appRoot },
+      seedFiles: [{ content: "from template", path: "/workspace/seed.txt" }],
+      templateKey: "tpl-filesystem-factory",
+    });
+    expect(factoryCalls).toBe(0);
+
+    const handle = await backend.create({
+      runtimeContext: { appRoot },
+      sessionKey: "session-filesystem-factory",
+      templateKey: "tpl-filesystem-factory",
+    });
+    expect(factoryCalls).toBe(1);
+    await expect(handle.session.readTextFile({ path: "seed.txt" })).resolves.toBe("from template");
+    await handle.shutdown();
+  });
+
   it("writes a file via the public session and reads it back", async () => {
     const cacheDirectory = await createTemporaryCacheDirectory("file-api");
     const handle = await createPrewarmedLocalHandle({

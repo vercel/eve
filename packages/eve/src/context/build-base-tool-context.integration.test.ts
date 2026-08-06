@@ -26,7 +26,11 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
       await live.run({ command: "echo ready" });
     });
 
-    expect(observed).toBe(controller.signal);
+    expect(observed).toBeDefined();
+    expect(observed).not.toBe(controller.signal);
+    expect(observed?.aborted).toBe(false);
+    controller.abort(new Error("turn cancelled"));
+    expect(observed?.aborted).toBe(true);
   });
 
   it("binds the inert fallback signal when no turn signal exists", async () => {

@@ -33,6 +33,7 @@ import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { InternalAgentDefinition } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
 import type { ToolSchema } from "#shared/tool-schema.js";
@@ -231,7 +232,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   /**
    * Universal entry point for new sessions, called by cross-channel
    * initiators (the schedule dispatcher today). Typed precisely as
-   * {@link CompiledChannel.receive} — `(input, { send }) => Session` —
+   * {@link CompiledChannel.receive} — `(input, ctx) => Session` —
    * so any caller passing the wrong context shape is a typecheck error,
    * not a runtime crash.
    *
@@ -243,7 +244,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly receive?: CompiledChannel["receive"];
   /**
    * Reference to the authored {@link CompiledChannel} value the channel
-   * module exported. Preserved so callers of `args.receive(channel, …)`
+   * module exported. Preserved so callers of `ctx.to(channel, target)`
    * can identify a target by the same imported reference. `undefined`
    * for framework-internal channels constructed without going through
    * `defineChannel`.
@@ -411,6 +412,8 @@ export interface ResolvedAgent {
   readonly workflowTool?: {
     readonly maxSubagents?: number;
   };
+  /** AI Gateway provider selected for the framework `web_search` tool. */
+  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructionsResolvers: readonly ResolvedDynamicInstructionsResolver[];
   readonly dynamicSkillResolvers: readonly ResolvedDynamicSkillResolver[];
   readonly dynamicToolResolvers: readonly ResolvedDynamicToolResolver[];

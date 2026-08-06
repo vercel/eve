@@ -541,10 +541,14 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .command("traces [trace]")
     .usage("[options] [trace]\n       eve traces ls [options]")
     .description("Show a local `eve dev` trace (the most recent when trace is omitted).")
-    .action(async (reference: string | undefined) => {
-      const { runTraceShowCommand } = await import("#cli/commands/trace.js");
-      await runTraceShowCommand(logger, appRoot, reference);
-    });
+    .option("--verbose", "Expand every span with all attributes and events")
+    .option("--json", "Output as JSON")
+    .action(
+      async (reference: string | undefined, options: { json?: boolean; verbose?: boolean }) => {
+        const { runTraceShowCommand } = await import("#cli/commands/trace.js");
+        await runTraceShowCommand(logger, appRoot, reference, options);
+      },
+    );
 
   traces
     .command("ls")

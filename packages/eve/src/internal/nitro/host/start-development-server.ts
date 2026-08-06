@@ -262,12 +262,12 @@ async function closeDevelopmentServerResources(input: {
   if (authoredSourceWatcher !== undefined) {
     await attempt(() => authoredSourceWatcher.close());
   }
-  const devServer = input.devServer;
-  const listenerClosed = devServer === undefined ? true : await attempt(() => devServer.close());
   const workflowWorld = input.workflowWorld;
   if (workflowWorld !== undefined) {
     await attempt(() => workflowWorld.close());
   }
+  const devServer = input.devServer;
+  const listenerClosed = devServer === undefined ? true : await attempt(() => devServer.close());
   const nitro = input.nitro;
   if (nitro !== undefined) {
     await attempt(() => nitro.close());

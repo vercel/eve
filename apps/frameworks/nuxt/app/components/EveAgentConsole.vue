@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { EveDynamicToolPart, EveMessagePart } from "eve/vue";
 
-const { data, status, error, send, stop } = useEveAgent();
+const { data, status, error, respond, send, stop } = useEveAgent();
 
 type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
@@ -37,7 +37,7 @@ function submitMessage() {
   const text = messageText.value.trim();
   if (!text || isBusy.value) return;
   messageText.value = "";
-  void send({ message: text });
+  void send(text);
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -54,7 +54,7 @@ function handleInputResponses(
     readonly text?: string;
   }[],
 ) {
-  void send({ inputResponses: responses });
+  void respond(responses);
 }
 
 function partKey(part: EveMessagePart, index: number): string {

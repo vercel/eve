@@ -30,6 +30,7 @@ function span(
   return {
     attributes,
     endTimeNs: BASE + BigInt(endMs) * 1_000_000n,
+    events: [],
     name,
     parentSpanId,
     spanId,

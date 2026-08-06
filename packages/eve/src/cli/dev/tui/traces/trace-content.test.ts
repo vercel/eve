@@ -9,7 +9,7 @@ const THEME = createTheme({ color: false, unicode: true });
 const WIDTH = 60;
 
 function format(key: string, value: unknown, width = WIDTH): string[] {
-  return formatAttributeContent(key, value, THEME, width).map(stripAnsi);
+  return formatAttributeContent(key, value, THEME.colors.dim, width).map(stripAnsi);
 }
 
 describe("formatAttributeContent", () => {
@@ -24,7 +24,7 @@ describe("formatAttributeContent", () => {
     const raw = formatAttributeContent(
       "agent.session.ids",
       ["safe", "evil\x1b[2J\x1b]0;owned\x07text"],
-      THEME,
+      THEME.colors.dim,
       WIDTH,
     ).join("\n");
     expect(raw).not.toContain("\x1b");

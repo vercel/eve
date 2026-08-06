@@ -5,6 +5,8 @@ description: "The default HTTP API for an agent, covering session routes, auth, 
 
 The eve channel is the framework's default HTTP API. It's what the terminal UI, [`useEveAgent`](../guides/frontend/overview), `curl`, and any SDK client talk to when they start sessions, send messages, and stream events. `eveChannel()` mounts the canonical session routes under `/eve/v1/session*`, and they are enabled by default even when `agent/channels/eve.ts` does not exist.
 
+Every running eve app exposes its own API. `eve.dev` publishes framework documentation; it is not a shared API, authorization server, MCP server, or A2A server. Each deployment supplies its own host and authentication policy.
+
 Reach for it when something needs HTTP access to your agent, including local tooling, a browser frontend, the terminal UI, or another API client. Most apps never write this file. Add `agent/channels/eve.ts` only to override the defaults, usually the route auth policy.
 
 ```ts title="agent/channels/eve.ts"
@@ -18,68 +20,112 @@ export default eveChannel({
 
 ## Routes
 
-The application exposes a health route plus eve channel routes that inspect the agent, create sessions, send follow-ups, cancel turns, compact or reset sessions, and stream events:
+The application exposes a health route plus eve channel routes that inspect the agent, create sessions, send follow-ups, control sessions, and stream events:
 
-- `GET /eve/v1/health`
-- `GET /eve/v1/info`
-- `POST /eve/v1/session` (start a session)
+- `GET /eve/v1/health` (check whether the application is reachable)
+- `GET /eve/v1/info` (inspect the agent)
+- `POST /eve/v1/session` (start a session and send its first message)
 - `POST /eve/v1/session/:sessionId` (send a follow-up)
 - `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
-- `POST /eve/v1/session/clear` (clear the continuation owner's model history)
-- `POST /eve/v1/session/compact` (compact the continuation owner's context)
-- `POST /eve/v1/session/reset` (retire the continuation owner)
-- `GET /eve/v1/session/:sessionId/stream` (stream events, NDJSON)
+- `POST /eve/v1/session/:sessionId/clear` (clear the session's model history)
+- `POST /eve/v1/session/:sessionId/compact` (compact the session's context)
+- `POST /eve/v1/session/:sessionId/reset` (retire the session)
+- `GET /eve/v1/session/:sessionId/stream` (stream events as NDJSON)
 
-Start a session with a minimal body. The response returns `sessionId` and the `continuationToken` you reuse for follow-ups:
+The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
+
+### Start and continue a session
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session \
   -H "Content-Type: application/json" \
   -d '{"message":"What is the weather in Paris?"}'
-# {"continuationToken":"eve:7f3c...","ok":true,"sessionId":"ses_01h..."}
+# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+
+curl -X POST https://<deployment>/eve/v1/session/wrun_A \
+  -H "Content-Type: application/json" \
+  -d '{"message":"How about tomorrow?"}'
 ```
 
-Stream that session's events as newline-delimited JSON (`application/x-ndjson; charset=utf-8`), one event object per line:
+The first request requires `message`. A follow-up request accepts exactly one of
+`message` or `inputResponses`; use the latter to answer a pending HITL request:
 
 ```bash
-curl -N https://<deployment>/eve/v1/session/ses_01h.../stream
+curl -X POST https://<deployment>/eve/v1/session/wrun_A \
+  -H "Content-Type: application/json" \
+  -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
+```
+
+Sending a message to an unknown or terminal session ID returns `409` with
+`{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
+TypeScript clients expose the stable code as `ClientError.code`. The route never
+creates or follows a replacement session.
+
+### Stream events
+
+Stream responses are newline-delimited JSON (`application/x-ndjson; charset=utf-8`), one event object per line:
+
+```bash
+curl -N https://<deployment>/eve/v1/session/wrun_A/stream
 # {"type":"turn.started",...}
 # {"type":"message.appended","data":{"messageDelta":"It is ",...}}
 # {"type":"message.completed",...}
 ```
 
+### Cancel a turn
+
 Cancel a session's in-flight turn with an empty body, or scope the cancel to the turn you observed by passing the `turnId` stamped on that turn's stream events:
 
 ```bash
-curl -X POST https://<deployment>/eve/v1/session/ses_01h.../cancel
-# {"ok":true,"sessionId":"ses_01h...","status":"accepted"}
+curl -X POST https://<deployment>/eve/v1/session/wrun_A/cancel
+# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
-Cancellation is asynchronous: `"accepted"` means a cancellation hook accepted the request. Confirm the effective outcome on the stream as `turn.cancelled` followed by `session.waiting` — never as a failure. Active local and remote subagents are cancelled recursively before the parent settles; their own streams carry their cancellation boundaries, and cancelled work does not emit `subagent.completed` on the parent. Content emitted before the cancel stays on the event stream, while durable model history keeps only content that had already settled. The session accepts the next message normally. When there is no resumable cancellation target (including an unknown session, a settled turn, or a duplicate cancel), the route responds with `"no_active_turn"` — also a success, so a stop button can fire and forget. A `turnId` naming any other turn is accepted and consumed as a no-op, so a guarded cancel racing a turn boundary cannot stop a turn the caller never saw.
+Cancellation is asynchronous: `"accepted"` means the live session durably queued the request. Confirm an actual cancellation on the stream as `turn.cancelled` followed by `session.waiting`—never as a failure. Active local and remote subagents are cancelled recursively before the parent settles. Content emitted before cancellation stays on the event stream, while durable model history keeps only content that had already settled. The session accepts the next message normally.
 
-Clear the model-message history of the session that owns a continuation token:
+An accepted cancellation returns HTTP `202` with `sessionId`. An inactive target
+returns HTTP `200` with `{"ok":true,"status":"no_active_turn"}`.
+
+A live session also returns `"accepted"` when it is already parked; the driver consumes that late or duplicate cancel as a no-op. An unknown or terminal session returns `"no_active_turn"`. A `turnId` naming any other turn is likewise accepted and consumed as a no-op, so a guarded cancel racing a turn boundary cannot stop a turn the caller never saw.
+
+### Clear context
+
+Clear one session's model-message history without replacing the session:
 
 ```bash
-curl -X POST https://<deployment>/eve/v1/session/clear \
-  -H "Content-Type: application/json" \
-  -d '{"continuationToken":"eve:7f3c..."}'
-# {"ok":true,"sessionId":"ses_01h...","status":"accepted"}
+curl -X POST https://<deployment>/eve/v1/session/wrun_A/clear
+# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
-An accepted clear emits `context.cleared` followed by `session.waiting`. The next message resumes the same session without prior model messages; the system prompt, tools and skills, durable state, limits, and session-scoped sandbox remain.
+An accepted clear emits `context.cleared` followed by `session.waiting`. The next message uses the same session without prior model messages; the system prompt, tools, skills, durable state, limits, and session-scoped sandbox remain.
 
-Compact the session that owns a continuation token without sending a message:
+### Compact context
+
+Compact one session's context without sending a message:
 
 ```bash
-curl -X POST https://<deployment>/eve/v1/session/compact \
-  -H "Content-Type: application/json" \
-  -d '{"continuationToken":"eve:7f3c..."}'
-# {"ok":true,"sessionId":"ses_01h...","status":"accepted"}
+curl -X POST https://<deployment>/eve/v1/session/wrun_A/compact
+# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
-Compaction is asynchronous. A successful operation emits `compaction.requested` and `compaction.completed`, then returns through `session.waiting`; when a turn is active, the operation waits for it to settle. If summarization fails, the session still returns to `session.waiting` with its previous history. `"no_active_session"` is the successful no-op response when the token has no owner.
+Compaction is asynchronous. A successful operation emits `compaction.requested` and `compaction.completed`, then returns through `session.waiting`. When a turn is active, compaction waits for it to settle. If summarization fails, the session still returns to `session.waiting` with its previous history.
 
-See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for the full request and stream flow, including the complete event set.
+### Reset a session
+
+Reset terminally retires the exact session ID:
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session/wrun_A/reset \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"Start over"}'
+# {"ok":true,"previousSessionId":"wrun_A","status":"reset"}
+```
+
+After reset, the old ID cannot accept another message. Start a replacement explicitly with `POST /eve/v1/session`.
+
+The control routes never create sessions. `compact`, `clear`, and `reset` return `"no_active_session"` when the ID is already inactive. Session message and control request/response bodies do not accept or return continuation tokens. For compatibility, the streamed `session.waiting` event retains `data.continuationToken`: it is the channel-local token for a channel-addressed session and the immutable session ID for an ID-only session. New clients should continue through their fixed session handle instead of reading this field.
+
+See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for the complete event set, operation results, and cursor behavior.
 
 ## CORS
 
@@ -113,7 +159,7 @@ The `auth` option decides who can call `/eve/v1/info` and the session routes. Th
 
 Neither admits browser users or external clients in production. For a public app, wire the channel to your own auth (Clerk, Auth.js, your own OIDC/JWT verification, an API-key verifier, or any custom `AuthFn`). Vercel OIDC is optional; use it only when Vercel-issued deployment tokens are part of your trust model.
 
-`eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel checks Vercel OIDC before falling back to localhost access, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and eve falls back to `[vercelOidc(), localDev()]`, which still does not admit browser users in production.
+`eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel checks Vercel OIDC before falling back to localhost access, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and eve falls back to `[vercelOidc(), localDev(), placeholderAuth()]`, which rejects all production traffic.
 
 For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
 
@@ -135,9 +181,8 @@ export default eveChannel({
     };
   },
   events: {
-    "message.completed"(eventData, channel, ctx) {
+    "message.completed"(eventData, _channel, ctx) {
       console.log("eve response completed", {
-        continuationToken: channel.continuationToken,
         sessionId: ctx.session.id,
       });
     },
@@ -145,11 +190,14 @@ export default eveChannel({
 });
 ```
 
+`onMessage` must return an auth result. A successful canonical eve HTTP message
+always dispatches and therefore always produces or continues a session.
+
 ## Clients
 
 The browser side of this API lives in the [Frontend](../guides/frontend/overview) docs, where `useEveAgent` drives the eve channel from React UI.
 
-For scripts, server-to-server calls, evals, tests, and custom clients, use the [TypeScript SDK](../guides/client/overview). It wraps the session routes, continuation token, stream cursor, and reconnect loop.
+For scripts, server-to-server calls, evals, tests, and custom clients, use the [TypeScript SDK](../guides/client/overview). It wraps the ID-addressed session routes, stream cursor, and reconnect loop.
 
 ## What to read next
 

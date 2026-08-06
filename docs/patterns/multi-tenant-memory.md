@@ -3,7 +3,7 @@ title: "Multi-tenant memory"
 description: "Compose dynamic instructions, authenticated session context, and ordinary tools into tenant-scoped long-term memory."
 ---
 
-You can add long-term memory with a packaged [memory integration](/integrations?filter=memory), or build tenant-aware memory from your own application store by composing three existing eve primitives:
+You can add long-term memory from the [integration gallery](/integrations) using the Memory filter, or build tenant-aware memory from your own application store by composing three existing eve primitives:
 
 1. route auth puts the tenant and user on `ctx.session.auth`;
 2. dynamic instructions load that caller's memories before each turn;

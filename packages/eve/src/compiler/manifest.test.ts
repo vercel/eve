@@ -143,6 +143,22 @@ describe("compiledAgentManifestSchema", () => {
     expect(parsed.workflowTool).toEqual({ maxSubagents: 6 });
   });
 
+  it("preserves web search provider configuration", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+      webSearchProvider: "exa",
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(manifest);
+
+    expect(parsed.webSearchProvider).toBe("exa");
+  });
+
   it("preserves dynamic model resolver source", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",

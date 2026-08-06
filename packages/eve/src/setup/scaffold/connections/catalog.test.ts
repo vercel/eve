@@ -12,7 +12,7 @@ import {
   mcpServiceHost,
   SUPPORTED_PROTOCOLS,
 } from "./catalog.js";
-import { connectionEntries } from "@vercel/eve-catalog";
+import { connectionEntries } from "@eve/catalog";
 
 describe("catalog integrity", () => {
   test("every entry declares the endpoint for each protocol it lists", () => {

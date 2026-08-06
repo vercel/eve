@@ -23,10 +23,12 @@ export default defineEval({
       toolName: "guarded-echo",
     });
 
-    const approved = await t.respond({
-      requestId: request.requestId,
-      optionId: "approve",
-    });
+    const approved = await t.respond([
+      {
+        requestId: request.requestId,
+        optionId: "approve",
+      },
+    ]);
     approved.expectOk();
     approved.event("action.result", {
       data: {

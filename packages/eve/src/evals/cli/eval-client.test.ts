@@ -28,7 +28,6 @@ describe("resolveEvalClientOptions", () => {
       url: "https://example.vercel.app",
     });
     expect(options.host).toBe("https://example.vercel.app");
-    expect(options.preserveCompletedSessions).toBe(false);
     expect(options.headers).toBeUndefined();
     expect(options.auth).toBeUndefined();
   });

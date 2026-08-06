@@ -31,9 +31,8 @@ type Cancellation = {
 };
 
 export function AgentChat() {
-  const [session] = useState(() =>
-    new Client({ host: "", preserveCompletedSessions: true }).session(),
-  );
+  const [client] = useState(() => new Client({ host: "" }));
+  const sessionIdRef = useRef<string | undefined>(undefined);
   const cancellationRef = useRef<Cancellation>({ requested: false });
   const [cancellationError, setCancellationError] = useState<string>();
   const [cancellationState, setCancellationState] = useState<CancellationState>("idle");
@@ -48,18 +47,26 @@ export function AgentChat() {
       cancellation.sentTurnId = turnId;
       setCancellationState("cancelling");
 
-      void session.cancel({ turnId }).catch((error: unknown) => {
-        if (cancellationRef.current !== cancellation) {
-          return;
-        }
+      const sessionId = sessionIdRef.current;
+      if (sessionId === undefined) {
+        return;
+      }
 
-        cancellation.requested = false;
-        cancellation.sentTurnId = undefined;
-        setCancellationError(toErrorMessage(error));
-        setCancellationState("idle");
-      });
+      void client.sessions
+        .attach(sessionId)
+        .cancel({ turnId })
+        .catch((error: unknown) => {
+          if (cancellationRef.current !== cancellation) {
+            return;
+          }
+
+          cancellation.requested = false;
+          cancellation.sentTurnId = undefined;
+          setCancellationError(toErrorMessage(error));
+          setCancellationState("idle");
+        });
     },
-    [session],
+    [client],
   );
 
   const handleEvent = useCallback(
@@ -75,7 +82,12 @@ export function AgentChat() {
     [cancelTurn],
   );
 
-  const agent = useEveAgent({ onEvent: handleEvent, session });
+  const agent = useEveAgent({
+    onEvent: handleEvent,
+    onSessionChange(session) {
+      sessionIdRef.current = session?.sessionId;
+    },
+  });
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
   const isEmpty = agent.data.messages.length === 0;
   const errorMessage = cancellationError ?? agent.error?.message;
@@ -109,7 +121,7 @@ export function AgentChat() {
     prepareTurn();
 
     if (message.files.length === 0) {
-      await agent.send({ message: text });
+      await agent.send(text);
       return;
     }
 
@@ -126,7 +138,7 @@ export function AgentChat() {
       });
     }
 
-    await agent.send({ message: parts });
+    await agent.send(parts);
   };
 
   const composer = (
@@ -172,7 +184,7 @@ export function AgentChat() {
                 message={message}
                 onInputResponses={(inputResponses) => {
                   prepareTurn();
-                  return agent.send({ inputResponses });
+                  return agent.respond(inputResponses);
                 }}
               />
             ))}

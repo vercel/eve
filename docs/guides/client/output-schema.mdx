@@ -26,10 +26,8 @@ const outputSchema = {
   required: ["title", "count"],
 } as const;
 
-const client = new Client({ host: "http://127.0.0.1:3000" });
-const session = client.session();
-
-const response = await session.send<Summary>({
+const client = new Client({ host: "http://127.0.0.1:2000" });
+const { session, response } = await client.sessions.create<Summary>({
   message: "Summarize this turn.",
   outputSchema,
 });
@@ -56,8 +54,7 @@ const summarySchema = z.object({
 
 type Summary = z.infer<typeof summarySchema>;
 
-const response = await session.send<Summary>({
-  message: "Summarize this turn.",
+const response = await session.send<Summary>("Summarize this turn.", {
   outputSchema: summarySchema,
 });
 
@@ -71,8 +68,7 @@ The server is authoritative for validation. The client types `MessageResult.data
 If you consume events manually, read `result.completed`:
 
 ```ts
-const response = await session.send<Summary>({
-  message: "Summarize this turn.",
+const response = await session.send<Summary>("Summarize this turn.", {
   outputSchema,
 });
 
@@ -88,11 +84,10 @@ If more than one `result.completed` appears in the consumed event list, `result(
 
 ## Send payloads with output schema
 
-`outputSchema` works with string shorthand and object-form sends. Use object form when you need schema, headers, signal, context, attachments, or HITL responses:
+Pass `outputSchema` in the second argument to `send()` or `respond()` alongside headers, signal, or client context:
 
 ```ts
-const response = await session.send<Summary>({
-  message: "Summarize this PDF.",
+const response = await session.send<Summary>("Summarize this PDF.", {
   clientContext: { reportId: "rpt_123" },
   outputSchema,
 });
@@ -103,9 +98,7 @@ const result = await response.result();
 It also works on follow-up turns and HITL response turns:
 
 ```ts
-const response = await session.send({
-  inputResponses: [{ requestId, optionId: "approve" }],
-  message: "Return the approved action as structured output.",
+const response = await session.respond([{ requestId, optionId: "approve" }], {
   outputSchema,
 });
 
@@ -117,7 +110,7 @@ const result = await response.result();
 Client `outputSchema` is scoped to the turn that sends it. It doesn't become a permanent setting for the conversation:
 
 ```ts
-const response = await session.send({ message: "Return a structured summary.", outputSchema });
+const response = await session.send("Return a structured summary.", { outputSchema });
 await response.result();
 
 const followUpResponse = await session.send("Now answer normally.");

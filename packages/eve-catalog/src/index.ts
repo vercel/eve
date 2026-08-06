@@ -122,14 +122,16 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "github",
     name: "GitHub",
     kind: "channel",
-    tagline: "Drive your agent from issues, pull requests, and comments.",
+    tagline:
+      "Drive your agent from issues, pull requests, and comments, with guided Connect setup.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
     slug: "linear-agent",
     name: "Linear Agent",
     kind: "channel",
-    tagline: "Delegate Linear issues and comments to your agent through Linear's Agent Sessions.",
+    tagline:
+      "Delegate Linear issues and comments through Agent Sessions, with guided Connect setup.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
@@ -299,6 +301,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Upstash AgentKit",
     kind: "extension",
     tagline: "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "hindsight",
+    name: "Hindsight",
+    kind: "extension",
+    tagline: "Recall relevant context before every turn and retain each exchange automatically.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
@@ -551,6 +560,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "natural",
+    name: "Natural",
+    kind: "connection",
+    tagline: "Send, request, and manage payments with Natural.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Natural: agentic payments — send and request payments, check balances, and move funds.",
+      mcp: { url: "https://mcp.natural.com/mcp" },
+    },
+  },
+  {
     slug: "netlify",
     name: "Netlify",
     kind: "connection",
@@ -683,6 +704,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "tinybird",
+    name: "Tinybird",
+    kind: "connection",
+    tagline: "Query pipes and data sources in your Tinybird Workspace.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Tinybird: query pipes and data sources, and run SQL. A token grants one Workspace, so add a connection per Workspace.",
+      mcp: { url: "https://mcp.tinybird.co" },
+    },
+  },
+  {
     slug: "todoist",
     name: "Todoist",
     kind: "connection",
@@ -745,6 +778,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Braintrust",
     kind: "instrumentation",
     tagline: "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "posthog-instrumentation",
+    name: "PostHog",
+    kind: "instrumentation",
+    tagline: "Send agent traces and generations to PostHog AI Observability.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {

@@ -123,7 +123,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       promptCommandHandler: { handle },
       renderer,
       serverUrl: "http://localhost:3000",
-      session: client.session(),
+      session: client.sessions.attach("session_test"),
       initialInput: "/model",
     });
 

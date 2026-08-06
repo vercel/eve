@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
 import {
   createDevelopmentSourceSnapshotPlan,
@@ -86,6 +87,7 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
   );
   const sourceSnapshotPlan = await createDevelopmentSourceSnapshotPlan({
     appRoot: compileResult.project.appRoot,
+    authoredSourceRoots: collectExtensionMountSourceRoots(compileResult.manifest),
     snapshotRoot,
   });
 
@@ -277,6 +279,21 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
     retainCount: input.retainCount,
     snapshotsDirectory: resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(input.appRoot),
   });
+}
+
+/**
+ * Collects the workspace roots that host extension-authored source. Extension
+ * modules hydrate from disk at runtime through snapshot paths, so their
+ * packages stay real copies while other workspace dependencies are mounted.
+ */
+function collectExtensionMountSourceRoots(manifest?: CompiledAgentManifest): string[] {
+  if (manifest === undefined) {
+    return [];
+  }
+
+  return [manifest, ...(manifest.subagents ?? []).map((subagent) => subagent.agent)].flatMap(
+    (node) => (node.extensionMounts ?? []).map((mount) => mount.sourceRoot),
+  );
 }
 
 function readDevelopmentRuntimeArtifactsPointer(

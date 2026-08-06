@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { instrumentationEntries } from "@vercel/eve-catalog";
+import { instrumentationEntries } from "@eve/catalog";
 
 interface RegistryFile {
   path: string;
@@ -19,6 +19,7 @@ interface Registry {
 
 const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   braintrust: "braintrust",
+  "posthog-instrumentation": "posthog",
   "sentry-instrumentation": "sentry",
   "datadog-instrumentation": "datadog",
   "honeycomb-instrumentation": "honeycomb",

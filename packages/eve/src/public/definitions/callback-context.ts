@@ -14,8 +14,7 @@ export type { SessionAuth, SessionParent, SessionTurn };
  */
 export interface SessionContext {
   /**
-   * Active session metadata. Mirrors the `Session` type but exposes the
-   * identifier as `id` here, where `Session` names it `sessionId`.
+   * Active session metadata for the callback's exact durable session.
    */
   readonly session: {
     readonly id: string;

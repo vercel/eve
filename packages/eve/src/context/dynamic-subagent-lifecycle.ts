@@ -14,8 +14,12 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
-import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
+import {
+  createPreparedRuntimeSubagentTool,
+  getSubagentToolInputJsonSchema,
+} from "#runtime/subagents/registry.js";
 import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { normalizeDynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("dynamic-subagents");
@@ -27,8 +31,10 @@ async function resolveSelections(input: {
   readonly ctx: ContextContainer;
   readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
+  readonly persistentSessions: boolean;
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
 }): Promise<DynamicSubagentSelections> {
+  const inputSchema = getSubagentToolInputJsonSchema(input.persistentSessions);
   const outcomes = await Promise.allSettled(
     input.resolvers.map(async (resolver) => {
       const handler = resolver.events[input.event.type];
@@ -40,21 +46,48 @@ async function resolveSelections(input: {
       if (result === null || result === undefined) {
         return [resolver.nodeId, null] as const;
       }
+      if (isRemoteAgentDefinition(result)) {
+        const remoteAgent = await normalizeDynamicRemoteAgentConfig({
+          name: resolver.name,
+          value: result,
+        });
+        const prepared = createPreparedRuntimeSubagentTool(
+          {
+            description: remoteAgent.description,
+            kind: "remote",
+            logicalPath: resolver.logicalPath,
+            name: resolver.name,
+            nodeId: resolver.nodeId,
+            outputSchema: remoteAgent.outputSchema,
+            path: remoteAgent.path,
+            sourceId: resolver.sourceId,
+            sourceKind: resolver.sourceKind,
+            url: remoteAgent.url,
+          },
+          inputSchema,
+        );
+
+        return [resolver.nodeId, { kind: "remote", prepared, remoteAgent }] as const;
+      }
+
       const agentConfig = normalizeDynamicSubagentAgentConfig({
         name: resolver.name,
         value: result,
       });
-      const prepared = createPreparedRuntimeSubagentTool({
-        description: agentConfig.description,
-        kind: resolver.kind,
-        logicalPath: resolver.logicalPath,
-        name: resolver.name,
-        nodeId: resolver.nodeId,
-        sourceId: resolver.sourceId,
-        sourceKind: resolver.sourceKind,
-      });
+      const prepared = createPreparedRuntimeSubagentTool(
+        {
+          description: agentConfig.description,
+          kind: "subagent",
+          logicalPath: resolver.logicalPath,
+          name: resolver.name,
+          nodeId: resolver.nodeId,
+          sourceId: resolver.sourceId,
+          sourceKind: resolver.sourceKind,
+        },
+        inputSchema,
+      );
 
-      return [resolver.nodeId, { agentConfig, prepared }] as const;
+      return [resolver.nodeId, { agentConfig, kind: "subagent", prepared }] as const;
     }),
   );
   const selections: Record<string, DurableDynamicSubagentSelection> = {};
@@ -76,10 +109,19 @@ async function resolveSelections(input: {
   return selections;
 }
 
+function isRemoteAgentDefinition(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { readonly kind?: unknown }).kind === "remote"
+  );
+}
+
 export async function dispatchDynamicSubagentEvent(input: {
   readonly ctx: ContextContainer;
   readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
+  readonly persistentSessions: boolean;
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
 }): Promise<void> {
   if (!ALLOWED_DYNAMIC_SUBAGENT_EVENTS.has(input.event.type)) {
@@ -102,6 +144,7 @@ export async function refreshDynamicSessionSubagentsForRuntimeRevision(input: {
   readonly ctx: ContextContainer;
   readonly event: SessionStartedStreamEvent;
   readonly messages: readonly ModelMessage[];
+  readonly persistentSessions: boolean;
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
   readonly runtimeRevision: string;
 }): Promise<void> {

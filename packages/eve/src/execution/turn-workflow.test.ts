@@ -13,6 +13,7 @@ import {
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { turnStep } from "#execution/workflow-steps.js";
+import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 
 const resumeHookMock = vi.fn();
 const createHookMock = vi.fn();
@@ -336,9 +337,8 @@ describe("turnWorkflow", () => {
       serializedContext: { state: "start" },
       sessionState,
     });
-    // The cancel token is session-scoped so a trigger can derive it from
-    // the session id alone.
-    expect(cancelHookTokens()).toEqual(["wrun_test_123:cancel"]);
+    // The command inbox forwards cancellation to this turn-private hook.
+    expect(cancelHookTokens()).toEqual(["turn-token:cancel"]);
     // The cancelled result is a pure marker: the control payload carries
     // the cursor's last settled state, not the aborted step's echo.
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
@@ -434,10 +434,10 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
-    // The token is stable across turns: the next turn's claim must never
-    // race this run's teardown, so disposal precedes the terminal send.
+    // The next turn must never race this run's teardown, so disposal
+    // precedes the terminal send.
     const cancelHook = createHookMock.mock.results.find(
-      (result) => (result.value as { token?: string }).token === "wrun_test_123:cancel",
+      (result) => (result.value as { token?: string }).token === "turn-token:cancel",
     )?.value as { dispose: ReturnType<typeof vi.fn> };
     const resultCall = resumeHookMock.mock.calls.findIndex(
       (call) => call[1]?.kind === "turn-result",
@@ -465,7 +465,7 @@ describe("turnWorkflow", () => {
     expect(cancelHookTokens()).toEqual([]);
   });
 
-  it("registers no cancel hook when the session cannot park", async () => {
+  it("registers a cancel hook for a task session without a continuation alias", async () => {
     const sessionState = createSessionState({ continuationToken: "" });
     installInbox([]);
     vi.mocked(turnStep).mockResolvedValueOnce({
@@ -482,8 +482,8 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
-    expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeUndefined();
-    expect(cancelHookTokens()).toEqual([]);
+    expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
+    expect(cancelHookTokens()).toEqual(["turn-token:cancel"]);
   });
 
   it("deduplicates concurrent turn workflows through inbox ownership", async () => {
@@ -561,6 +561,7 @@ describe("turnWorkflow", () => {
           {
             callId: "call-1",
             kind: "subagent-result",
+            origin: "child",
             output: "child output",
             subagentName: "delegate",
           },
@@ -569,7 +570,9 @@ describe("turnWorkflow", () => {
     ]);
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
-      sessionState: pendingState,
+      sessionState: withRunningChildren(pendingState, [
+        { callId: "call-1", sessionId: "child-session" },
+      ]),
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -692,6 +695,7 @@ describe("turnWorkflow", () => {
           callId: "call-1",
           isError: true,
           kind: "subagent-result",
+          origin: "dispatch",
           output: { code: "REMOTE_AGENT_START_FAILED", message: "remote unavailable" },
           subagentName: "research",
         },
@@ -736,8 +740,12 @@ describe("turnWorkflow", () => {
   });
 
   it("proxies child HITL and pulls the response through the active turn", async () => {
+    const runningChildren = [{ callId: "call-1", sessionId: "child-session" }];
     const pendingState = createSessionState();
-    const proxyState = createSessionState({ hasProxyInputRequests: true });
+    const proxyState = withRunningChildren(
+      createSessionState({ hasProxyInputRequests: true }),
+      runningChildren,
+    );
     const completedState = createSessionState();
     const requestId = "turn-token:inbox:delivery:0";
     installInbox([
@@ -763,6 +771,7 @@ describe("turnWorkflow", () => {
           {
             callId: "call-1",
             kind: "subagent-result",
+            origin: "child",
             output: "approved child output",
             subagentName: "delegate",
           },
@@ -771,7 +780,7 @@ describe("turnWorkflow", () => {
     ]);
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
-      sessionState: pendingState,
+      sessionState: withRunningChildren(pendingState, runningChildren),
     });
     vi.mocked(runProxySubagentEventStep).mockResolvedValue({
       serializedContext: { state: "proxied" },
@@ -889,9 +898,10 @@ describe("turnWorkflow", () => {
   });
 
   it("proxies child authorization lifecycle events while continuing to await its result", async () => {
+    const runningChildren = [{ callId: "call-1", sessionId: "child-session" }];
     const pendingState = createSessionState();
-    const requiredState = createSessionState();
-    const completedAuthState = createSessionState();
+    const requiredState = withRunningChildren(createSessionState(), runningChildren);
+    const completedAuthState = withRunningChildren(createSessionState(), runningChildren);
     const completedState = createSessionState();
     const requiredEvent = {
       data: {
@@ -937,15 +947,17 @@ describe("turnWorkflow", () => {
           {
             callId: "call-1",
             kind: "subagent-result",
+            origin: "child",
             output: "authorized child output",
             subagentName: "delegate",
           },
         ],
       },
     ]);
+    const dispatchedState = withRunningChildren(pendingState, runningChildren);
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
-      sessionState: pendingState,
+      sessionState: dispatchedState,
     });
     vi.mocked(runProxySubagentEventStep)
       .mockResolvedValueOnce({
@@ -985,7 +997,7 @@ describe("turnWorkflow", () => {
           hookPayload: expect.objectContaining({ event: requiredEvent }),
           parentWritable,
           serializedContext: { state: "pending" },
-          sessionState: pendingState,
+          sessionState: dispatchedState,
         },
       ],
       [
@@ -1025,7 +1037,13 @@ describe("turnWorkflow", () => {
       {
         kind: "runtime-action-result",
         results: [
-          { callId: "call-1", kind: "subagent-result", output: "first", subagentName: "delegate" },
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            origin: "child",
+            output: "first",
+            subagentName: "delegate",
+          },
         ],
       },
       {
@@ -1042,6 +1060,7 @@ describe("turnWorkflow", () => {
           {
             callId: "call-2",
             kind: "subagent-result",
+            origin: "child",
             output: "second",
             subagentName: "delegate",
           },
@@ -1050,7 +1069,10 @@ describe("turnWorkflow", () => {
     ]);
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
-      sessionState: pendingState,
+      sessionState: withRunningChildren(pendingState, [
+        { callId: "call-1", sessionId: "child-session-1" },
+        { callId: "call-2", sessionId: "child-session-2" },
+      ]),
     });
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "continue",
@@ -1248,5 +1270,51 @@ function createSessionState(overrides: Partial<DurableSessionState> = {}): Durab
     sessionId: "wrun_test_123",
     version: 1,
     ...overrides,
+  };
+}
+
+/**
+ * Embeds a snapshot whose handle store owns each child as `running`, the
+ * shape the dispatch step commits: inbox results only resolve the wait when
+ * a running handle binds their callId to their claimed sessionId.
+ */
+function withRunningChildren(
+  state: DurableSessionState,
+  children: readonly { readonly callId: string; readonly sessionId: string }[],
+): DurableSessionState {
+  return {
+    ...state,
+    snapshot: {
+      session: {
+        agent: { system: "" },
+        continuationToken: state.continuationToken,
+        history: [],
+        sessionId: state.sessionId,
+        state: {
+          [AGENT_HANDLES_STATE_KEY]: {
+            handles: children.map((child) => ({
+              address: {
+                continuationToken: `subagent:parent:${child.callId}`,
+                kind: "agent/local",
+                sessionId: child.sessionId,
+              },
+              identity: {
+                id: `ag_delegate:${child.callId}`,
+                name: "delegate",
+                nodeId: "subagents/delegate",
+              },
+              operation: {
+                callId: child.callId,
+                id: `op-${child.callId}`,
+                kind: "start",
+                parentTurnId: "turn_0",
+              },
+              phase: "running",
+            })),
+          },
+        },
+      },
+      version: 1,
+    },
   };
 }

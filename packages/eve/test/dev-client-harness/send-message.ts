@@ -1,9 +1,9 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
-  EVE_CREATE_SESSION_ROUTE_PATH,
-  createEveContinueSessionRoutePath,
-  createEveMessageStreamRoutePath,
+  EVE_SESSION_ROUTE_PATH,
+  createEveSessionRoutePath,
+  createEveSessionStreamRoutePath,
 } from "#protocol/routes.js";
 import {
   createDevelopmentRequestHeadersAsync,
@@ -33,7 +33,7 @@ async function fetchDevelopmentSessionStreamResponse(input: {
   readonly response: Response;
 }> {
   const canonicalResourceUrl = resolveDevelopmentServerResourceUrl({
-    resource: createEveMessageStreamRoutePath(input.sessionId),
+    resource: createEveSessionStreamRoutePath(input.sessionId),
     serverUrl: input.serverUrl,
   });
   const requestResourceUrl = new URL(canonicalResourceUrl);
@@ -148,8 +148,8 @@ export async function sendDevelopmentMessage(input: {
 }> {
   const session = input.session;
   const routePath = session.sessionId
-    ? createEveContinueSessionRoutePath(session.sessionId)
-    : EVE_CREATE_SESSION_ROUTE_PATH;
+    ? createEveSessionRoutePath(session.sessionId)
+    : EVE_SESSION_ROUTE_PATH;
   const messageRouteUrl = resolveDevelopmentServerRouteUrl({
     routePath,
     serverUrl: input.serverUrl,
@@ -180,13 +180,10 @@ export async function sendDevelopmentMessage(input: {
     const payload = (await response.json()) as Record<string, unknown>;
 
     if (payload.status === "completed" && typeof payload.output === "string") {
-      const continuationToken =
-        typeof payload.continuationToken === "string" ? payload.continuationToken : undefined;
-
       return {
         completedMessage: payload.output,
         events: [],
-        session: createDevelopmentSessionState({ continuationToken }),
+        session: createDevelopmentSessionState(),
       };
     }
 
@@ -195,11 +192,6 @@ export async function sendDevelopmentMessage(input: {
       response.headers.get(EVE_SESSION_ID_HEADER)?.trim() ??
       session.sessionId ??
       undefined;
-    const continuationToken =
-      typeof payload.continuationToken === "string"
-        ? payload.continuationToken
-        : session.continuationToken;
-
     if (!sessionId) {
       throw new Error("Message route did not return a session id.");
     }
@@ -237,7 +229,6 @@ export async function sendDevelopmentMessage(input: {
     }
 
     const nextSession = updateDevelopmentSessionState({
-      continuationToken,
       events,
       sessionId,
       session,

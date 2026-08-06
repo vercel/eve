@@ -101,37 +101,61 @@ describe("ChannelAdapter helpers", () => {
     expect(defaultDeliverResult({})).toBeUndefined();
   });
 
-  it("publishes a continuation token re-keyed by the waiting handler", async () => {
+  it("publishes a waiting handler's re-keyed channel address", async () => {
     let continuationToken = "slack:temporary";
+    let observedToken: string | undefined;
     const context: ChannelAdapterContext = {
       ctx: {} as ChannelAdapterContext["ctx"],
       session: {
         auth: { current: null, initiator: null },
-        get continuationToken() {
-          return continuationToken;
-        },
         id: "session-1",
-        setContinuationToken(token) {
-          continuationToken = `slack:${token}`;
+        continuation: {
+          get token() {
+            return continuationToken.slice("slack:".length);
+          },
+          rekey(token: string) {
+            continuationToken = `slack:${token}`;
+          },
         },
       },
       state: {},
     };
     const adapter: ChannelAdapter = {
       kind: "slack",
-      "session.waiting"(_data, ctx) {
-        ctx.session.setContinuationToken("C1:T1");
+      "session.waiting"(data, ctx) {
+        observedToken = data.continuationToken;
+        ctx.session.continuation?.rekey("C1:T1");
       },
     };
 
+    const event = await callAdapterEventHandler(adapter, createSessionWaitingEvent(), context);
+
+    expect(event).toEqual({
+      data: { continuationToken: "C1:T1", wait: "next-user-message" },
+      type: "session.waiting",
+    });
+    expect(observedToken).toBe("temporary");
+    expect(continuationToken).toBe("slack:C1:T1");
+  });
+
+  it("publishes the session ID for an ID-only waiting session", async () => {
+    const context: ChannelAdapterContext = {
+      ctx: {} as ChannelAdapterContext["ctx"],
+      session: {
+        auth: { current: null, initiator: null },
+        id: "session-1",
+      },
+      state: {},
+    };
+
     const event = await callAdapterEventHandler(
-      adapter,
-      createSessionWaitingEvent("slack:temporary"),
+      { kind: "http" },
+      createSessionWaitingEvent(),
       context,
     );
 
     expect(event).toEqual({
-      data: { continuationToken: "C1:T1", wait: "next-user-message" },
+      data: { continuationToken: "session-1", wait: "next-user-message" },
       type: "session.waiting",
     });
   });

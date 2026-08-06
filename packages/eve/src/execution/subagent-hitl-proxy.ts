@@ -46,12 +46,7 @@ export async function emitProxiedInputRequest(input: {
 
   if (input.mode === "conversation") {
     const state = getHarnessEmissionState(input.session.state);
-    const nextState = await emitTurnEpilogue(
-      input.emit,
-      state,
-      input.mode,
-      input.session.continuationToken,
-    );
+    const nextState = await emitTurnEpilogue(input.emit, state, input.mode);
     nextSession = setHarnessEmissionState(input.session, nextState);
   }
 

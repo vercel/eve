@@ -30,6 +30,7 @@ import {
   buildWithNitroRolldown,
 } from "#internal/bundler/nitro-rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
+import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
 const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
@@ -268,16 +269,20 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     moduleMapPath: input.moduleMapPath,
   });
   const extensionScopePlugin = createExtensionScopePlugin(
-    input.manifest.extensionMounts.map((mount) => ({
-      packageNamespace: mount.packageNamespace,
-      sourceRoot: mount.sourceRoot,
-    })),
+    [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
+      (node) =>
+        node.extensionMounts.map((mount) => ({
+          packageNamespace: mount.packageNamespace,
+          sourceRoot: mount.sourceRoot,
+        })),
+    ),
   );
   const plugins = [
     createVirtualGenerationModuleMapPlugin({
       id: input.moduleMapPath,
       source: moduleMapSource,
     }),
+    createDynamicCapabilityTransformPlugin({ dynamicTools: false }),
     createAuthoredDirectiveGuardPlugin(),
     extensionScopePlugin,
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),

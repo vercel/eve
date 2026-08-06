@@ -12,7 +12,14 @@ import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import type { ClientAuth, HeadersValue, SendTurnPayload, SessionState } from "#client/types.js";
+import type { UserContent } from "ai";
+import type {
+  ClientAuth,
+  HeadersValue,
+  RespondTurnOptions,
+  SendTurnOptions,
+  ClientSessionState,
+} from "#client/types.js";
 
 export type { PrepareSend };
 
@@ -39,8 +46,16 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
 export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
   /** Resets the session: aborts any in-flight turn, recreates the owned session, and clears events and projected data. */
   readonly reset: () => void;
-  /** Sends a turn (message, HITL responses, and/or client context). Rejects if a turn is already in flight. */
-  readonly send: <TOutput = unknown>(input: SendTurnPayload<TOutput>) => Promise<void>;
+  /** Sends a message. Rejects if a turn is already in flight. */
+  readonly send: <TOutput = unknown>(
+    message: string | UserContent,
+    options?: SendTurnOptions<TOutput>,
+  ) => Promise<void>;
+  /** Answers pending HITL input requests. Rejects if a turn is already in flight. */
+  readonly respond: <TOutput = unknown>(
+    inputResponses: Parameters<ClientSession["respond"]>[0],
+    options?: RespondTurnOptions<TOutput>,
+  ) => Promise<void>;
   /** Aborts the in-flight turn's stream, if any. */
   readonly stop: () => void;
 }
@@ -77,7 +92,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly host?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
   readonly initialEvents?: readonly MessageStreamEvent[];
-  readonly initialSession?: SessionState;
+  readonly initialSession?: ClientSessionState;
   /**
    * Project submitted user messages before eve confirms them with a
    * `message.received` stream event.
@@ -104,7 +119,7 @@ export function useEveAgent<TData>(
  * React hook that drives an eve session and projects its event stream into UI data.
  *
  * Returns the current snapshot (`data`, `events`, `session`, `status`, `error`)
- * plus the commands `send`, `stop`, and `reset`. With no reducer, `data` is the
+ * plus the commands `send`, `respond`, `stop`, and `reset`. With no reducer, `data` is the
  * built-in `UIMessage` projection from {@link defaultMessageReducer} (`TData`
  * is {@link EveMessageData}); pass a reducer to project into your own shape and
  * infer `TData`.
@@ -155,9 +170,16 @@ export function useEveAgent<TData>(
 
   const reset = useCallback(() => store.reset(), [store]);
   const send = useCallback(
-    <TOutput = unknown>(input: SendTurnPayload<TOutput>) => {
-      return store.send(input);
+    <TOutput = unknown>(message: string | UserContent, options?: SendTurnOptions<TOutput>) => {
+      return store.send({ ...options, message });
     },
+    [store],
+  );
+  const respond = useCallback(
+    <TOutput = unknown>(
+      inputResponses: Parameters<ClientSession["respond"]>[0],
+      options?: RespondTurnOptions<TOutput>,
+    ) => store.send({ ...options, inputResponses }),
     [store],
   );
   const stop = useCallback(() => store.stop(), [store]);
@@ -166,9 +188,10 @@ export function useEveAgent<TData>(
     () => ({
       ...snapshot,
       reset,
+      respond,
       send,
       stop,
     }),
-    [reset, send, snapshot, stop],
+    [reset, respond, send, snapshot, stop],
   );
 }

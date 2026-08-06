@@ -1,5 +1,5 @@
 {
-  "name": "@vercel/eve-catalog",
+  "name": "@eve/catalog",
   "version": "0.0.1",
   "private": true,
   "description": "Single source of truth for eve integration identity (channels, connections, and extensions).",

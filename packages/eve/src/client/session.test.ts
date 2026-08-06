@@ -1,23 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ClientError } from "#client/client-error.js";
 import { ClientSession } from "#client/session.js";
-import type { SessionState } from "#client/types.js";
+import type { ClientSessionState } from "#client/types.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 function createSession(
-  state: SessionState = { streamIndex: 0 },
+  state: ClientSessionState = { sessionId: "session_1", streamIndex: 0 },
   options: {
-    readonly preserveCompletedSessions?: boolean;
     readonly redirect?: "error" | "follow" | "manual";
     readonly resolveHeaders?: () => Promise<Headers>;
   } = {},
 ) {
   const context: ConstructorParameters<typeof ClientSession>[0] = {
     host: "https://eve.test",
-    preserveCompletedSessions: options.preserveCompletedSessions ?? false,
     redirect: options.redirect,
     resolveHeaders: options.resolveHeaders ?? (async () => new Headers()),
   };
@@ -50,7 +49,6 @@ async function collectEventTypes(events: AsyncIterable<{ type: string }>): Promi
 function createAcceptedResponse() {
   return Response.json(
     {
-      continuationToken: "eve:test",
       ok: true,
       sessionId: "session_1",
     },
@@ -99,7 +97,7 @@ describe("ClientSession", () => {
       return createAcceptedResponse();
     });
     const session = createSession(
-      { streamIndex: 0 },
+      { sessionId: "session_1", streamIndex: 0 },
       {
         redirect: "error",
         resolveHeaders: async () => {
@@ -121,10 +119,6 @@ describe("ClientSession", () => {
     expect(requests[1]!.headers.get("authorization")).toBe("Bearer token-2");
   });
 
-  it("rejects cancellation before a session has started", async () => {
-    await expect(createSession().cancel()).rejects.toThrow("Session has no session ID");
-  });
-
   it("snapshots the session from the start through one pinned durable tail", async () => {
     const requests: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
@@ -136,13 +130,12 @@ describe("ClientSession", () => {
         { type: "turn.started", data: { turnId: "turn_1" } },
         {
           type: "session.waiting",
-          data: { continuationToken: "eve:current", wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ];
       return createBoundedStreamResponse(events);
     });
     const initialState = {
-      continuationToken: "eve:stale",
       sessionId: "session_1",
       streamIndex: 9,
     };
@@ -155,7 +148,6 @@ describe("ClientSession", () => {
     expect(requestUrl.searchParams.get("includeTailIndex")).toBe("1");
     expect(snapshot.events.map((event) => event.type)).toEqual(["turn.started", "session.waiting"]);
     expect(snapshot.session).toEqual({
-      continuationToken: "eve:current",
       sessionId: "session_1",
       streamIndex: 2,
     });
@@ -190,7 +182,6 @@ describe("ClientSession", () => {
       ]),
     );
     const initialState = {
-      continuationToken: "eve:stale",
       sessionId: "session_1",
       streamIndex: 4,
     };
@@ -202,12 +193,11 @@ describe("ClientSession", () => {
     expect(session.state).toBe(initialState);
   });
 
-  it("omits the continuation token while the snapshotted turn is active", async () => {
+  it("snapshots an active turn without changing the fixed handle", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       createBoundedStreamResponse([{ type: "turn.started", data: { turnId: "turn_1" } }]),
     );
     const initialState = {
-      continuationToken: "eve:previous",
       sessionId: "session_1",
       streamIndex: 4,
     };
@@ -222,7 +212,6 @@ describe("ClientSession", () => {
   it("preserves an empty session without mutating its handle", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(createBoundedStreamResponse([]));
     const initialState = {
-      continuationToken: "eve:pending",
       sessionId: "session_1",
       streamIndex: 0,
     };
@@ -245,7 +234,6 @@ describe("ClientSession", () => {
       return createBoundedStreamResponse([]);
     });
     const initialState = {
-      continuationToken: "eve:current",
       sessionId: "session_1",
       streamIndex: 3,
     };
@@ -254,32 +242,6 @@ describe("ClientSession", () => {
     controller.abort(new DOMException("Aborted", "AbortError"));
 
     await expect(session.snapshot({ signal: controller.signal })).rejects.toThrow("Aborted");
-    expect(session.state).toBe(initialState);
-  });
-
-  it("preserves completed-session continuation when configured", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      createBoundedStreamResponse([
-        {
-          type: "session.completed",
-          data: { reason: "completed" },
-        },
-      ]),
-    );
-    const initialState = {
-      continuationToken: "eve:current",
-      sessionId: "session_1",
-      streamIndex: 3,
-    };
-    const session = createSession(initialState, { preserveCompletedSessions: true });
-
-    const snapshot = await session.snapshot();
-
-    expect(snapshot.session).toEqual({
-      continuationToken: "eve:current",
-      sessionId: "session_1",
-      streamIndex: 1,
-    });
     expect(session.state).toBe(initialState);
   });
 
@@ -295,8 +257,31 @@ describe("ClientSession", () => {
     await expect(session.cancel()).rejects.toThrow("Cancel route returned an invalid response");
   });
 
+  it("exposes a typed session_not_active conflict", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        {
+          code: "session_not_active",
+          error: "The session is no longer active.",
+          ok: false,
+        },
+        { status: 409 },
+      ),
+    );
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    const error = await session.send("too late").catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ClientError);
+    expect(error).toMatchObject({
+      code: "session_not_active",
+      message: "The session is no longer active.",
+      status: 409,
+    });
+  });
+
   it("queues a context clear without clearing the local session cursor", async () => {
-    const state = { continuationToken: "eve:test", sessionId: "session_1", streamIndex: 4 };
+    const state = { sessionId: "session_1", streamIndex: 4 };
     const requests: Array<{ body?: string; method: string; url: string }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
       const url =
@@ -319,20 +304,13 @@ describe("ClientSession", () => {
     });
 
     expect(session.state).toEqual(state);
-    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/clear");
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/session_1/clear");
     expect(requests[0]!.method).toBe("POST");
-    expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({ continuationToken: "eve:test" });
-  });
-
-  it("treats clearing a never-started session as a successful no-op", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch");
-
-    await expect(createSession().clear()).resolves.toEqual({ status: "no_active_session" });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({});
   });
 
   it("queues compaction without clearing the local session cursor", async () => {
-    const state = { continuationToken: "eve:test", sessionId: "session_1", streamIndex: 4 };
+    const state = { sessionId: "session_1", streamIndex: 4 };
     const requests: Array<{ body?: string; method: string; url: string }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
       const url =
@@ -355,19 +333,12 @@ describe("ClientSession", () => {
     });
 
     expect(session.state).toEqual(state);
-    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/compact");
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/session_1/compact");
     expect(requests[0]!.method).toBe("POST");
-    expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({ continuationToken: "eve:test" });
+    expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({});
   });
 
-  it("treats compacting a never-started session as a successful no-op", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch");
-
-    await expect(createSession().compact()).resolves.toEqual({ status: "no_active_session" });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("resets the continuation owner and clears the local session state", async () => {
+  it("resets the exact session while keeping the handle pinned to its ID", async () => {
     let headerResolution = 0;
     const requests: Array<{ headers: Headers; method: string; url: string; body?: string }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
@@ -386,7 +357,7 @@ describe("ClientSession", () => {
       });
     });
     const session = createSession(
-      { continuationToken: "eve:test", sessionId: "session_1", streamIndex: 4 },
+      { sessionId: "session_1", streamIndex: 4 },
       {
         redirect: "error",
         resolveHeaders: async () => {
@@ -401,29 +372,12 @@ describe("ClientSession", () => {
       status: "reset",
     });
 
-    expect(session.state).toEqual({ streamIndex: 0 });
+    expect(session.state).toEqual({ sessionId: "session_1", streamIndex: 4 });
     expect(requests).toHaveLength(1);
-    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/reset");
+    expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/session_1/reset");
     expect(requests[0]!.method).toBe("POST");
     expect(requests[0]!.headers.get("authorization")).toBe("Bearer token-1");
-    expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({ continuationToken: "eve:test" });
-  });
-
-  it("treats a never-started session as already reset", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch");
-    const session = createSession();
-
-    await expect(session.reset()).resolves.toEqual({ status: "no_active_session" });
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(session.state).toEqual({ streamIndex: 0 });
-  });
-
-  it("refuses to discard a session that has no continuation token", async () => {
-    const session = createSession({ sessionId: "session_1", streamIndex: 4 });
-
-    await expect(session.reset()).rejects.toThrow("Consume its event stream before resetting");
-    expect(session.state).toEqual({ sessionId: "session_1", streamIndex: 4 });
+    expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({});
   });
 
   it("preserves the local session when the reset response names another owner", async () => {
@@ -434,21 +388,18 @@ describe("ClientSession", () => {
         status: "reset",
       }),
     );
-    const state = { continuationToken: "eve:test", sessionId: "session_1", streamIndex: 4 };
+    const state = { sessionId: "session_1", streamIndex: 4 };
     const session = createSession(state);
 
     await expect(session.reset()).rejects.toThrow("Reset route returned an invalid response");
     expect(session.state).toEqual(state);
   });
 
-  it("serializes clientContext when sending a create-session message", async () => {
+  it("serializes clientContext with a fixed-session message", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession();
 
-    await session.send({
-      clientContext: { selectedWord: "jazz" },
-      message: "What word is selected?",
-    });
+    await session.send("What word is selected?", { clientContext: { selectedWord: "jazz" } });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
@@ -461,38 +412,32 @@ describe("ClientSession", () => {
   it("serializes clientContext when continuing a session", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession({
-      continuationToken: "eve:test",
       sessionId: "session_1",
       streamIndex: 0,
     });
 
-    await session.send({
+    await session.respond([{ requestId: "approval_1", optionId: "approve" }], {
       clientContext: "approve button visible",
-      inputResponses: [{ requestId: "approval_1", optionId: "approve" }],
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(JSON.parse(String(init.body))).toEqual({
       clientContext: "approve button visible",
-      continuationToken: "eve:test",
       inputResponses: [{ requestId: "approval_1", optionId: "approve" }],
     });
   });
 
-  it("rejects clientContext-only sends", async () => {
+  it("rejects empty input responses", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession({
-      continuationToken: "eve:test",
       sessionId: "session_1",
       streamIndex: 0,
     });
 
-    await expect(
-      session.send({
-        clientContext: { selectedWord: "jazz" },
-      }),
-    ).rejects.toThrow("Session.send requires a non-empty message, inputResponses, or both.");
+    await expect(session.respond([], { clientContext: { selectedWord: "jazz" } })).rejects.toThrow(
+      "ClientSession.respond() requires at least one input response.",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -515,7 +460,7 @@ describe("ClientSession", () => {
       return createStreamResponse([
         {
           type: "session.waiting",
-          data: { continuationToken: "eve:rekeyed", wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]);
     });
@@ -531,7 +476,6 @@ describe("ClientSession", () => {
     const postRequests = requests.filter((request) => request.method === "POST");
     expect(new URL(postRequests[1]!.url).pathname).toBe("/eve/v1/session/session_1");
     expect(postRequests[1]!.body).toEqual({
-      continuationToken: "eve:rekeyed",
       message: "second",
     });
   });
@@ -545,7 +489,7 @@ describe("ClientSession", () => {
           encoder.encode(
             `${JSON.stringify({
               type: "session.waiting",
-              data: { continuationToken: "eve:test", wait: "next-user-message" },
+              data: { continuationToken: "session-id", wait: "next-user-message" },
             })}\n`,
           ),
         );
@@ -569,7 +513,7 @@ describe("ClientSession", () => {
     expect(cancelled).toBe(true);
   });
 
-  it("resets the session by default after consuming through session.completed", async () => {
+  it("keeps the fixed session ID after consuming through session.completed", async () => {
     const requests: Array<{ body?: unknown; method: string; url: string }> = [];
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
       const url =
@@ -594,40 +538,8 @@ describe("ClientSession", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const postRequests = requests.filter((request) => request.method === "POST");
-    expect(new URL(postRequests[1]!.url).pathname).toBe("/eve/v1/session");
-    expect(postRequests[1]!.body).toEqual({
-      message: "second",
-    });
-  });
-
-  it("continues the session after session.completed when configured", async () => {
-    const requests: Array<{ body?: unknown; method: string; url: string }> = [];
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
-      const url =
-        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
-      const method = init?.method ?? "GET";
-      requests.push({
-        body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
-        method,
-        url,
-      });
-
-      if (method === "POST") {
-        return createAcceptedResponse();
-      }
-
-      return createStreamResponse([{ type: "session.completed", data: {} }]);
-    });
-    const session = createSession({ streamIndex: 0 }, { preserveCompletedSessions: true });
-
-    await (await session.send("first")).result();
-    await session.send("second");
-
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    const postRequests = requests.filter((request) => request.method === "POST");
     expect(new URL(postRequests[1]!.url).pathname).toBe("/eve/v1/session/session_1");
     expect(postRequests[1]!.body).toEqual({
-      continuationToken: "eve:test",
       message: "second",
     });
   });
@@ -656,7 +568,7 @@ describe("ClientSession", () => {
         },
         {
           type: "session.waiting",
-          data: { continuationToken: "eve:test", wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]);
     });
@@ -676,12 +588,11 @@ describe("ClientSession", () => {
       return createStreamResponse([
         {
           type: "session.waiting",
-          data: { continuationToken: "eve:test", wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]);
     });
     const initialState = {
-      continuationToken: "eve:test",
       sessionId: "session_1",
       streamIndex: 7,
     };
@@ -716,7 +627,7 @@ describe("ClientSession", () => {
                 encoder.encode(
                   `${JSON.stringify({
                     type: "session.waiting",
-                    data: { continuationToken: "eve:test", wait: "next-user-message" },
+                    data: { continuationToken: "session-id", wait: "next-user-message" },
                   })}\n`,
                 ),
               );
@@ -763,8 +674,7 @@ describe("ClientSession", () => {
     const session = createSession();
 
     const eventTypes: string[] = [];
-    for await (const event of await session.send({
-      message: "first",
+    for await (const event of await session.send("first", {
       streamReconnectPolicy: { reconnect: false },
     })) {
       eventTypes.push(event.type);
@@ -855,7 +765,7 @@ describe("ClientSession", () => {
       return createStreamResponse([
         {
           type: "session.waiting",
-          data: { continuationToken: "eve:test", wait: "next-user-message" },
+          data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]);
     });
@@ -902,17 +812,13 @@ describe("ClientSession", () => {
     const session = createSession();
 
     const eventTypes: string[] = [];
-    for await (const event of await session.send({
-      message: "first",
-      signal: abortController.signal,
-    })) {
+    for await (const event of await session.send("first", { signal: abortController.signal })) {
       eventTypes.push(event.type);
       abortController.abort();
     }
 
     expect(eventTypes).toEqual(["turn.started"]);
     expect(session.state).toEqual({
-      continuationToken: "eve:test",
       sessionId: "session_1",
       streamIndex: 1,
     });
@@ -931,7 +837,7 @@ describe("ClientSession", () => {
         return createStreamResponse([
           {
             type: "session.waiting",
-            data: { continuationToken: "eve:first", wait: "next-user-message" },
+            data: { continuationToken: "session-id", wait: "next-user-message" },
           },
         ]);
       }
@@ -962,7 +868,6 @@ describe("ClientSession", () => {
 
     expect(streamStartIndices).toEqual([null, "1"]);
     expect(session.state).toEqual({
-      continuationToken: "eve:first",
       sessionId: "session_1",
       streamIndex: 2,
     });

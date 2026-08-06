@@ -31,7 +31,7 @@ export function normalizeDynamicSubagentAgentConfig(input: {
   readonly name: string;
   readonly value: unknown;
 }): DynamicSubagentAgentConfig {
-  const message = `Dynamic subagent "${input.name}" must return defineAgent({ description, model, ... }) or null.`;
+  const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineRemoteAgent(...), or null.`;
   const definition = normalizeAgentDefinition(input.value, message);
 
   if (!definition.description) {

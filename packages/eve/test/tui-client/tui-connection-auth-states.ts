@@ -43,10 +43,9 @@ class FakeSession extends ClientSession {
     super(
       {
         host: "http://fake.invalid",
-        preserveCompletedSessions: false,
         resolveHeaders: async () => new Headers(),
       },
-      { streamIndex: 0 },
+      { sessionId: "fake-session", streamIndex: 0 },
     );
     this.#turns = input.turns;
     this.#continuations = input.continuations;
@@ -57,7 +56,6 @@ class FakeSession extends ClientSession {
     this.#turnIndex += 1;
     return new MessageResponse<TOutput>({
       sessionId: "fake-session",
-      continuationToken: `fake-token-${this.#turnIndex}`,
       createStream: () => pacedEvents(events),
     });
   }
@@ -123,7 +121,7 @@ const firstTurn: UnstampedMessageStreamEvent[] = [
   },
   {
     type: "session.waiting",
-    data: { continuationToken: "eve:test", wait: "next-user-message" },
+    data: { continuationToken: "session-id", wait: "next-user-message" },
   },
 ];
 
@@ -144,7 +142,7 @@ const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
   },
   {
     type: "session.waiting",
-    data: { continuationToken: "eve:test", wait: "next-user-message" },
+    data: { continuationToken: "session-id", wait: "next-user-message" },
   },
 ];
 
@@ -172,7 +170,7 @@ const secondTurn: UnstampedMessageStreamEvent[] = [
   },
   {
     type: "session.waiting",
-    data: { continuationToken: "eve:test", wait: "next-user-message" },
+    data: { continuationToken: "session-id", wait: "next-user-message" },
   },
 ];
 
@@ -194,7 +192,7 @@ const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
   },
   {
     type: "session.waiting",
-    data: { continuationToken: "eve:test", wait: "next-user-message" },
+    data: { continuationToken: "session-id", wait: "next-user-message" },
   },
 ];
 

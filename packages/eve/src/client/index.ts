@@ -10,6 +10,7 @@ export { defaultMessageReducer } from "#client/message-reducer.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
 export { ClientSession } from "#client/session.js";
+export { ClientSessions, type CreatedClientSession } from "#client/sessions.js";
 
 // ---------------------------------------------------------------------------
 // Client types
@@ -51,12 +52,13 @@ export type {
   HeadersValue,
   HealthResult,
   MessageResult,
+  RespondTurnOptions,
   ResetResult,
   ResolvedStreamReconnectPolicy,
   SendTurnInput,
-  SendTurnPayload,
+  SendTurnOptions,
   SessionSnapshot,
-  SessionState,
+  ClientSessionState,
   StreamOptions,
   StreamReconnectPolicy,
   StreamReconnectRetryPolicy,
@@ -90,6 +92,7 @@ export type {
 // ---------------------------------------------------------------------------
 
 export type {
+  ActionPartialStreamEvent,
   ActionResultStreamEvent,
   ActionsRequestedStreamEvent,
   AssistantStepFinishReason,

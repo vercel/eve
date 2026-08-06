@@ -88,7 +88,7 @@ const agent = useEveAgent({
 });
 ```
 
-The default eve channel is fail-closed. With no `agent/channels/eve.ts` authored, eve registers `eveChannel({ auth: [vercelOidc(), localDev()] })`: `vercelOidc()` gets the first chance to resolve a Vercel caller, `localDev()` opens the remaining localhost requests, and everything else gets a `401`. To run your app's own auth policy, add `agent/channels/eve.ts`:
+The default eve channel is fail-closed. With no `agent/channels/eve.ts` authored, eve registers `eveChannel({ auth: [vercelOidc(), localDev(), placeholderAuth()] })`: `vercelOidc()` gets the first chance to resolve a Vercel caller, `localDev()` authenticates while the process is an `eve dev` or `vercel dev` server, and everything else gets a `401`. To run your app's own auth policy, add `agent/channels/eve.ts`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
