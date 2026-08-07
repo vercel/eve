@@ -100,6 +100,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       auth: null,
       caller,
       kind: "deliver",
+      payload: { message: "hello" },
       payloads: [{ message: "hello" }],
       requestId: "req_deliver",
     });
@@ -136,6 +137,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       auth: undefined,
       caller: undefined,
       kind: "deliver",
+      payload: { message: "hello" },
       payloads: [{ message: "hello" }],
       requestId: undefined,
     });

@@ -241,10 +241,13 @@ describe("routeProxiedDeliverStep", () => {
 
     expect(resumeHookMock).toHaveBeenCalledWith("child-token", {
       auth,
-      kind: "send",
+      caller: undefined,
+      kind: "deliver",
       payload: {
         inputResponses: [{ optionId: "approve", requestId: "request-1" }],
       },
+      payloads: [{ inputResponses: [{ optionId: "approve", requestId: "request-1" }] }],
+      requestId: undefined,
     });
   });
 });

@@ -1,6 +1,6 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
-import type { DeliverPayload, SessionAuthContext, SessionCommand } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
@@ -28,6 +28,7 @@ import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-
 import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import {
@@ -646,12 +647,12 @@ export async function routeProxiedDeliverStep(input: {
   });
 
   for (const forChild of routed.forChildren) {
-    const command = {
-      auth: input.auth,
-      kind: "send",
-      payload: forChild.payload,
-    } satisfies SessionCommand;
-    await resumeHook(forChild.childContinuationToken, command);
+    // Children are pinned to their own deployments, so proxied deliveries
+    // must cross this hook in the same durable envelope as channel sends.
+    await resumeHook(
+      forChild.childContinuationToken,
+      sendCommandToDelivery({ auth: input.auth, kind: "send", payload: forChild.payload }),
+    );
   }
 
   return routed.parentAction ?? { kind: "continue", remainder: routed.forSelf };

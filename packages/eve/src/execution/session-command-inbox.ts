@@ -6,6 +6,7 @@ import type {
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
+import { bundledEveVersion } from "#internal/package-version.js";
 
 /**
  * Payloads accepted by a session driver's stable and channel aliases.
@@ -99,7 +100,14 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
   };
 
   const createState = (token: string): SessionCommandHookState => {
-    const hook = createHook<SessionInboxPayload>({ token });
+    // Stamp the consumer's eve version so producers can read it pre-resume
+    // (`getHookByToken(...).metadata`) and version-gate future wire changes.
+    // Hooks created before this stamp carry no metadata: markerless means
+    // the consumer predates it and only understands the legacy shapes.
+    const hook = createHook<SessionInboxPayload>({
+      metadata: { eveVersion: bundledEveVersion() },
+      token,
+    });
     return {
       closed: false,
       enabled: false,

@@ -4,28 +4,18 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
+import { bundledEveVersion } from "#internal/package-version.js";
 
 let cachedPackageInfo: InstalledPackageInfo | undefined;
 let cachedPackageLocation: PackageLocation | undefined;
-// The package build stamps the published version into `dist` so bundled
-// deployments can still report package metadata without resolving package.json.
-const BUNDLED_FALLBACK_PACKAGE_VERSION: string = "__EVE_PACKAGE_VERSION__";
 const WORKFLOW_MODULE_ALIASES = {
   "workflow/errors": "src/compiled/@workflow/errors/index.js",
   "workflow/internal/private": "src/compiled/@workflow/core/private.js",
 } as const;
 
-function resolveFallbackPackageVersion(): string {
-  // Detect an unstamped build by the token's `__` shape — spelling the token
-  // out in a comparison would get rewritten by the stamp itself.
-  return BUNDLED_FALLBACK_PACKAGE_VERSION.startsWith("__")
-    ? "0.0.0"
-    : BUNDLED_FALLBACK_PACKAGE_VERSION;
-}
-
 const FALLBACK_PACKAGE_INFO: InstalledPackageInfo = {
   name: EVE_PACKAGE_NAME,
-  version: resolveFallbackPackageVersion(),
+  version: bundledEveVersion(),
 };
 
 interface InstalledPackageInfo {

@@ -13,13 +13,17 @@ const WORKFLOW_EVENTS_DIR = resolve(".eve", ".workflow-data", "events");
 
 /**
  * A channel-address follow-up crosses the durable continuation-hook boundary,
- * and the persisted hook payload must stay on the frozen `deliver` envelope.
+ * and the persisted hook payload must stay on the frozen `deliver` envelope
+ * with the transitional single-payload mirror (`payload` alongside
+ * `payloads`) that keeps eve 0.30.3–0.30.8 parked consumers receiving
+ * messages. Drop the mirror assertion together with the encoder mirror once
+ * that cohort has aged out (30-day session timeout).
  *
  * The behavioral half (a same-version follow-up turn) passes even if producer
  * and consumer change the wire together — exactly how the 0.30.3 `send`
  * regression shipped. The byte-level half closes that hole: on worlds with a
  * local event log, the eval decodes the persisted `hook_received` payload and
- * fails loudly when its discriminator is not `deliver`.
+ * fails loudly when the envelope shape drifts.
  */
 export default defineEval({
   description: "Custom channel continuation preserves the durable delivery wire protocol.",
@@ -73,8 +77,17 @@ export default defineEval({
       await t.require(
         payload,
         satisfies(
-          (text: string) => text.includes('"deliver"'),
+          (text: string) => text.includes('"deliver"') && text.includes('"payloads"'),
           "the persisted continuation payload uses the frozen `deliver` envelope",
+        ),
+      );
+      await t.require(
+        payload,
+        satisfies(
+          // `"payload"` never matches inside `"payloads"`: the closing quote
+          // pins the exact key.
+          (text: string) => /"payload"/.test(text),
+          "the persisted envelope mirrors `payload` for 0.30.3–0.30.8 parked consumers",
         ),
       );
     }
