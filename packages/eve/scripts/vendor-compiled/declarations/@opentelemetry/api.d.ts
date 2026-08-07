@@ -7,7 +7,6 @@ export interface SpanContext {
 }
 
 export interface Span {
-  /** `timestamp` is epoch milliseconds; omitted means now. */
   addEvent(name: string, attributes?: Attributes, timestamp?: number): this;
   end(): void;
   recordException(
@@ -25,7 +24,6 @@ export interface Tracer {
       attributes?: Attributes | undefined;
       kind?: SpanKind | undefined;
       root?: boolean | undefined;
-      /** Epoch milliseconds; omitted means now. */
       startTime?: number | undefined;
     },
     context?: Context,

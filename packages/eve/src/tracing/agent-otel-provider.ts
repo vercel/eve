@@ -62,11 +62,6 @@ export interface AgentOtelInstrumentationInput {
    */
   readonly captureContent?: boolean;
   readonly frameworkVersion: string;
-  /**
-   * Must be the registered tracer provider's id generator, so a turn span
-   * emitted at its terminal carries the pre-allocated id (see
-   * {@link AgentSpanIdGenerator}).
-   */
   readonly idGenerator: AgentSpanIdGenerator;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
