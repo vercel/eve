@@ -65,9 +65,16 @@ function terminalView(
 
 export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskTransitionResult {
   if (isTerminalTaskStatus(view.status)) {
-    if (command.kind === "record-usage") {
-      if (sameUsage(view.usage, command.usage)) return { outcome: "noop", view };
-      return { outcome: "accepted", view: { ...view, usage: command.usage } };
+    if (command.kind === "settle-executor") {
+      const executor = { ...view.executor, lifecycle: "terminal" as const };
+      if (sameUsage(view.usage, command.usage) && view.executor?.lifecycle === "terminal") {
+        return { outcome: "noop", view };
+      }
+      const next = { ...view, executor };
+      return {
+        outcome: "accepted",
+        view: command.usage === undefined ? next : { ...next, usage: command.usage },
+      };
     }
     if (command.kind === "cancel" && view.status === "cancelled") {
       return { outcome: "noop", view };
@@ -102,7 +109,7 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
         outcome: "accepted",
         view: terminalView(view, command, { status: "cancelled" }),
       };
-    case "record-usage":
+    case "settle-executor":
       return {
         outcome: "rejected",
         reason: `Task "${view.taskId}" is not terminal; usage settles with its terminal command.`,
@@ -203,7 +210,8 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
   }
 }
 
-function sameUsage(left: TaskUsage | undefined, right: TaskUsage): boolean {
+function sameUsage(left: TaskUsage | undefined, right: TaskUsage | undefined): boolean {
+  if (left === undefined || right === undefined) return left === right;
   return (
     left?.cacheReadTokens === right.cacheReadTokens &&
     left.cacheWriteTokens === right.cacheWriteTokens &&

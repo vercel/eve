@@ -146,8 +146,20 @@ describe("translateTaskInboundPayload", () => {
   it("blocks authorization under a reserved id that only its completion clears", () => {
     expect(
       translateTaskInboundPayload({
-        event: { data: { authorizationUrl: "https://example.com/authorize" }, type: "authorization.required" },
+        callId: "call-1",
+        childSessionId: "child-session",
+        event: {
+          data: {
+            description: "Authorize GitHub",
+            name: "github",
+            sequence: 1,
+            stepIndex: 2,
+            turnId: "turn-1",
+          },
+          type: "authorization.required",
+        },
         kind: "subagent-authorization-event",
+        subagentName: "research",
       }),
     ).toEqual({
       inputRequests: [{ blockedOn: "authorization", requestId: TASK_AUTHORIZATION_REQUEST_ID }],
@@ -155,8 +167,20 @@ describe("translateTaskInboundPayload", () => {
     });
     expect(
       translateTaskInboundPayload({
-        event: { data: { connection: "github" }, type: "authorization.completed" },
+        callId: "call-1",
+        childSessionId: "child-session",
+        event: {
+          data: {
+            name: "github",
+            outcome: "authorized",
+            sequence: 2,
+            stepIndex: 2,
+            turnId: "turn-1",
+          },
+          type: "authorization.completed",
+        },
         kind: "subagent-authorization-event",
+        subagentName: "research",
       }),
     ).toEqual({ kind: "answered", requestIds: [TASK_AUTHORIZATION_REQUEST_ID] });
   });

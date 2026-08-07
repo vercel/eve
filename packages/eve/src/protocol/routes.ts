@@ -51,6 +51,11 @@ export const EVE_CONTINUE_SESSION_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:
 export const EVE_MESSAGE_STREAM_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId/stream`;
 
 /**
+ * Parent-origin proxy route for one remotely executed child session stream.
+ */
+export const EVE_SUBAGENT_STREAM_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:parentSessionId/subagents/:callId/:childSessionId/stream`;
+
+/**
  * Stable framework-owned route pattern for cancelling a session's
  * in-flight turn. Accepts an optional `{ turnId }` body guard scoping
  * the cancel to the turn the caller observed.
@@ -127,11 +132,23 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 
+/** Capability route used by a parent task to answer a remote child HITL batch. */
+export const EVE_TASK_INPUT_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/task-input/:token`;
+
 /**
  * Creates the stable framework-owned message stream route path for one session.
  */
 export function createEveMessageStreamRoutePath(sessionId: string): string {
   return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}/stream`;
+}
+
+/** Builds the parent-origin stream path for one remote child session. */
+export function createEveSubagentStreamRoutePath(input: {
+  readonly callId: string;
+  readonly childSessionId: string;
+  readonly parentSessionId: string;
+}): string {
+  return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(input.parentSessionId)}/subagents/${encodeURIComponent(input.callId)}/${encodeURIComponent(input.childSessionId)}/stream`;
 }
 
 /**
@@ -167,4 +184,9 @@ export function createEveConnectionCallbackRoutePath(name: string, token: string
  */
 export function createEveCallbackRoutePath(token: string): string {
   return `${EVE_ROUTE_PREFIX}/callback/${encodeURIComponent(token)}`;
+}
+
+/** Builds the capability path used to answer one remote child turn. */
+export function createEveTaskInputRoutePath(token: string): string {
+  return `${EVE_ROUTE_PREFIX}/task-input/${encodeURIComponent(token)}`;
 }

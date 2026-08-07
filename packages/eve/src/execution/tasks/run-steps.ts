@@ -9,14 +9,17 @@ import {
 import type {
   SessionAuthContext,
   SessionCommand,
+  SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import { walkCauseChain } from "#shared/errors.js";
 import {
+  isTerminalTaskStatus,
   TASK_SNAPSHOT_STREAM_NAMESPACE,
   type TaskInboundAnswerInput,
+  type TaskInboundAuthorizationEvent,
   type TaskInboundInputRequest,
   type TaskView,
 } from "#tasks/types.js";
@@ -40,6 +43,39 @@ export async function appendTaskSnapshotStep(input: { readonly view: TaskView })
   }
 }
 
+/** Re-emits a task-owned child authorization event through the parent channel. */
+export async function wakeTaskAuthorizationParentStep(input: {
+  readonly request: TaskInboundAuthorizationEvent;
+  readonly taskId: string;
+  readonly token: string;
+}): Promise<void> {
+  "use step";
+
+  const hookPayload: SubagentAuthorizationEventHookPayload = input.request;
+  const data = input.request.event.data;
+  const payload: {
+    message?: string;
+    taskAuthorizationEvents: {
+      hookPayload: SubagentAuthorizationEventHookPayload;
+      taskId: string;
+    }[];
+  } = { taskAuthorizationEvents: [{ hookPayload, taskId: input.taskId }] };
+  if (input.request.event.type === "authorization.required") {
+    payload.message = `Background task ${input.taskId} needs authorization.`;
+  }
+  const command: SessionCommand = {
+    kind: "send",
+    payload,
+    taskDeliveryId: `${input.taskId}:authorization:${input.request.event.type}:${data.turnId}:${data.stepIndex}:${data.sequence}:${data.name}`,
+  };
+  try {
+    await resumeHook(input.token, command);
+  } catch (error) {
+    if (isGoneParentTarget(error)) return;
+    throw error;
+  }
+}
+
 /**
  * Wakes the parent session with a framework task notification.
  *
@@ -54,11 +90,13 @@ export async function wakeTaskParentStep(input: {
 }): Promise<void> {
   "use step";
 
+  const payload: { message: string; taskSnapshots?: readonly TaskView[] } = {
+    message: formatTaskNotification(input.view),
+  };
+  if (isTerminalTaskStatus(input.view.status)) payload.taskSnapshots = [input.view];
   const command: SessionCommand = {
     kind: "send",
-    payload: {
-      message: formatTaskNotification(input.view),
-    },
+    payload,
     taskDeliveryId: `${input.view.taskId}:ready:${input.view.status}`,
   };
   try {
@@ -130,7 +168,19 @@ export async function deliverTaskInputResponsesStep(input: {
     taskDeliveryId: `${input.answer.taskId}:${[...input.requestIds].sort().join(",")}`,
   };
   try {
-    await resumeHook(input.answer.childContinuationToken, command);
+    if (input.answer.childResponseUrl !== undefined) {
+      const response = await fetch(input.answer.childResponseUrl, {
+        body: JSON.stringify({ inputResponses: command.payload.inputResponses }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+        redirect: "error",
+      });
+      if (response.status === 404) return "unreachable";
+      if (!response.ok)
+        throw new Error(`Remote task input delivery failed with HTTP ${response.status}.`);
+    } else {
+      await resumeHook(input.answer.childContinuationToken, command);
+    }
     return "delivered";
   } catch (error) {
     if (isGoneParentTarget(error)) {
