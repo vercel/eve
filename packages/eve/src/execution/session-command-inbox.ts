@@ -1,10 +1,22 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { SessionCommand, SessionTimeoutHookPayload } from "#channel/types.js";
+import type {
+  DeliverHookPayload,
+  SessionCommand,
+  SessionTimeoutHookPayload,
+} from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 
-/** Payloads accepted by a session driver's stable and channel command aliases. */
-export type SessionInboxPayload = SessionCommand | SessionTimeoutHookPayload;
+/**
+ * Payloads accepted by a session driver's stable and channel aliases.
+ *
+ * `DeliverHookPayload` is the only delivery format producers persist. The
+ * `send` member of `SessionCommand` stays accepted solely for payloads
+ * persisted by eve 0.30.3–0.30.8, which wrote the command shape directly;
+ * sessions are bounded by the 30-day default timeout, so the decode can be
+ * dropped once runs created on those versions have aged out.
+ */
+export type SessionInboxPayload = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
 
 interface HookRead {
   readonly order: number;

@@ -8,6 +8,7 @@ import {
 import type {
   CancelTurnInput,
   CancelTurnResult,
+  DeliverHookPayload,
   DispatchContinuationInput,
   DispatchSessionInput,
   GetEventStreamOptions,
@@ -48,6 +49,7 @@ import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
@@ -254,7 +256,7 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
 ): Promise<SessionCommandResult<TCommand>> {
   let hook: WorkflowHookRecord;
   try {
-    hook = normalizeWorkflowHook(await resumeHook(token, command));
+    hook = normalizeWorkflowHook(await resumeHook(token, sessionHookPayload(command)));
   } catch (error) {
     if (isInactiveCommandTarget(error)) {
       return inactiveCommandResult(command);
@@ -271,6 +273,10 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   return activeCommandResult(command, hook.runId);
+}
+
+function sessionHookPayload(command: SessionCommand): SessionCommand | DeliverHookPayload {
+  return command.kind === "send" ? sendCommandToDelivery(command) : command;
 }
 
 function activeCommandResult<TCommand extends SessionCommand>(

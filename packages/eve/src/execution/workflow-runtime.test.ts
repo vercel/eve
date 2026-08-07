@@ -75,7 +75,7 @@ describe("createWorkflowRuntime command dispatch", () => {
     return createWorkflowRuntime({ compiledArtifactsSource });
   }
 
-  it("dispatches send commands directly through a continuation alias", async () => {
+  it("preserves the legacy delivery payload through a continuation alias", async () => {
     resumeHookMock.mockResolvedValue({ runId: "driver-run" });
     const caller = {
       callId: "call-1",
@@ -99,8 +99,8 @@ describe("createWorkflowRuntime command dispatch", () => {
     expect(resumeHookMock).toHaveBeenCalledWith("test:token", {
       auth: null,
       caller,
-      kind: "send",
-      payload: { message: "hello" },
+      kind: "deliver",
+      payloads: [{ message: "hello" }],
       requestId: "req_deliver",
     });
     expect(getHookByTokenMock).not.toHaveBeenCalled();
@@ -120,6 +120,25 @@ describe("createWorkflowRuntime command dispatch", () => {
       kind: "clear",
     });
     expect(getHookByTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves the delivery payload through the stable session inbox", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "session-1" });
+
+    await expect(
+      buildRuntime().dispatchSession({
+        command: { kind: "send", payload: { message: "hello" } },
+        sessionId: "session-1",
+      }),
+    ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
+
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
+      auth: undefined,
+      caller: undefined,
+      kind: "deliver",
+      payloads: [{ message: "hello" }],
+      requestId: undefined,
+    });
   });
 
   it.each([
