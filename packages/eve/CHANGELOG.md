@@ -1,5 +1,12 @@
 # eve
 
+## 0.31.3
+
+### Patch Changes
+
+- 0dbe7ef: Add `toolCall.providedArguments` to MCP and OpenAPI connections so applications can hide and supply application-owned arguments on every remote tool call.
+- 53c05ff: Allow Linear channels to configure the accepted webhook timestamp skew for retry deliveries.
+
 ## 0.31.2
 
 ### Patch Changes
