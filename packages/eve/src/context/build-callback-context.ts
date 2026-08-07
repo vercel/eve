@@ -1,6 +1,6 @@
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { SkillHandle } from "#execution/skills/types.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
+import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 import { createSandboxSkillHandle } from "#runtime/skills/sandbox-access.js";
 import { loadContext } from "#context/container.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
@@ -23,7 +23,7 @@ export function buildCallbackContext(): SessionContext {
       parent: session.parent,
     },
 
-    getSandbox(): Promise<SandboxSession> {
+    getSandbox(): Promise<RuntimeSandboxSession> {
       const access = ctx.get(SandboxKey);
       if (access === undefined) {
         throw new Error(
@@ -35,7 +35,7 @@ export function buildCallbackContext(): SessionContext {
         if (sandbox === null) {
           throw new Error("The sandbox is not available in the current authored runtime context.");
         }
-        return sandbox;
+        return withRuntimeSandboxStop(sandbox, async () => await access.stop());
       });
     },
 
@@ -49,5 +49,26 @@ export function buildCallbackContext(): SessionContext {
       }
       return createSandboxSkillHandle(access, identifier);
     },
+  };
+}
+
+function withRuntimeSandboxStop(
+  sandbox: SandboxSession,
+  stop: () => Promise<void>,
+): RuntimeSandboxSession {
+  return {
+    id: sandbox.id,
+    readBinaryFile: (options) => sandbox.readBinaryFile(options),
+    readFile: (options) => sandbox.readFile(options),
+    readTextFile: (options) => sandbox.readTextFile(options),
+    removePath: (options) => sandbox.removePath(options),
+    resolvePath: (path) => sandbox.resolvePath(path),
+    run: (options) => sandbox.run(options),
+    setNetworkPolicy: (policy) => sandbox.setNetworkPolicy(policy),
+    spawn: (options) => sandbox.spawn(options),
+    stop,
+    writeBinaryFile: (options) => sandbox.writeBinaryFile(options),
+    writeFile: (options) => sandbox.writeFile(options),
+    writeTextFile: (options) => sandbox.writeTextFile(options),
   };
 }

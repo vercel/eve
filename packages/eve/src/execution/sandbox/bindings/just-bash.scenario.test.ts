@@ -308,6 +308,7 @@ describe("just-bash sandbox file API", () => {
       path: "persisted.txt",
     });
 
+    await firstHandle.stop();
     const state = await firstHandle.captureState();
 
     expect(state.metadata).toEqual({

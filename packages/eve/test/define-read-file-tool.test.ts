@@ -15,6 +15,8 @@ function createFakeAccess(files: Record<string, string>): SandboxAccess {
       return { initialized: false, session: null };
     },
 
+    async stop() {},
+
     async get() {
       return {
         id: "test-read-file-sandbox",
@@ -99,6 +101,8 @@ describe("defineReadFileTool", () => {
       async captureState() {
         return { initialized: false, session: null };
       },
+
+      async stop() {},
 
       async get() {
         return null;

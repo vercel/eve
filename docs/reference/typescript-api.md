@@ -61,7 +61,7 @@ A few non-`define*` helpers round out the set: `disableTool`, `experimental_work
 | Member                      | Use                                                                          |
 | --------------------------- | ---------------------------------------------------------------------------- |
 | `ctx.session`               | Current session, turn, auth, and optional parent lineage (read-only)         |
-| `ctx.getSandbox()`          | Live sandbox handle for the current agent                                    |
+| `ctx.getSandbox()`          | Live sandbox handle; `stop()` releases compute but preserves durable state   |
 | `ctx.getSkill(identifier)`  | Handle for a named skill visible to the current agent                        |
 | `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`  |
 | `ctx.requireAuth(provider)` | Evict and re-authorize an inline provider, commonly after a downstream `401` |
