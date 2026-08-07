@@ -68,10 +68,11 @@ export default mcpChannel({
 ```
 
 This form does not advertise an interactive OAuth login. A deployed caller
-must send a Vercel OIDC bearer token; a request addressed to a loopback host
-falls through to `localDev()` and needs no credential. Static Basic, bearer,
-JWT, generic OIDC, and custom `AuthFn` policies work the same way, but clients
-must be configured with their credentials out of band.
+must send a Vercel OIDC bearer token. `localDev()` needs no credential only
+while the process is running under `eve dev` or `vercel dev`; addressing a
+production process through a loopback host does not enable it. Static Basic,
+bearer, JWT, generic OIDC, and custom `AuthFn` policies work the same way, but
+clients must be configured with their credentials out of band.
 
 Authentication is required by default. Use `none()` only when you intentionally
 want a public MCP endpoint:

@@ -422,9 +422,18 @@ describe("mcpChannel", () => {
 });
 
 function routeArgs(createSession: () => Promise<never> = vi.fn()): RouteHandlerArgs {
-  const args = {
-    from: vi.fn(() => ({ respond: vi.fn() })),
-  } as unknown as RouteHandlerArgs;
+  const unavailable = () => {
+    throw new Error("Route operation is unavailable in this test.");
+  };
+  const args: RouteHandlerArgs = {
+    attachSession: unavailable,
+    from: unavailable,
+    params: {},
+    requestIp: "127.0.0.1",
+    resolveSession: vi.fn(),
+    to: unavailable,
+    waitUntil: vi.fn(),
+  };
   return attachAgentInfoRouteResponse(attachRouteSessionCreator(args, createSession), async () =>
     Response.json({
       agent: {
