@@ -77,13 +77,33 @@ describe("applyTaskTransition", () => {
 
   it("moves working to input_required carrying the outstanding batch", () => {
     const result = applyTaskTransition(createView("working"), {
-      inputRequests: [{ question: "which region?" }],
+      inputRequests: [{ question: "which region?", requestId: "req-1" }],
       kind: "require-input",
     });
 
     expect(result.outcome).toBe("accepted");
     expect(result.view.status).toBe("input_required");
-    expect(result.view.inputRequests).toEqual([{ question: "which region?" }]);
+    expect(result.view.inputRequests).toEqual([
+      { question: "which region?", requestId: "req-1" },
+    ]);
+  });
+
+  it("rejects empty, unidentified, and duplicate input request batches", () => {
+    for (const inputRequests of [
+      [],
+      [{ question: "missing id" }],
+      [
+        { question: "first", requestId: "same" },
+        { question: "second", requestId: "same" },
+      ],
+    ]) {
+      const result = applyTaskTransition(createView("working"), {
+        inputRequests,
+        kind: "require-input",
+      });
+      expect(result.outcome).toBe("rejected");
+      expect(result.view.status).toBe("working");
+    }
   });
 
   it("returns input_required to working once the whole batch is answered", () => {
@@ -137,23 +157,23 @@ describe("applyTaskTransition", () => {
 
   it("replaces the outstanding batch on repeated require-input", () => {
     const first = applyTaskTransition(createView("working"), {
-      inputRequests: [{ question: "first" }],
+      inputRequests: [{ question: "first", requestId: "req-1" }],
       kind: "require-input",
     });
     expect(first.outcome).toBe("accepted");
 
     const second = applyTaskTransition(first.view, {
-      inputRequests: [{ question: "second" }],
+      inputRequests: [{ question: "second", requestId: "req-2" }],
       kind: "require-input",
     });
 
     expect(second.outcome).toBe("accepted");
-    expect(second.view.inputRequests).toEqual([{ question: "second" }]);
+    expect(second.view.inputRequests).toEqual([{ question: "second", requestId: "req-2" }]);
   });
 
   it("completes and cancels an input_required task", () => {
     const blocked = applyTaskTransition(createView("working"), {
-      inputRequests: [{ question: "which?" }],
+      inputRequests: [{ question: "which?", requestId: "req-1" }],
       kind: "require-input",
     });
     expect(blocked.outcome).toBe("accepted");

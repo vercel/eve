@@ -107,16 +107,16 @@ describe("translateTaskInboundPayload", () => {
     ).toEqual({ kind: "cancel", lifecycle: "terminal", usage: ZERO_USAGE });
   });
 
-  it("falls back to isError when a result carries no outcome", () => {
+  it("ignores results without an explicit lifecycle outcome", () => {
     expect(
       translateTaskInboundPayload({
         kind: "runtime-action-result",
         results: [{ isError: true, output: "broken" }],
       }),
-    ).toEqual({ data: "broken", kind: "fail" });
+    ).toBeUndefined();
     expect(
       translateTaskInboundPayload({ kind: "runtime-action-result", results: [{ output: "ok" }] }),
-    ).toEqual({ data: "ok", kind: "complete" });
+    ).toBeUndefined();
   });
 
   it("ignores empty result payloads", () => {

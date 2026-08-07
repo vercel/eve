@@ -53,9 +53,7 @@ export function translateTaskInboundPayload(
             return withUsage({ kind: "cancel", lifecycle: result.outcome.kind }, usage);
         }
       }
-      return result.isError === true
-        ? { data: result.output, kind: "fail" }
-        : { data: result.output, kind: "complete" };
+      return undefined;
     }
     case "subagent-input-request":
       return { inputRequests: payload.event.requests, kind: "require-input" };

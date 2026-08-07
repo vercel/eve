@@ -5,6 +5,7 @@ import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import {
   appendTaskSnapshotStep,
   deliverTaskInputResponsesStep,
+  wakeTaskAuthorizationParentStep,
   wakeTaskInputRequestParentStep,
   wakeTaskParentStep,
 } from "#execution/tasks/run-steps.js";
@@ -29,6 +30,7 @@ vi.mock("../hook-ownership.js", async (importOriginal) => ({
 vi.mock("./run-steps.js", () => ({
   appendTaskSnapshotStep: vi.fn(),
   deliverTaskInputResponsesStep: vi.fn(),
+  wakeTaskAuthorizationParentStep: vi.fn(),
   wakeTaskInputRequestParentStep: vi.fn(),
   wakeTaskParentStep: vi.fn(),
 }));
@@ -120,7 +122,7 @@ describe("taskRunWorkflow", () => {
 
     await taskRunWorkflow({ commandToken: "task-token", initialView: createWorkingView() });
 
-    expect(appendedStatuses()).toEqual(["working", "input_required"]);
+    expect(appendedStatuses()).toEqual(["working"]);
     expect(disposeHook).toHaveBeenCalledTimes(1);
   });
 
@@ -226,10 +228,50 @@ describe("taskRunWorkflow", () => {
     expect(wakeTaskParentStep).not.toHaveBeenCalled();
   });
 
+  it("holds a fast authorization event until the readiness barrier", async () => {
+    mockCommandHook([
+      {
+        callId: "call-task",
+        childSessionId: "child-session",
+        event: {
+          data: {
+            description: "Authorize GitHub",
+            name: "github",
+            sequence: 1,
+            stepIndex: 2,
+            turnId: "turn-child",
+          },
+          type: "authorization.required",
+        },
+        kind: "subagent-authorization-event",
+        subagentName: "research",
+      },
+      { command: { kind: "ready" }, kind: "task-command" },
+    ]);
+
+    await taskRunWorkflow({
+      commandToken: "task-token",
+      initialView: createWorkingView(),
+      wakeToken: "parent-session-token",
+    });
+
+    expect(appendedStatuses()).toEqual(["working", "input_required", "input_required"]);
+    expect(wakeTaskAuthorizationParentStep).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(wakeTaskAuthorizationParentStep).mock.invocationCallOrder[0],
+    ).toBeGreaterThan(vi.mocked(appendTaskSnapshotStep).mock.invocationCallOrder[2] ?? 0);
+  });
+
   it("does not wake without a wake token and never wakes twice for one blocked child", async () => {
     mockCommandHook([
-      { command: { inputRequests: [{ q: 1 }], kind: "require-input" }, kind: "task-command" },
-      { command: { inputRequests: [{ q: 2 }], kind: "require-input" }, kind: "task-command" },
+      {
+        command: { inputRequests: [{ q: 1, requestId: "q1" }], kind: "require-input" },
+        kind: "task-command",
+      },
+      {
+        command: { inputRequests: [{ q: 2, requestId: "q2" }], kind: "require-input" },
+        kind: "task-command",
+      },
       { command: { data: "done", kind: "complete" }, kind: "task-command" },
     ]);
 
