@@ -1,7 +1,8 @@
-import type { DeliverHookPayload, DeliverPayload, SessionCommand } from "#channel/types.js";
+import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 
 type NextSessionAction =
@@ -119,20 +120,12 @@ async function waitForNextSessionAction(input: {
       continue;
     }
 
-    return { delivery: commandToDelivery(first.value), kind: "delivery" };
-  }
-}
+    if (first.value.kind === "deliver") {
+      return { delivery: first.value, kind: "delivery" };
+    }
 
-function commandToDelivery(
-  command: Extract<SessionCommand, { readonly kind: "send" }>,
-): DeliverHookPayload {
-  return {
-    auth: command.auth,
-    caller: command.caller,
-    kind: "deliver",
-    payloads: [command.payload],
-    requestId: command.requestId,
-  };
+    return { delivery: sendCommandToDelivery(first.value), kind: "delivery" };
+  }
 }
 
 function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): DeliverHookPayload {

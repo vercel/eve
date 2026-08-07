@@ -141,6 +141,17 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
+type ToolOutputFromExecuteReturn<TReturn> =
+  TReturn extends Promise<infer TOutput>
+    ? TOutput
+    : TReturn extends AsyncIterable<infer TOutput>
+      ? TOutput
+      : TReturn;
+
+type ToolDefinitionWithExecuteReturn<TInput, TOutput, TReturn> = ToolDefinition<TInput, TOutput> & {
+  execute(input: TInput, ctx: ToolContext): TReturn;
+};
+
 /**
  * Defines a tool configuration, used both for static tools (default export
  * from `agent/tools/*.ts`) and as the entry wrapper inside `defineDynamic`
@@ -152,70 +163,73 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
 export function defineTool<
   TInputSchema extends StandardJSONSchemaV1<unknown, unknown>,
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
+  TReturn extends
+    | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
+    | StandardJSONSchemaV1.InferOutput<TOutputSchema>
+    | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>,
 >(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
   inputSchema: TInputSchema;
   outputSchema: TOutputSchema;
-  execute(
-    input: StandardJSONSchemaV1.InferOutput<TInputSchema>,
-    ctx: ToolContext,
-  ):
-    | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
-    | StandardJSONSchemaV1.InferOutput<TOutputSchema>
-    | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
+  execute(input: StandardJSONSchemaV1.InferOutput<TInputSchema>, ctx: ToolContext): TReturn;
   approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["toModelOutput"];
-}): ToolDefinition<
+}): ToolDefinitionWithExecuteReturn<
   StandardJSONSchemaV1.InferOutput<TInputSchema>,
-  StandardJSONSchemaV1.InferOutput<TOutputSchema>
+  StandardJSONSchemaV1.InferOutput<TOutputSchema>,
+  TReturn
 >;
 export function defineTool<
   TSchema extends StandardJSONSchemaV1<unknown, unknown>,
-  TOutput,
+  TReturn,
 >(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
   inputSchema: TSchema;
   outputSchema?: JsonObject;
-  execute(
-    input: StandardJSONSchemaV1.InferOutput<TSchema>,
-    ctx: ToolContext,
-  ): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
+  execute(input: StandardJSONSchemaV1.InferOutput<TSchema>, ctx: ToolContext): TReturn;
   approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, unknown>["approval"];
-  toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
-}): ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, TOutput>;
+  toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
+}): ToolDefinitionWithExecuteReturn<
+  StandardJSONSchemaV1.InferOutput<TSchema>,
+  ToolOutputFromExecuteReturn<TReturn>,
+  TReturn
+>;
 export function defineTool<
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
+  TReturn extends
+    | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
+    | StandardJSONSchemaV1.InferOutput<TOutputSchema>
+    | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>,
 >(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
   inputSchema: JsonObject;
   outputSchema: TOutputSchema;
-  execute(
-    input: Record<string, unknown>,
-    ctx: ToolContext,
-  ):
-    | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
-    | StandardJSONSchemaV1.InferOutput<TOutputSchema>
-    | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
+  execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["toModelOutput"];
-}): ToolDefinition<Record<string, unknown>, StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
-export function defineTool<TOutput>(definition: {
+}): ToolDefinitionWithExecuteReturn<
+  Record<string, unknown>,
+  StandardJSONSchemaV1.InferOutput<TOutputSchema>,
+  TReturn
+>;
+export function defineTool<TReturn>(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
   inputSchema: JsonObject;
   outputSchema?: JsonObject;
-  execute(
-    input: Record<string, unknown>,
-    ctx: ToolContext,
-  ): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
+  execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
-  toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
-}): ToolDefinition<Record<string, unknown>, TOutput>;
+  toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
+}): ToolDefinitionWithExecuteReturn<
+  Record<string, unknown>,
+  ToolOutputFromExecuteReturn<TReturn>,
+  TReturn
+>;
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput>;

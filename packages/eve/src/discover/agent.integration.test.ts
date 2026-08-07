@@ -486,7 +486,7 @@ describe("discoverAgent (memory)", () => {
 
   it("silently ignores generated runtime directories", async () => {
     const project = buildMemoryAgentProject({
-      agentDirectories: [".eve", ".next", ".output", ".vercel", "node_modules"],
+      agentDirectories: [".devtools", ".eve", ".next", ".output", ".vercel", "node_modules"],
       agentFiles: {
         "instructions.md": "You are a precise assistant.",
       },

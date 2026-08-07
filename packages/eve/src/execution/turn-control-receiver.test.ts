@@ -108,7 +108,7 @@ describe("TurnControlReceiver", () => {
     await expect(runReceiver([])).rejects.toThrow("boom");
   });
 
-  it("buffers sends and context controls that arrive during a turn", async () => {
+  it("buffers current and legacy sends that arrive during a turn", async () => {
     installControlHook([parkResult()], true);
     const bufferedDeliveries: DeliverHookPayload[] = [];
     const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
@@ -117,6 +117,7 @@ describe("TurnControlReceiver", () => {
       bufferedSessionControls,
       commandInbox: createCommandInbox([
         { kind: "send", payload: { message: "follow up" } },
+        { kind: "deliver", payloads: [{ message: "legacy follow up" }] },
         { kind: "clear" },
         { kind: "compact" },
         { kind: "session-timeout" },
@@ -129,9 +130,11 @@ describe("TurnControlReceiver", () => {
         auth: undefined,
         caller: undefined,
         kind: "deliver",
+        payload: { message: "follow up" },
         payloads: [{ message: "follow up" }],
         requestId: undefined,
       },
+      { kind: "deliver", payloads: [{ message: "legacy follow up" }] },
     ]);
     expect(bufferedSessionControls).toEqual(["clear", "compact", "expired"]);
   });

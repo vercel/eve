@@ -21,6 +21,7 @@ export const PROJECT_MARKER_FILE_NAMES = ["package.json", "vercel.json"] as cons
 
 const PROJECT_MARKER_FILE_NAME_SET = new Set<string>(PROJECT_MARKER_FILE_NAMES);
 const GENERATED_AGENT_DIRECTORY_NAMES = new Set<string>([
+  ".devtools",
   ".eve",
   ".next",
   ".output",

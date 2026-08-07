@@ -1,12 +1,13 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, SessionCommand } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
+import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
 
@@ -71,8 +72,12 @@ export class TurnControlReceiver {
   private async handleSessionCommand(
     command: SessionInboxPayload,
   ): Promise<TurnDriverAction | undefined> {
+    if (command.kind === "deliver") {
+      this.bufferedDeliveries.push(command);
+      return undefined;
+    }
     if (command.kind === "send") {
-      this.bufferedDeliveries.push(commandToDelivery(command));
+      this.bufferedDeliveries.push(sendCommandToDelivery(command));
       return undefined;
     }
     if (command.kind === "clear" || command.kind === "compact") {
@@ -192,8 +197,12 @@ export class TurnControlReceiver {
       }
 
       this.commandInbox.consumeNext();
+      if (winner.value.value.kind === "deliver") {
+        delivery = winner.value.value;
+        continue;
+      }
       if (winner.value.value.kind === "send") {
-        delivery = commandToDelivery(winner.value.value);
+        delivery = sendCommandToDelivery(winner.value.value);
         continue;
       }
       const terminal = await this.handleSessionCommand(winner.value.value);
@@ -263,16 +272,4 @@ export class TurnControlReceiver {
 
 function unsupportedSessionCommand(command: never): never {
   throw new Error(`Unsupported session command: ${JSON.stringify(command)}`);
-}
-
-function commandToDelivery(
-  command: Extract<SessionCommand, { readonly kind: "send" }>,
-): DeliverHookPayload {
-  return {
-    auth: command.auth,
-    caller: command.caller,
-    kind: "deliver",
-    payloads: [command.payload],
-    requestId: command.requestId,
-  };
 }
