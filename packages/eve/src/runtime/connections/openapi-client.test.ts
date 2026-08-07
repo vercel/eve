@@ -142,6 +142,42 @@ describe("OpenApiConnectionClient", () => {
     });
   });
 
+  it("hides provided arguments from schemas and adds them to requests", async () => {
+    const fetchMock = vi.fn(
+      async (_url: URL, _init: RequestInit) =>
+        new Response(JSON.stringify({ id: "prj_1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        toolCall: { providedArguments: { teamId: "team_from_app" } },
+      }),
+    );
+
+    const metadata = await client.getToolMetadata();
+    expect(metadata.find((item) => item.name === "getProject")?.inputSchema).toMatchObject({
+      properties: { id: { type: "string" } },
+      required: ["id"],
+    });
+    expect(
+      metadata.find((item) => item.name === "getProject")?.inputSchema.properties,
+    ).not.toHaveProperty("teamId");
+
+    await client.executeTool("getProject", {
+      id: "prj_1",
+      teamId: "team_from_model",
+    });
+
+    const [calledUrl] = fetchMock.mock.calls[0]!;
+    expect(String(calledUrl)).toBe(
+      "https://api.example.com/v1/projects/prj_1?teamId=team_from_app",
+    );
+  });
+
   it("builds input schemas from Swagger 2.0 top-level parameters", async () => {
     const client = new OpenApiConnectionClient(makeConnection({ spec: SWAGGER_SPEC, url: "" }));
     const metadata = await client.getToolMetadata();

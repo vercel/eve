@@ -2,6 +2,7 @@ import type { UserContent } from "ai";
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import type { ChannelFrom } from "#channel/channel-operations.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import type {
   AgentInvocation,
@@ -14,20 +15,26 @@ import {
   INVOCATION_OWNER_ATTRIBUTE,
   INVOCATION_TOKEN_ATTRIBUTE,
 } from "#internal/invocation/metadata.js";
+import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import type { Agent } from "#public/definitions/channel.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { parseJsonValue } from "#shared/json.js";
 
 export class WorkflowAgentInvocationExecution implements AgentInvocationExecution {
-  readonly #agent: Agent;
   readonly #channelName: string;
+  readonly #createSession: RouteSessionCreator;
+  readonly #from: ChannelFrom;
 
-  constructor(agent: Agent, channelName: string) {
-    this.#agent = agent;
-    this.#channelName = channelName;
+  constructor(input: {
+    readonly channelName: string;
+    readonly createSession: RouteSessionCreator;
+    readonly from: ChannelFrom;
+  }) {
+    this.#channelName = input.channelName;
+    this.#createSession = input.createSession;
+    this.#from = input.from;
   }
 
   async create(input: {
@@ -36,11 +43,9 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
     readonly outputSchema?: JsonObject;
   }): Promise<AgentInvocation> {
     const continuationToken = `invocation:${crypto.randomUUID()}`;
-    const handle = await this.#agent.run({
-      adapter: { kind: "http" },
+    const handle = await this.#createSession({
       auth: input.auth,
       capabilities: { requestInput: true },
-      channelName: this.#channelName,
       continuationToken: `${this.#channelName}:${continuationToken}`,
       externalInvocation: {
         continuationToken,
@@ -100,11 +105,7 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
     const token = run?.attributes[INVOCATION_TOKEN_ATTRIBUTE];
     if (token === undefined) return { type: "not_found" };
     try {
-      await this.#agent.deliver({
-        auth: input.auth,
-        continuationToken: `${this.#channelName}:${token}`,
-        payload: { inputResponses: input.responses },
-      });
+      await this.#from(token).respond(input.responses, { auth: input.auth });
     } catch (error) {
       if (RunExpiredError.is(error)) return { type: "not_found" };
       throw error;

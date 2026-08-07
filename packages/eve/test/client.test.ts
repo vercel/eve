@@ -53,8 +53,8 @@ function createControlledStreamResponse(): {
   };
 }
 
-function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
-  return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
+function createStartedMessageResponse(sessionId: string): Response {
+  return new Response(JSON.stringify({ ok: true, sessionId }), {
     headers: {
       "content-type": "application/json",
       [EVE_SESSION_ID_HEADER]: sessionId,
@@ -63,8 +63,8 @@ function createStartedMessageResponse(sessionId: string, continuationToken: stri
   });
 }
 
-function createResumedMessageResponse(continuationToken: string): Response {
-  return new Response(JSON.stringify({ continuationToken, ok: true }), {
+function createResumedMessageResponse(): Response {
+  return new Response(JSON.stringify({ ok: true }), {
     headers: { "content-type": "application/json" },
     status: 200,
   });
@@ -86,7 +86,6 @@ function createEagerStreamResponse(events: readonly unknown[]): Response {
 }
 
 function singleTurnEvents(input: {
-  continuationToken?: string;
   message: string;
   sequence: number;
   turnId: string;
@@ -105,7 +104,7 @@ function singleTurnEvents(input: {
       turnId: input.turnId,
     }),
     createTurnCompletedEvent({ sequence: input.sequence, turnId: input.turnId }),
-    createSessionWaitingEvent(`eve:${input.continuationToken ?? "http:session_001"}`),
+    createSessionWaitingEvent(),
   ];
 }
 
@@ -342,10 +341,10 @@ describe("Session.send (result)", () => {
     const events = singleTurnEvents({ message: "Hello", sequence: 1, turnId: "turn_001" });
 
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
     const res = await session.send("Hello");
 
     expect(res.sessionId).toBe("session_001");
@@ -358,7 +357,7 @@ describe("Session.send (result)", () => {
     expect(result.events).toEqual(events);
   });
 
-  it("sends continuation token on follow-up messages", async () => {
+  it("sends follow-up messages through the fixed session ID", async () => {
     const firstEvents = singleTurnEvents({ message: "Hello", sequence: 1, turnId: "turn_001" });
     const secondEvents = singleTurnEvents({
       message: "Follow up",
@@ -368,12 +367,12 @@ describe("Session.send (result)", () => {
 
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(createEagerStreamResponse(firstEvents))
-      .mockResolvedValueOnce(createResumedMessageResponse("http:session_001"))
+      .mockResolvedValueOnce(createResumedMessageResponse())
       .mockResolvedValueOnce(createEagerStreamResponse(secondEvents));
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
     await (await session.send("Hello")).result();
     const second = await (await session.send("Follow up")).result();
 
@@ -384,8 +383,10 @@ describe("Session.send (result)", () => {
       string,
       unknown
     >;
-    expect(secondPostBody.continuationToken).toBe("http:session_001");
     expect(secondPostBody.message).toBe("Follow up");
+    expect(new URL(String(fetchMock.mock.calls[2]?.[0])).pathname).toBe(
+      "/eve/v1/session/session_001",
+    );
 
     const secondStreamUrl = String(fetchMock.mock.calls[3]?.[0]);
     expect(secondStreamUrl).toContain("startIndex=5");
@@ -402,10 +403,10 @@ describe("Session.send (result)", () => {
     ];
 
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
     const result = await (await session.send("Hello")).result();
 
     expect(result.status).toBe("failed");
@@ -427,10 +428,10 @@ describe("Session.send (result)", () => {
     ];
 
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
     const result = await (await session.send("Do a task")).result();
 
     expect(result.status).toBe("completed");
@@ -463,16 +464,16 @@ describe("Session.send (result)", () => {
         turnId: "turn_001",
       }),
       createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }),
-      createSessionWaitingEvent("eve:http:session_001"),
+      createSessionWaitingEvent(),
     ];
 
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
-    const response = await session.send<{ title: string }>({ message: "Summarize", outputSchema });
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
+    const response = await session.send<{ title: string }>("Summarize", { outputSchema });
     const result = await response.result();
 
     expect(result.data).toEqual({ title: "Done" });
@@ -483,7 +484,7 @@ describe("Session.send (result)", () => {
     expect(postBody.outputSchema).toEqual(outputSchema);
   });
 
-  it("resets session state after session.completed", async () => {
+  it("keeps the handle pinned after session.completed", async () => {
     const firstEvents: UnstampedMessageStreamEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createMessageCompletedEvent({
@@ -495,7 +496,6 @@ describe("Session.send (result)", () => {
       createSessionCompletedEvent(),
     ];
     const secondEvents = singleTurnEvents({
-      continuationToken: "http:session_002",
       message: "New conversation",
       sequence: 1,
       turnId: "turn_001",
@@ -503,20 +503,18 @@ describe("Session.send (result)", () => {
 
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(createEagerStreamResponse(firstEvents))
-      .mockResolvedValueOnce(createStartedMessageResponse("session_002", "http:session_002"))
+      .mockResolvedValueOnce(createResumedMessageResponse())
       .mockResolvedValueOnce(createEagerStreamResponse(secondEvents));
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
     await (await session.send("Task")).result();
     await (await session.send("New conversation")).result();
 
-    const secondPostBody = JSON.parse(fetchMock.mock.calls[2]?.[1]?.body as string) as Record<
-      string,
-      unknown
-    >;
-    expect(secondPostBody.continuationToken).toBeUndefined();
+    expect(new URL(String(fetchMock.mock.calls[2]?.[0])).pathname).toBe(
+      "/eve/v1/session/session_001",
+    );
   });
 
   it("throws ClientError when the POST fails", async () => {
@@ -524,7 +522,7 @@ describe("Session.send (result)", () => {
       new Response('{"ok":false,"error":"Bad request"}', { status: 400 }),
     );
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
 
     await expect(session.send("Hello")).rejects.toThrow(ClientError);
   });
@@ -539,10 +537,10 @@ describe("Session.send (stream)", () => {
     const stream = createControlledStreamResponse();
 
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(stream.response);
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
     const res = await session.send("Hello");
     const collected: UnstampedMessageStreamEvent[] = [];
 
@@ -562,7 +560,7 @@ describe("Session.send (stream)", () => {
           turnId: "turn_001",
         }),
       );
-      stream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
+      stream.pushEvent(createSessionWaitingEvent());
     }, 0);
 
     await iterationPromise;
@@ -577,16 +575,16 @@ describe("Session.send (stream)", () => {
     const stream = createControlledStreamResponse();
 
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(stream.response);
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
     const res = await session.send("Hello");
 
     expect(res.sessionId).toBe("session_001");
 
     setTimeout(() => {
-      stream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
+      stream.pushEvent(createSessionWaitingEvent());
     }, 0);
 
     for await (const _ of res) {
@@ -596,14 +594,14 @@ describe("Session.send (stream)", () => {
 
   it("throws when consumed twice", async () => {
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(
         createEagerStreamResponse(
           singleTurnEvents({ message: "Hello", sequence: 1, turnId: "turn_001" }),
         ),
       );
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
     const res = await session.send("Hello");
 
     await res.result();
@@ -630,16 +628,16 @@ describe("Session.send (reconnection)", () => {
         turnId: "turn_001",
       }),
       createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }),
-      createSessionWaitingEvent("eve:http:session_001"),
+      createSessionWaitingEvent(),
     ];
 
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(firstStream.response)
       .mockResolvedValueOnce(createEagerStreamResponse(reconnectEvents));
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
     const res = await session.send("Hello");
 
     setTimeout(() => {
@@ -670,96 +668,81 @@ describe("Session.send (reconnection)", () => {
 describe("Session state", () => {
   it("exposes state after a turn completes", async () => {
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(
         createEagerStreamResponse(
           singleTurnEvents({ message: "Hello", sequence: 1, turnId: "turn_001" }),
         ),
       );
 
-    const session = new Client({ host: "http://localhost:3000" }).session();
+    const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
 
-    expect(session.state).toEqual({ streamIndex: 0 });
+    expect(session.state).toEqual({ sessionId: "session_001", streamIndex: 0 });
 
     await (await session.send("Hello")).result();
 
     expect(session.state).toEqual({
-      continuationToken: "http:session_001",
       sessionId: "session_001",
       streamIndex: 5,
     });
   });
 
-  it("resumes from a saved SessionState", async () => {
+  it("resumes from a saved ClientSessionState", async () => {
     const events = singleTurnEvents({ message: "I'm back", sequence: 2, turnId: "turn_002" });
 
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createResumedMessageResponse("http:session_001"))
+      .mockResolvedValueOnce(createResumedMessageResponse())
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
     const client = new Client({ host: "http://localhost:3000" });
-    const session = client.session({
-      continuationToken: "http:session_001",
-      sessionId: "session_001",
-      streamIndex: 5,
-    });
+    const session = client.sessions.attach("session_001", { streamIndex: 5 });
 
     await (await session.send("I'm back")).result();
-
-    const postBody = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as Record<
-      string,
-      unknown
-    >;
-    expect(postBody.continuationToken).toBe("http:session_001");
 
     const streamUrl = String(fetchMock.mock.calls[1]?.[0]);
     expect(streamUrl).toContain("startIndex=5");
   });
 
-  it("resumes from a continuation token string shorthand", async () => {
+  it("attaches a fixed session ID without sending it in the body", async () => {
     const events = singleTurnEvents({ message: "Hello", sequence: 1, turnId: "turn_001" });
 
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("run_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
     const client = new Client({ host: "http://localhost:3000" });
-    const session = client.session("http:session_001");
+    const session = client.sessions.attach("session_001");
 
     await (await session.send("Hello")).result();
 
-    const postBody = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as Record<
-      string,
-      unknown
-    >;
-    expect(postBody.continuationToken).toBe("http:session_001");
+    expect(new URL(String(fetchMock.mock.calls[0]?.[0])).pathname).toBe(
+      "/eve/v1/session/session_001",
+    );
   });
 
   it("allows multiple independent sessions on the same client", async () => {
     const eventsA = singleTurnEvents({
-      continuationToken: "http:session_a",
       message: "A",
       sequence: 1,
       turnId: "turn_a",
     });
     const eventsB = singleTurnEvents({
-      continuationToken: "http:session_b",
       message: "B",
       sequence: 1,
       turnId: "turn_b",
     });
 
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_a", "http:session_a"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_a"))
       .mockResolvedValueOnce(createEagerStreamResponse(eventsA))
-      .mockResolvedValueOnce(createStartedMessageResponse("session_b", "http:session_b"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_b"))
       .mockResolvedValueOnce(createEagerStreamResponse(eventsB));
 
     const client = new Client({ host: "http://localhost:3000" });
-    const sessionA = client.session();
-    const sessionB = client.session();
+    const sessionA = client.sessions.attach("session_a");
+    const sessionB = client.sessions.attach("session_b");
 
     const resultA = await (await sessionA.send("A")).result();
     const resultB = await (await sessionB.send("B")).result();
@@ -773,32 +756,27 @@ describe("Session state", () => {
   it("creating a new session starts a fresh conversation", async () => {
     const firstEvents = singleTurnEvents({ message: "Hello", sequence: 1, turnId: "turn_001" });
     const secondEvents = singleTurnEvents({
-      continuationToken: "http:session_002",
       message: "Fresh start",
       sequence: 1,
       turnId: "turn_001",
     });
 
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(createEagerStreamResponse(firstEvents))
-      .mockResolvedValueOnce(createStartedMessageResponse("session_002", "http:session_002"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_002"))
       .mockResolvedValueOnce(createEagerStreamResponse(secondEvents));
 
     const client = new Client({ host: "http://localhost:3000" });
 
-    const first = client.session();
-    await (await first.send("Hello")).result();
+    const first = await client.sessions.create({ message: "Hello" });
+    await first.response.result();
 
-    const second = client.session();
-    await (await second.send("Fresh start")).result();
+    const second = await client.sessions.create({ message: "Fresh start" });
+    await second.response.result();
 
-    const secondPostBody = JSON.parse(fetchMock.mock.calls[2]?.[1]?.body as string) as Record<
-      string,
-      unknown
-    >;
-    expect(secondPostBody.continuationToken).toBeUndefined();
+    expect(first.session.state.sessionId).toBe("session_001");
+    expect(second.session.state.sessionId).toBe("session_002");
   });
 });
 
@@ -807,10 +785,9 @@ describe("Session state", () => {
 // ---------------------------------------------------------------------------
 
 describe("Session.stream", () => {
-  it("throws when no session ID is available", () => {
-    const session = new Client({ host: "http://localhost:3000" }).session();
-
-    expect(() => session.stream()).toThrow("no session ID");
+  it("rejects an empty session ID at attach time", () => {
+    const client = new Client({ host: "http://localhost:3000" });
+    expect(() => client.sessions.attach("")).toThrow("sessionId must be a non-empty string");
   });
 
   it("uses the session sessionId and streamIndex", async () => {
@@ -821,7 +798,7 @@ describe("Session.stream", () => {
         stepIndex: 0,
         turnId: "turn_002",
       }),
-      createSessionWaitingEvent("eve:http:session_001"),
+      createSessionWaitingEvent(),
     ];
 
     const fetchMock = vi
@@ -829,11 +806,7 @@ describe("Session.stream", () => {
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
     const client = new Client({ host: "http://localhost:3000" });
-    const session = client.session({
-      continuationToken: "http:session_001",
-      sessionId: "session_001",
-      streamIndex: 10,
-    });
+    const session = client.sessions.attach("session_001", { streamIndex: 10 });
 
     const collected: UnstampedMessageStreamEvent[] = [];
     for await (const event of session.stream()) {
@@ -861,7 +834,7 @@ describe("Client auth (async bearer)", () => {
     let tokenCounter = 0;
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_001", "http:session_001"))
+      .mockResolvedValueOnce(createStartedMessageResponse("session_001"))
       .mockResolvedValueOnce(
         createEagerStreamResponse(
           singleTurnEvents({ message: "Hello", sequence: 1, turnId: "turn_001" }),
@@ -878,7 +851,7 @@ describe("Client auth (async bearer)", () => {
       host: "http://localhost:3000",
     });
 
-    await (await client.session().send("Hello")).result();
+    await (await client.sessions.attach("session_001").send("Hello")).result();
 
     expect(tokenCounter).toBe(2);
     const postHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);

@@ -6,24 +6,21 @@ type: integration
 
 The Linear channel uses Linear's Agent Session surface rather than ordinary comments. Users delegate work to the agent from Linear, eve receives `AgentSessionEvent` webhooks at `/eve/v1/linear`, and the channel replies with native Agent Activities, including `thought`, `action`, `elicitation`, `response`, and `error`. Credentials can run through [Vercel Connect](../guides/auth-and-route-protection), which manages the Linear app, its access token, and inbound webhook verification, so there's no API key or webhook secret for you to hold. See [Channels](./overview) for the contract this builds on.
 
-## Set up Connect
+## Guided Connect setup
 
-Create a Linear Connect client and copy its UID (e.g. `linear/my-agent`), then attach this project as the trigger destination at eve's Linear route:
-
-```bash
-npm install -g vercel@latest
-vercel connect create linear --triggers
-vercel connect detach <uid> --yes
-vercel connect attach <uid> --triggers --trigger-path /eve/v1/linear --yes
-```
-
-The `create` step provisions the Linear app — with the `app:assignable` and `app:mentionable` scopes the agent surface needs — and a trigger destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/linear` re-points the trigger at the eve Linear route, since eve does not serve the default Connect path. `--triggers` makes Connect receive Linear's webhooks, verify them, and forward them to your deployment. During registration, subscribe to the `AgentSessionEvent` webhook category — the managed app defaults to `Comment` and `Issue` — so Linear sends `created` events when the agent is delegated or mentioned and `prompted` events when the user continues the session. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
-
-## Add the channel
+Run the registry setup from the agent directory:
 
 ```bash
-npm install @vercel/connect
+eve add linear
 ```
+
+Select **Linear Channel** in the component checklist. **Linear MCP** is also selected by default if you want the agent to search and update Linear through MCP. Run `eve add channel/linear-agent` instead to install only the channel directly.
+
+The flow checks that the Vercel CLI is authenticated, creates or links a Vercel project when needed, reuses a compatible existing connector when available or provisions an app-scoped Linear Connect client, and replaces its default trigger with `/eve/v1/linear`. It then installs `@vercel/connect` and writes `agent/channels/linear.ts` with the connector UID.
+
+Vercel Connect creates the Linear app with the `app:assignable` and `app:mentionable` scopes required for Agent Sessions, receives and verifies `AgentSessionEvent` webhooks, and forwards them to the deployed agent. After deploying, open the Linear app in the Connect dashboard and install it in the workspace where you want to delegate work. Then delegate an issue or mention the agent in a Linear Agent Session.
+
+The generated channel uses Connect-managed credentials:
 
 ```ts title="agent/channels/linear.ts"
 import { connectLinearCredentials } from "@vercel/connect/eve";
@@ -51,6 +48,8 @@ export default linearChannel({
 });
 ```
 
+Direct webhook verification accepts timestamps within 60 seconds by default, as Linear recommends. Set `maxSkewMs` to a larger number of milliseconds only when you intentionally accept delayed retries. Use the narrowest window that fits your retry policy.
+
 ```bash
 LINEAR_AGENT_ACCESS_TOKEN=lin_api_... # posts Agent Activities and creates proactive sessions
 LINEAR_WEBHOOK_SECRET=...             # verifies Linear-Signature
@@ -66,7 +65,7 @@ https://<deployment>/eve/v1/linear
 
 For Linear's agent surface, configure the OAuth authorize URL with `actor=app` and grant the app scopes that let it appear as an agent in Linear, including `app:assignable` and `app:mentionable`. Subscribe to the `AgentSessionEvent` webhook category so Linear sends `created` events when the agent is delegated or mentioned and `prompted` events when the user continues the session.
 
-Linear sends webhook signatures in `Linear-Signature`; eve verifies the HMAC over the raw body and rejects stale `webhookTimestamp` values. If a trusted gateway verifies Linear before the request reaches eve, pass `credentials.webhookVerifier` instead of a webhook secret.
+Linear sends webhook signatures in `Linear-Signature`; eve verifies the HMAC over the raw body and rejects stale `webhookTimestamp` values. If a trusted gateway verifies Linear before the request reaches eve, pass `credentials.webhookVerifier` instead of a webhook secret. Your custom verifier must enforce its timestamp policy because `maxSkewMs` does not apply.
 
 ## How the channel handles messages
 
@@ -163,7 +162,7 @@ await channel.linear.updateSession({
 
 ## Proactive sessions
 
-Use the channel's `receive` target to continue an existing Agent Session or create one from a Linear issue or root comment. The target accepts an existing `agentSessionId`, or an `issueId` or root `commentId` to create a new session before sending the message. The example below runs from a schedule; a route handler uses the same target shape through its own `receive` helper.
+Use the channel's proactive target to continue an existing Agent Session or create one from a Linear issue or root comment. The target accepts an existing `agentSessionId`, or an `issueId` or root `commentId` to create a new session before sending the message. The example below runs from a schedule; a route handler uses the same target shape through `ctx.to(...)`.
 
 ```ts
 import { defineSchedule } from "eve/schedules";
@@ -172,15 +171,13 @@ import linear from "../channels/linear";
 
 export default defineSchedule({
   cron: "0 14 * * 1",
-  async run({ receive, waitUntil, appAuth }) {
+  async run({ to, waitUntil, appAuth }) {
     waitUntil(
-      receive(linear, {
+      to(linear, {
+        issueId: "EVE-123",
+        initialActivity: "Preparing the status update.",
+      }).send("Post a concise status update with blockers and next actions.", {
         auth: appAuth,
-        message: "Post a concise status update with blockers and next actions.",
-        target: {
-          issueId: "EVE-123",
-          initialActivity: "Preparing the status update.",
-        },
       }),
     );
   },

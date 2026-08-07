@@ -43,8 +43,9 @@ import {
   setPendingInputBatch,
 } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   getSessionTokenLimitViolation,
@@ -65,6 +66,7 @@ vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
   gateway: {
     tools: {
+      exaSearch: vi.fn(() => ({})),
       parallelSearch: vi.fn(() => ({})),
     },
   },
@@ -690,6 +692,214 @@ describe("createToolLoopHarness", () => {
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
+  it("announces parked agents as user-role content before the user message, outside the system prompt", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        persistentSubagentSessions: true,
+        resolveModel: vi.fn().mockResolvedValue(
+          new MockLanguageModelV3({
+            modelId: "claude-sonnet-4-5",
+            provider: "anthropic.messages",
+          }),
+        ),
+      }),
+    );
+    const session = createTestSession({
+      state: {
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              address: {
+                continuationToken: "private-token",
+                kind: "agent/local",
+                sessionId: "child-session-123456789012",
+              },
+              identity: {
+                id: "ag_research:123456789012",
+                name: "research",
+                nodeId: "subagents/research",
+              },
+              lastStatus: "waiting",
+              phase: "parked",
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await runStep(session, { message: "Hi" });
+
+    const { instructions } = vi.mocked(ToolLoopAgent).mock.calls[0]![0];
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
+    // The volatile listing stays out of the system prompt (prompt cache) and
+    // rides history as a labeled, framework-injected user message.
+    expect(instructions).toBe("You are a test assistant.");
+    expect(messages).toContainEqual({
+      content: expect.stringContaining(
+        '<agent id="ag_research:123456789012" name="research">waiting</agent>',
+      ),
+      role: "user",
+    });
+    // The announcement precedes the turn's actual user message.
+    expect(messages.at(-1)).toEqual({ content: "Hi", role: "user" });
+    expect(messages.at(-2)).toEqual({
+      content: expect.stringContaining("[Agents]"),
+      role: "user",
+    });
+    expect(JSON.stringify({ instructions, messages })).not.toContain("private-token");
+    expect(result.session.history).toContainEqual({
+      content: expect.stringContaining('<agent id="ag_research:123456789012"'),
+      role: "user",
+    });
+  });
+
+  it("skips the agents snippet when no handle is parked", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { persistentSubagentSessions: true }),
+    );
+    const session = createTestSession({
+      state: {
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              identity: {
+                id: "ag_research:123456789012",
+                name: "research",
+                nodeId: "subagents/research",
+              },
+              operation: {
+                callId: "call-1",
+                id: "op-1",
+                kind: "start",
+                parentTurnId: "turn-1",
+              },
+              phase: "starting",
+              target: { continuationToken: "private-token", kind: "agent/local" },
+            },
+          ],
+        },
+      },
+    });
+
+    await runStep(session, { message: "Hi" });
+
+    const call = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
+    expect(JSON.stringify(call?.instructions ?? "")).not.toContain("<agents>");
+    expect(JSON.stringify(messages)).not.toContain("<agents>");
+  });
+
+  // Regression: a child settling used to append the updated <agents> listing
+  // to history as an assistant message. On a resume with no new user input the
+  // request then ended with `assistant`, which Anthropic rejects ("this model
+  // does not support assistant message prefill"). The announcement is
+  // user-role content, so on a no-input resume it trails the tool results
+  // and the request stays user-final.
+  it("keeps a no-input resume provider-valid when a parked handle is announced", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Done.", role: "assistant" }] },
+      text: "Done.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { persistentSubagentSessions: true }),
+    );
+    const session = createTestSession({
+      history: [
+        { content: "Delegate this.", role: "user" },
+        {
+          content: [
+            {
+              input: { message: "do it" },
+              toolCallId: "call-1",
+              toolName: "research",
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              output: { type: "text", value: "child answered" },
+              toolCallId: "call-1",
+              toolName: "research",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+      ],
+      state: {
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              address: {
+                continuationToken: "private-token",
+                kind: "agent/local",
+                sessionId: "child-session-123456789012",
+              },
+              identity: {
+                id: "ag_research:123456789012",
+                name: "research",
+                nodeId: "subagents/research",
+              },
+              lastStatus: "child answered",
+              phase: "parked",
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await runStep(session);
+
+    const { instructions } = vi.mocked(ToolLoopAgent).mock.calls[0]![0];
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
+    // The request ends user-final: the announcement trails the tool results.
+    expect(messages.at(-1)).toEqual({
+      content: expect.stringContaining('<agent id="ag_research:123456789012"'),
+      role: "user",
+    });
+    expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+    // The volatile listing never rides the system prompt (prompt cache).
+    expect(JSON.stringify(instructions ?? "")).not.toContain("<agents>");
+    // The announcement persists append-only so the next step's diff gate
+    // sees it and does not re-announce an unchanged listing.
+    expect(result.session.history.at(-2)).toEqual({
+      content: expect.stringContaining("[Agents]"),
+      role: "user",
+    });
+  });
+
   it("uses dynamic model selection for the model call", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -966,6 +1176,7 @@ describe("createToolLoopHarness", () => {
           description: "Research the request.",
           model: { id: "openai/gpt-5.5" },
         },
+        kind: "subagent",
         prepared: {
           description: "Research the request.",
           inputSchema: { type: "object" },
@@ -1275,6 +1486,7 @@ describe("createToolLoopHarness", () => {
 
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toBeUndefined();
     expect(events.map((event) => event.type)).toEqual([
       "session.started",
       "turn.started",
@@ -1631,6 +1843,7 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "Hi" });
 
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: { title: "Done" } });
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
       "turn.started",
@@ -1785,6 +1998,10 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "Hi" });
 
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({
+      isError: true,
+      output: "The agent could not produce a result matching the requested schema.",
+    });
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
       "turn.started",
@@ -1994,6 +2211,7 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "What's the weather in NY?" });
 
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: "It is 41 F in New York right now." });
     expect(result.session.history).toEqual([
       { content: "What's the weather in NY?", role: "user" },
       {
@@ -2201,6 +2419,7 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session);
 
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: "The result is 42." });
     expect(result.session.history).toEqual([
       { content: "prior message", role: "user" },
       { content: "The result is 42.", role: "assistant" },
@@ -3553,6 +3772,7 @@ describe("createToolLoopHarness", () => {
     // session parks (`next: null`) so the user can follow up in the
     // same thread rather than the whole run being torn down.
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ isError: true, output: "Model blew up" });
 
     const types = events.map((e) => e.type);
     expect(types).toContain("session.started");
@@ -3668,14 +3888,43 @@ describe("createToolLoopHarness", () => {
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("task", emit));
+    const ctx = new ContextContainer();
+    setDelegatedParent(ctx);
 
-    const result = await runStep(createTestSession(), { message: "Delegated task" });
+    const result = await contextStorage.run(ctx, () =>
+      runStep(createTestSession(), { message: "Delegated task" }),
+    );
 
-    // The task's terminal result must be marked as an error with the
-    // failure message as output, mirroring the non-terminal task-mode
-    // failure shape. Today the terminal branch returns
-    // `{ done: true, output: "" }`, which the parent driver treats as a
-    // successful delegation with empty output.
+    // The terminal result must be marked as an error with the failure
+    // message as output, matching the non-terminal task-mode failure shape.
+    expect(result.next).toMatchObject({
+      done: true,
+      isError: true,
+      output: expect.stringContaining("No endpoints found for anthropic/claude-3.5-haiku"),
+    });
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain("step.failed");
+    expect(types).toContain("turn.failed");
+    expect(types).toContain("session.failed");
+  });
+
+  it("surfaces a terminal model-call error to a delegated conversation caller", async () => {
+    const error = Object.assign(new Error("No endpoints found for anthropic/claude-3.5-haiku"), {
+      name: "AI_APICallError",
+      statusCode: 404,
+    });
+    setupMockAgentError(error);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const ctx = new ContextContainer();
+    setDelegatedParent(ctx);
+
+    const result = await contextStorage.run(ctx, () =>
+      runStep(createTestSession(), { message: "Delegated turn" }),
+    );
+
     expect(result.next).toMatchObject({
       done: true,
       isError: true,
@@ -5135,6 +5384,7 @@ describe("createToolLoopHarness", () => {
       );
 
       expect(result.next).toBeNull();
+      expect(result.settledTurn).toBeUndefined();
       expect(getPendingAuthorization(result.session.state)).toEqual({
         challenges: full.challenges,
       });
@@ -5233,6 +5483,7 @@ describe("createToolLoopHarness", () => {
       );
 
       expect(result.next).toBeNull();
+      expect(result.settledTurn).toBeUndefined();
       expect(getPendingAuthorization(result.session.state)).toEqual({
         challenges: full.challenges,
       });
@@ -10100,5 +10351,81 @@ describe("createToolLoopHarness", () => {
       ).toBe(false);
       errorSpy.mockRestore();
     });
+  });
+});
+
+describe("appendMissingToolResultMessages", () => {
+  const searchResult = {
+    type: "tool-result" as const,
+    toolCallId: "toolu_1",
+    toolName: "web_search",
+    output: { type: "json" as const, value: { winner: "OKC" } },
+  };
+
+  it("skips synthesized results for provider-executed calls already answered inline", () => {
+    // Provider-executed results live inside the *assistant* message until
+    // provider history normalization; a second result for the same id makes
+    // Anthropic reject the whole history on the next call.
+    const assistantWithInlineResult = {
+      role: "assistant" as const,
+      content: [
+        {
+          type: "tool-call" as const,
+          toolCallId: "toolu_1",
+          toolName: "web_search",
+          input: { query: "2025 NBA Finals" },
+          providerExecuted: true,
+        },
+        { ...searchResult, providerExecuted: true },
+      ],
+    };
+
+    const messages = appendMissingToolResultMessages({
+      append: [
+        {
+          type: "tool-result",
+          toolCallId: "toolu_1",
+          toolName: "web_search",
+          output: { type: "error-text", value: "Failed to parse tool-call arguments" },
+        },
+      ],
+      responseMessages: [assistantWithInlineResult],
+    });
+
+    expect(messages).toEqual([assistantWithInlineResult]);
+  });
+
+  it("still backfills calls with no result anywhere", () => {
+    const assistant = {
+      role: "assistant" as const,
+      content: [
+        {
+          type: "tool-call" as const,
+          toolCallId: "toolu_2",
+          toolName: "web_search",
+          input: {},
+        },
+      ],
+    };
+    const backfill = {
+      type: "tool-result" as const,
+      toolCallId: "toolu_2",
+      toolName: "web_search",
+      output: { type: "error-text" as const, value: "invalid input" },
+    };
+
+    expect(
+      appendMissingToolResultMessages({ append: [backfill], responseMessages: [assistant] }),
+    ).toEqual([assistant, { role: "tool", content: [backfill] }]);
+  });
+
+  it("dedupes against results already in tool messages", () => {
+    const toolMessage = { role: "tool" as const, content: [searchResult] };
+    expect(
+      appendMissingToolResultMessages({
+        append: [searchResult],
+        responseMessages: [toolMessage],
+      }),
+    ).toEqual([toolMessage]);
   });
 });

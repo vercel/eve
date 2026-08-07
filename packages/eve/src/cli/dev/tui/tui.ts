@@ -113,7 +113,6 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
 
   const options: EveTUIRunnerOptions = {
     ...display,
-    session: client.session(),
     client,
     serverUrl,
     promptCommandHandler: createPromptCommandHandler({ target }),

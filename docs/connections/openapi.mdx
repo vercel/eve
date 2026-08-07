@@ -117,6 +117,30 @@ export default defineOpenAPIConnection({
 
 `auth` and `headers` can also be functions that receive the active session context. Use that when credentials, tenants, or routing depend on the caller.
 
+## Application-provided operation arguments
+
+Some APIs declare operation parameters that should come from the application rather than the model, such as a tenant or organization ID. Configure those values with `toolCall.providedArguments`:
+
+```ts title="agent/connections/crm.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://api.example.com/openapi.json",
+  description: "CRM accounts, contacts, and opportunities.",
+  toolCall: {
+    providedArguments: {
+      tenantId: ({ session }) => String(session.auth.current?.attributes.tenant ?? ""),
+    },
+  },
+});
+```
+
+Values may be JSON values, promises, or callbacks. Callbacks receive the active session context plus the bare operation `toolName`.
+
+eve removes configured keys from every operation's model-facing input schema and adds their resolved values immediately before constructing the HTTP request. Values apply to every operation on the connection and replace any conflicting model value. The keys correspond to the generated top-level operation inputs: path, query, header, and cookie parameter names, plus `body` for a request body.
+
+Use `headers` for transport-wide headers that are not operation inputs. Use `providedArguments` when the OpenAPI document declares the value as an operation parameter and it should remain outside model control. Approval policies continue to receive only the model-authored input.
+
 ## Operation filters
 
 Most OpenAPI specs describe far more than the model should use. Narrow generated tools with exactly one of `operations.allow` or `operations.block`:

@@ -1,53 +1,36 @@
 import type { UserContent } from "ai";
 
-import type { CrossChannelReceiveFn } from "#channel/cross-channel-receive.js";
-import type {
-  CancelTurnResult,
-  ClearSessionResult,
-  CompactSessionResult,
-  SessionAuthContext,
-  SessionCallback,
-} from "#channel/types.js";
+import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
+import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { Session } from "#channel/session.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
 
 type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Record<string, string>;
 
 /**
- * Second argument passed to every route handler. `send` starts or continues a
- * session on this channel; `cancel` stops the active turn on a session
- * addressed by continuation token; `clear` removes its model-message history;
- * `compact` summarizes its context without sending model input; `reset` retires
- * a session so its token can start a fresh session; `getSession` looks one up by
- * id; `receive` hands inbound work to a different channel; `params` contains
- * the matched path parameters; `waitUntil` keeps background work alive past
- * the response; `requestIp` is the client IP, or `null` when the host cannot
- * provide it.
+ * Second argument passed to every route handler. `from` binds local operations,
+ * `resolveSession` snapshots the current owner, `to` selects a proactive target
+ * on another channel, and `attachSession` binds an immutable-ID handle.
  */
 export interface RouteHandlerArgs<TState = undefined> {
-  send: SendFn<TState>;
+  /** Binds a raw channel-local address to its current-owner operations. */
+  readonly from: ChannelFrom<TState>;
+  /** Snapshots the session currently owning a raw channel-local address. */
+  readonly resolveSession: ChannelResolveSession;
+  /** Attaches a fixed operation handle to one exact durable session ID without performing I/O. */
+  attachSession: AttachSessionFn;
   /**
-   * Resolves the session currently owning a channel-local continuation token.
-   * This point-in-time lookup does not reserve the continuation.
+   * Selects a proactive target on another channel. Call `.send(message, options)`
+   * on the returned handle; the target channel owns its address and initial state.
    */
-  resolveActiveSession: ResolveActiveSessionFn;
-  cancel: CancelFn;
-  clear: ClearFn;
-  compact: CompactFn;
-  reset: ResetFn;
-  getSession: GetSessionFn;
-  /**
-   * Starts a session on a different channel to hand off inbound work (e.g. an
-   * HTTP webhook routing the conversation onto Slack). The target's authored
-   * `receive` hook owns continuation-token format and initial state; the caller
-   * supplies the payload, channel-specific args, and auth.
-   */
-  receive: CrossChannelReceiveFn;
+  readonly to: CrossChannelToFn;
+  /** Path parameters matched for the current route. */
   params: Readonly<Record<string, string>>;
+  /** Keeps background work alive after the route returns its response. */
   waitUntil: (task: Promise<unknown>) => void;
+  /** Best-effort client IP reported by the host, or `null` when unavailable. */
   requestIp: string | null;
 }
 
@@ -61,135 +44,14 @@ export interface SendPayload {
    */
   readonly context?: readonly string[];
   /**
-   * Run-scoped JSON schema the turn's result must match. Orthogonal to
-   * {@link BaseSendOptions.mode}: eve enforces the schema in either mode; mode
-   * only decides the failure behavior. A conversation run parks recoverably and
-   * waits for more input; a task run (which cannot wait) finishes as an error.
+   * Run-scoped JSON schema the turn's result must match. eve enforces the
+   * schema in conversation and task mode; mode only decides failure behavior.
    */
   readonly outputSchema?: JsonObject;
 }
 
-/**
- * Starts or continues a session on this channel. Accepts a plain string,
- * `UserContent`, or a {@link SendPayload}, plus {@link SendOptions} (auth,
- * continuation token, run mode, and an optional seed `state` for stateful
- * channels). Resolves to the resulting {@link Session}.
- */
-export type SendFn<TState = undefined> = (
-  input: string | UserContent | SendPayload,
-  options: SendOptions<TState>,
-) => Promise<Session>;
-
-/** Resolves the active owner of a channel-local continuation token. */
-export type ResolveActiveSessionFn = (options: {
-  readonly continuationToken: string;
-}) => Promise<{ readonly sessionId: string } | undefined>;
-
-type BaseSendOptions = {
-  auth: SessionAuthContext | null;
-  callback?: SessionCallback;
-  continuationToken: string;
-  /**
-   * The original (top-level) caller's auth for a newly started session,
-   * becoming `session.auth.initiator`. Defaults to {@link auth} when omitted
-   * (root session behavior). Ignored when the send resolves to an existing
-   * session, whose initiator never changes after start.
-   */
-  initiatorAuth?: SessionAuthContext | null;
-  mode?: RunMode;
-  /**
-   * Human-readable title for a newly started workflow session. Defaults to
-   * the first user message and is ignored when resuming an existing session.
-   */
-  title?: string;
-};
-
-/**
- * Options for {@link SendFn}. The channel owns its continuation-token
- * format: pass the channel-local raw token (the framework prepends
- * the channel name). Stateful channels also seed initial adapter
- * state via {@link state}, which becomes the new session's `state`
- * on first `runtime.run()` and is ignored on subsequent `deliver`s.
- */
-export type SendOptions<TState = undefined> = [TState] extends [undefined]
-  ? BaseSendOptions
-  : BaseSendOptions & { state: TState };
-
-/**
- * Resolves an existing {@link Session} by id, for example to read its event
- * stream from within a route handler.
- */
-export type GetSessionFn = (sessionId: string) => Session;
-
-/**
- * Options for {@link CancelFn}. `continuationToken` is the channel-local raw
- * token, exactly as passed to {@link SendFn}. `turnId` limits the request to
- * the turn the caller observed; a stale guard is consumed as a benign no-op.
- */
-export interface CancelOptions {
-  readonly continuationToken: string;
-  readonly turnId?: string;
-}
-
-/**
- * Requests cancellation of the active turn on the session that owns the
- * continuation token. Never starts a session, sends input, or clears history.
- *
- * Both statuses are successful: `"accepted"` means the request was consumed,
- * and `"no_active_turn"` covers an unknown token and a session with nothing
- * to cancel. Confirmation is `turn.cancelled` followed by `session.waiting`
- * on the event stream.
- */
-export type CancelFn = (options: CancelOptions) => Promise<CancelTurnResult>;
-
-/** Options for {@link CompactFn}. */
-export interface CompactOptions {
-  /** Channel-local raw token, in the same format accepted by {@link SendFn}. */
-  readonly continuationToken: string;
-}
-
-/**
- * Queues context compaction for the session owning a continuation token.
- * Never sends model input or starts a new session. An accepted request returns
- * to `session.waiting`; successful compaction emits `compaction.requested`
- * followed by `compaction.completed` on the session stream.
- */
-export type CompactFn = (options: CompactOptions) => Promise<CompactSessionResult>;
-
-/** Options for {@link ClearFn}. */
-export interface ClearOptions {
-  /** Channel-local raw token, in the same format accepted by {@link SendFn}. */
-  readonly continuationToken: string;
-}
-
-/**
- * Queues removal of the model-message history for the session owning a
- * continuation token. Preserves the session, agent configuration, durable
- * state, limits, and sandbox. Completion is `context.cleared` followed by
- * `session.waiting` on the session stream.
- */
-export type ClearFn = (options: ClearOptions) => Promise<ClearSessionResult>;
-
-/** Options for {@link ResetFn}. */
-export interface ResetOptions {
-  /** Channel-local raw token, in the same format accepted by {@link SendFn}. */
-  readonly continuationToken: string;
-  /** Human-readable terminal reason. Do not include credentials or message contents. */
-  readonly reason?: string;
-}
-
-/** Result of resetting the session that owned a continuation token. */
-export type ResetResult =
-  | { readonly status: "reset"; readonly previousSessionId: string }
-  | { readonly status: "no_active_session" };
-
-/**
- * Terminally retires the session currently owning a continuation token.
- * The token is available for the next {@link SendFn} after this resolves;
- * that send starts with fresh history and state, and initializes a new
- * session-scoped sandbox on first sandbox use.
- */
-export type ResetFn = (options: ResetOptions) => Promise<ResetResult>;
+/** Attaches an I/O-free handle to one exact durable session ID. */
+export type AttachSessionFn = (sessionId: string) => Session;
 
 export type RouteHandler<TState = undefined> = (
   req: Request,

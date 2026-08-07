@@ -2,7 +2,12 @@ import type { LanguageModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { RuntimeIdentity, MessageStreamEvent } from "#protocol/message.js";
-import type { CancelSessionResult, SendTurnInput, SessionState } from "#client/types.js";
+import type {
+  CancelSessionResult,
+  ClientSessionState,
+  SendTurnInput,
+  SendTurnOptions,
+} from "#client/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
@@ -85,7 +90,7 @@ export interface EveEvalSessionResult {
   readonly events: readonly MessageStreamEvent[];
   readonly primary: boolean;
   readonly sessionId?: string;
-  readonly state: SessionState;
+  readonly state: ClientSessionState | undefined;
 }
 
 /**
@@ -275,7 +280,7 @@ export interface EveEvalSessionDriver {
   /** Input requests left pending by the last parked turn. */
   readonly pendingInputRequests: readonly InputRequest[];
   /** Serializable cursor for resuming this session. */
-  readonly state: SessionState;
+  readonly state: ClientSessionState | undefined;
   /** eve session id after the first successful send. */
   readonly sessionId: string | undefined;
   /** Request cooperative cancellation of this session's active turn. */
@@ -283,13 +288,13 @@ export interface EveEvalSessionDriver {
   /** Require exactly one pending input request matching `filter`, or abort dependent control flow. */
   requireInputRequest(filter?: EveEvalInputRequestMatchOptions): InputRequest;
   /** Resolve specific pending requests and run the resumed turn. */
-  respond(...responses: InputResponse[]): Promise<EveEvalTurn>;
+  respond(responses: readonly InputResponse[], options?: SendTurnOptions): Promise<EveEvalTurn>;
   /** Resolve every pending request with the same option id. */
   respondAll(optionId: string): Promise<EveEvalTurn>;
   /** Send one turn through this session. */
-  send(input: SendTurnInput): Promise<EveEvalTurn>;
-  /** Start one turn and return as soon as its session is accepted. */
-  start(input: SendTurnInput): Promise<EveEvalLiveTurn>;
+  send(message: SendTurnInput["message"], options?: SendTurnOptions): Promise<EveEvalTurn>;
+  /** Start one text turn and return as soon as its session is accepted. */
+  start(message: string, options?: SendTurnOptions): Promise<EveEvalLiveTurn>;
   /** Send one text turn with a local file attached as a data URL. */
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
 }
@@ -433,8 +438,8 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
    * Attach to a pre-existing session and consume one turn boundary.
    *
    * When that boundary is `session.waiting`, the attached session recovers
-   * the current continuation token from the stream, so `session.send(...)`
-   * and `session.respond(...)` continue the same durable session.
+   * the exact session ID, so `session.send(...)` and `session.respond(...)`
+   * continue the same durable session.
    */
   attachSession(
     sessionId: string,

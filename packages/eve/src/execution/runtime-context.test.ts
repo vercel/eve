@@ -3,6 +3,7 @@ import { ContextContainer, contextStorage, loadContext } from "#context/containe
 import {
   AuthKey,
   ChannelInstrumentationKey,
+  ContinuationTokenKey,
   type Session,
   type SessionAuthContext,
   SessionIdKey,
@@ -175,6 +176,20 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.require(AuthKey)).toBeNull();
+  });
+
+  it("does not invent a continuation for an ID-only run", () => {
+    const ctx = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "http" },
+        input: { message: "hi" },
+        mode: "conversation",
+      },
+    });
+
+    expect(ctx.get(ContinuationTokenKey)).toBeUndefined();
   });
 
   it("does not throw when channel has no onContext", () => {

@@ -21,11 +21,12 @@ import {
   expectOnlyKnownKeys,
   expectString,
 } from "#internal/authored-module.js";
-import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
 import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 
 const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set<DynamicToolEventName>([
   "session.started",
@@ -154,11 +155,23 @@ async function compileSubagentDefinition(input: {
     };
   }
 
+  let agentConfigDefinition = definition;
+  if (dynamic !== undefined) {
+    const dynamicAgentConfig: {
+      build?: { readonly externalDependencies?: readonly string[] };
+      readonly model: string;
+    } = { model: DEFAULT_AGENT_MODEL_ID };
+    if (dynamic.build !== undefined) {
+      dynamicAgentConfig.build = dynamic.build;
+    }
+    agentConfigDefinition = dynamicAgentConfig;
+  }
+
   return {
     kind: "local",
     ...(await compileLocalSubagent({
       ...input,
-      agentConfigDefinition: dynamic === undefined ? definition : { model: DEFAULT_AGENT_MODEL_ID },
+      agentConfigDefinition,
       dynamic: dynamic?.definition,
     })),
   };
@@ -280,7 +293,12 @@ function compileRemoteAgent(input: {
 function normalizeDynamicSubagentDefinition(
   value: unknown,
   message: string,
-): { readonly definition: { readonly eventNames: readonly DynamicToolEventName[] } } | undefined {
+):
+  | {
+      readonly build?: { readonly externalDependencies?: readonly string[] };
+      readonly definition: { readonly eventNames: readonly DynamicToolEventName[] };
+    }
+  | undefined {
   if (!isDynamicSentinel(value)) {
     return undefined;
   }
@@ -288,11 +306,16 @@ function normalizeDynamicSubagentDefinition(
   const record = expectObjectRecord(value, message);
   if (Object.hasOwn(record, "fallback")) {
     throw new Error(
-      `${message} Dynamic subagent definitions do not support "fallback". Return defineAgent(...) from an event handler instead.`,
+      `${message} Dynamic subagent definitions do not support "fallback". Return defineAgent(...) or defineRemoteAgent(...) from an event handler instead.`,
     );
   }
-  expectOnlyKnownKeys(record, ["events", "kind"], message);
+  expectOnlyKnownKeys(record, ["build", "events", "kind"], message);
 
+  const build =
+    record.build === undefined
+      ? undefined
+      : normalizeAgentDefinition({ build: record.build, model: DEFAULT_AGENT_MODEL_ID }, message)
+          .build;
   const rawEvents = expectObjectRecord(record.events, message);
   const eventNames: DynamicToolEventName[] = [];
 
@@ -306,9 +329,16 @@ function normalizeDynamicSubagentDefinition(
     eventNames.push(eventName as DynamicToolEventName);
   }
 
-  return {
+  const normalized: {
+    build?: { readonly externalDependencies?: readonly string[] };
+    readonly definition: { readonly eventNames: readonly DynamicToolEventName[] };
+  } = {
     definition: { eventNames },
   };
+  if (build !== undefined) {
+    normalized.build = build;
+  }
+  return normalized;
 }
 
 function createSubagentConfigModuleSourceRef(
@@ -383,10 +413,7 @@ function normalizeRemoteAgentDefinition(
   return {
     description: expectString(record.description, message),
     outputSchema: serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined),
-    path:
-      record.path === undefined
-        ? EVE_CREATE_SESSION_ROUTE_PATH
-        : expectString(record.path, message),
+    path: record.path === undefined ? EVE_SESSION_ROUTE_PATH : expectString(record.path, message),
     // A function `url` is resolved at runtime, not baked into the manifest.
     url: typeof record.url === "function" ? undefined : expectString(record.url, message),
   };

@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
-import { CallbackBaseUrlKey, isAuthorizationSignal } from "#harness/authorization.js";
+import {
+  CallbackBaseUrlKey,
+  isAuthorizationSignal,
+  PendingAuthorizationResultKey,
+} from "#harness/authorization.js";
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ConnectionRegistry, ConnectionToolMetadata } from "#runtime/connections/types.js";
@@ -282,6 +286,60 @@ describe("connection_search", () => {
         error: 'Failed to load tools for "incident": MCP SSE Transport Error: 400 Bad Request',
       },
     ]);
+  });
+
+  it("does not complete an unrelated connection authorization", async () => {
+    let notionCompletions = 0;
+    const notion: ResolvedConnectionDefinition = {
+      ...connection("notion"),
+      authorization: {
+        completeAuthorization: async () => {
+          notionCompletions += 1;
+          throw new Error("stale Notion callback");
+        },
+        getToken: async () => ({ token: "notion-token" }),
+        principalType: "user",
+        startAuthorization: async () => ({
+          challenge: { url: "https://idp.example.com/authorize" },
+        }),
+      },
+    };
+    const linear = connection("linear");
+    const connectionRegistry = registry({
+      connections: [notion, linear],
+      loadTools: {
+        notion: async () => [],
+        linear: async () => [
+          {
+            description: "List issues",
+            inputSchema: { type: "object" },
+            name: "list_issues",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(
+        connectionRegistry,
+        { connection: "linear", keywords: "list issues" },
+        (ctx) => {
+          ctx.set(PendingAuthorizationResultKey, [
+            {
+              callback: { method: "GET", params: {} },
+              hookUrl: "https://agent.example.com/eve/v1/connections/notion/callback/auth",
+              name: "notion",
+            },
+          ]);
+        },
+      ),
+    ).resolves.toMatchObject([
+      {
+        connection: "linear",
+        qualifiedName: "linear__list_issues",
+      },
+    ]);
+    expect(notionCompletions).toBe(0);
   });
 
   it("returns an authorization signal when sign-in can be started", async () => {

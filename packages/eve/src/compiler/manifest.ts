@@ -28,6 +28,7 @@ import type {
   ModelRouting,
 } from "#shared/agent-definition.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 
 /**
  * Stable manifest kind emitted by the compiler for runtime loading.
@@ -42,7 +43,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 38;
+export const COMPILED_AGENT_MANIFEST_VERSION = 39;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -641,6 +642,17 @@ const compiledHookDefinitionSchema: z.ZodType<CompiledHookDefinition> = z
   })
   .strict();
 
+const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
+  .object({
+    namespace: z.string(),
+    packageName: z.string(),
+    packageNamespace: z.string(),
+    sourceRoot: z.string(),
+    mountSourceId: z.string(),
+    mountLogicalPath: z.string(),
+  })
+  .strict();
+
 /**
  * Zod schema for one non-recursive compiled authored agent payload.
  */
@@ -654,9 +666,11 @@ const compiledAgentNodeManifestSchema = z
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
     disabledFrameworkTools: z.array(z.string()).readonly(),
     workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
+    webSearchProvider: z.enum(["exa", "parallel"]).optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
+    extensionMounts: z.array(compiledExtensionMountSchema).default([]),
     hooks: z.array(compiledHookDefinitionSchema),
     sandbox: compiledSandboxDefinitionSchema.nullable(),
     sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
@@ -703,7 +717,7 @@ const compiledSubagentEdgeSchema: z.ZodType<CompiledSubagentEdge> = z
   .strict();
 
 /**
- * One mounted extension recorded on the root compiled manifest. The runtime
+ * One mounted extension recorded on a compiled agent manifest. The runtime
  * evaluates {@link mountLogicalPath} at module-map load so the mount's factory
  * call binds the extension's config before any tool runs.
  */
@@ -727,17 +741,6 @@ export interface CompiledExtensionMount {
   readonly mountLogicalPath: string;
 }
 
-const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
-  .object({
-    namespace: z.string(),
-    packageName: z.string(),
-    packageNamespace: z.string(),
-    sourceRoot: z.string(),
-    mountSourceId: z.string(),
-    mountLogicalPath: z.string(),
-  })
-  .strict();
-
 /**
  * Zod schema for the versioned compiled manifest emitted by the compiler.
  */
@@ -752,6 +755,7 @@ export const compiledAgentManifestSchema = z
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
     disabledFrameworkTools: z.array(z.string()).readonly(),
     workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
+    webSearchProvider: z.enum(["exa", "parallel"]).optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
@@ -783,9 +787,11 @@ export function createCompiledAgentNodeManifest(input: {
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly disabledFrameworkTools?: readonly string[];
   readonly workflowTool?: CompiledWorkflowToolDefinition;
+  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
+  readonly extensionMounts?: readonly CompiledExtensionMount[];
   readonly hooks?: readonly CompiledHookDefinition[];
   readonly remoteAgents?: readonly CompiledRemoteAgentNode[];
   readonly sandbox?: CompiledSandboxDefinition | null;
@@ -865,9 +871,11 @@ export function createCompiledAgentNodeManifest(input: {
       input.workflowTool === undefined
         ? undefined
         : { maxSubagents: input.workflowTool.maxSubagents },
+    webSearchProvider: input.webSearchProvider,
     dynamicInstructions: [...(input.dynamicInstructions ?? [])],
     dynamicSkills: [...(input.dynamicSkills ?? [])],
     dynamicTools: [...(input.dynamicTools ?? [])],
+    extensionMounts: [...(input.extensionMounts ?? [])],
     hooks: [...(input.hooks ?? [])],
     remoteAgents: [...(input.remoteAgents ?? [])],
     sandbox: input.sandbox ?? null,
@@ -938,6 +946,7 @@ export function createCompiledAgentManifest(input: {
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly disabledFrameworkTools?: readonly string[];
   readonly workflowTool?: CompiledWorkflowToolDefinition;
+  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
   readonly hooks?: readonly CompiledHookDefinition[];

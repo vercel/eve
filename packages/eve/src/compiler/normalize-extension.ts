@@ -196,6 +196,11 @@ async function composeManifestContributions(input: {
         `${describeExtensionSource(role, namespace, source.logicalPath)} enables the Workflow tool, ` +
           `but the Workflow tool is the consuming agent's to enable, not an extension's. Remove it.`,
       );
+    } else if (entry.kind === "web-search-tool") {
+      throw new Error(
+        `${describeExtensionSource(role, namespace, source.logicalPath)} configures web search, ` +
+          `but the web search provider is the consuming agent's to configure, not an extension's. Remove it.`,
+      );
     } else if (role === "extension") {
       throw new Error(
         `${describeExtensionSource(role, namespace, source.logicalPath)} calls disableTool(), ` +

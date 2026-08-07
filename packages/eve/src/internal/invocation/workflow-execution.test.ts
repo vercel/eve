@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SessionAuthContext } from "#channel/types.js";
+import type { RunHandle, SessionAuthContext } from "#channel/types.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import type { Agent } from "#public/definitions/channel.js";
 
 const runsGet = vi.fn();
 const cancel = vi.fn();
@@ -28,12 +27,9 @@ const auth: SessionAuthContext = {
   principalType: "user",
 };
 
-const agent: Agent = {
-  cancelTurn: vi.fn(),
-  deliver: vi.fn(),
-  getEventStream: vi.fn(),
-  run: vi.fn(),
-};
+const createSession = vi.fn<() => Promise<RunHandle>>();
+const respond = vi.fn();
+const from = vi.fn(() => ({ respond }) as never);
 
 describe("WorkflowAgentInvocationExecution", () => {
   beforeEach(() => {
@@ -43,8 +39,7 @@ describe("WorkflowAgentInvocationExecution", () => {
 
   it("seeds invocation metadata when starting a task run", async () => {
     runsGet.mockResolvedValue(run({ status: "running" }));
-    vi.mocked(agent.run).mockResolvedValue({
-      continuationToken: "mcp:invocation:token",
+    createSession.mockResolvedValue({
       events: new ReadableStream(),
       sessionId: "wrun_invocation",
     });
@@ -53,7 +48,7 @@ describe("WorkflowAgentInvocationExecution", () => {
       message: "work",
     });
 
-    expect(agent.run).toHaveBeenCalledWith(
+    expect(createSession).toHaveBeenCalledWith(
       expect.objectContaining({
         capabilities: { requestInput: true },
         externalInvocation: expect.objectContaining({ continuationToken: expect.any(String) }),
@@ -160,7 +155,7 @@ describe("WorkflowAgentInvocationExecution", () => {
         } as HandleMessageStreamEvent,
       ]),
     );
-    vi.mocked(agent.deliver).mockResolvedValue({ sessionId: "wrun_invocation" });
+    respond.mockResolvedValue({ sessionId: "wrun_invocation" });
 
     await expect(
       execution().update({
@@ -172,7 +167,8 @@ describe("WorkflowAgentInvocationExecution", () => {
       invocation: { pollAfterMs: 1_000, status: "working" },
       type: "success",
     });
-    expect(agent.deliver).toHaveBeenCalledOnce();
+    expect(from).toHaveBeenCalledWith("invocation:token");
+    expect(respond).toHaveBeenCalledWith([{ optionId: "yes", requestId: "question" }], { auth });
     expect(getReadable).toHaveBeenCalledOnce();
   });
 
@@ -312,7 +308,7 @@ describe("WorkflowAgentInvocationExecution", () => {
 });
 
 function execution(): WorkflowAgentInvocationExecution {
-  return new WorkflowAgentInvocationExecution(agent, "mcp");
+  return new WorkflowAgentInvocationExecution({ channelName: "mcp", createSession, from });
 }
 
 function run(input: { status: string }) {

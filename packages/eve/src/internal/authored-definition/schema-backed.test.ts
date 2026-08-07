@@ -8,6 +8,7 @@ import {
   experimental_workflow,
 } from "#public/definitions/tool.js";
 import { once } from "#public/tools/approval/approval-helpers.js";
+import { webSearch } from "#public/tools/web-search.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
 const FAILURE_MESSAGE = "Expected the tool export to match the public eve shape.";
@@ -47,6 +48,19 @@ describe("normalizeToolDefinition", () => {
     );
 
     expect(entry).toEqual({ kind: "workflow-tool", maxSubagents: 6 });
+  });
+
+  it("returns a configured entry for the provider-managed web search tool", () => {
+    expect(normalizeToolDefinition(webSearch({ provider: "exa" }), FAILURE_MESSAGE)).toEqual({
+      kind: "web-search-tool",
+      provider: "exa",
+    });
+  });
+
+  it("rejects an unsupported web search provider", () => {
+    expect(() =>
+      normalizeToolDefinition({ kind: "eve:web-search-tool", provider: "other" }, FAILURE_MESSAGE),
+    ).toThrow('Expected "provider" to be one of: exa, parallel');
   });
 
   it.each([0, 1.5, -1, "6"])("rejects invalid workflow max subagents %j", (maxSubagents) => {

@@ -3,17 +3,19 @@ import { jsonSchema, type JSONSchema7, type ToolSet } from "ai";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
+  WEB_SEARCH_EXA_OUTPUT_SCHEMA,
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
   WEB_SEARCH_TOOL_DEFINITION,
 } from "#runtime/framework-tools/web-search.js";
 import type { JsonObject } from "#shared/json.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 
 /**
  * The provider backend resolved for one web search tool invocation.
  */
-export type WebSearchBackend = "anthropic" | "google" | "openai" | "parallel";
+export type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel";
 
 /**
  * Maps an upstream provider tool type (the literal `type` string the AI SDK
@@ -55,6 +57,8 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
   switch (backend) {
     case "anthropic":
       return WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA;
+    case "exa":
+      return WEB_SEARCH_EXA_OUTPUT_SCHEMA;
     case "google":
       return WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA;
     case "openai":
@@ -67,15 +71,18 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
 /**
  * Determines the web search backend for a model reference.
  *
- * - All AI Gateway models: Parallel search via gateway
+ * - All AI Gateway models: the configured search provider (Parallel by default)
  * - Direct/BYO OpenAI models: native OpenAI search
  * - Direct/BYO Anthropic models: native Anthropic search
  * - Direct/BYO Google models: native Google search grounding
  * - Other BYO models: not available (returns `null`)
  */
-export function resolveWebSearchBackend(modelRef: RuntimeModelReference): WebSearchBackend | null {
+export function resolveWebSearchBackend(
+  modelRef: RuntimeModelReference,
+  gatewayProvider: WebSearchProvider = "parallel",
+): WebSearchBackend | null {
   if (modelRef.source === undefined) {
-    return "parallel";
+    return gatewayProvider;
   }
 
   const providerId = modelRef.id.split("/")[0] ?? "";
@@ -124,6 +131,16 @@ export async function resolveWebSearchProviderTool(
     case "google": {
       const { google } = await import("#compiled/@ai-sdk/google/index.js");
       return attachWebSearchOutputSchema(google.tools.googleSearch({}) as ToolSet[string], backend);
+    }
+    case "exa": {
+      const { gateway } = await import("ai");
+      return attachWebSearchOutputSchema(
+        gateway.tools.exaSearch({
+          contents: { highlights: { maxCharacters: 1_000 } },
+          numResults: 10,
+        }) as ToolSet[string],
+        backend,
+      );
     }
     case "parallel": {
       const { gateway } = await import("ai");

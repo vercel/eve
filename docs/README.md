@@ -47,12 +47,12 @@ Read in this order:
 12. [Channels](./channels/overview.mdx)
 13. [Session Context](./reference/typescript-api.md)
 14. [Sessions And Streaming](./concepts/sessions-runs-and-streaming.md)
-15. [TypeScript SDK](./clients/typescript-sdk/overview.mdx)
+15. [TypeScript SDK](./guides/client/overview.mdx)
 16. [Subagents](./subagents.mdx)
 17. [Schedules](./schedules.mdx)
 18. [Evals](./evals/overview.mdx)
-19. [Auth And Route Protection](./develop/auth-and-route-protection.md)
-20. [Vercel Deployment](./develop/deployment.md)
+19. [Auth And Route Protection](./guides/auth-and-route-protection.md)
+20. [Vercel Deployment](./guides/deployment/overview.md)
 21. [CLI, Build, And Debugging](./reference/cli.md)
 
 ## The public mental model
@@ -86,24 +86,24 @@ eve then gives you:
 The public surface stays filesystem-first, but the implementation model underneath is still useful to
 know:
 
-- channels normalize inbound transport input and define the `continuationToken`
+- channels normalize inbound transport input and map platform addresses to sessions
 - the harness does one unit of AI work and decides whether to continue, wait, or finish
 - the runtime persists session state, streams events, and owns workflow orchestration
 
-That is why eve exposes two identifiers:
-
-- `continuationToken` for the next user message
-- `sessionId` for streaming and inspection
+The default HTTP API exposes one durable `sessionId` for messages, controls, and
+streaming. Platform channels additionally own channel-local continuation
+addresses so a Slack thread or custom conversation ID can point at its current
+session without leaking that routing identity into the HTTP client contract.
 
 ## How to use these docs
 
 - Start with the authored filesystem shape and `agent.ts`.
 - Then add runtime surfaces in this order: skills, tools, workspace, sandbox, channels.
 - Then learn the durable runtime model: HITL, session context, sessions, streaming, and
-  continuation-token follow-ups.
+  ID-addressed follow-ups and channel address routing.
 - Then add advanced features: subagents, schedules, route protection, deployment.
 
 ## Good companions in this repo
 
-- Weather-focused smoke/dev fixture: [`../../apps/fixtures/weather-fixture`](../../apps/fixtures/weather-fixture)
-- Public API source of truth: [`../../packages/eve/src/public/index.ts`](../../packages/eve/src/public/index.ts)
+- Weather-focused smoke/dev fixture: [`../apps/fixtures/weather-agent`](../apps/fixtures/weather-agent)
+- Public API source of truth: [`../packages/eve/src/public/index.ts`](../packages/eve/src/public/index.ts)

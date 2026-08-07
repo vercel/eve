@@ -2,11 +2,12 @@ import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import { contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
+import type { InstrumentationParentLineage } from "#harness/instrumentation-lifecycle.js";
 import type {
   AgentSessionTraceState,
   AgentTraceStateStore,
   AgentTurnTraceState,
-} from "#tracing/agent-otel-provider.js";
+} from "#tracing/agent-trace-state.js";
 
 interface AgentTraceContextState {
   readonly sessions: Readonly<Record<string, AgentSessionTraceState>>;
@@ -136,10 +137,16 @@ function deserializeState(data: unknown): AgentTraceContextState {
   });
   const turns = deserializeRecord(data.turns, (value) => {
     if (!isRecord(value) || !isSpanContext(value.context)) return undefined;
+    if (typeof value.parentSpanId !== "string" || typeof value.startTimeMs !== "number") {
+      return undefined;
+    }
     return {
       context: value.context,
+      lineage: deserializeLineage(value.lineage),
+      parentSpanId: value.parentSpanId,
       rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
       sequence: typeof value.sequence === "number" ? value.sequence : 0,
+      startTimeMs: value.startTimeMs,
       terminal: deserializeTerminal(value.terminal),
     } satisfies AgentTurnTraceState;
   });
@@ -157,6 +164,23 @@ function deserializeRecord<T>(
     if (parsed !== undefined) result[key] = parsed;
   }
   return result;
+}
+
+function deserializeLineage(value: unknown): InstrumentationParentLineage | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.callId !== "string" ||
+    typeof value.sessionId !== "string" ||
+    typeof value.turnId !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    callId: value.callId,
+    sessionId: value.sessionId,
+    subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
+    turnId: value.turnId,
+  };
 }
 
 function deserializeTerminal(value: unknown): AgentTurnTraceState["terminal"] {

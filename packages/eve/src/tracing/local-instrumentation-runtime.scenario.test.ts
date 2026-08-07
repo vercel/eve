@@ -110,6 +110,17 @@ describe("local instrumentation runtime", () => {
         },
       ]);
       await runtime.hooks.publish({ scope, type: "attempt.completed" });
+      await runtime.hooks.publish({
+        sessionId: "session-1",
+        turnId: "turn-1",
+        type: "turn.completed",
+      });
+      // Settling the turn emits the turn span with the pre-allocated id.
+      await runtime.hooks.publish({
+        sessionId: "session-1",
+        turnId: "turn-1",
+        type: "session.waiting",
+      });
     });
     await runtime.forceFlush();
 
@@ -139,6 +150,7 @@ describe("local instrumentation runtime", () => {
         "user.tool-work",
       ]),
     );
+    expect(span(spans, "agent.step").parentSpanId).toBe(span(spans, "agent.turn").spanId);
     expect(span(spans, "ai.streamText").parentSpanId).toBe(span(spans, "agent.step").spanId);
     expect(span(spans, "ai.streamText.doStream").parentSpanId).toBe(
       span(spans, "ai.streamText").spanId,

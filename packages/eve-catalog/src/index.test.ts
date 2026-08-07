@@ -93,6 +93,11 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("upstash-agentkit")?.connection).toBeUndefined();
   });
 
+  it("exposes Hindsight as an extension", () => {
+    expect(getIntegrationEntry("hindsight")?.kind).toBe("extension");
+    expect(getIntegrationEntry("hindsight")?.connection).toBeUndefined();
+  });
+
   it("exposes GitHub Tools as an extension distinct from the GitHub channel", () => {
     expect(getIntegrationEntry("github")?.kind).toBe("channel");
     expect(getIntegrationEntry("github-tools")?.kind).toBe("extension");
@@ -102,6 +107,12 @@ describe("integration catalog", () => {
   it("uses Browser Use's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("browser-use")!.connection!.mcp!.url).toBe(
       "https://api.browser-use.com/v3/mcp",
+    );
+  });
+
+  it("uses Natural's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("natural")!.connection!.mcp!.url).toBe(
+      "https://mcp.natural.com/mcp",
     );
   });
 });

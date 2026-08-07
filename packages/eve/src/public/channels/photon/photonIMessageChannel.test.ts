@@ -34,7 +34,7 @@ describe("photonIMessageChannel", () => {
     vi.clearAllMocks();
   });
 
-  it("cancels the active Eve turn before steering a direct message into its thread", async () => {
+  it("cancels the active eve turn before steering a direct message into its thread", async () => {
     photonIMessageChannel({
       credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
     });

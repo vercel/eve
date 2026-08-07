@@ -1,32 +1,40 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
+import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
-import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
+import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
+import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
 
 type DeliveryRequest = Extract<TurnControlPayload, { readonly kind: "turn-delivery-request" }>;
 
+export type TurnDriverAction = NextDriverAction;
+
 /** Owns one turn's driver-side control hook and public-delivery relay state. */
 export class TurnControlReceiver {
   private readonly bufferedDeliveries: DeliverHookPayload[];
+  private readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  private readonly commandInbox: SessionCommandInbox;
   private readonly control: Hook<TurnControlPayload>;
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
-  private readonly deliveryHook: SessionDeliveryHook;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
 
   constructor(input: {
     readonly bufferedDeliveries: DeliverHookPayload[];
-    readonly deliveryHook: SessionDeliveryHook;
+    readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+    readonly commandInbox: SessionCommandInbox;
     readonly token: string;
   }) {
     this.bufferedDeliveries = input.bufferedDeliveries;
+    this.bufferedSessionControls = input.bufferedSessionControls;
+    this.commandInbox = input.commandInbox;
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
-    this.deliveryHook = input.deliveryHook;
   }
 
   /** Token passed to the turn workflow so it can publish control messages. */
@@ -41,11 +49,15 @@ export class TurnControlReceiver {
   }
 
   /** Services control messages until the active turn returns its terminal driver action. */
-  async waitForAction(): Promise<NextDriverAction> {
+  async waitForAction(): Promise<TurnDriverAction> {
     while (true) {
-      const payload = await this.nextControl(
-        "Turn control hook closed before delivering a result.",
-      );
+      const winner = await this.nextControlOrCommand();
+      if (winner.kind === "command") {
+        const terminal = await this.handleSessionCommand(winner.command);
+        if (terminal !== undefined) return terminal;
+        continue;
+      }
+      const payload = winner.payload;
 
       const terminal = this.readTerminalControl(payload);
       if (terminal !== undefined) return terminal;
@@ -55,6 +67,43 @@ export class TurnControlReceiver {
         if (resolved !== undefined) return resolved;
       }
     }
+  }
+
+  private async handleSessionCommand(
+    command: SessionInboxPayload,
+  ): Promise<TurnDriverAction | undefined> {
+    if (command.kind === "deliver") {
+      this.bufferedDeliveries.push(command);
+      return undefined;
+    }
+    if (command.kind === "send") {
+      this.bufferedDeliveries.push(sendCommandToDelivery(command));
+      return undefined;
+    }
+    if (command.kind === "clear" || command.kind === "compact") {
+      this.bufferedSessionControls.push(command.kind);
+      return undefined;
+    }
+    if (command.kind === "session-timeout") {
+      this.bufferedSessionControls.push("expired");
+      return undefined;
+    }
+    if (command.kind === "cancel") {
+      await forwardTurnCancellationStep({
+        payload: command.turnId === undefined ? {} : { turnId: command.turnId },
+        token: turnCancellationHookToken(this.control.token),
+      });
+      return undefined;
+    }
+    if (command.kind === "reset") {
+      await forwardTurnCancellationStep({
+        payload: {},
+        token: turnCancellationHookToken(this.control.token),
+      });
+      this.bufferedSessionControls.push("reset");
+      return undefined;
+    }
+    return unsupportedSessionCommand(command);
   }
 
   private bufferTurnDeliveries(
@@ -74,23 +123,34 @@ export class TurnControlReceiver {
     return this.pendingControl;
   }
 
-  private async nextControl(
-    onClosed: string,
-  ): Promise<
-    Exclude<TurnControlPayload, { readonly kind: "turn-error" | "turn-continuation-token" }>
+  private async nextControlOrCommand(): Promise<
+    | { readonly command: SessionInboxPayload; readonly kind: "command" }
+    | { readonly kind: "control"; readonly payload: TurnControlPayload }
   > {
-    while (true) {
-      const next = await this.getControlPromise();
-      this.consumeControl();
-      if (next.done) throw new Error(onClosed);
-      const payload = next.value;
-      if (payload.kind === "turn-error") throw rebuildSerializableError(payload.error);
-      if (payload.kind === "turn-continuation-token") {
-        await this.deliveryHook.rekey(payload.continuationToken);
-        continue;
+    const winner = await Promise.race([
+      this.getControlPromise().then((value) => ({ kind: "control" as const, value })),
+      this.commandInbox.next().then((value) => ({ kind: "command" as const, value })),
+    ]);
+
+    if (winner.kind === "command") {
+      if (winner.value.done) {
+        throw new Error("Session command inbox closed before the active turn settled.");
       }
-      return payload;
+      this.commandInbox.consumeNext();
+      return { command: winner.value.value, kind: "command" };
     }
+
+    this.consumeControl();
+    if (winner.value.done) {
+      throw new Error("Turn control hook closed before delivering a result.");
+    }
+    const payload = winner.value.value;
+    if (payload.kind === "turn-error") throw rebuildSerializableError(payload.error);
+    if (payload.kind === "turn-continuation-token") {
+      await this.commandInbox.rekeyContinuation(payload.continuationToken);
+      return await this.nextControlOrCommand();
+    }
+    return { kind: "control", payload };
   }
 
   private readTerminalControl(payload: TurnControlPayload): NextDriverAction | undefined {
@@ -102,14 +162,14 @@ export class TurnControlReceiver {
 
   private async serviceDeliveryRequest(
     request: DeliveryRequest,
-  ): Promise<NextDriverAction | undefined> {
-    await this.deliveryHook.rekey(request.continuationToken);
+  ): Promise<TurnDriverAction | undefined> {
+    await this.commandInbox.rekeyContinuation(request.continuationToken);
 
     let delivery = this.bufferedDeliveries.shift();
     while (delivery === undefined) {
       const winner = await Promise.race([
         this.getControlPromise().then((value) => ({ kind: "control" as const, value })),
-        this.deliveryHook.next().then((value) => ({ kind: "delivery" as const, value })),
+        this.commandInbox.next().then((value) => ({ kind: "command" as const, value })),
       ]);
 
       if (winner.kind === "control") {
@@ -118,7 +178,7 @@ export class TurnControlReceiver {
           throw new Error("Turn control hook closed during a delivery request.");
         }
         if (winner.value.value.kind === "turn-continuation-token") {
-          await this.deliveryHook.rekey(winner.value.value.continuationToken);
+          await this.commandInbox.rekeyContinuation(winner.value.value.continuationToken);
           continue;
         }
         const terminal = this.readTerminalControl(winner.value.value);
@@ -133,12 +193,20 @@ export class TurnControlReceiver {
       }
 
       if (winner.value.done) {
-        throw new Error("Session delivery hook closed during a turn delivery request.");
+        throw new Error("Session command inbox closed during a turn delivery request.");
       }
 
-      this.deliveryHook.consumeNext();
-      if (winner.value.value.kind !== "deliver") continue;
-      delivery = winner.value.value;
+      this.commandInbox.consumeNext();
+      if (winner.value.value.kind === "deliver") {
+        delivery = winner.value.value;
+        continue;
+      }
+      if (winner.value.value.kind === "send") {
+        delivery = sendCommandToDelivery(winner.value.value);
+        continue;
+      }
+      const terminal = await this.handleSessionCommand(winner.value.value);
+      if (terminal !== undefined) return terminal;
     }
 
     // Forwarding is provisional until the turn acknowledges it. If the inbox is
@@ -163,17 +231,24 @@ export class TurnControlReceiver {
   /**
    * Waits for the active turn to resolve a forwarded delivery. The turn either
    * accepts it (consumed) or releases it on cancellation or termination, in
-   * which case the delivery returns to the buffer ahead of the turn's own
-   * remainders so the next parent turn still observes it in arrival order.
+   * which case the delivery returns behind remainders from earlier deliveries
+   * accepted by the turn and ahead of deliveries that arrived later.
    */
   private async awaitForwardedDelivery(
     requestId: string,
     outstanding: DeliverHookPayload,
-  ): Promise<NextDriverAction | undefined> {
+  ): Promise<TurnDriverAction | undefined> {
     while (true) {
-      const payload = await this.nextControl(
-        "Turn control hook closed before resolving a forwarded delivery.",
-      );
+      const winner = await this.nextControlOrCommand();
+      if (winner.kind === "command") {
+        const terminal = await this.handleSessionCommand(winner.command);
+        if (terminal !== undefined) {
+          this.bufferedDeliveries.unshift(outstanding);
+          return terminal;
+        }
+        continue;
+      }
+      const payload = winner.payload;
 
       if (payload.kind === "turn-delivery-accepted") {
         if (payload.requestId === requestId) return undefined;
@@ -193,4 +268,8 @@ export class TurnControlReceiver {
       if (terminal !== undefined) return terminal;
     }
   }
+}
+
+function unsupportedSessionCommand(command: never): never {
+  throw new Error(`Unsupported session command: ${JSON.stringify(command)}`);
 }

@@ -7,6 +7,7 @@ import { normalizeAuthorizationSpec } from "#runtime/connections/validate-author
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
 import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 
 /**
  * The OpenAPI document backing the connection: either an HTTPS URL the
@@ -91,6 +92,14 @@ export interface OpenAPIConnectionDefinition {
    * values may be callbacks that receive the active session context.
    */
   headers?: HeadersDefinition;
+  /**
+   * Per-call behavior for operations exposed by this OpenAPI connection.
+   *
+   * Use `providedArguments` for application-owned operation parameters. eve
+   * removes configured keys from the model-facing input schema and adds their
+   * resolved values immediately before building the HTTP request.
+   */
+  toolCall?: ConnectionToolCallDefinition;
   /**
    * Operation filter keyed on `operationId`. When set, the model sees
    * only operations whose id passes the filter; `connection_search`

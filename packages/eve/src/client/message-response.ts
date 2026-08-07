@@ -7,7 +7,6 @@ import type { MessageResult } from "#client/types.js";
  * Internal configuration passed to construct a {@link MessageResponse}.
  */
 interface MessageResponseInput {
-  readonly continuationToken?: string;
   readonly createStream: () => AsyncGenerator<MessageStreamEvent>;
   readonly sessionId: string;
 }
@@ -15,16 +14,11 @@ interface MessageResponseInput {
 /**
  * The response from {@link ClientSession.send}.
  *
- * Like `fetch()`, the response exposes metadata (session ID, continuation
- * token) as soon as the POST completes. Collect the event stream via
+ * Like `fetch()`, the response exposes its session ID as soon as the POST
+ * completes. Collect the event stream via
  * {@link result} or iterate it with `for await...of`.
  */
 export class MessageResponse<TOutput = unknown> implements AsyncIterable<MessageStreamEvent> {
-  /**
-   * Continuation token returned by the server for follow-up messages.
-   */
-  readonly continuationToken: string | undefined;
-
   /**
    * Session ID assigned by the server.
    */
@@ -35,7 +29,6 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
 
   /** @internal */
   constructor(input: MessageResponseInput) {
-    this.continuationToken = input.continuationToken;
     this.sessionId = input.sessionId;
     this.#createStream = input.createStream;
   }

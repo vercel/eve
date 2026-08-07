@@ -26,4 +26,18 @@ describe("defineMcpClientConnection", () => {
 
     expect(typeof definition.auth).toBe("function");
   });
+
+  it("accepts application-provided tool arguments", () => {
+    const definition = defineMcpClientConnection({
+      description: "Tenant-aware catalog",
+      toolCall: {
+        providedArguments: {
+          tenantId: ({ session }) => `tenant-for-${session.id}`,
+        },
+      },
+      url: "https://shop.example.com/mcp",
+    });
+
+    expect(typeof definition.toolCall?.providedArguments?.tenantId).toBe("function");
+  });
 });

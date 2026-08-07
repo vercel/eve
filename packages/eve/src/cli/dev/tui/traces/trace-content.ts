@@ -12,8 +12,6 @@
 
 import { stripTerminalControls, visibleLength, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 
-import type { Theme } from "../theme.js";
-
 /** Indent applied to continuation lines within a block. */
 const CONTINUATION = "  ";
 
@@ -21,12 +19,13 @@ const CONTINUATION = "  ";
  * Formats one attribute's value into display lines, each at most `width`
  * columns. A single scalar stays on one line so the panel can keep it beside
  * its key; multi-line content comes back unindented for the caller to nest
- * under the key.
+ * under the key. `dim` styles de-emphasized parts (role prefixes, the
+ * truncation notice), so callers pass their surface's dim style.
  */
 export function formatAttributeContent(
   key: string,
   value: unknown,
-  theme: Theme,
+  dim: (text: string) => string,
   width: number,
 ): string[] {
   // Non-string OTLP values include arrays whose elements can carry raw
@@ -37,7 +36,7 @@ export function formatAttributeContent(
     return [stripTerminalControls(shortJson(value))];
   }
   if (key === "ai.prompt.messages") {
-    const transcript = messageTranscript(value, theme, width);
+    const transcript = messageTranscript(value, dim, width);
     if (transcript !== undefined) return transcript;
   }
   return formatPayloadContent(value, width);
@@ -62,7 +61,11 @@ export function formatPayloadContent(text: string, width: number): string[] {
   return wrapPlainText(text, width);
 }
 
-function messageTranscript(raw: string, theme: Theme, width: number): string[] | undefined {
+function messageTranscript(
+  raw: string,
+  dim: (text: string) => string,
+  width: number,
+): string[] | undefined {
   const parsed = parseJson(raw);
   if (!Array.isArray(parsed)) return undefined;
   // Long conversations are front-truncated at capture time with an
@@ -82,11 +85,10 @@ function messageTranscript(raw: string, theme: Theme, width: number): string[] |
   if (!messages.every((message) => typeof message.role === "string")) {
     return undefined;
   }
-  const { colors } = theme;
   const lines: string[] = [];
   if (omitted > 0) {
     lines.push(
-      colors.dim(`… ${omitted} earlier message${omitted === 1 ? "" : "s"} omitted (long context)`),
+      dim(`… ${omitted} earlier message${omitted === 1 ? "" : "s"} omitted (long context)`),
     );
   }
   for (const message of messages) {
@@ -95,8 +97,8 @@ function messageTranscript(raw: string, theme: Theme, width: number): string[] |
       message.role === "tool" ? toolRoleLabel(parts) : stripTerminalControls(String(message.role));
     // The first part sits beside the role prefix; the rest hang underneath.
     parts.forEach((part, index) => {
-      const prefix = index === 0 ? `${colors.dim(`${role}:`)} ` : CONTINUATION;
-      lines.push(...wrapPrefixed(prefix, part.text, part.dim ? colors.dim : undefined, width));
+      const prefix = index === 0 ? `${dim(`${role}:`)} ` : CONTINUATION;
+      lines.push(...wrapPrefixed(prefix, part.text, part.dim ? dim : undefined, width));
     });
   }
   return lines;

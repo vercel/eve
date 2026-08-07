@@ -36,7 +36,7 @@ import {
 } from "#public/channels/auth.js";
 import {
   readAgentInfoRouteResponse,
-  readRouteAgent,
+  readRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 export interface McpChannelInput {
   /** Existing eve route-auth policy. Use `none()` for explicit public access. */
@@ -327,9 +327,9 @@ async function handleMcpRequest(
   args: RouteHandlerArgs,
   auth: import("#channel/types.js").SessionAuthContext,
 ): Promise<Response> {
-  const agent = readRouteAgent(args);
+  const createSession = readRouteSessionCreator(args);
   const respondWithAgentInfo = readAgentInfoRouteResponse(args);
-  if (agent === undefined || respondWithAgentInfo === undefined) {
+  if (createSession === undefined || respondWithAgentInfo === undefined) {
     return Response.json({ error: "MCP requires agent route context." }, { status: 500 });
   }
   const agentInfoResponse = await respondWithAgentInfo();
@@ -342,7 +342,13 @@ async function handleMcpRequest(
   }
   const description =
     typeof agentInfo.agent.description === "string" ? agentInfo.agent.description : undefined;
-  const service = new AgentInvocationService(new WorkflowAgentInvocationExecution(agent, "mcp"));
+  const service = new AgentInvocationService(
+    new WorkflowAgentInvocationExecution({
+      channelName: "mcp",
+      createSession,
+      from: args.from,
+    }),
+  );
   return await createMcpStreamableHttpServer({
     authenticate: async () => auth,
     name: agentInfo.agent.name,

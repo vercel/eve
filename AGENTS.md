@@ -31,6 +31,13 @@ the DCO `Signed-off-by` trailer. Use `git commit -s` for every commit, and if a
 commit is missing the trailer, amend it with `git commit --amend -s --no-edit`
 before pushing.
 
+PR descriptions are reviewer-oriented explanations of the problem, solution,
+meaningful behavior changes, and validation—not file lists or commit logs. Keep
+them proportional to the change, link the prior issue, call out important scope
+boundaries or preserved behavior, and report only checks actually run. Use the
+[`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md) skill when
+drafting or updating one.
+
 ## Commands
 
 ```sh
@@ -63,13 +70,25 @@ line of defense, and every required check must pass before merge.
 
 ## Coding principles
 
-1. **Public APIs need docs and tests.** Exported functions, classes, and
-   important public types get documentation comments and at least one test.
+1. **Public APIs are sensitive.** They usually require a research doc proposing the
+   change, alongside proper e2e tests covering golden paths and known failure modes.
+   They also require proper and legible documentation.
 
-2. **Small modules over big helpers.** Favor composable primitives with narrow
-   responsibilities. Split files that carry multiple concerns.
+2. **The core is lean and powerful**. The framework core should be simple yet highly
+   expressible i.e., `eve` can be built with `eve`. This means that changes in
+   `execution/` and `harness/` should be only done when strictly necessary. The
+   core should expose hooks and internal APIs so that broad functionality is built
+   on top of it.
 
-3. **Wrap third-party dependencies.** Do not expose third-party APIs as eve
+3. **KISS**. Keep things simple. If there are 5 ways to do something, the simplest
+   and more obvious one should be the preferred option. Code should be legible and
+   obvious.
+
+4. **Code is liability**. Each net-new introduced snippet should earn its right
+   to exist. Common abstractions should be reused. Accidental complexity needs
+   to be derived to its essence. Entropy must be contained.
+
+5. **Wrap third-party dependencies.** Do not expose third-party APIs as eve
    public APIs. Wrap them in eve-owned surfaces so internals can change freely.
    Add runtime `dependencies` only as a last resort: prefer vendoring code or
    generated artifacts into the repository and listing the source package under
@@ -78,24 +97,24 @@ line of defense, and every required check must pass before merge.
    exposure to hijacked nested dependencies that are not pinned directly in the
    main lockfile.
 
-4. **Pre-1.0: prefer breaking changes.** Favor correctness and simplicity over
+6. **Pre-1.0: prefer breaking changes.** Favor correctness and simplicity over
    backwards compatibility. No legacy fallback logic.
 
-5. **Derive names from file paths.** Connection names, tool names, and similar
+7. **Derive names from file paths.** Connection names, tool names, and similar
    identifiers come from the filesystem path (e.g.
    `agent/connections/linear.ts` → `"linear"`). Do not add redundant `name`
    fields to definitions.
 
-6. **Name definitions for the protocol they target.** Use
+8. **Name definitions for the protocol they target.** Use
    `defineMcpClientConnection`, not `defineConnection`.
 
-7. **All runtime functionality lives in the `eve` package.** Never rely on
+9. **All runtime functionality lives in the `eve` package.** Never rely on
    emitted or generated code for runtime behavior.
 
-8. **Comment why, not what.** Default to no comment; well-named code is the
-   documentation. Comment only what the code cannot say itself — a non-obvious
-   why, an invariant, a surprising edge case. Public API docs (principle 1) are
-   the exception.
+10. **Comment why, not what.** Default to no comment; well-named code is the
+    documentation. Comment only what the code cannot say itself — a non-obvious
+    why, an invariant, a surprising edge case. Public API docs (principle 1) are
+    the exception.
 
 Machine-checkable invariants are enforced by `pnpm guard:invariants`, which
 runs in the CI lint job. If the guard fails, fix the violation rather than
@@ -170,6 +189,8 @@ live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 - `docs/**` is the published documentation. If your change alters
   public behavior, update the relevant doc in the same PR and run
   `pnpm docs:check`.
+- When moving a published route, update authored links to the new URL and add a
+  permanent redirect from every old HTML and supported Markdown URL.
 - Sidebar order lives in `docs/meta.json`.
 - Keep markdown framework-agnostic — no MDX-only constructs unless the page is
   `.mdx`.

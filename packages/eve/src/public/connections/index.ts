@@ -21,6 +21,12 @@ export {
   defineMcpClientConnection,
   type McpClientConnectionDefinition,
 } from "#public/definitions/connections/mcp.js";
+export type {
+  ConnectionToolCallDefinition,
+  ProvidedArgumentContext,
+  ProvidedArgumentsDefinition,
+  ProvidedArgumentValue,
+} from "#public/definitions/connections/tool-call.js";
 export {
   defineOpenAPIConnection,
   type OpenAPIConnectionDefinition,

@@ -9,8 +9,10 @@ import {
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
-import { defineAgent } from "#public/definitions/agent.js";
-import { defineDynamic, experimental_workflow } from "#public/definitions/tool.js";
+import { collectModuleRefsForManifest } from "#compiler/module-map.js";
+import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
+import { experimental_workflow } from "#public/definitions/tool.js";
+import { webSearch } from "#public/tools/web-search.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 const mocks = vi.hoisted(() => ({
@@ -81,6 +83,71 @@ describe("compileAgentManifest", () => {
     );
   });
 
+  it("retains extension mounts on the subagent that owns them", async () => {
+    const extensionManifest = createAgentSourceManifest({
+      agentId: "research-extension",
+      agentRoot: "/packages/research/dist/extension",
+      appRoot: "/packages/research",
+    });
+    const mountRef = createModuleSourceRef({ logicalPath: "extensions/research.ts" });
+    const subagentManifest = createAgentSourceManifest({
+      agentId: "researcher",
+      agentRoot: "/app/agent/subagents/researcher",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({ logicalPath: "agent.ts" }),
+      extensions: [mountRef],
+      resolvedExtensions: [
+        {
+          namespace: "research",
+          specifier: "@acme/research",
+          packageName: "@acme/research",
+          packageRoot: "/packages/research",
+          sourceRoot: "/packages/research/dist/extension",
+          manifest: extensionManifest,
+        },
+      ],
+    });
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      subagents: [
+        createLocalSubagentSourceRef({
+          entryPath: "subagents/researcher/agent.ts",
+          logicalPath: "subagents/researcher",
+          manifest: subagentManifest,
+          rootPath: "/app/agent/subagents/researcher",
+          subagentId: "researcher",
+        }),
+      ],
+    });
+    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
+      input.agentId === "researcher"
+        ? createConfig({ name: input.agentId, description: "Research the request." })
+        : createConfig({ name: input.agentId }),
+    );
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      description: "Research the request.",
+      model: "openai/gpt-5.5",
+    });
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.extensionMounts).toEqual([]);
+    expect(compiled.subagents[0]?.agent.extensionMounts).toEqual([
+      expect.objectContaining({
+        namespace: "research",
+        mountLogicalPath: "extensions/research.ts",
+        packageName: "@acme/research",
+      }),
+    ]);
+    expect(collectModuleRefsForManifest(compiled.subagents[0]!.agent)).toContainEqual({
+      sourceKind: "module",
+      logicalPath: "extensions/research.ts",
+      sourceId: "extensions/research.ts",
+    });
+  });
+
   it("compiles experimental Workflow tool configuration", async () => {
     const manifest = createAgentSourceManifest({
       agentId: "root",
@@ -94,6 +161,37 @@ describe("compileAgentManifest", () => {
     const compiled = await compileAgentManifest(manifest);
 
     expect(compiled.workflowTool).toEqual({ maxSubagents: 6 });
+  });
+
+  it("compiles web search provider configuration", async () => {
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      tools: [createModuleSourceRef({ logicalPath: "tools/web_search.ts" })],
+    });
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.loadModuleBackedDefinition.mockResolvedValue(webSearch({ provider: "exa" }));
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.webSearchProvider).toBe("exa");
+    expect(compiled.tools).toEqual([]);
+  });
+
+  it("requires web search configuration to use the web_search filename", async () => {
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      tools: [createModuleSourceRef({ logicalPath: "tools/search.ts" })],
+    });
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.loadModuleBackedDefinition.mockResolvedValue(webSearch({ provider: "exa" }));
+
+    await expect(compileAgentManifest(manifest)).rejects.toThrow(
+      'must be exported from "tools/web_search.ts"',
+    );
   });
 
   it("compiles a dynamic subagent manifest without resolving an agent config", async () => {
@@ -122,6 +220,49 @@ describe("compileAgentManifest", () => {
     expect(mocks.compileAgentConfig.mock.calls[1]?.[2]).toMatchObject({
       definition: { model: DEFAULT_AGENT_MODEL_ID },
     });
+  });
+
+  it("applies dynamic subagent build configuration before resolving events", async () => {
+    const dynamic = defineDynamic({
+      build: { externalDependencies: ["just-bash"] },
+      events: {
+        "session.started": () =>
+          defineAgent({
+            description: "Edit the request.",
+            model: "openai/gpt-5.5",
+          }),
+      },
+    });
+    const manifest = createManifestWithSubagent();
+    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
+      createConfig({ name: input.agentId }),
+    );
+    mocks.loadModuleBackedDefinition.mockResolvedValue(dynamic);
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.subagents[0]?.dynamic).toEqual({
+      eventNames: ["session.started"],
+    });
+    expect(mocks.compileAgentConfig.mock.calls[1]?.[2]).toMatchObject({
+      definition: {
+        build: { externalDependencies: ["just-bash"] },
+        model: DEFAULT_AGENT_MODEL_ID,
+      },
+    });
+  });
+
+  it("rejects invalid dynamic subagent build configuration", async () => {
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      build: { externalDependencies: "just-bash" },
+      events: { "session.started": () => null },
+      kind: "eve:dynamic",
+    });
+
+    await expect(compileAgentManifest(createManifestWithSubagent())).rejects.toThrow(
+      "Expected the dynamic subagent config export",
+    );
   });
 
   it("rejects fallback on a dynamic subagent", async () => {

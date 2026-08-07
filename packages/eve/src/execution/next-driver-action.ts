@@ -12,6 +12,7 @@
  * strips unknown fields.
  */
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { SettledTurn } from "#harness/types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 /** Discriminated union the driver workflow body dispatches on. */
@@ -24,6 +25,12 @@ export type NextDriverAction =
       readonly serializedContext: Record<string, unknown>;
       /** Session-total token usage spent by the completed session. */
       readonly usage?: TokenUsage;
+      /**
+       * Usage the final turn added beyond what earlier settled turns already
+       * reported; forwarded through the same pinned-driver-safe
+       * optional-field pattern as `cancelled`.
+       */
+      readonly usageDelta?: TokenUsage;
     }
   | {
       readonly kind: "park";
@@ -37,6 +44,11 @@ export type NextDriverAction =
        * working.
        */
       readonly cancelled?: true;
+      /**
+       * Settled user-facing answer forwarded through the same pinned-driver-safe
+       * optional-field pattern as `cancelled`.
+       */
+      readonly settled?: SettledTurn;
     }
   | {
       readonly kind: "dispatch-runtime-actions";

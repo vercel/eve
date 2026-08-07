@@ -36,7 +36,7 @@ import type {
 } from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
-import { transformDynamicToolExecute } from "#internal/workflow-bundle/dynamic-tool-transform.js";
+import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
 /**
@@ -503,26 +503,12 @@ function addNitroStepTransformPlugin(
   return clearCachedStepTransformTargets;
 }
 
-/**
- * Adds the dynamic tool transform plugin that hoists execute functions
- * from defineDynamic event handlers to module scope. Runs
- * unconditionally for all tool files regardless of workflow mode.
- */
-function addDynamicToolTransformPlugin(nitro: Nitro): void {
+function addDynamicCapabilityTransformPlugin(nitro: Nitro): void {
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
       return;
     }
-
-    config.plugins.unshift({
-      async transform(code: string, id: string) {
-        if (!id.includes("/tools/")) return null;
-        const result = await transformDynamicToolExecute(id, code);
-        if (result === null) return null;
-        return { code: result.code, map: null };
-      },
-      name: "eve:dynamic-tool-transform",
-    });
+    config.plugins.unshift(createDynamicCapabilityTransformPlugin());
   });
 }
 
@@ -635,10 +621,15 @@ function createApplicationNitroBundlerConfiguration(
     ).push(packageName);
   }
   const extensionScopePlugin = createExtensionScopePlugin(
-    (preparedHost.compileResult.manifest.extensionMounts ?? []).map((mount) => ({
-      sourceRoot: mount.sourceRoot,
-      packageNamespace: mount.packageNamespace,
-    })),
+    [
+      preparedHost.compileResult.manifest,
+      ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
+    ].flatMap((node) =>
+      node.extensionMounts.map((mount) => ({
+        sourceRoot: mount.sourceRoot,
+        packageNamespace: mount.packageNamespace,
+      })),
+    ),
   );
   const nitroBundlerPlugins = [
     compiledSandboxBackendPrunePlugin,
@@ -688,7 +679,7 @@ function configureSharedApplicationNitro(
   addWorkflowModuleSideEffectsPlugin(nitro, preparedHost.workflowBuildDir);
   patchWorkflowTransformExcludePath(nitro, preparedHost.workflowBuildDir);
 
-  addDynamicToolTransformPlugin(nitro);
+  addDynamicCapabilityTransformPlugin(nitro);
 
   if (preparedHost.compiledArtifacts.instrumentationSourcePath !== undefined) {
     addInstrumentationModuleSideEffectsPlugin(

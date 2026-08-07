@@ -1,6 +1,7 @@
 import { relative } from "node:path";
 
 import {
+  buildOpaqueTypesStub,
   buildUniqueSymbolStub,
   collectFilesRecursively,
   createDeclarationCopier,
@@ -86,10 +87,20 @@ const copyDeclarations = createDeclarationCopier({
       kind: "vendored",
       compiledPath: "@workflow/world",
     },
+    devalue: {
+      kind: "stub",
+      stubBaseName: "_devalue",
+      build: buildOpaqueTypesStub,
+    },
     ms: {
       kind: "stub",
       stubBaseName: "_ms",
       build: buildMsStub,
+    },
+    "quickjs-wasi": {
+      kind: "stub",
+      stubBaseName: "_quickjs-wasi",
+      build: buildOpaqueTypesStub,
     },
   },
 });
@@ -124,11 +135,39 @@ function stubCoreWorldFactories() {
   };
 }
 
+// @workflow/core@5.0.0-beta.40 lazy-loads the optional QuickJS runtime, but
+// Rolldown still emits it as a reachable chunk and Nitro packages that chunk
+// into every eve function. eve only supports the Node.js workflow VM, so keep
+// the lazy boundary while replacing its target with a small, explicit error.
+const CORE_QUICKJS_ENTRYPOINT_STUB_ID = "\0eve-core-quickjs-entrypoint-stub";
+
+function stubCoreQuickJSEntrypoint() {
+  return {
+    name: "eve:stub-core-quickjs-entrypoint",
+    resolveId(source, importer) {
+      if (source !== "./runtime/quickjs-entrypoint.js") return null;
+      if (typeof importer !== "string") return null;
+      if (!importer.replaceAll("\\", "/").includes("/@workflow/core/")) return null;
+      return CORE_QUICKJS_ENTRYPOINT_STUB_ID;
+    },
+    load(id) {
+      if (id !== CORE_QUICKJS_ENTRYPOINT_STUB_ID) return null;
+      return [
+        "export async function runWorkflowWithQuickJS() {",
+        '  throw new Error("Unsupported in eve: QuickJS workflow VM. ' +
+          'eve uses the Node.js workflow VM.");',
+        "}",
+        "",
+      ].join("\n");
+    },
+  };
+}
+
 export default {
   packageName: "@workflow/core",
   compiledPath: "@workflow/core",
   chunkGroup: "workflow",
-  plugins: [stubCoreWorldFactories()],
+  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
   entries: [
     {
       outputPath: "index",

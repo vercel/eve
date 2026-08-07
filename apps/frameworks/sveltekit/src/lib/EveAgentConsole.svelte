@@ -45,7 +45,7 @@
     const text = messageText.trim();
     if (!text || isBusy) return;
     messageText = "";
-    void agent.send({ message: text });
+    void agent.send(text);
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -62,7 +62,7 @@
       readonly text?: string;
     }[],
   ) {
-    void agent.send({ inputResponses: responses });
+    void agent.respond(responses);
   }
 
   function partKey(part: EveMessagePart, index: number): string {

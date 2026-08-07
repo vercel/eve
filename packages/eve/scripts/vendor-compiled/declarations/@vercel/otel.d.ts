@@ -5,8 +5,14 @@ export interface SpanProcessor {
   shutdown(): Promise<void>;
 }
 
+export interface IdGenerator {
+  generateSpanId(): string;
+  generateTraceId(): string;
+}
+
 export interface Configuration {
   readonly autoDetectResources?: boolean;
+  readonly idGenerator?: IdGenerator;
   readonly instrumentations?: readonly unknown[];
   readonly propagators?: readonly ["none"];
   readonly serviceName?: string;

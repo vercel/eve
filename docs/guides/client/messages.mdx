@@ -3,7 +3,7 @@ title: "Messages"
 description: "Send text, full turn payloads, client context, attachments, and HITL responses with eve/client."
 ---
 
-`ClientSession` sends one turn at a time. A fresh session starts on the first send; later sends continue the same conversation as long as the previous turn left the session waiting.
+Create a session with its first turn, then use the returned `ClientSession` for follow-ups. Each handle targets one durable session ID.
 
 ## Send text
 
@@ -12,13 +12,13 @@ Pass a string to `send()` for plain text:
 ```ts
 import { Client } from "eve/client";
 
-const client = new Client({ host: "http://127.0.0.1:3000" });
-const session = client.session();
-
-const response = await session.send("What is the weather in Brooklyn?");
+const client = new Client({ host: "http://127.0.0.1:2000" });
+const { session, response } = await client.sessions.create({
+  message: "What is the weather in Brooklyn?",
+});
 
 // Metadata is available as soon as the POST succeeds.
-console.log(response.sessionId, response.continuationToken);
+console.log(response.sessionId);
 
 const result = await response.result();
 console.log(result.status, result.message);
@@ -38,10 +38,10 @@ When the stream includes `session.failed`, the turn returns `status: "failed"` r
 
 ## Send a full turn payload
 
-Use `send()` when you need more than plain text:
+Pass the full payload to `create()` for the first turn or `send()` for a follow-up:
 
 ```ts
-const response = await session.send({
+const { session, response } = await client.sessions.create({
   message: "What should I do on this screen?",
   clientContext: {
     route: "/billing",
@@ -60,17 +60,15 @@ await response.result();
 `send()` accepts AI SDK `UserContent`, so a message can mix text and file parts:
 
 ```ts
-const response = await session.send({
-  message: [
-    { type: "text", text: "Summarize this report." },
-    {
-      type: "file",
-      data: reportDataUrl,
-      mediaType: "application/pdf",
-      filename: "report.pdf",
-    },
-  ],
-});
+const response = await session.send([
+  { type: "text", text: "Summarize this report." },
+  {
+    type: "file",
+    data: reportDataUrl,
+    mediaType: "application/pdf",
+    filename: "report.pdf",
+  },
+]);
 
 await response.result();
 ```
@@ -83,17 +81,15 @@ import { readFile } from "node:fs/promises";
 const bytes = await readFile("report.pdf");
 const reportDataUrl = `data:application/pdf;base64,${bytes.toString("base64")}`;
 
-const response = await session.send({
-  message: [
-    { type: "text", text: "Summarize this report." },
-    {
-      type: "file",
-      data: reportDataUrl,
-      mediaType: "application/pdf",
-      filename: "report.pdf",
-    },
-  ],
-});
+const response = await session.send([
+  { type: "text", text: "Summarize this report." },
+  {
+    type: "file",
+    data: reportDataUrl,
+    mediaType: "application/pdf",
+    filename: "report.pdf",
+  },
+]);
 
 await response.result();
 ```
@@ -119,17 +115,17 @@ for await (const event of response) {
   }
 }
 
-const resumed = await session.send({
-  inputResponses: pendingRequests.map((request) => ({
+const resumed = await session.respond(
+  pendingRequests.map((request) => ({
     requestId: request.requestId,
     optionId: "approve",
   })),
-});
+);
 
 await resumed.result();
 ```
 
-You can send `message`, `inputResponses`, and `clientContext` together when the resumed turn needs both a human answer and follow-up text.
+`send(message, options)` and `respond(inputResponses, options)` are separate operations. Put `clientContext`, `outputSchema`, headers, or stream options in the second argument to either method.
 
 ## Single-use responses
 

@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
+import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
 import { integrations } from "@/lib/integrations/data";
 import { translations } from "@/geistdocs";
 import { Gallery, type GalleryFilter } from "./components/gallery";
@@ -6,10 +8,17 @@ import { Gallery, type GalleryFilter } from "./components/gallery";
 const title = "Integrations";
 const description =
   "Browse the channels, connections, extensions, and instrumentation providers available to an eve agent, each with install, quick start, and configuration steps.";
+const titleMetadata = pageTitleMetadata(title);
 
 export const metadata: Metadata = {
-  title,
+  ...titleMetadata,
   description,
+  alternates: canonicalAlternates(canonicalRoutes.integrations),
+  openGraph: titleMetadata.openGraph,
+  twitter: {
+    ...titleMetadata.twitter,
+    card: "summary_large_image",
+  },
 };
 
 export const generateStaticParams = () => Object.keys(translations).map((lang) => ({ lang }));

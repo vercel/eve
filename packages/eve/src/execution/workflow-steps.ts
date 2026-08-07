@@ -28,6 +28,7 @@ import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-
 import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import {
@@ -36,8 +37,8 @@ import {
 } from "#harness/workflow-runtime-action-state.js";
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
-import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
-import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
+import type { HarnessSession, SettledTurn, StepInput, StepResult } from "#harness/types.js";
+import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -112,6 +113,12 @@ export type DurableStepResult =
       readonly sessionState: DurableSessionState;
       /** Session-total token usage; set on `done` when the session spent any. */
       readonly usage?: TokenUsage;
+      /**
+       * Usage the final turn added beyond what earlier settled turns already
+       * reported; feeds the terminal `AgentTurnOutcome` for conversation
+       * children. Task sessions settle once, so their callers read `usage`.
+       */
+      readonly usageDelta?: TokenUsage;
     }
   | {
       readonly action: "cancelled";
@@ -127,6 +134,7 @@ export type DurableStepResult =
       readonly sleepDurationMs?: number;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
+      readonly settled?: SettledTurn;
     }
   | {
       readonly action: "dispatch-workflow-runtime-actions";
@@ -281,6 +289,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const dynamicInstructionsResolvers = bundle.resolvedAgent.dynamicInstructionsResolvers ?? [];
   const dynamicSkillResolvers = bundle.resolvedAgent.dynamicSkillResolvers ?? [];
   const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
+  const persistentSubagentSessions =
+    bundle.resolvedAgent.config.experimental?.subagentPersistentSessions === true;
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
   const effectiveNode = {
     ...bundle.graph.root,
@@ -304,6 +314,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         resolvers: dynamicSubagentResolvers,
         event: refreshEvent,
         messages: initialSession.history,
+        persistentSessions: persistentSubagentSessions,
         runtimeRevision: dynamicRuntimeRevision,
       }),
       refreshDynamicSessionToolsForRuntimeRevision({
@@ -351,6 +362,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       resolvers: dynamicSubagentResolvers,
       event: emitted,
       messages: messages ?? [],
+      persistentSessions: persistentSubagentSessions,
     });
     await dispatchDynamicToolEvent({
       ctx,
@@ -451,7 +463,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
 
   // Re-stamp the in-memory session's continuation token in case a
-  // handler called `setContinuationToken(...)` (eg. Slack auto-anchor).
+  // handler called `session.continuation.rekey(...)` (eg. Slack auto-anchor).
   const rekeyed = reconcileSessionContinuationToken(ctx, stepResult.session);
   const nextSerializedContext = serializeContext(ctx);
   stepResult = { ...stepResult, session: rekeyed };
@@ -475,6 +487,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       serializedContext: nextSerializedContext,
       sessionState: nextState,
       usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
+      usageDelta: takeSessionUsageDelta(stepResult.session).delta,
     };
   }
 
@@ -497,9 +510,41 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       };
     }
 
+    const pending = derivePendingState(stepResult.session);
+
+    // A park is idle when the turn stopped because it finished, not because
+    // it is blocked on an authorization grant, a queued input batch, or
+    // runtime-action dispatch.
+    const isIdlePark =
+      !pending.hasPendingAuthorization &&
+      !pending.hasPendingInputBatch &&
+      (pending.pendingRuntimeActionKeys?.length ?? 0) === 0;
+
+    // A settled answer crosses the park boundary only at an idle park: the
+    // driver forwards it to the delegated caller (notify-then-park), and
+    // forwarding from a blocked park would report the turn as finished while
+    // it still waits on pending work. `usage` carries only this turn's
+    // delta: the take marks the totals reported, so the next settled turn
+    // of a persistent child never re-reports earlier spend.
+    if (isIdlePark && stepResult.settledTurn !== undefined) {
+      const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
+      return {
+        action: "park",
+        ...pending,
+        ...sleepTransition,
+        serializedContext: nextSerializedContext,
+        sessionState: createDurableSessionState({ session: reportedSession }),
+        settled: {
+          output: stepResult.settledTurn.output,
+          isError: stepResult.settledTurn.isError,
+          usage: delta,
+        },
+      };
+    }
+
     return {
       action: "park",
-      ...derivePendingState(stepResult.session),
+      ...pending,
       ...sleepTransition,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
@@ -602,11 +647,12 @@ export async function routeProxiedDeliverStep(input: {
   });
 
   for (const forChild of routed.forChildren) {
-    await resumeHook(forChild.childContinuationToken, {
-      auth: input.auth,
-      kind: "deliver",
-      payloads: [forChild.payload],
-    });
+    // Children are pinned to their own deployments, so proxied deliveries
+    // must cross this hook in the same durable envelope as channel sends.
+    await resumeHook(
+      forChild.childContinuationToken,
+      sendCommandToDelivery({ auth: input.auth, kind: "send", payload: forChild.payload }),
+    );
   }
 
   return routed.parentAction ?? { kind: "continue", remainder: routed.forSelf };

@@ -8,6 +8,10 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import { isObject } from "#shared/guards.js";
+import {
+  omitProvidedArgumentsFromSchema,
+  resolveProvidedArguments,
+} from "#runtime/connections/provided-arguments.js";
 import type {
   AuthorizationDefinition,
   ConnectionClient,
@@ -132,7 +136,13 @@ export class McpConnectionClient implements ConnectionClient {
         );
       }
 
-      return await sdkTool.execute(args, { abortSignal: options?.abortSignal } as never);
+      const resolvedArgs = await resolveProvidedArguments({
+        args,
+        connection: this.#connection,
+        toolName,
+      });
+
+      return await sdkTool.execute(resolvedArgs, { abortSignal: options?.abortSignal } as never);
     } catch (error) {
       return await this.#rethrowClassified(error);
     }
@@ -179,9 +189,15 @@ export class McpConnectionClient implements ConnectionClient {
     // elements are `Tool<unknown, CallToolResult>`. The AI SDK's
     // `ToolSet` constraint only admits `Tool<any | never, any | never>`,
     // so a single-hop cast is required — the runtime shape is identical.
-    const tools = client.toolsFromDefinitions({ tools: filteredTools }) as ToolSet;
+    const providedArgumentNames = Object.keys(this.#connection.toolCall?.providedArguments ?? {});
+    const projectedTools = filteredTools.map((tool) => ({
+      ...tool,
+      inputSchema: omitProvidedArgumentsFromSchema(tool.inputSchema, providedArgumentNames),
+    }));
 
-    const metadata: ConnectionToolMetadata[] = filteredTools.map((t) => ({
+    const tools = client.toolsFromDefinitions({ tools: projectedTools }) as ToolSet;
+
+    const metadata: ConnectionToolMetadata[] = projectedTools.map((t) => ({
       annotations: t.annotations as Record<string, unknown> | undefined,
       description: t.description ?? "",
       inputSchema: (t.inputSchema ?? {}) as Record<string, unknown>,

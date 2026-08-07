@@ -92,6 +92,24 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
     );
   });
 
+  it("builds workspace extensions mounted by local subagents", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha"]);
+    await rm(join(appRoot, "agent", "extensions", "alpha.ts"));
+    await writeText(
+      join(appRoot, "agent", "subagents", "researcher", "extensions", "alpha.ts"),
+      'export { default } from "../../../../packages/alpha";\n',
+    );
+
+    const extensions = await prepareDevelopmentWorkspaceExtensions({ appRoot });
+
+    expect(extensions).toHaveLength(1);
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledOnce();
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledWith(
+      join(appRoot, "packages", "alpha"),
+      expect.objectContaining({ packageName: "@acme/alpha" }),
+    );
+  });
+
   it("does not rebuild an extension for an unrelated workspace dependency edit", async () => {
     const appRoot = await createWorkspaceAgent(["alpha"]);
     const initial = await prepareDevelopmentWorkspaceExtensions({ appRoot });

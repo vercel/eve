@@ -1,7 +1,9 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
+import { z } from "#compiled/zod/index.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
+import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth } from "#public/channels/eve.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
@@ -16,7 +18,11 @@ import { defineInstrumentation } from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { defineTool, experimental_workflow } from "#public/definitions/tool.js";
+import {
+  defineTool,
+  experimental_workflow,
+  type ToolDefinition,
+} from "#public/definitions/tool.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
@@ -43,6 +49,38 @@ describe("definition helper exact inputs", () => {
     expect(schedule.cron).toBe("0 9 * * *");
   });
 
+  it("accepts async-generator tool executors", () => {
+    const streamedTool = defineTool({
+      description: "Stream report progress.",
+      inputSchema: { type: "object" },
+      async *execute() {
+        yield { phase: "collecting" };
+        yield { phase: "complete" };
+      },
+    });
+
+    expectTypeOf(streamedTool).toMatchTypeOf<
+      ToolDefinition<Record<string, unknown>, { phase: string }>
+    >();
+    expectTypeOf<ReturnType<typeof streamedTool.execute>>().toEqualTypeOf<
+      AsyncGenerator<{ phase: string }, void, unknown>
+    >();
+  });
+
+  it("preserves ordinary async tool executor return types", () => {
+    const ordinaryTool = defineTool({
+      description: "React to a message.",
+      inputSchema: z.object({ reaction: z.string() }),
+      async execute(input) {
+        return { ok: input.reaction.length > 0 };
+      },
+    });
+
+    expectTypeOf<ReturnType<typeof ordinaryTool.execute>>().toEqualTypeOf<
+      Promise<{ ok: boolean }>
+    >();
+  });
+
   it("keeps the public hook event map aligned with runtime stream events", () => {
     expectTypeOf<keyof HookEventMap>().toEqualTypeOf<UnstampedMessageStreamEvent["type"]>();
   });
@@ -56,6 +94,22 @@ function typeOnlyFixtures(): void {
         defineAgent({
           model: "anthropic/claude-sonnet-5",
         }),
+    },
+  });
+
+  defineDynamic({
+    build: { externalDependencies: ["just-bash"] },
+    events: {
+      "session.started": () =>
+        Math.random() > 0.5
+          ? defineAgent({
+              description: "Delegate local research tasks.",
+              model: "anthropic/claude-sonnet-5",
+            })
+          : defineRemoteAgent({
+              description: "Delegate remote research tasks.",
+              url: "https://research.example.com",
+            }),
     },
   });
 
@@ -194,9 +248,10 @@ function typeOnlyFixtures(): void {
         const sessionId: string = ctx.session.id;
         void sessionId;
       },
-      "session.failed"(_data, _channel) {
+      "session.failed"(data, _channel) {
         // session.failed has no ctx — fires outside ALS on terminal failures.
-        void _data;
+        const sessionId: string = data.sessionId;
+        void sessionId;
         void _channel;
       },
     },
@@ -248,15 +303,25 @@ function typeOnlyFixtures(): void {
     },
     events: {
       "turn.started"(_data, channel, ctx) {
-        const continuationToken: string = channel.continuationToken;
+        const continuationToken: string | undefined = channel.continuation?.token;
         const sessionId: string = ctx.session.id;
         void continuationToken;
         void sessionId;
       },
-      "session.failed"(_data, channel) {
-        const continuationToken: string = channel.continuationToken;
+      "session.failed"(data, channel) {
+        const sessionId: string = data.sessionId;
+        const continuationToken: string | undefined = channel.continuation?.token;
+        void sessionId;
         void continuationToken;
       },
+    },
+  });
+
+  eveChannel({
+    auth: none(),
+    // @ts-expect-error canonical eve HTTP messages must dispatch or fail.
+    onMessage() {
+      return null;
     },
   });
 

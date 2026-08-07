@@ -3,9 +3,9 @@ import {
   ClientError,
   type ClientSession,
   type MessageStreamEvent,
-  type SendTurnPayload,
-  type SessionState,
+  type ClientSessionState,
 } from "#client/index.js";
+import type { SendTurnPayload } from "#client/types.js";
 import { collectTurnEvents, summarizeTurnEvents } from "#client/session-utils.js";
 import { resolveLocalDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import { resolveLinkedDevelopmentOidcToken } from "#services/dev-client/request-headers.js";
@@ -41,9 +41,11 @@ export interface RunInvokeInput {
 export async function runInvoke(input: RunInvokeInput): Promise<InvokeResult> {
   const { client, deploymentResolution } = await createInvokeClient(input);
   const resume = input.operation.resume;
-  const session = client.session(resume?.session);
 
   if (input.operation.kind === "follow") {
+    const session = client.sessions.attach(resume!.session.sessionId, {
+      streamIndex: resume!.session.streamIndex,
+    });
     return observeSafely(
       input,
       session,
@@ -53,8 +55,26 @@ export async function runInvoke(input: RunInvokeInput): Promise<InvokeResult> {
   }
 
   let response: Awaited<ReturnType<ClientSession["send"]>>;
+  let session: ClientSession;
   try {
-    response = await session.send({ ...input.operation.payload, signal: input.signal });
+    const payload = { ...input.operation.payload, signal: input.signal };
+    if (resume === undefined) {
+      if (payload.message === undefined) {
+        throw new Error("Cannot answer an input request before the session starts.");
+      }
+      const created = await client.sessions.create({ ...payload, message: payload.message });
+      session = created.session;
+      response = created.response;
+    } else {
+      session = client.sessions.attach(resume.session.sessionId, {
+        streamIndex: resume.session.streamIndex,
+      });
+      const { inputResponses, message, ...options } = payload;
+      response =
+        inputResponses === undefined
+          ? await session.send(message!, options)
+          : await session.respond(inputResponses, options);
+    }
   } catch (error) {
     const authentication = authenticationFailure(error, undefined, deploymentResolution);
     if (authentication !== undefined) return authentication;
@@ -115,7 +135,6 @@ async function createInvokeClient(input: RunInvokeInput): Promise<{
           serverUrl: input.target.serverUrl,
           token: () => resolveLinkedDevelopmentOidcToken(input.target.workspaceRoot),
         }),
-        preserveCompletedSessions: true,
       }),
     };
   }
@@ -128,7 +147,7 @@ async function createInvokeClient(input: RunInvokeInput): Promise<{
     workspaceRoot: input.target.workspaceRoot,
   });
   return {
-    client: new Client({ ...options, preserveCompletedSessions: true }),
+    client: new Client(options),
     deploymentResolution,
   };
 }
@@ -202,22 +221,13 @@ async function observeInvocation(
   return { status: "ready", outcome, resume };
 }
 
-function runningResult(target: DevelopmentTarget, state: SessionState): InvokeResult {
+function runningResult(target: DevelopmentTarget, state: ClientSessionState): InvokeResult {
   return { status: "running", resume: createResume(target, state) };
 }
 
-function createResume(target: DevelopmentTarget, session: SessionState): InvokeResume {
-  if (session.sessionId === undefined) throw new Error("Invocation has no resumable session ID.");
-  const cursor =
-    session.continuationToken === undefined
-      ? { sessionId: session.sessionId, streamIndex: session.streamIndex }
-      : {
-          continuationToken: session.continuationToken,
-          sessionId: session.sessionId,
-          streamIndex: session.streamIndex,
-        };
+function createResume(target: DevelopmentTarget, session: ClientSessionState): InvokeResume {
   return {
-    session: cursor,
+    session,
     target:
       target.kind === "local" ? { kind: "local" } : { kind: "remote", serverUrl: target.serverUrl },
   };

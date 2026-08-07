@@ -1,5 +1,6 @@
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { ChannelFrom } from "#channel/channel-operations.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
@@ -31,8 +32,7 @@ import {
   defineChannel,
   POST,
   type Channel,
-  type ChannelSessionOps,
-  type SendFn,
+  type ChannelContinuationOps,
 } from "#public/definitions/channel.js";
 import { isObject, readNonEmptyString } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
@@ -102,8 +102,8 @@ export interface LinearChannelContext {
   state: LinearChannelState;
 }
 
-/** Event-handler Linear context, including session operations. */
-export interface LinearEventContext extends LinearChannelContext, ChannelSessionOps {}
+/** Event-handler Linear context, including continuation routing. */
+export interface LinearEventContext extends LinearChannelContext, ChannelContinuationOps {}
 
 /** Low-level Linear handle exposed to hooks and event handlers. */
 export interface LinearHandle {
@@ -139,6 +139,7 @@ type LinearSessionFailedHandler = (
 export interface LinearChannelEvents {
   readonly "turn.started"?: LinearEventHandler<"turn.started">;
   readonly "actions.requested"?: LinearEventHandler<"actions.requested">;
+  readonly "action.partial"?: LinearEventHandler<"action.partial">;
   readonly "action.result"?: LinearEventHandler<"action.result">;
   readonly "message.completed"?: LinearEventHandler<"message.completed">;
   readonly "message.appended"?: LinearEventHandler<"message.appended">;
@@ -171,6 +172,8 @@ export interface LinearChannelConfig {
   readonly api?: LinearApiOptions;
   readonly credentials?: LinearChannelCredentials;
   readonly events?: LinearChannelEvents;
+  /** Max allowed webhook timestamp skew in milliseconds. Defaults to 60 seconds. */
+  readonly maxSkewMs?: number;
   readonly route?: string;
 
   /** Inbound Agent Session hook. Defaults to dispatching `created` and `prompted` events. */
@@ -223,8 +226,8 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
     routes: [
       POST<LinearChannelState>(
         config.route ?? LINEAR_CHANNEL_DEFAULT_ROUTE,
-        async (req, { send, waitUntil }) => {
-          const body = await verifyInbound(req, config.credentials);
+        async (req, { from, waitUntil }) => {
+          const body = await verifyInbound(req, config.credentials, config.maxSkewMs);
           if (body === null) return new Response("unauthorized", { status: 401 });
 
           let event;
@@ -238,7 +241,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
           if (event === null) return jsonOk({ ignored: true, ok: true });
 
           if (event.kind === "agent_session") {
-            waitUntil(dispatchAgentSession({ config, event, onAgentSession, send }));
+            waitUntil(dispatchAgentSession({ config, event, from, onAgentSession }));
             return jsonOk({ ok: true });
           }
 
@@ -252,7 +255,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
       ),
     ],
 
-    async receive(input, { send }) {
+    async receive(input, { from }) {
       const target = input.target as Record<string, unknown>;
       const session = await resolveReceiveSession(target, config);
 
@@ -268,9 +271,8 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
         });
       }
 
-      return send(input.message, {
+      return from(linearContinuationToken(session.id)).send(input.message, {
         auth: input.auth,
-        continuationToken: linearContinuationToken(session.id),
         state: stateFromAgentSession(session),
       });
     },
@@ -329,10 +331,10 @@ function buildLinearHandle(input: {
 }
 
 async function dispatchAgentSession(input: {
+  readonly from: ChannelFrom<LinearChannelState>;
   readonly config: LinearChannelConfig;
   readonly event: LinearAgentSessionEvent;
   readonly onAgentSession: NonNullable<LinearChannelConfig["onAgentSession"]>;
-  readonly send: SendFn<LinearChannelState>;
 }): Promise<void> {
   const { event } = input;
   const context: LinearSessionContext = {
@@ -349,21 +351,15 @@ async function dispatchAgentSession(input: {
     fetch: input.config.api?.fetch,
   });
 
-  await input.send(
-    {
-      context: [
-        formatLinearContextBlock(event),
-        ...event.previousComments,
-        ...(result.context ?? []),
-      ],
-      message,
-    },
-    {
-      auth: result.auth,
-      continuationToken: linearContinuationToken(event.agentSession.id),
-      state: stateFromAgentSession(event.agentSession),
-    },
-  );
+  await input.from(linearContinuationToken(event.agentSession.id)).send(message, {
+    auth: result.auth,
+    context: [
+      formatLinearContextBlock(event),
+      ...event.previousComments,
+      ...(result.context ?? []),
+    ],
+    state: stateFromAgentSession(event.agentSession),
+  });
 }
 
 async function resolveReceiveSession(
@@ -430,9 +426,11 @@ function initialLinearState(): LinearChannelState {
 async function verifyInbound(
   req: Request,
   credentials: LinearChannelCredentials | undefined,
+  maxSkewMs: number | undefined,
 ): Promise<string | null> {
   try {
     return await verifyLinearRequest(req, {
+      maxSkewMs,
       webhookSecret: credentials?.webhookSecret,
       webhookVerifier: credentials?.webhookVerifier,
     });

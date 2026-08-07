@@ -4,11 +4,10 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import {
   attachAgentInfoRouteResponse,
-  attachRouteAgent,
+  attachRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 import { MCP_LEGACY_PROTOCOL_VERSION } from "#internal/mcp/streamable-http-server.js";
 import { ForbiddenError, none, oauthResource, withAuthChallenges } from "#public/channels/auth.js";
-import type { Agent } from "#public/definitions/channel.js";
 import { mcpChannel } from "#public/channels/mcp.js";
 
 const principal: SessionAuthContext = {
@@ -178,13 +177,7 @@ describe("mcpChannel", () => {
   });
 
   it("bounds and rejects external output schemas before starting work", async () => {
-    const run = vi.fn();
-    const agent: Agent = {
-      cancelTurn: vi.fn(),
-      deliver: vi.fn(),
-      getEventStream: vi.fn(),
-      run,
-    };
+    const createSession = vi.fn();
     const channel = mcpChannel({ auth: none() });
     const route = channel.routes[1]!;
     if (route.transport === "websocket") throw new Error("expected HTTP route");
@@ -202,7 +195,7 @@ describe("mcpChannel", () => {
           name: "agent_start",
         },
       }),
-      routeArgs(agent),
+      routeArgs(createSession),
     );
 
     await expect(jsonRpcResponse(response)).resolves.toMatchObject({
@@ -216,7 +209,7 @@ describe("mcpChannel", () => {
         isError: true,
       },
     });
-    expect(run).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
   });
 
   it("mounts OAuth resource metadata and augments auth failures", async () => {
@@ -428,8 +421,11 @@ describe("mcpChannel", () => {
   });
 });
 
-function routeArgs(agent: Agent = {} as Agent): RouteHandlerArgs {
-  return attachAgentInfoRouteResponse(attachRouteAgent({} as RouteHandlerArgs, agent), async () =>
+function routeArgs(createSession: () => Promise<never> = vi.fn()): RouteHandlerArgs {
+  const args = {
+    from: vi.fn(() => ({ respond: vi.fn() })),
+  } as unknown as RouteHandlerArgs;
+  return attachAgentInfoRouteResponse(attachRouteSessionCreator(args, createSession), async () =>
     Response.json({
       agent: {
         description: "Investigates tasks.",

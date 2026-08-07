@@ -16,6 +16,8 @@ import {
   textContentAttribute,
   toolResultsContentAttribute,
 } from "#tracing/agent-otel-content.js";
+import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import type {
   InstrumentationAttemptMetadataEvent,
   InstrumentationAttemptScope,
@@ -52,70 +54,6 @@ interface ToolSpanState extends SpanState {
 /** Sized so an ordinary session stays one trace and only an outsized one rolls. */
 export const SESSION_WINDOW_TURN_LIMIT = 200;
 
-export interface AgentSessionTraceState {
-  readonly agentName?: string;
-  readonly channelKind?: string;
-  readonly context: SpanContext;
-  readonly rootSessionId: string;
-  readonly turnsInWindow: number;
-  readonly window: number;
-}
-
-export interface AgentTurnTraceState {
-  readonly context: SpanContext;
-  readonly rootSessionId: string;
-  readonly sequence: number;
-  readonly terminal?: {
-    readonly error?: unknown;
-    readonly type: InstrumentationTurnTerminalEvent["type"];
-  };
-}
-
-/** Provider-owned serializable storage for durable agent trace state. */
-export interface AgentTraceStateStore {
-  deleteSession(sessionId: string): void | PromiseLike<void>;
-  deleteTurn(sessionId: string, turnId: string): void | PromiseLike<void>;
-  getSession(
-    sessionId: string,
-  ): AgentSessionTraceState | undefined | PromiseLike<AgentSessionTraceState | undefined>;
-  getTurn(
-    sessionId: string,
-    turnId: string,
-  ): AgentTurnTraceState | undefined | PromiseLike<AgentTurnTraceState | undefined>;
-  setSession(sessionId: string, state: AgentSessionTraceState): void | PromiseLike<void>;
-  setTurn(sessionId: string, turnId: string, state: AgentTurnTraceState): void | PromiseLike<void>;
-}
-
-/** In-memory trace state used by tests and non-durable runtimes. */
-export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
-  readonly #sessions = new Map<string, AgentSessionTraceState>();
-  readonly #turns = new Map<string, AgentTurnTraceState>();
-
-  deleteSession(sessionId: string): void {
-    this.#sessions.delete(sessionId);
-  }
-
-  deleteTurn(sessionId: string, turnId: string): void {
-    this.#turns.delete(turnKey(sessionId, turnId));
-  }
-
-  getSession(sessionId: string): AgentSessionTraceState | undefined {
-    return this.#sessions.get(sessionId);
-  }
-
-  getTurn(sessionId: string, turnId: string): AgentTurnTraceState | undefined {
-    return this.#turns.get(turnKey(sessionId, turnId));
-  }
-
-  setSession(sessionId: string, state: AgentSessionTraceState): void {
-    this.#sessions.set(sessionId, state);
-  }
-
-  setTurn(sessionId: string, turnId: string, state: AgentTurnTraceState): void {
-    this.#turns.set(turnKey(sessionId, turnId), state);
-  }
-}
-
 export interface AgentOtelInstrumentationInput {
   /**
    * Capture model prompts/responses and tool call inputs/outputs as span
@@ -124,6 +62,7 @@ export interface AgentOtelInstrumentationInput {
    */
   readonly captureContent?: boolean;
   readonly frameworkVersion: string;
+  readonly idGenerator: AgentSpanIdGenerator;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
 }
@@ -164,34 +103,27 @@ export function createAgentOtelInstrumentation(
         type: "session.started",
       }),
     );
-    const span = input.tracer.startSpan(
-      "agent.turn",
-      {
-        attributes: {
-          "agent.framework.name": "eve",
-          "agent.framework.version": input.frameworkVersion,
-          "agent.name": session.agentName,
-          ...parentLineageAttributes(event.parentLineage),
-          "agent.root.session.id": event.rootSessionId,
-          "agent.session.id": event.sessionId,
-          "agent.session.window": session.window,
-          "agent.turn.id": event.turnId,
-          "agent.turn.sequence": event.sequence,
-        },
-      },
-      contextFromSpanContext(session.context),
-    );
-    span.addEvent("turn.started");
+    // The turn outlives this worker, so no live span can cover it: the span
+    // id is allocated now for descendants to parent through, and the span
+    // itself is emitted at the turn's session transition.
+    const turnContext: SpanContext = {
+      isRemote: false,
+      spanId: input.idGenerator.allocateSpanId(),
+      traceFlags: session.context.traceFlags,
+      traceId: session.context.traceId,
+    };
     await input.stateStore.setSession(event.sessionId, {
       ...session,
       turnsInWindow: session.turnsInWindow + 1,
     });
     await input.stateStore.setTurn(event.sessionId, event.turnId, {
-      context: span.spanContext(),
+      context: turnContext,
+      lineage: event.parentLineage,
+      parentSpanId: session.context.spanId,
       rootSessionId: event.rootSessionId,
       sequence: event.sequence,
+      startTimeMs: Date.now(),
     });
-    span.end();
   };
 
   const onAttemptStarted = async (event: InstrumentationAttemptStartedEvent): Promise<void> => {
@@ -269,18 +201,33 @@ export function createAgentOtelInstrumentation(
     if (event.turnId !== undefined) {
       const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
       if (turn !== undefined) {
-        const span = input.tracer.startSpan(
-          "agent.turn.terminal",
-          {
-            attributes: {
-              "agent.root.session.id": turn.rootSessionId,
-              "agent.session.id": event.sessionId,
-              "agent.turn.id": event.turnId,
-              "agent.turn.sequence": turn.sequence,
+        const session = await input.stateStore.getSession(event.sessionId);
+        const span = input.idGenerator.withSpanId(turn.context.spanId, () =>
+          input.tracer.startSpan(
+            "agent.turn",
+            {
+              attributes: {
+                "agent.framework.name": "eve",
+                "agent.framework.version": input.frameworkVersion,
+                "agent.name": session?.agentName,
+                ...parentLineageAttributes(turn.lineage),
+                "agent.root.session.id": turn.rootSessionId,
+                "agent.session.id": event.sessionId,
+                "agent.session.window": session?.window,
+                "agent.turn.id": event.turnId,
+                "agent.turn.sequence": turn.sequence,
+              },
+              startTime: turn.startTimeMs,
             },
-          },
-          contextFromSpanContext(turn.context),
+            contextFromSpanContext({
+              isRemote: false,
+              spanId: turn.parentSpanId,
+              traceFlags: turn.context.traceFlags,
+              traceId: turn.context.traceId,
+            }),
+          ),
         );
+        span.addEvent("turn.started", undefined, turn.startTimeMs);
         if (turn.terminal !== undefined) {
           span.addEvent(turn.terminal.type);
           if (turn.terminal.type === "turn.failed") {
@@ -466,8 +413,9 @@ export function createAgentOtelInstrumentation(
       root: true,
     });
     span.addEvent(window.index === 0 ? "session.started" : "session.window.opened");
-    // The window outlives this worker, so the root is recorded as a marker and
-    // later spans parent through its persisted context, as `agent.turn` does.
+    // The window outlives this worker and has no guaranteed close — an idle
+    // session never ends — so the root is recorded as a zero-duration marker
+    // and later spans parent through its persisted context.
     span.end();
     return span.spanContext();
   };
@@ -571,10 +519,6 @@ export function createAgentOtelInstrumentation(
     }
     return state;
   }
-}
-
-function turnKey(sessionId: string, turnId: string): string {
-  return `${sessionId}:${turnId}`;
 }
 
 function parentLineageAttributes(

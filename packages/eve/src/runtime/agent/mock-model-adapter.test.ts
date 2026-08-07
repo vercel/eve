@@ -37,6 +37,42 @@ describe("createMockAuthoredRuntimeModel", () => {
     expect(shouldMockAuthoredRuntimeModels()).toBe(true);
   });
 
+  it("emits a message-only input for delegated agent calls", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Delegate to a subagent: use the wait_for_cancel tool.",
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            additionalProperties: false,
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+            type: "object",
+          },
+          name: "agent",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      {
+        input: JSON.stringify({
+          message: "use the wait_for_cancel tool.",
+        }),
+        toolCallId: "call_agent",
+        toolName: "agent",
+        type: "tool-call",
+      },
+    ]);
+  });
+
   it("activates a matching skill when the available skill line includes a skill path", async () => {
     const result = await generateWithPrompt([
       {
@@ -659,6 +695,68 @@ describe("createMockAuthoredRuntimeModel", () => {
         toolCallId: "call_lookup_step_b",
         toolName: "lookup-step-b",
         type: "tool-call",
+      },
+    ]);
+  });
+
+  // Regression: the [Agents] announcement is user-role scaffolding injected
+  // after a subagent settles. Treating it as a turn boundary masked the tool
+  // result, and the adapter re-issued the same deterministic tool call — a
+  // duplicate start operation that fatally failed the parent session in the
+  // mock world suites.
+  it("replies to a tool result behind a framework [Agents] announcement instead of re-calling", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Call conditional-marker exactly once.",
+          role: "user",
+        },
+        {
+          content: [
+            {
+              input: JSON.stringify({ message: "run" }),
+              toolCallId: "call_conditional_marker",
+              toolName: "conditional-marker",
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              output: { type: "json", value: "DYNAMIC_SUBAGENT_ENABLED" },
+              toolCallId: "call_conditional_marker",
+              toolName: "conditional-marker",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+        {
+          content:
+            '[Agents]\n<agents>\n<agent id="ag_conditional-marker:5ae9bfd35776" name="conditional-marker">DYNAMIC_SUBAGENT_ENABLED</agent>\n</agents>',
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            properties: { message: { type: "string" } },
+            required: ["message"],
+            type: "object",
+          },
+          name: "conditional-marker",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.finishReason).toEqual({ raw: undefined, unified: "stop" });
+    expect(result.content).toEqual([
+      {
+        text: 'Used conditional-marker for "Call conditional-marker exactly once.": DYNAMIC_SUBAGENT_ENABLED',
+        type: "text",
       },
     ]);
   });

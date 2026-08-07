@@ -45,11 +45,9 @@ const WEATHER_SMOKE_TARGET: RunOptions = {
 
 run(WEATHER_SMOKE_TARGET, async (target) => {
   const client = new Client({ host: target.baseUrl });
-  const session = client.session();
   const screen = new MockScreen({ columns: 140, rows: 60 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    session,
     client,
     screen,
     userInput: input,
