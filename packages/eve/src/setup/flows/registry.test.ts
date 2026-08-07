@@ -294,7 +294,13 @@ describe("runRegistryFlow", () => {
       "production",
       "0",
     ];
-    const fake = createFakePrompter({ single: () => answers.shift()! });
+    const prompts: unknown[] = [];
+    const fake = createFakePrompter({
+      single: (options) => {
+        prompts.push(options);
+        return answers.shift()!;
+      },
+    });
     const flowDeps = deps({
       browseRegistryCatalog: vi.fn(async () => ({
         items: [{ address: "channel/slack", name: "channel/slack", source: "Vercel" }],
@@ -322,11 +328,18 @@ describe("runRegistryFlow", () => {
       deployed: "production",
       facts: [
         { label: "Workspace", value: "Acme" },
-        { label: "Open Slack", value: "https://slack.com/app", kind: "url" },
         { label: "Workspace", value: "Acme" },
+        { label: "Open Slack", value: "https://slack.com/app", kind: "url" },
       ],
     });
     expect(flowDeps.runDeployFlow).toHaveBeenCalledTimes(1);
+    expect(prompts.at(-1)).toMatchObject({
+      message: "Open a destination?",
+      options: [
+        { value: "0", label: "Open Slack", hint: "https://slack.com/app" },
+        { value: "none", label: "Not now" },
+      ],
+    });
     expect(flowDeps.openUrl).toHaveBeenCalledWith("https://slack.com/app");
   });
 

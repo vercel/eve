@@ -46,7 +46,7 @@ export const WEB_SETUP: SetupIntegration = {
     );
     if (result.action === "skipped") {
       context.ui.prompter.log.info("Next.js project detected. Skipping Web Chat scaffolding.");
-      return { kind: "done" };
+      return { kind: "done", completion: { facts: [] } };
     }
     context.ui.prompter.log.success("Scaffolded channel: web");
     await installScaffoldDependencies({
@@ -55,6 +55,9 @@ export const WEB_SETUP: SetupIntegration = {
       projectPath: context.appRoot,
       signal: context.signal,
     });
-    return { kind: "done", deploymentRequired: true };
+    return {
+      kind: "done",
+      completion: { facts: [], deployment: { required: true } },
+    };
   },
 };

@@ -47,7 +47,10 @@ describe("setupSlack", () => {
         },
         effects,
       ),
-    ).resolves.toEqual({ kind: "done", deploymentRequired: true });
+    ).resolves.toEqual({
+      kind: "done",
+      completion: { facts: [], deployment: { required: true } },
+    });
 
     expect(provisionSlackbot).toHaveBeenCalledOnce();
   });

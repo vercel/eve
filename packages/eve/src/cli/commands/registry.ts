@@ -15,6 +15,7 @@ import { isEveProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import { hasInteractiveTerminal, NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
+import { runDeclaredSetups } from "./registry-declared-setups.js";
 import { eveMetadataFromRegistryItem } from "./registry-metadata.js";
 import { runRegistryPackage } from "./registry-package.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
@@ -45,11 +46,6 @@ export interface RegistrySearchCommandOptions extends RegistryCommandOptions {
   /** Maximum number of matching items to return. */
   limit?: number;
 }
-
-type SetupCommandOptions = Pick<AddCommandOptions, "yes" | "silent"> & {
-  prompter?: Prompter;
-  signal?: AbortSignal;
-};
 
 export interface RegistrySetupDependencies {
   loadSetupCommandRunner(): Promise<typeof runRegistrySetupCommand>;
@@ -450,48 +446,6 @@ export async function getRegistryItemManifest(appRoot: string, item: string): Pr
   return items.length === 1 ? items[0] : items;
 }
 
-async function runDeclaredSetups(
-  logger: RegistryCommandLogger,
-  appRoot: string,
-  item: string,
-  setups: NonNullable<ReturnType<typeof eveMetadataFromRegistryItem>>["setup"],
-  options: SetupCommandOptions,
-  dependencies: RegistrySetupDependencies,
-): Promise<RegistrySetupCompletion | false> {
-  const completion: RegistrySetupCompletion = { facts: [] };
-  if (setups === undefined) return completion;
-  const runSetupCommand = await dependencies.loadSetupCommandRunner();
-  const prompter = options.prompter ?? createPrompter();
-  try {
-    for (const setup of setups) {
-      const result = await runSetupCommand(
-        appRoot,
-        { ...setup, args: [...setup.args, ...(options.yes ? ["--yes"] : [])] },
-        item,
-        { prompter, signal: options.signal },
-      );
-      if (result.kind === "cancelled") {
-        logger.log(setupReminder(item, "cancelled"));
-        return false;
-      }
-      if (options.silent !== true) {
-        for (const fact of result.facts) logger.log(`${fact.label}: ${fact.value}`);
-      }
-      completion.facts = [...completion.facts, ...result.facts];
-      if (result.deployment !== undefined) {
-        completion.deployment ??= { required: true };
-        completion.deployment.productionDestinations = [
-          ...(completion.deployment.productionDestinations ?? []),
-          ...(result.deployment.productionDestinations ?? []),
-        ];
-      }
-    }
-    return completion;
-  } catch (error) {
-    throw new Error(`${errorMessage(error)} Try again with \`${setupResumeCommand(item)}\`.`);
-  }
-}
-
 /** Installs an official, configured, or URL-addressed registry item. */
 export async function installRegistryItem(
   appRoot: string,
@@ -568,14 +522,16 @@ export async function runAddCommand(
           metadata: eveMetadataFromRegistryItem,
           assertCompatibleVersion: assertCompatibleEveVersion,
           runSetups: ({ item: packageItem, setups, prompter }) =>
-            runDeclaredSetups(
+            runDeclaredSetups({
               logger,
               appRoot,
-              packageItem,
+              item: packageItem,
               setups,
-              { yes: options.yes, prompter, signal: options.signal },
+              options: { yes: options.yes, prompter, signal: options.signal },
               dependencies,
-            ),
+              cancelledReminder: setupReminder(packageItem, "cancelled"),
+              resumeCommand: setupResumeCommand(packageItem),
+            }),
           setupReminder: (packageItem) => setupReminder(packageItem, "skipped"),
         },
       });
@@ -586,14 +542,16 @@ export async function runAddCommand(
       if (eveMetadata?.setup === undefined) {
         throw new Error(`Registry item "${item}" does not declare a setup flow.`);
       }
-      const completion = await runDeclaredSetups(
+      const completion = await runDeclaredSetups({
         logger,
         appRoot,
         item,
-        eveMetadata.setup,
+        setups: eveMetadata.setup,
         options,
         dependencies,
-      );
+        cancelledReminder: setupReminder(item, "cancelled"),
+        resumeCommand: setupResumeCommand(item),
+      });
       return completion === false ? undefined : completion;
     }
 
@@ -638,14 +596,16 @@ export async function runAddCommand(
       }
     }
 
-    const completion = await runDeclaredSetups(
+    const completion = await runDeclaredSetups({
       logger,
       appRoot,
       item,
-      eveMetadata.setup,
+      setups: eveMetadata.setup,
       options,
       dependencies,
-    );
+      cancelledReminder: setupReminder(item, "cancelled"),
+      resumeCommand: setupResumeCommand(item),
+    });
     return completion === false ? undefined : completion;
   });
 }

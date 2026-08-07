@@ -174,7 +174,7 @@ describe("registry commands", () => {
 
   it("lets interactive users select components from an official registry package", async () => {
     const logger = createLogger();
-    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
     const fake = createFakePrompter({
       multiple: (options) => {
         expect(options).toMatchObject({
@@ -290,7 +290,7 @@ describe("registry commands", () => {
         _setup: RegistrySetupCommand,
         _item: string,
         _options?: RegistrySetupCommandOptions,
-      ) => ({ kind: "completed" as const, output: [] }),
+      ) => ({ kind: "completed" as const, facts: [] }),
     );
     getRegistryItems
       .mockResolvedValueOnce([
@@ -328,7 +328,7 @@ describe("registry commands", () => {
 
   it("installs a registry package's default components with --yes", async () => {
     const logger = createLogger();
-    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
     getRegistryItems
       .mockResolvedValueOnce([
         {
@@ -364,7 +364,7 @@ describe("registry commands", () => {
 
   it("accepts a legacy singular setup command", async () => {
     const logger = createLogger();
-    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, output: [] }));
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
     getRegistryItems.mockResolvedValue([
       {
         meta: {
@@ -402,7 +402,7 @@ describe("registry commands", () => {
         options?: RegistrySetupCommandOptions,
       ) => {
         prompters.push(options?.prompter);
-        return { kind: "completed" as const, output: [] };
+        return { kind: "completed" as const, facts: [] };
       },
     );
     getRegistryItems.mockResolvedValue([

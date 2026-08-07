@@ -1,6 +1,5 @@
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { createRegistrySetupClient } from "#setup/registry-setup-client.js";
-import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 import {
   runIntegrationSetup,
   type IntegrationSetupRunnerDeps,
@@ -55,14 +54,7 @@ export async function runIntegrationSetupCommand(
       return;
     }
     prompter.outro("Integration set up.");
-    const completion: RegistrySetupCompletion = { facts: result.facts ?? [] };
-    if (result.deploymentRequired === true) {
-      completion.deployment = { required: true };
-      if (result.productionDestinations !== undefined) {
-        completion.deployment.productionDestinations = result.productionDestinations;
-      }
-    }
-    client?.complete(completion);
+    client?.complete(result.completion);
   } catch (error) {
     client?.fail(error);
     logger.error(error instanceof Error ? error.message : String(error));

@@ -1,7 +1,4 @@
-import type {
-  RegistrySetupDestination,
-  RegistrySetupFact,
-} from "#setup/registry-setup-protocol.js";
+import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 
 import type { IntegrationSetupEnvironment } from "./shared/environment.js";
 import type { IntegrationSetupUi } from "./shared/ui.js";
@@ -18,14 +15,7 @@ export interface IntegrationSetupContext {
 
 /** Outcome from one registry-owned integration setup flow. */
 export type IntegrationSetupResult =
-  | {
-      readonly kind: "done";
-      readonly facts?: readonly RegistrySetupFact[];
-      /** Setup changed runtime behavior and should be included in the next deployment. */
-      readonly deploymentRequired?: boolean;
-      /** Destinations offered only after a successful production deployment. */
-      readonly productionDestinations?: readonly RegistrySetupDestination[];
-    }
+  | { readonly kind: "done"; readonly completion: RegistrySetupCompletion }
   | { readonly kind: "cancelled" };
 
 /** One built-in registry-owned integration setup flow. */

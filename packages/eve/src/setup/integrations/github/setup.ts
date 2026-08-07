@@ -142,7 +142,9 @@ export async function setupGitHub(
     ]);
     return {
       kind: "done",
-      facts: [{ label: "Vercel Connect", value: dashboardUrl, kind: "url" }],
+      completion: {
+        facts: [{ label: "Vercel Connect", value: dashboardUrl, kind: "url" }],
+      },
     };
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };

@@ -26,7 +26,10 @@ afterEach(() => {
 
 describe("runIntegrationSetupCommand", () => {
   it("delegates registry-owned setup to the integration runner", async () => {
-    vi.mocked(runIntegrationSetup).mockResolvedValue({ kind: "done" });
+    vi.mocked(runIntegrationSetup).mockResolvedValue({
+      kind: "done",
+      completion: { facts: [] },
+    });
     const output = logger();
     const fake = createFakePrompter();
 

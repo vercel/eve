@@ -192,7 +192,10 @@ export async function setupSlack(
       "Set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET in .env.local (listed in .env.example).",
       "Configure your Slack app to send events to /eve/v1/slack on your public agent URL.",
     ]);
-    return { kind: "done", deploymentRequired: true };
+    return {
+      kind: "done",
+      completion: { facts: [], deployment: { required: true } },
+    };
   }
 
   const project = await deps.ensureVercelProject({
@@ -229,14 +232,19 @@ export async function setupSlack(
   });
   return {
     kind: "done",
-    deploymentRequired: true,
-    ...(slackbot.chatUrl === undefined
-      ? {}
-      : {
-          productionDestinations: [
-            { label: "Open Slack DM", url: slackMessageDeepLink(slackbot.chatUrl) },
-          ],
-        }),
+    completion: {
+      facts: [],
+      deployment: {
+        required: true,
+        ...(slackbot.chatUrl === undefined
+          ? {}
+          : {
+              productionDestinations: [
+                { label: "Open Slack DM", url: slackMessageDeepLink(slackbot.chatUrl) },
+              ],
+            }),
+      },
+    },
   };
 }
 

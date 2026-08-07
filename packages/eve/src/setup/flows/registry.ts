@@ -9,12 +9,11 @@ import type {
 import { runDeployFlow } from "#setup/flows/deploy.js";
 import { openUrl } from "#setup/primitives/open-url.js";
 import { detectDeployment } from "#setup/project-resolution.js";
-import type {
-  RegistrySetupDestination,
-  RegistrySetupFact,
-} from "#setup/registry-setup-protocol.js";
+import type { RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { withSpinner } from "#setup/with-spinner.js";
+
+import { createRegistrySession } from "./registry-session.js";
 
 const ADDRESS_PREFIX = "address:";
 const BACK = "action:back";
@@ -284,11 +283,7 @@ export async function runRegistryFlow(input: {
     runDeployFlow: input.deps?.runDeployFlow ?? runDeployFlow,
   };
   let notices: SelectNotice[] = [];
-  const addedItems: string[] = [];
-  const facts: RegistrySetupFact[] = [];
-  const output: string[] = [];
-  const productionDestinations: RegistrySetupDestination[] = [];
-  let deploymentPending = false;
+  const session = createRegistrySession(deps);
 
   try {
     while (true) {
@@ -310,7 +305,7 @@ export async function runRegistryFlow(input: {
         notices,
       });
       notices = [];
-      if (selectedCategory === DONE) return { kind: "done", addedItems, facts, output };
+      if (selectedCategory === DONE) return session.result();
 
       const categoryItems = itemsForCategory(catalog.items, selectedCategory);
       const rows = itemRows(categoryItems);
@@ -348,80 +343,14 @@ export async function runRegistryFlow(input: {
       );
       if (inspected.kind !== "added") continue;
 
-      addedItems.push(resolved.item.address);
-      output.push(...inspected.output);
-      facts.push(...(inspected.setup?.facts ?? []));
-      if (inspected.setup?.deployment !== undefined) {
-        deploymentPending = true;
-        const destinations = inspected.setup.deployment.productionDestinations ?? [];
-        productionDestinations.push(...destinations);
-        facts.push(
-          ...destinations
-            .filter(
-              (destination) =>
-                !facts.some((fact) => fact.kind === "url" && fact.value === destination.url),
-            )
-            .map((destination) => ({
-              label: destination.label,
-              value: destination.url,
-              kind: "url" as const,
-            })),
-        );
-      }
-      if (!deploymentPending) return { kind: "done", addedItems, facts, output };
-
-      const deployment = await deps.detectDeployment(input.appRoot, { signal: input.signal });
-      const canDeploy = deployment.state === "linked" || deployment.state === "deployed";
-      const action = await input.prompter.select<"production" | "preview" | "add-more" | "finish">({
-        message: "What would you like to do next?",
-        options: [
-          ...(canDeploy
-            ? [
-                { value: "production" as const, label: "Deploy to production" },
-                { value: "preview" as const, label: "Deploy a preview" },
-              ]
-            : []),
-          { value: "add-more", label: "Add another integration" },
-          { value: "finish", label: "Finish without deploying" },
-        ],
-      });
-      if (action === "add-more") continue;
-      if (action === "finish") return { kind: "done", addedItems, facts, output };
-
-      const deployResult = await deps.runDeployFlow({
+      session.add(resolved.item.address, inspected.output, inspected.setup);
+      const next = await session.continueAfterInstall({
         appRoot: input.appRoot,
         prompter: input.prompter,
         signal: input.signal,
-        interactive: true,
-        target: action,
       });
-      const deployed = deployResult.kind === "deployed" ? action : undefined;
-      if (deployed === "production" && productionDestinations.length > 0) {
-        const destination = await input.prompter.select<string>({
-          message: "Open a destination?",
-          options: [
-            ...productionDestinations.map((candidate, index) => ({
-              value: String(index),
-              label: candidate.label,
-              hint: candidate.url,
-            })),
-            { value: "none", label: "Not now" },
-          ],
-          initialValue: "none",
-        });
-        if (destination !== "none") {
-          const selectedDestination = productionDestinations[Number(destination)];
-          if (selectedDestination !== undefined) deps.openUrl(selectedDestination.url);
-        }
-      }
-      const result: Extract<RegistryFlowResult, { kind: "done" }> = {
-        kind: "done",
-        addedItems,
-        facts,
-        output,
-      };
-      if (deployed !== undefined) result.deployed = deployed;
-      return result;
+      if (next === "add-more") continue;
+      return next;
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };
