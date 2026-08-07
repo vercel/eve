@@ -45,6 +45,20 @@ curl -X POST https://<deployment>/eve/v1/session \
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
+Authenticated callers that may retry a create request can pass their own `operationId` for
+create-once semantics. The same operation under the same authenticated principal returns the
+active session it already created instead of dispatching the input again. The first accepted
+payload wins; retries with different input still return that first session. Anonymous callers
+cannot use `operationId`, and operation ownership expires when the session is no longer resumable.
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"What is the weather in Paris?","operationId":"order-4213-research"}'
+# {"ok":true,"sessionId":"wrun_A","status":"accepted"} — retries return the same sessionId
+```
+
 The first request requires `message`. A follow-up request accepts exactly one of
 `message` or `inputResponses`; use the latter to answer a pending HITL request:
 

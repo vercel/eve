@@ -13,6 +13,7 @@ import type { ResetResponse } from "#protocol/reset-session.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal, type TrustedForwarders } from "#channel/forwarded-principal.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
+import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
@@ -252,6 +253,35 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
 
+        if (body.operationId !== undefined && authResult.principalType === "anonymous") {
+          return Response.json(
+            { error: "operationId requires an authenticated principal.", ok: false },
+            { status: 400 },
+          );
+        }
+        const operationToken =
+          body.operationId === undefined
+            ? undefined
+            : await deriveOperationContinuationToken({
+                auth: authResult,
+                operationId: body.operationId,
+              });
+        if (operationToken !== undefined) {
+          const owner = await args.resolveSession(operationToken);
+          if (owner !== undefined) {
+            return Response.json(
+              { ok: true, sessionId: owner.id, status: "accepted" },
+              {
+                headers: {
+                  "cache-control": "no-store",
+                  [EVE_SESSION_ID_HEADER]: owner.id,
+                },
+                status: 202,
+              },
+            );
+          }
+        }
+
         const messageResult = await resolveOnMessage({
           auth: forwarded.auth,
           config: input,
@@ -274,6 +304,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             capabilities:
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
             callback: body.callback,
+            continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: {
               message: body.message,
@@ -284,6 +315,20 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             parentTraceContext,
           });
         } catch (error) {
+          // A concurrent create-once request won the token: adopt its session
+          // without delivering this duplicate input.
+          if (operationToken !== undefined && isRuntimeSessionOwnershipConflictError(error)) {
+            return Response.json(
+              { ok: true, sessionId: error.ownerSessionId, status: "accepted" },
+              {
+                headers: {
+                  "cache-control": "no-store",
+                  [EVE_SESSION_ID_HEADER]: error.ownerSessionId,
+                },
+                status: 202,
+              },
+            );
+          }
           const errorId = logError(log, "session-create request failed", error);
           return Response.json(
             { error: "Failed to create the session.", errorId, ok: false },
@@ -621,7 +666,28 @@ interface ParsedCreateBody {
   message: string | UserContent;
   mode?: RunMode;
   context?: readonly string[];
+  operationId?: string;
   outputSchema?: JsonObject;
+}
+
+/** Replay-stable identity for one authenticated create operation. */
+async function deriveOperationContinuationToken(input: {
+  readonly auth: SessionAuthContext;
+  readonly operationId: string;
+}): Promise<string> {
+  const identity = JSON.stringify([
+    "eve:create-session:v1",
+    input.auth.authenticator,
+    input.auth.issuer ?? null,
+    input.auth.principalType,
+    input.auth.principalId,
+    input.operationId,
+  ]);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity));
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+  return `eve:op:${hex.slice(0, 32)}`;
 }
 
 function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | Response {
@@ -656,7 +722,24 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
     );
   }
 
-  return { callback, capabilities, message, mode, context, outputSchema };
+  const rawOperationId = payload.operationId;
+  if (rawOperationId !== undefined && (typeof rawOperationId !== "string" || !rawOperationId)) {
+    return Response.json(
+      { error: "Expected 'operationId' to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  const result: ParsedCreateBody = {
+    callback,
+    capabilities,
+    message,
+    mode,
+    context,
+    outputSchema,
+  };
+  if (typeof rawOperationId === "string") result.operationId = rawOperationId;
+  return result;
 }
 
 interface ParsedSessionMessageBody {

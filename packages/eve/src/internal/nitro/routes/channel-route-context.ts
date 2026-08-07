@@ -2,6 +2,11 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunHandle, RunInput } from "#channel/types.js";
 
 type AgentInfoRouteResponse = () => Promise<Response>;
+/**
+ * Creates one session from a route handler. `continuationToken` is
+ * channel-local (the dispatcher prepends the channel name), so ownership
+ * established here is visible to `resolveSession` on the same channel.
+ */
 export type RouteSessionCreator = (
   input: Omit<RunInput, "adapter" | "channelName" | "requestId">,
 ) => Promise<RunHandle>;
