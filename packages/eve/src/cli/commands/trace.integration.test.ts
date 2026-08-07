@@ -189,7 +189,7 @@ describe("eve traces", () => {
     const session = "a".repeat(16);
     const turn = "b".repeat(16);
     const step = "c".repeat(16);
-    const terminal = "d".repeat(16);
+    const orphanMarker = "d".repeat(16);
     await writeSegment(
       root,
       TRACE_ONE,
@@ -200,7 +200,7 @@ describe("eve traces", () => {
     await writeSegment(
       root,
       TRACE_ONE,
-      span(turn, "agent.turn", 10, 10, session, { "agent.session.id": "session-one" }),
+      span(turn, "agent.turn", 10, 95, session, { "agent.session.id": "session-one" }),
     );
     await writeSegment(
       root,
@@ -210,7 +210,7 @@ describe("eve traces", () => {
     await writeSegment(
       root,
       TRACE_ONE,
-      span(terminal, "agent.turn.terminal", 95, 95, turn, {
+      span(orphanMarker, "user.marker", 95, 95, turn, {
         "agent.session.id": "session-one",
       }),
     );
@@ -218,11 +218,13 @@ describe("eve traces", () => {
 
     await runTraceShowCommand(output.logger, root, "session-one");
 
+    // The session window root is the only zero-duration marker eve records;
+    // it borrows its descendants' extent.
     expect(output.out[0]).toContain("agent.session  85ms");
     expect(output.out[0]).toContain("agent.turn  85ms");
     expect(output.out[0]).toContain("agent.step  70ms");
-    // A marker with no descendants has no extent to borrow.
-    expect(output.out[0]).toContain("agent.turn.terminal  0ms");
+    // A zero-duration span with no descendants has no extent to borrow.
+    expect(output.out[0]).toContain("user.marker  0ms");
   });
 
   it("shows usage and cost chips on span rows and totals in the header", async () => {

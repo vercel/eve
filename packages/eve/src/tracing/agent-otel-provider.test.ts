@@ -10,9 +10,10 @@ import { describe, expect, it } from "vitest";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import {
   createAgentOtelInstrumentation,
-  InMemoryAgentTraceStateStore,
   SESSION_WINDOW_TURN_LIMIT,
 } from "#tracing/agent-otel-provider.js";
+import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { InMemoryAgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import {
   createInstrumentationHooks,
   type InstrumentationAttemptScope,
@@ -31,11 +32,14 @@ interface TestRuntime {
 
 function createRuntime(stateStore = new InMemoryAgentTraceStateStore()): TestRuntime {
   const exporter = new InMemorySpanExporter();
+  const idGenerator = new AgentSpanIdGenerator();
   const provider = new BasicTracerProvider({
+    idGenerator,
     spanProcessors: [new SimpleSpanProcessor(exporter)],
   });
   const agentOtel = createAgentOtelInstrumentation({
     frameworkVersion: "test",
+    idGenerator,
     stateStore,
     tracer: provider.getTracer("eve.agent"),
   });
@@ -200,8 +204,22 @@ async function publishTurnStarted(input: {
   });
 }
 
+/** The turn span itself is emitted at the turn's session transition. */
+async function completeTurn(
+  hooks: InstrumentationHooks,
+  sessionId: string,
+  turnId: string,
+): Promise<void> {
+  await hooks.publish({ sessionId, turnId, type: "turn.completed" });
+  await hooks.publish({ sessionId, turnId, type: "session.waiting" });
+}
+
 function byName(spans: readonly ReadableSpan[], name: string): ReadableSpan[] {
   return spans.filter((span) => span.name === name);
+}
+
+function nanos(hrTime: readonly [number, number]): bigint {
+  return BigInt(hrTime[0]) * 1_000_000_000n + BigInt(hrTime[1]);
 }
 
 describe("createAgentOtelInstrumentation", () => {
@@ -218,7 +236,6 @@ describe("createAgentOtelInstrumentation", () => {
 
     const spans = runtime.exporter.getFinishedSpans();
     const turn = byName(spans, "agent.turn")[0]!;
-    const turnTerminal = byName(spans, "agent.turn.terminal")[0]!;
     const step = byName(spans, "agent.step")[0]!;
     const operation = byName(spans, "ai.streamText")[0]!;
     const model = byName(spans, "ai.streamText.doStream")[0]!;
@@ -233,18 +250,24 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.session.window": 0,
     });
     expect(turn.parentSpanContext?.spanId).toBe(session.spanContext().spanId);
-    expect(turnTerminal.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
     expect(step.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
     expect(operation.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
     expect(model.parentSpanContext?.spanId).toBe(operation.spanContext().spanId);
     expect(action.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
     expect(tool.parentSpanContext?.spanId).toBe(action.spanContext().spanId);
     expect(new Set(spans.map((span) => span.spanContext().traceId))).toHaveLength(1);
-    expect(turn.events.map((event) => event.name)).toEqual(["turn.started"]);
-    expect(turnTerminal.events.map((event) => event.name)).toEqual([
+    expect(turn.events.map((event) => event.name)).toEqual([
+      "turn.started",
       "turn.completed",
       "session.waiting",
     ]);
+    // The turn span carries the turn's real extent: it is emitted at the
+    // session transition with the start time recorded at `turn.started`.
+    // Turn timestamps are millisecond-quantized (`Date.now`), so the end
+    // comparison against the step's sub-millisecond clock gets 1ms of slack.
+    expect(turn.attributes).toMatchObject({ "agent.name": "weather", "agent.session.window": 0 });
+    expect(nanos(turn.startTime)).toBeLessThanOrEqual(nanos(step.startTime));
+    expect(nanos(turn.endTime)).toBeGreaterThanOrEqual(nanos(step.endTime) - 1_000_000n);
     expect(step.attributes).toMatchObject({
       "agent.framework.name": "eve",
       "agent.model.id": "claude-test",
@@ -372,12 +395,15 @@ describe("createAgentOtelInstrumentation", () => {
 
   it("captures nothing when content capture is off", async () => {
     const exporter = new InMemorySpanExporter();
+    const idGenerator = new AgentSpanIdGenerator();
     const provider = new BasicTracerProvider({
+      idGenerator,
       spanProcessors: [new SimpleSpanProcessor(exporter)],
     });
     const agentOtel = createAgentOtelInstrumentation({
       captureContent: false,
       frameworkVersion: "test",
+      idGenerator,
       stateStore: new InMemoryAgentTraceStateStore(),
       tracer: provider.getTracer("eve.agent"),
     });
@@ -506,8 +532,12 @@ describe("createAgentOtelInstrumentation", () => {
     });
     await replacementRuntime.provider.forceFlush();
 
-    const turn = byName(firstRuntime.exporter.getFinishedSpans(), "agent.turn")[0]!;
+    // The worker that started the turn emitted no turn span — the
+    // replacement's session transition emits it with the span id the first
+    // worker allocated, so descendants from both workers stay attached.
+    expect(byName(firstRuntime.exporter.getFinishedSpans(), "agent.turn")).toHaveLength(0);
     const replacementSpans = replacementRuntime.exporter.getFinishedSpans();
+    const turn = byName(replacementSpans, "agent.turn")[0]!;
     const step = byName(replacementSpans, "agent.step")[0]!;
     const action = byName(replacementSpans, "agent.action")[0]!;
 
@@ -554,6 +584,7 @@ describe("createAgentOtelInstrumentation", () => {
         turnId: `turn-${sequence}`,
         turnSequence: sequence,
       });
+      await completeTurn(runtime.hooks, "session-1", `turn-${sequence}`);
     }
     await runtime.provider.forceFlush();
 
@@ -596,6 +627,7 @@ describe("createAgentOtelInstrumentation", () => {
       turnId: "child-turn-1",
       turnSequence: 0,
     });
+    await completeTurn(runtime.hooks, "child-1", "child-turn-1");
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
@@ -626,6 +658,7 @@ describe("createAgentOtelInstrumentation", () => {
       turnId: "child-turn-1",
       turnSequence: 0,
     });
+    await completeTurn(runtime.hooks, "child-1", "child-turn-1");
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
@@ -648,6 +681,7 @@ describe("createAgentOtelInstrumentation", () => {
       turnId: "child-turn-1",
       turnSequence: 0,
     });
+    await completeTurn(runtime.hooks, "child-1", "child-turn-1");
     await runtime.provider.forceFlush();
 
     const childTurn = byName(runtime.exporter.getFinishedSpans(), "agent.turn").find(
@@ -665,6 +699,7 @@ describe("createAgentOtelInstrumentation", () => {
       turnId: "turn-1",
       turnSequence: 0,
     });
+    await completeTurn(runtime.hooks, "session-1", "turn-1");
     await runtime.provider.forceFlush();
 
     const turn = byName(runtime.exporter.getFinishedSpans(), "agent.turn")[0]!;

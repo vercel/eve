@@ -22,8 +22,16 @@ describe("ContextAgentTraceStateStore", () => {
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
+        lineage: {
+          callId: "call-1",
+          sessionId: "parent-session",
+          subagentName: "researcher",
+          turnId: "parent-turn",
+        },
+        parentSpanId: "2".repeat(16),
         rootSessionId: "session-1",
         sequence: 0,
+        startTimeMs: 1_700_000_000_000,
         terminal: { error: new Error("failed"), type: "turn.failed" },
       });
     });
@@ -35,6 +43,16 @@ describe("ContextAgentTraceStateStore", () => {
       expect(store.getSession("session-1")?.context).toEqual(spanContext("1", "2"));
       expect(store.getSession("session-1")).toMatchObject({ turnsInWindow: 3, window: 1 });
       expect(store.getTurn("session-1", "turn-1")?.context).toEqual(spanContext("1", "3"));
+      expect(store.getTurn("session-1", "turn-1")).toMatchObject({
+        lineage: {
+          callId: "call-1",
+          sessionId: "parent-session",
+          subagentName: "researcher",
+          turnId: "parent-turn",
+        },
+        parentSpanId: "2".repeat(16),
+        startTimeMs: 1_700_000_000_000,
+      });
       expect(store.getTurn("session-1", "turn-1")?.terminal?.error).toMatchObject({
         message: "failed",
       });
@@ -52,8 +70,10 @@ describe("ContextAgentTraceStateStore", () => {
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
+        parentSpanId: "2".repeat(16),
         rootSessionId: "session-1",
         sequence: 0,
+        startTimeMs: 1_700_000_000_000,
       });
 
       store.deleteTurn("session-1", "turn-1");

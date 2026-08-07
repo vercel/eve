@@ -3,6 +3,7 @@ import { registerOTel } from "#compiled/@vercel/otel/index.js";
 
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
+import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { AgentTraceSpanProcessor } from "#tracing/agent-trace-span-processor.js";
 import {
   createInstrumentationHooks,
@@ -34,8 +35,10 @@ export function installLocalInstrumentationRuntime(input: {
   const processor = new AgentTraceSpanProcessor(
     retention.enabled ? [new LocalTraceSpanProcessor(input.appRoot)] : [],
   );
+  const idGenerator = new AgentSpanIdGenerator();
   registerOTel({
     autoDetectResources: false,
+    idGenerator,
     instrumentations: [],
     propagators: ["none"],
     serviceName: input.serviceName,
@@ -51,6 +54,7 @@ export function installLocalInstrumentationRuntime(input: {
   const agentOtel = createAgentOtelInstrumentation({
     captureContent: process.env.EVE_TRACES_CONTENT !== "off",
     frameworkVersion: input.frameworkVersion,
+    idGenerator,
     stateStore: new ContextAgentTraceStateStore(),
     tracer: trace.getTracer("eve.agent", input.frameworkVersion),
   });

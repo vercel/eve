@@ -5,8 +5,15 @@ export interface SpanProcessor {
   shutdown(): Promise<void>;
 }
 
+/** Supplies trace and span ids for every span the registered provider starts. */
+export interface IdGenerator {
+  generateSpanId(): string;
+  generateTraceId(): string;
+}
+
 export interface Configuration {
   readonly autoDetectResources?: boolean;
+  readonly idGenerator?: IdGenerator;
   readonly instrumentations?: readonly unknown[];
   readonly propagators?: readonly ["none"];
   readonly serviceName?: string;

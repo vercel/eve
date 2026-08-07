@@ -20,7 +20,7 @@ import { SURFACE_CLOSE } from "./trace-surfaces.js";
 
 export interface ConversationItem {
   readonly kind: "system" | "user" | "assistant" | "tool";
-  /** Detail-drawer source for this item (the turn marker span for users). */
+  /** Detail-drawer source for this item (the turn span for users). */
   readonly span: LocalTraceSpan;
   /** Tool name for tool items. */
   readonly name?: string;

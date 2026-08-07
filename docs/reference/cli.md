@@ -271,7 +271,7 @@ A session long enough to outgrow one trace — far longer than anything you will
 
 One parent turn can dispatch several subagents into the same window, so a child's turn spans name the dispatch: `agent.parent.session.id`, `agent.parent.turn.id`, and `agent.parent.call_id` identify the tool call that created the child, and `agent.subagent.name` the subagent it invoked. Top-level sessions carry none of these.
 
-`agent.session` and `agent.turn` outlive the worker that opened them, so they are recorded as zero-duration markers. The span tree shows their descendant extent instead; `agent.step` and the model and tool spans beneath it carry real durations. A third-party OTel backend reports zero for the markers.
+`agent.turn`, `agent.step`, and the model and tool spans beneath them carry real durations; a turn's span is written when the turn settles, so a turn still running shows its steps without the enclosing turn row until it finishes. `agent.session` has no guaranteed close — an idle session never ends — so it is recorded as a zero-duration marker. The span tree shows its descendant extent instead; a third-party OTel backend reports zero for it.
 
 Model and tool-call spans carry their inputs and outputs — system prompt, prompt messages, and response text for models; call arguments and results for tools — each capped at 32 KB. Set `EVE_TRACES_CONTENT=off` to keep payloads out of the spool.
 

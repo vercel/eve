@@ -285,10 +285,11 @@ function renderSpanTree(
 /**
  * Extent of each span's own range unioned with its descendants', keyed by span id.
  *
- * eve records a span whose lifetime crosses a durable worker boundary — a
- * session window or a turn — as a zero-duration marker, because a span object
- * cannot cross that boundary to be ended later. The tree falls back to this
- * extent for those rows so it shows where the time went.
+ * eve records a span with no guaranteed close — an `agent.session` window
+ * root, whose session may idle forever — as a zero-duration marker, because
+ * a span object cannot cross a durable worker boundary to be ended later.
+ * The tree falls back to this extent for those rows so it shows where the
+ * time went.
  */
 function subtreeExtents(
   spans: readonly LocalTraceSpan[],
