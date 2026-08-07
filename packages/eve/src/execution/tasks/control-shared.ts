@@ -43,7 +43,7 @@ export async function readTaskViews(
   return Promise.all(entries.map(readTaskView));
 }
 
-async function readTaskView(entry: SessionTaskIndexEntry): Promise<TaskView> {
+export async function readTaskView(entry: SessionTaskIndexEntry): Promise<TaskView> {
   try {
     return (
       (await readLatestTaskSnapshot({ taskRunId: entry.taskRunId })) ?? createPendingTaskView(entry)

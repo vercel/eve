@@ -233,7 +233,8 @@ export function sessionCallbackToTurnCaller(
     ? undefined
     : {
         callId: callback.callId,
-        replyTo: { kind: "callback", url: callback.url },
+        replyTo: { kind: "callback", token: callback.token, url: callback.url },
         subagentName: callback.subagentName,
+        taskId: callback.taskId,
       };
 }

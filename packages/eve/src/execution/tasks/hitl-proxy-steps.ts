@@ -35,6 +35,10 @@ export async function recordTaskInputRequestStep(input: {
   ) {
     return { accepted: false, sessionState: input.sessionState };
   }
+  // Remote creates are ID-addressed and return no continuation token, so
+  // provenance rests on the sessionId match above plus the strict view
+  // checks below; the child-advertised token is only used as the answer
+  // route, never as an identity anchor.
   const view = await readLatestTaskSnapshot({ taskRunId: entry.taskRunId });
   const eventRequestIds = input.hookPayload.event.requests.map((request) => request.requestId);
   const viewRequestIds =

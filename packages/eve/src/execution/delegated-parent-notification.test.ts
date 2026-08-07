@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
-import { SessionIdKey } from "#context/keys.js";
+import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
+  bindTurnCallerContextStep,
   notifyDelegatedParentStep,
   notifyTaskTurnStartedStep,
   notifyTurnCallerStep,
@@ -208,7 +209,11 @@ describe("turn caller notification", () => {
     await notifyTaskTurnStartedStep({
       caller: {
         callId: "call-task",
-        replyTo: { kind: "callback", url: "https://parent.example/eve/v1/callback/task-token" },
+        replyTo: {
+          kind: "callback",
+          token: "task-token",
+          url: "https://parent.example/eve/v1/callback/task-token",
+        },
         subagentName: "research",
         taskId: "task-1",
       },
@@ -402,6 +407,7 @@ describe("turn caller notification", () => {
         callId: "call-remote",
         replyTo: {
           kind: "callback",
+          token: "parent-turn",
           url: "https://caller.example/eve/v1/callback/parent-turn",
         },
         subagentName: "remote",
@@ -460,5 +466,63 @@ describe("turn caller notification", () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+});
+
+describe("task turn caller binding", () => {
+  it("rebinds local adapter forwarding to the current task", async () => {
+    const serializedContext = {
+      [ChannelKey.name]: {
+        kind: SUBAGENT_ADAPTER_KIND,
+        state: {
+          callId: "call-old",
+          parentContinuationToken: "task-old",
+          parentSessionId: "parent",
+          subagentName: "research",
+        },
+      },
+    };
+
+    await expect(
+      bindTurnCallerContextStep({
+        caller: {
+          callId: "call-new",
+          replyTo: { kind: "hook", token: "task-new" },
+          subagentName: "research",
+          taskId: "task-new",
+        },
+        serializedContext,
+      }),
+    ).resolves.toMatchObject({
+      [ChannelKey.name]: {
+        state: { callId: "call-new", parentContinuationToken: "task-new" },
+      },
+    });
+  });
+
+  it("rebinds remote callback forwarding to the current task", async () => {
+    await expect(
+      bindTurnCallerContextStep({
+        caller: {
+          callId: "call-new",
+          replyTo: {
+            kind: "callback",
+            token: "task-new",
+            url: "https://parent.example/eve/v1/callback/task-new",
+          },
+          subagentName: "research",
+          taskId: "task-new",
+        },
+        serializedContext: {},
+      }),
+    ).resolves.toEqual({
+      [SessionCallbackKey.name]: {
+        callId: "call-new",
+        subagentName: "research",
+        taskId: "task-new",
+        token: "task-new",
+        url: "https://parent.example/eve/v1/callback/task-new",
+      },
+    });
   });
 });
