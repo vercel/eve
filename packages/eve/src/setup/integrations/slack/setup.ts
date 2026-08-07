@@ -1,23 +1,27 @@
+import { select } from "#setup/ask.js";
+import { readProjectLink, type VercelProjectReference } from "#setup/project-resolution.js";
 import {
   deriveSlackConnectorSlug,
   ensureChannel,
   type SlackConnectorSlug,
 } from "#setup/scaffold/index.js";
-import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
 import {
+  inspectSlackbotConnectors,
   provisionSlackbot,
   reconcileSlackUid,
-  type ProvisionSlackbotOptions,
   type ProvisionSlackbotResult,
+  type SlackConnectorRef,
+  type SlackConnectorSelection,
 } from "#setup/slackbot.js";
-import { WizardCancelledError } from "#setup/step.js";
 import { slackMessageDeepLink } from "#setup/slack-connect.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import { installScaffoldDependencies, reportOverwrittenFiles } from "../shared/scaffold.js";
-import type {
-  IntegrationSetupContext,
-  IntegrationSetupResult,
-  SetupIntegration,
+import { resolveIntegrationVercelProject } from "../shared/vercel-project.js";
+import {
+  defineSetupIntegration,
+  type SetupApplyContext,
+  type SetupPrepareContext,
 } from "../types.js";
 
 const SLACK_REQUIRES_VERCEL = "Slack setup with Vercel Connect requires a linked Vercel project.";
@@ -74,11 +78,11 @@ function slackbotFailureCopy(result: SlackbotFailure): { reason: string; followU
   }
 }
 
-/** Effects used by Slack setup. */
 export interface SlackSetupDeps {
   deriveSlackConnectorSlug: typeof deriveSlackConnectorSlug;
   ensureChannel: typeof ensureChannel;
-  ensureVercelProject: typeof ensureVercelProject;
+  inspectConnectors: typeof inspectSlackbotConnectors;
+  readProjectLink: typeof readProjectLink;
   provisionSlackbot: typeof provisionSlackbot;
   reconcileSlackUid: typeof reconcileSlackUid;
 }
@@ -86,73 +90,130 @@ export interface SlackSetupDeps {
 const defaultDeps: SlackSetupDeps = {
   deriveSlackConnectorSlug,
   ensureChannel,
-  ensureVercelProject,
+  inspectConnectors: inspectSlackbotConnectors,
+  readProjectLink,
   provisionSlackbot,
   reconcileSlackUid,
 };
 
-async function chooseCredentials(
-  context: IntegrationSetupContext,
-): Promise<"vercel-connect" | "environment" | "cancelled"> {
-  if (context.yes) return "vercel-connect";
-  try {
-    return (await context.ui.prompter.select<"vercel" | "portable">({
+type SlackSetupPlan =
+  | { credentials: "environment"; slug: SlackConnectorSlug }
+  | {
+      credentials: "vercel-connect";
+      slug: SlackConnectorSlug;
+      project: VercelProjectReference;
+      connector: SlackConnectorSelection;
+    };
+
+async function chooseConnector(
+  context: SetupPrepareContext,
+  connectors: readonly SlackConnectorRef[],
+  preferred: SlackConnectorRef | undefined,
+): Promise<SlackConnectorSelection> {
+  if (connectors.length === 0) return "create";
+  return context.asker.ask(
+    select({
+      key: "slack-connector",
+      message: "Which Slack app would you like to use?",
+      options: [
+        ...connectors.map((connector) => ({
+          id: connector.uid,
+          value: connector,
+          label: `Use ${connector.uid}`,
+          hint: connector.uid === preferred?.uid ? "Matches this agent" : undefined,
+        })),
+        { id: "create", value: "create" as const, label: "Create a new Slack app" },
+      ],
+      recommended: preferred ?? connectors[0] ?? ("create" as const),
+      required: true,
+    }),
+  );
+}
+
+export async function prepareSlackSetup(
+  context: SetupPrepareContext,
+  deps: SlackSetupDeps = defaultDeps,
+): Promise<SlackSetupPlan> {
+  const credentials = await context.asker.ask(
+    select({
+      key: "slack-credentials",
       message: "How would you like to configure Slack?",
       options: [
-        { value: "vercel", label: "Set up Vercel Connect", hint: "Sign in and link this project" },
         {
-          value: "portable",
+          id: "vercel",
+          value: "vercel-connect" as const,
+          label: "Set up Vercel Connect",
+          hint: "Use a linked Vercel project",
+        },
+        {
+          id: "portable",
+          value: "environment" as const,
           label: "Use portable credentials",
           hint: "Read Slack tokens from environment variables",
         },
       ],
-    })) === "portable"
-      ? "environment"
-      : "vercel-connect";
-  } catch (error) {
-    if (error instanceof WizardCancelledError) return "cancelled";
-    throw error;
+      recommended: "vercel-connect" as const,
+      required: true,
+    }),
+  );
+  const slug = await deps.deriveSlackConnectorSlug(context.appRoot);
+  if (credentials === "environment") return { credentials, slug };
+  if (context.environment.vercel.kind === "unavailable") {
+    throw new Error(
+      "Vercel Connect requires an authenticated Vercel CLI. Run `vercel login`, then retry Slack setup.",
+    );
   }
-}
-
-async function provisionSlack(
-  context: IntegrationSetupContext,
-  deps: SlackSetupDeps,
-  slug: SlackConnectorSlug,
-): Promise<Extract<ProvisionSlackbotResult, { state: "attached" }>> {
-  const provisionOptions: ProvisionSlackbotOptions = {
-    selectConnector: async (connectors, preferred) => {
-      if (context.yes) return preferred ?? connectors[0]!;
-      const selected = await context.ui.prompter.select<string>({
-        message: "Which Slack app would you like to use?",
-        options: [
-          ...connectors.map((connector) => {
-            const option: { value: string; label: string; hint?: string } = {
-              value: connector.uid,
-              label: `Use ${connector.uid}`,
-            };
-            if (connector.uid === preferred?.uid) option.hint = "Matches this agent";
-            return option;
-          }),
-          { value: "create", label: "Create a new Slack app" },
-        ],
-        initialValue: preferred?.uid,
-      });
-      return selected === "create"
-        ? "create"
-        : connectors.find((connector) => connector.uid === selected)!;
-    },
-  };
-  if (context.signal !== undefined) provisionOptions.signal = context.signal;
-  if (context.ui.prompter.awaitChoice !== undefined) {
-    provisionOptions.awaitChoice = context.ui.prompter.awaitChoice;
-  }
-  const result = await deps.provisionSlackbot(
-    context.ui.prompter.log,
+  const project = await resolveIntegrationVercelProject({
+    appRoot: context.appRoot,
+    integration: "Slack",
+    signal: context.signal,
+    deps,
+  });
+  if (project.projectId.length === 0) throw new Error(SLACK_REQUIRES_VERCEL);
+  const lookup = await deps.inspectConnectors(
+    context.presentation.log,
     context.appRoot,
     slug,
+    context.signal,
+  );
+  const connector =
+    lookup.state === "found"
+      ? await chooseConnector(context, lookup.connectors, lookup.preferred)
+      : "create";
+  return { credentials, slug, project, connector };
+}
+
+export async function applySlackSetup(
+  plan: SlackSetupPlan,
+  context: SetupApplyContext,
+  deps: SlackSetupDeps = defaultDeps,
+) {
+  if (plan.credentials === "environment") {
+    const result = await deps.ensureChannel({
+      projectRoot: context.appRoot,
+      kind: "slack",
+      slackConnectorSlug: plan.slug,
+      slackCredentials: "environment",
+      force: context.force,
+      skipDependencyMutation: true,
+    });
+    reportOverwrittenFiles(context.presentation.log, result.filesOverwritten);
+    context.presentation.log.success("Scaffolded channel: slack");
+    context.presentation.nextSteps([
+      "Set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET in .env.local (listed in .env.example).",
+      "Configure your Slack app to send events to /eve/v1/slack on your public agent URL.",
+    ]);
+    return { facts: [], deploymentRequired: true as const };
+  }
+  const result = await deps.provisionSlackbot(
+    context.presentation.log,
+    context.appRoot,
+    plan.slug,
     undefined,
-    provisionOptions,
+    {
+      signal: context.signal,
+      selectConnector: async () => plan.connector,
+    },
   );
   context.signal?.throwIfAborted();
   if (result.state === "cancelled") throw new WizardCancelledError();
@@ -160,98 +221,50 @@ async function provisionSlack(
     const copy = slackbotFailureCopy(result);
     throw new Error(`${copy.reason} ${copy.followUp}`);
   }
-  return result;
-}
-
-/** Runs the Slack setup flow. Exported for direct integration tests. */
-export async function setupSlack(
-  context: IntegrationSetupContext,
-  deps: SlackSetupDeps = defaultDeps,
-): Promise<IntegrationSetupResult> {
-  const credentials = await chooseCredentials(context);
-  if (credentials === "cancelled") return { kind: "cancelled" };
-  if (credentials === "vercel-connect" && context.environment.vercel.kind === "unavailable") {
-    throw new Error(
-      "Vercel Connect requires an authenticated Vercel CLI. Run `vercel login`, then retry Slack setup.",
-    );
-  }
-
-  const slug = await deps.deriveSlackConnectorSlug(context.appRoot);
-  if (credentials === "environment") {
-    const result = await deps.ensureChannel({
-      projectRoot: context.appRoot,
-      kind: "slack",
-      slackConnectorSlug: slug,
-      slackCredentials: "environment",
-      force: context.force,
-      skipDependencyMutation: true,
-    });
-    reportOverwrittenFiles(context.ui.prompter.log, result.filesOverwritten);
-    context.ui.prompter.log.success("Scaffolded channel: slack");
-    context.ui.nextSteps([
-      "Set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET in .env.local (listed in .env.example).",
-      "Configure your Slack app to send events to /eve/v1/slack on your public agent URL.",
-    ]);
-    return {
-      kind: "done",
-      completion: { facts: [], deploymentRequired: true },
-    };
-  }
-
-  const project = await deps.ensureVercelProject({
-    appRoot: context.appRoot,
-    prompter: context.ui.prompter,
-    signal: context.signal,
-  });
-  if (project.projectId.length === 0) throw new Error(SLACK_REQUIRES_VERCEL);
-  const slackbot = await provisionSlack(context, deps, slug);
-  const result = await deps.ensureChannel({
+  const channel = await deps.ensureChannel({
     projectRoot: context.appRoot,
     kind: "slack",
-    slackConnectorUid: slackbot.connectorUid,
-    slackConnectorSlug: slug,
+    slackConnectorUid: result.connectorUid,
+    slackConnectorSlug: plan.slug,
     force: context.force,
     skipDependencyMutation: true,
   });
-  reportOverwrittenFiles(context.ui.prompter.log, result.filesOverwritten);
-  if (result.action === "skipped") {
+  reportOverwrittenFiles(context.presentation.log, channel.filesOverwritten);
+  if (channel.action === "skipped") {
     const ready = await deps.reconcileSlackUid(
-      context.ui.prompter.log,
+      context.presentation.log,
       context.appRoot,
-      slackbot,
-      `slack/${slug}`,
+      result,
+      `slack/${plan.slug}`,
     );
     if (!ready) throw new Error("Slack connector UID update is required before deployment.");
   }
-  context.ui.prompter.log.success("Scaffolded channel: slack");
+  context.presentation.log.success("Scaffolded channel: slack");
   await installScaffoldDependencies({
-    changed: result.packageJsonUpdated.length > 0,
-    log: context.ui.prompter.log,
+    changed: channel.packageJsonUpdated.length > 0,
+    log: context.presentation.log,
     projectPath: context.appRoot,
     signal: context.signal,
   });
   return {
-    kind: "done",
-    completion: {
-      facts:
-        slackbot.chatUrl === undefined
-          ? []
-          : [
-              {
-                label: "Agent Slack DM",
-                value: slackMessageDeepLink(slackbot.chatUrl),
-                kind: "url",
-              },
-            ],
-      deploymentRequired: true,
-    },
+    facts:
+      result.chatUrl === undefined
+        ? []
+        : [
+            {
+              label: "Open Slack DM",
+              value: slackMessageDeepLink(result.chatUrl),
+              kind: "url" as const,
+            },
+          ],
+    deploymentRequired: true as const,
   };
 }
 
-/** Slack setup registration. */
-export const SLACK_SETUP: SetupIntegration = {
+export const SLACK_SETUP = defineSetupIntegration({
   kind: "slack",
   label: "Slack",
   hint: "Slack app mentions and DMs",
-  setup: setupSlack,
-};
+  prepare: prepareSlackSetup,
+  apply: applySlackSetup,
+});

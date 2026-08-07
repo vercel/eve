@@ -1,41 +1,12 @@
 import { basename } from "node:path";
 
-import { setupPhoton } from "./setup-flow.js";
+import { defineSetupIntegration } from "../types.js";
+import { applyPhotonSetup, preparePhotonSetup } from "./setup-flow.js";
 
-import type { SetupIntegration } from "../types.js";
-
-/** Photon project provisioning and iMessage channel scaffolding. */
-export const PHOTON_SETUP: SetupIntegration = {
+export const PHOTON_SETUP = defineSetupIntegration({
   kind: "photon",
   label: "Photon",
   hint: "Messages through Photon",
-  async setup(context) {
-    const result = await setupPhoton({
-      agentName: basename(context.appRoot),
-      projectPath: context.appRoot,
-      environment: context.environment,
-      ui: context.ui,
-      signal: context.signal,
-      force: context.force,
-    });
-    if (result.kind === "cancelled") return result;
-    return {
-      kind: "done",
-      completion: {
-        deploymentRequired: true,
-        facts: [
-          ...(result.assignedPhoneNumber === undefined
-            ? []
-            : [
-                {
-                  label: "Agent phone number",
-                  value: result.assignedPhoneNumber,
-                  kind: "phone" as const,
-                },
-              ]),
-          { label: "Photon project dashboard", value: result.dashboardUrl, kind: "url" as const },
-        ],
-      },
-    };
-  },
-};
+  prepare: (context) => preparePhotonSetup(context, basename(context.appRoot)),
+  apply: applyPhotonSetup,
+});

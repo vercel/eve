@@ -1,57 +1,87 @@
 import { describe, expect, it, vi } from "vitest";
-
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { headlessAsker, InteractionRequired, withAnswers, withPolicy } from "#setup/ask.js";
 import type { SlackConnectorSlug } from "#setup/scaffold/index.js";
-
 import { integrationSetupEnvironment } from "../shared/environment.js";
-import { createIntegrationSetupUi } from "../shared/ui.js";
-import { setupSlack, type SlackSetupDeps } from "./setup.js";
+import { createSetupContexts } from "../shared/ui.js";
+import { applySlackSetup, prepareSlackSetup, type SlackSetupDeps } from "./setup.js";
 
-describe("setupSlack", () => {
-  it("uses Vercel Connect without prompting for credentials in non-interactive mode", async () => {
-    const fake = createFakePrompter({
-      single: () => {
-        throw new Error("credential selection must not be prompted");
-      },
-    });
-    const provisionSlackbot = vi.fn(async () => ({
+function channelResult() {
+  return {
+    kind: "slack" as const,
+    action: "created" as const,
+    filesWritten: [],
+    filesOverwritten: [],
+    filesSkipped: [],
+    packageJsonUpdated: [],
+    slackConnectorSlug: "agent" as SlackConnectorSlug,
+  };
+}
+function deps(): SlackSetupDeps {
+  return {
+    deriveSlackConnectorSlug: vi.fn(async () => "agent" as SlackConnectorSlug),
+    ensureChannel: vi.fn(async () => channelResult()),
+    inspectConnectors: vi.fn(async () => ({
+      state: "not-found" as const,
+      connectorUids: new Set<string>(),
+    })),
+    readProjectLink: vi.fn(async () => ({ orgId: "team", projectId: "project" })),
+    provisionSlackbot: vi.fn(async () => ({
       state: "attached" as const,
-      connectorUid: "uid",
-    }));
-    const effects = {
-      deriveSlackConnectorSlug: vi.fn(async () => "agent" as SlackConnectorSlug),
-      ensureChannel: vi.fn(async () => ({
-        kind: "slack" as const,
-        action: "created" as const,
-        filesWritten: [],
-        filesOverwritten: [],
-        filesSkipped: [],
-        packageJsonUpdated: [],
-        slackConnectorSlug: "agent" as SlackConnectorSlug,
-      })),
-      ensureVercelProject: vi.fn(async () => ({ orgId: "org-id", projectId: "project-id" })),
-      provisionSlackbot,
-      reconcileSlackUid: vi.fn(),
-    } as SlackSetupDeps;
+      connectorUid: "slack/agent",
+    })),
+    reconcileSlackUid: vi.fn(async () => true),
+  };
+}
+function contexts(answers: Record<string, unknown>, assume = false) {
+  const base = headlessAsker();
+  return createSetupContexts({
+    appRoot: "/project",
+    asker: withAnswers(answers)(assume ? withPolicy("assume")(base) : base),
+    environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
+    prompter: createFakePrompter().prompter,
+  });
+}
 
-    await expect(
-      setupSlack(
-        {
-          appRoot: "/project",
-          environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
-          ui: createIntegrationSetupUi({
-            asker: { ask: vi.fn(), askEditable: vi.fn(), askMany: vi.fn() },
-            prompter: fake.prompter,
-          }),
-          yes: true,
-        },
-        effects,
-      ),
-    ).resolves.toEqual({
-      kind: "done",
-      completion: { facts: [], deploymentRequired: true },
+describe("Slack setup", () => {
+  it("accepts recommendations before apply", async () => {
+    const effects = deps();
+    const ctx = contexts({}, true);
+    const plan = await prepareSlackSetup(ctx.prepare, effects);
+    expect(effects.provisionSlackbot).not.toHaveBeenCalled();
+    await applySlackSetup(plan, ctx.apply, effects);
+    expect(effects.provisionSlackbot).toHaveBeenCalledOnce();
+  });
+  it("scaffolds portable credentials without provisioning", async () => {
+    const effects = deps();
+    const ctx = contexts({ "slack-credentials": "portable" });
+    const plan = await prepareSlackSetup(ctx.prepare, effects);
+    await applySlackSetup(plan, ctx.apply, effects);
+    expect(effects.ensureChannel).toHaveBeenCalledWith(
+      expect.objectContaining({ slackCredentials: "environment" }),
+    );
+    expect(effects.provisionSlackbot).not.toHaveBeenCalled();
+  });
+  it("refuses missing credentials before discovery", async () => {
+    const effects = deps();
+    await expect(prepareSlackSetup(contexts({}).prepare, effects)).rejects.toBeInstanceOf(
+      InteractionRequired,
+    );
+    expect(effects.deriveSlackConnectorSlug).not.toHaveBeenCalled();
+  });
+  it("resolves connector choice during prepare", async () => {
+    const connector = { id: "existing", uid: "slack/existing" };
+    const effects = deps();
+    vi.mocked(effects.inspectConnectors).mockResolvedValue({
+      state: "found",
+      connectors: [connector],
+      preferred: connector,
+      connectorUids: new Set([connector.uid]),
     });
-
-    expect(provisionSlackbot).toHaveBeenCalledOnce();
+    const ctx = contexts({ "slack-credentials": "vercel", "slack-connector": connector.uid });
+    const plan = await prepareSlackSetup(ctx.prepare, effects);
+    await applySlackSetup(plan, ctx.apply, effects);
+    const options = vi.mocked(effects.provisionSlackbot).mock.calls[0]?.[4];
+    expect(await options?.selectConnector?.([], undefined)).toBe(connector);
   });
 });

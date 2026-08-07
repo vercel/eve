@@ -27,4 +27,4 @@ export function setupIntegration(kind: string): SetupIntegration {
   return integration;
 }
 
-export { createIntegrationSetupUi } from "./shared/ui.js";
+export { createSetupContexts, createSetupPresentation } from "./shared/ui.js";

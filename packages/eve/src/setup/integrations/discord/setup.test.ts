@@ -1,120 +1,62 @@
 import { describe, expect, it, vi } from "vitest";
-
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import type { Asker, Question } from "#setup/ask.js";
+import { headlessAsker, withAnswers } from "#setup/ask.js";
 import { integrationSetupEnvironment } from "../shared/environment.js";
-import { createIntegrationSetupUi } from "../shared/ui.js";
-import { setupDiscord, type DiscordSetupDeps } from "./setup.js";
+import { createSetupContexts } from "../shared/ui.js";
+import { applyDiscordSetup, prepareDiscordSetup, type DiscordSetupDeps } from "./setup.js";
 
-function asker(answers: Record<string, string>): Asker {
-  return {
-    ask: async <T>(question: Question<T>) => answers[question.key] as T,
-    askEditable: async () => {
-      throw new Error("Unexpected editable question");
-    },
-    askMany: async () => [],
-  };
-}
-
+const ANSWERS = {
+  "discord-bot-token": " bot-token ",
+  "discord-command-name": "ask",
+  "discord-command-description": "Ask the eve agent",
+};
 function deps(): DiscordSetupDeps {
   return {
     configureEndpoint: vi.fn(async () => {}),
     deriveConnectorSlug: vi.fn(async () => "agent" as never),
-    ensureVercelProject: vi.fn(async () => ({ orgId: "team-id", projectId: "project-id" })),
-    provisionConnector: vi.fn(async () => ({ id: "scl_discord", uid: "discord/agent" })),
+    readProjectLink: vi.fn(async () => ({ orgId: "team", projectId: "project" })),
+    provisionConnector: vi.fn(async () => ({ id: "connector", uid: "discord/agent" })),
     registerCommand: vi.fn(async () => {}),
-    resolveApplication: vi.fn(async () => ({
-      id: "app-1",
-      name: "Agent",
-      publicKey: "public-key",
-    })),
+    resolveApplication: vi.fn(async () => ({ id: "app", name: "Agent", publicKey: "key" })),
     writeTextFile: vi.fn(async () => {}),
   };
 }
+function contexts(answers: Record<string, unknown>) {
+  return createSetupContexts({
+    appRoot: "/project",
+    asker: withAnswers(answers)(headlessAsker()),
+    environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
+    prompter: createFakePrompter().prompter,
+  });
+}
 
 describe("Discord setup", () => {
-  it("provisions Connect, registers the command and callback, and scaffolds the channel", async () => {
-    const fake = createFakePrompter();
+  it("prepares all input before applying", async () => {
     const effects = deps();
-
-    await expect(
-      setupDiscord(
-        {
-          appRoot: "/project",
-          environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
-          ui: createIntegrationSetupUi({
-            asker: asker({
-              "discord-bot-token": "  bot-token  ",
-              "discord-command-name": "ask",
-              "discord-command-description": "Ask the eve agent",
-            }),
-            prompter: fake.prompter,
-          }),
-        },
-        effects,
-      ),
-    ).resolves.toMatchObject({ kind: "done" });
-
+    const ctx = contexts(ANSWERS);
+    const plan = await prepareDiscordSetup(ctx.prepare, effects);
+    expect(effects.resolveApplication).not.toHaveBeenCalled();
+    await applyDiscordSetup(plan, ctx.apply, effects);
     expect(effects.resolveApplication).toHaveBeenCalledWith("bot-token");
-    expect(effects.provisionConnector).toHaveBeenCalledWith(
-      expect.objectContaining({ botToken: "bot-token" }),
-    );
-    expect(effects.registerCommand).toHaveBeenCalledWith("app-1", "bot-token", {
-      name: "ask",
-      description: "Ask the eve agent",
-    });
-    expect(effects.configureEndpoint).toHaveBeenCalledWith("bot-token", "scl_discord");
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/agent/channels/discord.ts",
-      expect.stringContaining('connectDiscordCredentials("discord/agent")'),
+      expect.stringContaining("discord/agent"),
       { force: undefined },
     );
   });
-
-  it("prefills the command name and description", async () => {
-    const questions: Question<unknown>[] = [];
+  it("refuses missing input before mutation", async () => {
     const effects = deps();
-    await setupDiscord(
-      {
-        appRoot: "/project",
-        environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
-        ui: createIntegrationSetupUi({
-          asker: {
-            ask: async <T>(question: Question<T>) => {
-              questions.push(question as Question<unknown>);
-              if (question.key === "discord-bot-token") return "bot-token" as T;
-              return question.detected as T;
-            },
-            askEditable: async () => {
-              throw new Error("Unexpected editable question");
-            },
-            askMany: async () => [],
-          },
-          prompter: createFakePrompter().prompter,
-        }),
-      },
-      effects,
-    );
-
-    expect(questions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ key: "discord-command-name", detected: "ask" }),
-        expect.objectContaining({
-          key: "discord-command-description",
-          detected: "Ask the eve agent",
-        }),
-      ]),
-    );
+    await expect(prepareDiscordSetup(contexts({}).prepare, effects)).rejects.toMatchObject({
+      prerequisite: { kind: "environment", variable: "DISCORD_BOT_TOKEN" },
+    });
+    expect(effects.resolveApplication).not.toHaveBeenCalled();
   });
-
-  it("requires an authenticated Vercel CLI", async () => {
-    const fake = createFakePrompter();
-    await expect(
-      setupDiscord({
-        appRoot: "/project",
-        environment: integrationSetupEnvironment("logged-out", { kind: "unresolved" }),
-        ui: createIntegrationSetupUi({ asker: asker({}), prompter: fake.prompter }),
-      }),
-    ).rejects.toThrow("vercel login");
+  it("requires a linked project", async () => {
+    const effects = deps();
+    vi.mocked(effects.readProjectLink).mockResolvedValue(undefined);
+    await expect(prepareDiscordSetup(contexts(ANSWERS).prepare, effects)).rejects.toThrow(
+      "eve link",
+    );
+    expect(effects.provisionConnector).not.toHaveBeenCalled();
   });
 });

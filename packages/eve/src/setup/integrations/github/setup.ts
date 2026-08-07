@@ -1,28 +1,28 @@
 import { join } from "node:path";
 
 import type { MultiSelectQuestion } from "#setup/ask.js";
-import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
+import { readProjectLink, type VercelProjectReference } from "#setup/project-resolution.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
-import { WizardCancelledError } from "#setup/step.js";
 
-import type {
-  IntegrationSetupContext,
-  IntegrationSetupResult,
-  SetupIntegration,
+import { resolveIntegrationVercelProject } from "../shared/vercel-project.js";
+import {
+  defineSetupIntegration,
+  type SetupApplyContext,
+  type SetupPrepareContext,
 } from "../types.js";
 import { provisionGitHubConnector } from "./connect.js";
 
 export interface GitHubSetupDeps {
   deriveConnectorSlug: typeof deriveSlackConnectorSlug;
-  ensureVercelProject: typeof ensureVercelProject;
+  readProjectLink: typeof readProjectLink;
   provisionConnector: typeof provisionGitHubConnector;
   writeTextFile: typeof writeTextFile;
 }
 
 const defaultDeps: GitHubSetupDeps = {
   deriveConnectorSlug: deriveSlackConnectorSlug,
-  ensureVercelProject,
+  readProjectLink,
   provisionConnector: provisionGitHubConnector,
   writeTextFile,
 };
@@ -40,12 +40,7 @@ const GITHUB_EVENT_OPTIONS = [
     value: "pull_request_review_comment",
     hint: "Reply when a new inline review comment includes `@<bot-name>`.",
   },
-  {
-    id: "issues",
-    label: "New issues",
-    value: "issues",
-    hint: "Add comments to new issues.",
-  },
+  { id: "issues", label: "New issues", value: "issues", hint: "Add comments to new issues." },
   {
     id: "pull_request",
     label: "New PRs",
@@ -56,16 +51,12 @@ const GITHUB_EVENT_OPTIONS = [
 
 type GitHubWebhookEvent = (typeof GITHUB_EVENT_OPTIONS)[number]["value"];
 
-const DEFAULT_GITHUB_EVENTS: readonly GitHubWebhookEvent[] = [
-  "issue_comment",
-  "pull_request_review_comment",
-];
-
 const githubEventsQuestion: MultiSelectQuestion<GitHubWebhookEvent> = {
   key: "github-events",
   message: "What should this GitHub App respond to?",
   options: GITHUB_EVENT_OPTIONS,
-  recommended: DEFAULT_GITHUB_EVENTS,
+  recommended: ["issue_comment", "pull_request_review_comment"],
+  required: true,
   requireSelection: true,
 };
 
@@ -76,87 +67,79 @@ function connectTemplate(
 ): string {
   const handlers = [
     events.includes("issues")
-      ? `  onIssue(ctx, issue) {
-    if (issue.action !== "opened") return null;
-    return { auth: defaultGitHubAuth(ctx) };
-  },`
+      ? `  onIssue(ctx, issue) {\n    if (issue.action !== "opened") return null;\n    return { auth: defaultGitHubAuth(ctx) };\n  },`
       : undefined,
     events.includes("pull_request")
-      ? `  onPullRequest(ctx, pullRequest) {
-    if (pullRequest.action !== "opened") return null;
-    return { auth: defaultGitHubAuth(ctx) };
-  },`
+      ? `  onPullRequest(ctx, pullRequest) {\n    if (pullRequest.action !== "opened") return null;\n    return { auth: defaultGitHubAuth(ctx) };\n  },`
       : undefined,
   ].filter((handler): handler is string => handler !== undefined);
   const defaultAuthImport = handlers.length > 0 ? ", defaultGitHubAuth" : "";
   const handlerBlock = handlers.length > 0 ? `\n${handlers.join("\n")}` : "";
-
-  return `import { connectGitHubCredentials } from "@vercel/connect/eve";
-import { githubChannel${defaultAuthImport} } from "eve/channels/github";
-
-export default githubChannel({
-  botName: ${JSON.stringify(appSlug)},
-  credentials: connectGitHubCredentials(${JSON.stringify(uid)}),${handlerBlock}
-});
-`;
+  return `import { connectGitHubCredentials } from "@vercel/connect/eve";\nimport { githubChannel${defaultAuthImport} } from "eve/channels/github";\n\nexport default githubChannel({\n  botName: ${JSON.stringify(appSlug)},\n  credentials: connectGitHubCredentials(${JSON.stringify(uid)}),${handlerBlock}\n});\n`;
 }
 
-/** Runs guided GitHub App connector and channel setup. */
-export async function setupGitHub(
-  context: IntegrationSetupContext,
+export interface GitHubSetupPlan {
+  events: readonly GitHubWebhookEvent[];
+  project: VercelProjectReference;
+  slug: string;
+}
+
+export async function prepareGitHubSetup(
+  context: SetupPrepareContext,
   deps: GitHubSetupDeps = defaultDeps,
-): Promise<IntegrationSetupResult> {
+): Promise<GitHubSetupPlan> {
   if (context.environment.vercel.kind === "unavailable") {
     throw new Error(
       "GitHub setup requires an authenticated Vercel CLI. Run `vercel login`, then retry.",
     );
   }
-  try {
-    context.ui.prompter.log.info("GitHub App");
-    context.ui.prompter.log.info(
-      "Vercel Connect creates a GitHub App and routes verified webhooks to your deployed agent.",
-    );
-    const events = await context.ui.asker.askMany(githubEventsQuestion);
-    const project = await deps.ensureVercelProject({
-      appRoot: context.appRoot,
-      prompter: context.ui.prompter,
-      signal: context.signal,
-    });
-    const connector = await deps.provisionConnector({
-      log: context.ui.prompter.log,
-      events,
-      project,
-      projectRoot: context.appRoot,
-      slug: await deps.deriveConnectorSlug(context.appRoot),
-      signal: context.signal,
-    });
-    await deps.writeTextFile(
-      join(context.appRoot, "agent/channels/github.ts"),
-      connectTemplate(connector.uid, connector.appSlug, events),
-      { force: context.force },
-    );
-    const dashboardUrl = "https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Open+Vercel+Connect";
-    context.ui.nextSteps([
-      "Deploy the agent, then open the GitHub App in Vercel Connect and install it in the organization or account where you want to use it.",
-      `Add @${connector.appSlug} to a new issue, pull request, or review comment to invoke the agent. GitHub may not autocomplete or render the token as a linked mention.`,
-    ]);
-    return {
-      kind: "done",
-      completion: {
-        facts: [{ label: "GitHub App dashboard", value: dashboardUrl, kind: "url" }],
-        deploymentRequired: true,
-      },
-    };
-  } catch (error) {
-    if (error instanceof WizardCancelledError) return { kind: "cancelled" };
-    throw error;
-  }
+  const events = await context.asker.askMany(githubEventsQuestion);
+  const project = await resolveIntegrationVercelProject({
+    appRoot: context.appRoot,
+    integration: "GitHub",
+    signal: context.signal,
+    deps,
+  });
+  return { events, project, slug: await deps.deriveConnectorSlug(context.appRoot) };
 }
 
-/** GitHub App setup registration. */
-export const GITHUB_SETUP: SetupIntegration = {
+export async function applyGitHubSetup(
+  plan: GitHubSetupPlan,
+  context: SetupApplyContext,
+  deps: GitHubSetupDeps = defaultDeps,
+) {
+  context.presentation.log.info("GitHub App");
+  context.presentation.log.info(
+    "Vercel Connect creates a GitHub App and routes verified webhooks to your deployed agent.",
+  );
+  const connector = await deps.provisionConnector({
+    log: context.presentation.log,
+    events: plan.events,
+    project: plan.project,
+    projectRoot: context.appRoot,
+    slug: plan.slug,
+    signal: context.signal,
+  });
+  await deps.writeTextFile(
+    join(context.appRoot, "agent/channels/github.ts"),
+    connectTemplate(connector.uid, connector.appSlug, plan.events),
+    { force: context.force },
+  );
+  const dashboardUrl = "https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Open+Vercel+Connect";
+  context.presentation.nextSteps([
+    "Deploy the agent, then open the GitHub App in Vercel Connect and install it in the organization or account where you want to use it.",
+    `Add @${connector.appSlug} to a new issue, pull request, or review comment to invoke the agent. GitHub may not autocomplete or render the token as a linked mention.`,
+  ]);
+  return {
+    facts: [{ label: "Vercel Connect", value: dashboardUrl, kind: "url" as const }],
+    deploymentRequired: true as const,
+  };
+}
+
+export const GITHUB_SETUP = defineSetupIntegration({
   kind: "github",
   label: "GitHub",
   hint: "Respond to issues, pull requests, and comments",
-  setup: setupGitHub,
-};
+  prepare: prepareGitHubSetup,
+  apply: applyGitHubSetup,
+});

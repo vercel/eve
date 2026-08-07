@@ -25,6 +25,7 @@ import {
   listSlackConnectors,
   type SlackConnectLifecycleDeps,
   type SlackConnectorCleanupResult,
+  type SlackConnectorLookup,
 } from "./slack-connect-lifecycle.js";
 
 // Re-exported so the Connect parsers remain importable from the provisioning
@@ -314,6 +315,27 @@ async function raceAttemptAgainstChoice(input: {
  * payload before attachment.
  */
 export type SlackConnectorSelection = SlackConnectorRef | "create";
+
+/** Read-only connector inventory used to resolve the create/reuse decision before provisioning. */
+export async function inspectSlackbotConnectors(
+  log: ChannelSetupLog,
+  projectRoot: string,
+  slug: string,
+  signal?: AbortSignal,
+  deps: SlackbotProvisionDeps = defaultDeps,
+): Promise<Extract<SlackConnectorLookup, { state: "found" | "not-found" }>> {
+  const projectLink = await (deps.readProjectLink ?? readProjectLink)(projectRoot);
+  const lookup = await findSlackConnector(
+    deps,
+    projectRoot,
+    projectLink?.projectId,
+    `slack/${slug}`,
+    createPromptCommandOutput(log),
+    signal,
+  );
+  if (lookup.state === "failed") throw new Error(lookup.message);
+  return lookup;
+}
 
 export interface ProvisionSlackbotOptions {
   /**
