@@ -4,6 +4,8 @@ import { applyTaskTransition } from "#tasks/transitions.js";
 import type { TaskCommand, TaskStatus, TaskView } from "#tasks/types.js";
 
 function createView(status: TaskStatus, overrides: Partial<TaskView> = {}): TaskView {
+  // Cast on purpose: tests probe the transition function's runtime guards
+  // with shapes the TaskView union already forbids (e.g. terminal, no output).
   return {
     metadata: {
       agentId: "ag_research:abcdef123456",
@@ -14,7 +16,7 @@ function createView(status: TaskStatus, overrides: Partial<TaskView> = {}): Task
     status,
     taskId: "task_abc123",
     ...overrides,
-  };
+  } as TaskView;
 }
 
 const TERMINAL_STATUSES: readonly TaskStatus[] = ["completed", "failed", "cancelled"];
@@ -83,9 +85,7 @@ describe("applyTaskTransition", () => {
 
     expect(result.outcome).toBe("accepted");
     expect(result.view.status).toBe("input_required");
-    expect(result.view.inputRequests).toEqual([
-      { question: "which region?", requestId: "req-1" },
-    ]);
+    expect(result.view.inputRequests).toEqual([{ question: "which region?", requestId: "req-1" }]);
   });
 
   it("rejects empty, unidentified, and duplicate input request batches", () => {

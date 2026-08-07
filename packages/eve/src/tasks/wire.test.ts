@@ -158,7 +158,7 @@ describe("translateTaskInboundPayload", () => {
           },
           type: "authorization.required",
         },
-        kind: "subagent-authorization-event",
+        kind: "authorization-event",
         subagentName: "research",
       }),
     ).toEqual({
@@ -179,7 +179,7 @@ describe("translateTaskInboundPayload", () => {
           },
           type: "authorization.completed",
         },
-        kind: "subagent-authorization-event",
+        kind: "authorization-event",
         subagentName: "research",
       }),
     ).toEqual({ kind: "answered", requestIds: [TASK_AUTHORIZATION_REQUEST_ID] });
@@ -190,7 +190,7 @@ describe("translateTaskInboundPayload", () => {
       translateTaskInboundPayload({
         childContinuationToken: "child-token",
         inputResponses: [{ requestId: "req-1", text: "west" }],
-        kind: "task-answer-input",
+        kind: "input-response",
         taskId: "task-1",
       }),
     ).toBeUndefined();

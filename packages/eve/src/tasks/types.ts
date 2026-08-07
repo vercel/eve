@@ -6,7 +6,7 @@ import type { SubagentAuthorizationEvent } from "#channel/types.js";
  *
  * A task is one durable unit of delegated work owned by a parent session.
  * The durable task run is the single writer for lifecycle transitions
- * (see `#execution/tasks/run-workflow.js`); every other path submits
+ * (see `#execution/tasks/run-task-workflow.js`); every other path submits
  * commands and reads snapshots. This module is dependency-free on
  * purpose: it is bundled into workflow bodies, which reject Node.js
  * builtins and heavyweight validators.
@@ -126,22 +126,12 @@ export function readTaskInputRequestId(request: TaskInputRequest): string | unde
   return typeof requestId === "string" ? requestId : undefined;
 }
 
-/**
- * Full durable task snapshot. The task run appends one per accepted
- * command; readers always observe a complete view, never a delta.
- * Never contains routing credentials, continuation tokens, or
- * authorization capabilities.
- */
-export interface TaskView {
+/** Fields shared by every durable task snapshot. */
+interface TaskViewBase {
   readonly taskId: string;
-  readonly status: TaskStatus;
   readonly metadata: TaskMetadata;
   /** Private executor state; deliberately excluded from model-visible JSON. */
   readonly executor?: TaskExecutorState;
-  /** Terminal output; present exactly when `status` is terminal. */
-  readonly lastOutput?: TaskOutput;
-  /** Outstanding requests; present exactly when `status` is `input_required`. */
-  readonly inputRequests?: readonly TaskInputRequest[];
   /**
    * Provider usage the child reported at settlement; present when the
    * terminal command carried it. Retained for later accounting only —
@@ -150,6 +140,45 @@ export interface TaskView {
    */
   readonly usage?: TaskUsage;
 }
+
+/**
+ * Full durable task snapshot discriminated by lifecycle status.
+ *
+ * The task run appends one per accepted command; readers always observe a
+ * complete view, never a delta. A snapshot never contains routing credentials,
+ * continuation tokens, or authorization capabilities.
+ *
+ * Completed and failed tasks carry their corresponding output, cancelled
+ * tasks carry no output, and only input-required tasks carry requests.
+ */
+export type TaskView = TaskViewBase &
+  (
+    | {
+        readonly status: "working";
+        readonly inputRequests?: never;
+        readonly lastOutput?: never;
+      }
+    | {
+        readonly status: "input_required";
+        readonly inputRequests: readonly TaskInputRequest[];
+        readonly lastOutput?: never;
+      }
+    | {
+        readonly status: "completed";
+        readonly inputRequests?: never;
+        readonly lastOutput: Extract<TaskOutput, { type: "result" }>;
+      }
+    | {
+        readonly status: "failed";
+        readonly inputRequests?: never;
+        readonly lastOutput: Extract<TaskOutput, { type: "error" }>;
+      }
+    | {
+        readonly status: "cancelled";
+        readonly inputRequests?: never;
+        readonly lastOutput?: never;
+      }
+  );
 
 /** Commands accepted by the durable task run's transition function. */
 export type TaskCommand =
@@ -224,6 +253,11 @@ export interface TaskInboundChildResult {
   }[];
 }
 
+/**
+ * Arrives when the delegated child emits `input.requested`. After dispatch is
+ * acknowledged, the task run exposes the batch in an `input_required`
+ * snapshot and forwards the request to the parent session.
+ */
 export interface TaskInboundInputRequest {
   readonly callId: string;
   readonly childContinuationToken: string;
@@ -238,17 +272,28 @@ export interface TaskInboundInputRequest {
   readonly subagentName: string;
 }
 
+/**
+ * Arrives when a delegated child turn starts and its session and turn ids are
+ * known. The task run records those ids for executor addressing; this payload
+ * does not itself make the task ready or wake the parent.
+ */
 export interface TaskInboundTurnStarted {
   readonly childSessionId: string;
   readonly childTurnId: string;
-  readonly kind: "task-child-turn-started";
+  readonly kind: "turn-started";
   readonly taskId: string;
 }
 
+/**
+ * Arrives when the delegated child emits `authorization.required` or
+ * `authorization.completed`. The former exposes an authorization blocker in
+ * the task snapshot; the latter clears it. The event is forwarded separately
+ * to the parent and is never copied into the snapshot.
+ */
 export interface TaskInboundAuthorizationEvent {
   readonly callId: string;
   readonly childSessionId: string;
-  readonly kind: "subagent-authorization-event";
+  readonly kind: "authorization-event";
   readonly event: SubagentAuthorizationEvent;
   readonly subagentName: string;
 }
@@ -264,11 +309,11 @@ export interface TaskInboundAnswerInput {
   readonly childContinuationToken: string;
   readonly childResponseUrl?: string;
   readonly inputResponses: readonly TaskInputResponse[];
-  readonly kind: "task-answer-input";
+  readonly kind: "input-response";
   readonly taskId: string;
 }
 
-/** Everything a task run's command hook may receive. */
+/** Everything a task run's inbound continuation hook may receive. */
 export type TaskRunInboundPayload =
   | TaskCommandHookPayload
   | TaskInboundChildResult

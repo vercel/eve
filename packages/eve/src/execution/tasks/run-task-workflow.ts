@@ -7,7 +7,7 @@ import {
   wakeTaskAuthorizationParentStep,
   wakeTaskInputRequestParentStep,
   wakeTaskParentStep,
-} from "#execution/tasks/run-steps.js";
+} from "#execution/tasks/run-task.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
 import { translateTaskInboundPayload } from "#tasks/wire.js";
 import {
@@ -25,15 +25,20 @@ import {
 
 /** Input for one durable task run. */
 export interface TaskRunWorkflowInput {
-  /** Private command-hook token; a routing credential, never model-visible. */
-  readonly commandToken: string;
+  /** Private continuation token; a routing credential, never model-visible. */
+  readonly continuationToken: string;
   /** The creation snapshot, normally `working`. */
   readonly initialView: TaskView;
-  /**
-   * Parent session delivery token used to wake a parked parent when the
-   * task becomes ready. Absent for runs that should never wake anyone.
-   */
-  readonly wakeToken?: string;
+  /** Parent session delivery token used to wake the task's owning parent. */
+  readonly parentContinuationToken: string;
+}
+
+function isTaskRunFinished(view: TaskView, dispatchAcknowledged: boolean): boolean {
+  if (!isTerminalTaskStatus(view.status) || !dispatchAcknowledged) return false;
+
+  // Cancellation makes the task terminal before the child executor has
+  // necessarily unwound. Keep its hook open until the final result settles it.
+  return view.status !== "cancelled" || view.executor?.lifecycle === "terminal";
 }
 
 /**
@@ -59,7 +64,7 @@ export interface TaskRunWorkflowInput {
 export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void> {
   "use workflow";
 
-  const commands = createHook<TaskRunInboundPayload>({ token: input.commandToken });
+  const commands = createHook<TaskRunInboundPayload>({ token: input.continuationToken });
   // The iterator shares the hook's durable cursor; create it before
   // claiming so conflict replay is consumed by getConflict(), not a
   // later iterator read.
@@ -84,29 +89,33 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     let dispatchAcknowledged = false;
     await appendTaskSnapshotStep({ view });
 
-    while (
-      !isTerminalTaskStatus(view.status) ||
-      !dispatchAcknowledged ||
-      (view.status === "cancelled" && view.executor?.lifecycle !== "terminal")
-    ) {
+    while (!isTaskRunFinished(view, dispatchAcknowledged)) {
       const next = await iterator.next();
       if (next.done === true) return;
       if (next.value.kind === "task-command") dispatchAcknowledged = true;
       if (next.value.kind === "subagent-input-request") {
         pendingInputRequest = next.value;
       }
-      if (next.value.kind === "subagent-authorization-event") {
+      if (next.value.kind === "authorization-event") {
         pendingAuthorizationEvent = next.value;
       }
-      const command =
-        view.status === "cancelled" && next.value.kind === "runtime-action-result"
-          ? {
-              kind: "settle-executor" as const,
-              usage: readTaskUsage(next.value.results[0]?.outcome?.usageDelta),
-            }
-          : next.value.kind === "task-answer-input"
-            ? await resolveAnsweredCommand(view, next.value)
-            : translateTaskInboundPayload(next.value);
+      const payload = next.value;
+      const isExecutorResultAfterCancellation =
+        view.status === "cancelled" && payload.kind === "runtime-action-result";
+      const isTaskInputAnswer = payload.kind === "input-response";
+      let command: TaskCommand | undefined;
+
+      if (isExecutorResultAfterCancellation) {
+        command = {
+          kind: "settle-executor",
+          usage: readTaskUsage(payload.results[0]?.outcome?.usageDelta),
+        };
+      } else if (isTaskInputAnswer) {
+        if (view.status !== "input_required") continue;
+        command = await resolveAnsweredCommand(view, payload);
+      } else {
+        command = translateTaskInboundPayload(payload);
+      }
       if (command === undefined) continue;
       const result = applyTaskTransition(view, command);
       if (result.outcome !== "accepted") continue;
@@ -115,15 +124,11 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       const becameReady = !isReadyTaskStatus(view.status) && isReadyTaskStatus(result.view.status);
       view = result.view;
       await appendTaskSnapshotStep({ view });
-      if (
-        pendingAuthorizationEvent !== undefined &&
-        dispatchAcknowledged &&
-        input.wakeToken !== undefined
-      ) {
+      if (pendingAuthorizationEvent !== undefined && dispatchAcknowledged) {
         await wakeTaskAuthorizationParentStep({
           request: pendingAuthorizationEvent,
           taskId: view.taskId,
-          token: input.wakeToken,
+          token: input.parentContinuationToken,
         });
         pendingAuthorizationEvent = undefined;
       }
@@ -131,19 +136,15 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         pendingInputRequest !== undefined &&
         dispatchAcknowledged &&
         view.status === "input_required";
-      if (routableInputRequest && input.wakeToken !== undefined) {
+      if (routableInputRequest) {
         await wakeTaskInputRequestParentStep({
           request: pendingInputRequest as TaskInboundInputRequest,
           taskId: view.taskId,
-          token: input.wakeToken,
+          token: input.parentContinuationToken,
         });
         pendingInputRequest = undefined;
-      } else if (
-        (becameTerminal ||
-          (becameReady && pendingInputRequest === undefined)) &&
-        input.wakeToken !== undefined
-      ) {
-        await wakeTaskParentStep({ token: input.wakeToken, view });
+      } else if (becameTerminal || (becameReady && pendingInputRequest === undefined)) {
+        await wakeTaskParentStep({ token: input.parentContinuationToken, view });
       }
       // An unrouted request cannot outlive the block it described, or a
       // later block would replay it to the parent as if it were new.
@@ -168,13 +169,13 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
  * instead of moving to `working` with nothing listening.
  */
 async function resolveAnsweredCommand(
-  view: TaskView,
+  view: Extract<TaskView, { status: "input_required" }>,
   answer: TaskInboundAnswerInput,
 ): Promise<TaskCommand | undefined> {
-  if (answer.taskId !== view.taskId || view.status !== "input_required") return undefined;
+  if (answer.taskId !== view.taskId) return undefined;
 
   const outstanding = new Set(
-    (view.inputRequests ?? []).flatMap((request) => {
+    view.inputRequests.flatMap((request) => {
       const requestId = readTaskInputRequestId(request);
       return requestId === undefined ? [] : [requestId];
     }),

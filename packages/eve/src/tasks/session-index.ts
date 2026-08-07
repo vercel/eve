@@ -19,8 +19,8 @@ export const SESSION_TASKS_STATE_KEY = "eve.tasks";
  * One task owned by this session. Immutable model-safe metadata keeps the
  * task-to-agent join available before the task run publishes its first view.
  *
- * `commandToken` is the private routing credential for the task run's
- * command hook. It must never render into model context, history, task
+ * `continuationToken` is the private routing credential for the task run's
+ * inbound hook. It must never render into model context, history, task
  * snapshots, or compaction summaries — the model addresses tasks by
  * `taskId` only, and lookup verifies ownership through this index.
  */
@@ -29,7 +29,7 @@ export interface SessionTaskIndexEntry {
   readonly taskRunId: string;
   /** Immutable fallback once the owning workflow run expires. */
   readonly terminalSnapshot?: TaskView;
-  readonly commandToken: string;
+  readonly continuationToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
   readonly metadata: TaskMetadata;
@@ -43,37 +43,48 @@ const taskMetadataSchema: z.ZodType<TaskMetadata> = z.strictObject({
   name: z.string().min(1),
 });
 
-const taskViewSchema: z.ZodType<TaskView> = z
-  .strictObject({
-    executor: z
-      .strictObject({
-        childSessionId: z.string().min(1).optional(),
-        childTurnId: z.string().min(1).optional(),
-        lifecycle: z.enum(["parked", "terminal"]).optional(),
-      })
-      .optional(),
-    inputRequests: z.array(z.custom<JsonValue>()).optional(),
-    lastOutput: z
-      .strictObject({ data: z.custom<JsonValue>(), type: z.enum(["result", "error"]) })
-      .optional(),
-    metadata: taskMetadataSchema,
-    status: z.enum(["working", "input_required", "completed", "failed", "cancelled"]),
-    taskId: z.string().min(1),
-    usage: z
-      .strictObject({
-        cacheReadTokens: z.number().nonnegative(),
-        cacheWriteTokens: z.number().nonnegative(),
-        inputTokens: z.number().nonnegative(),
-        outputTokens: z.number().nonnegative(),
-      })
-      .optional(),
-  })
-  .refine((view) => isValidTerminalSnapshot(view), {
-    message: "Cached task snapshots must satisfy terminal status invariants.",
-  });
+const taskViewBaseShape = {
+  executor: z
+    .strictObject({
+      childSessionId: z.string().min(1).optional(),
+      childTurnId: z.string().min(1).optional(),
+      lifecycle: z.enum(["parked", "terminal"]).optional(),
+    })
+    .optional(),
+  metadata: taskMetadataSchema,
+  taskId: z.string().min(1),
+  usage: z
+    .strictObject({
+      cacheReadTokens: z.number().nonnegative(),
+      cacheWriteTokens: z.number().nonnegative(),
+      inputTokens: z.number().nonnegative(),
+      outputTokens: z.number().nonnegative(),
+    })
+    .optional(),
+};
+
+/**
+ * Terminal snapshots only, on purpose: the index caches a snapshot solely as
+ * the expired-run fallback, and the discriminated arms encode the terminal
+ * status/output invariants structurally (strict objects reject
+ * `inputRequests` and mismatched outputs).
+ */
+const taskViewSchema: z.ZodType<TaskView> = z.discriminatedUnion("status", [
+  z.strictObject({
+    ...taskViewBaseShape,
+    lastOutput: z.strictObject({ data: z.custom<JsonValue>(), type: z.literal("result") }),
+    status: z.literal("completed"),
+  }),
+  z.strictObject({
+    ...taskViewBaseShape,
+    lastOutput: z.strictObject({ data: z.custom<JsonValue>(), type: z.literal("error") }),
+    status: z.literal("failed"),
+  }),
+  z.strictObject({ ...taskViewBaseShape, status: z.literal("cancelled") }),
+]);
 
 const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictObject({
-  commandToken: z.string().min(1),
+  continuationToken: z.string().min(1),
   createdByStepIndex: z.number().int().nonnegative().optional(),
   createdByTurnId: z.string().min(1),
   metadata: taskMetadataSchema,
@@ -158,8 +169,8 @@ function isValidTerminalSnapshot(view: TaskView): boolean {
       return view.lastOutput?.type === "error";
     case "cancelled":
       return view.lastOutput === undefined;
+    // "input_required" is already excluded: its arm requires `inputRequests`.
     case "working":
-    case "input_required":
       return false;
   }
 }

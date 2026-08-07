@@ -2,7 +2,6 @@ import type {
   TaskCommand,
   TaskInputRequest,
   TaskOutput,
-  TaskStatus,
   TaskUsage,
   TaskView,
 } from "#tasks/types.js";
@@ -47,27 +46,31 @@ export type TaskTransitionResult =
 function terminalView(
   view: TaskView,
   command: Extract<TaskCommand, { kind: "complete" | "fail" | "cancel" }>,
-  settled: { readonly lastOutput?: TaskOutput; readonly status: TaskStatus },
+  settled:
+    | {
+        readonly lastOutput: Extract<TaskOutput, { type: "result" }>;
+        readonly status: "completed";
+      }
+    | { readonly lastOutput: Extract<TaskOutput, { type: "error" }>; readonly status: "failed" }
+    | { readonly status: "cancelled" },
 ): TaskView {
-  const next: {
-    executor?: TaskView["executor"];
-    lastOutput?: TaskOutput;
-    metadata: TaskView["metadata"];
-    status: TaskStatus;
-    taskId: string;
-    usage?: TaskUsage;
-  } = {
+  const base: Pick<TaskView, "executor" | "metadata" | "taskId"> & { usage?: TaskUsage } = {
     executor:
       command.lifecycle === undefined
         ? view.executor
         : { ...view.executor, lifecycle: command.lifecycle },
     metadata: view.metadata,
-    status: settled.status,
     taskId: view.taskId,
   };
-  if (settled.lastOutput !== undefined) next.lastOutput = settled.lastOutput;
-  if (command.usage !== undefined) next.usage = command.usage;
-  return next;
+  if (command.usage !== undefined) base.usage = command.usage;
+  switch (settled.status) {
+    case "completed":
+      return { ...base, lastOutput: settled.lastOutput, status: "completed" };
+    case "failed":
+      return { ...base, lastOutput: settled.lastOutput, status: "failed" };
+    case "cancelled":
+      return { ...base, status: "cancelled" };
+  }
 }
 
 export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskTransitionResult {

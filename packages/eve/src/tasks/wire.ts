@@ -19,7 +19,7 @@ import { TASK_AUTHORIZATION_REQUEST_ID, readTaskUsage } from "#tasks/types.js";
  *   payloads never enter the snapshot — only the fact that the child is
  *   blocked does.
  *
- * `task-answer-input` is deliberately absent: the run must forward the
+ * `input-response` is deliberately absent: the run must forward the
  * answers to the child before it may record them, so it builds that
  * command itself rather than translating one here.
  *
@@ -57,14 +57,14 @@ export function translateTaskInboundPayload(
     }
     case "subagent-input-request":
       return { inputRequests: payload.event.requests, kind: "require-input" };
-    case "task-child-turn-started":
+    case "turn-started":
       return {
         childSessionId: payload.childSessionId,
         childTurnId: payload.childTurnId,
         kind: "start-turn",
         taskId: payload.taskId,
       };
-    case "subagent-authorization-event":
+    case "authorization-event":
       return payload.event.type === "authorization.required"
         ? {
             inputRequests: [

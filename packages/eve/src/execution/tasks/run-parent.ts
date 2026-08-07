@@ -5,7 +5,7 @@ import {
   WorkflowRunNotFoundError,
 } from "#compiled/@workflow/errors/index.js";
 
-import type { TaskRunWorkflowInput } from "#execution/tasks/run-workflow.js";
+import type { TaskRunWorkflowInput } from "#execution/tasks/run-task-workflow.js";
 import {
   startWorkflowPreferLatest,
   taskRunWorkflowReference,
@@ -49,7 +49,7 @@ export async function startTaskRun(
  */
 export async function sendTaskCommand(input: {
   readonly command: TaskCommand;
-  readonly commandToken: string;
+  readonly continuationToken: string;
   readonly retryUnreachable?: { readonly attempts: number; readonly delayMs: number };
 }): Promise<"delivered" | "unreachable"> {
   return (await sendTaskCommandToOwner(input)) === undefined ? "unreachable" : "delivered";
@@ -58,21 +58,23 @@ export async function sendTaskCommand(input: {
 /** Delivers one command and returns the accepting task workflow's run id. */
 export async function sendTaskCommandToOwner(input: {
   readonly command: TaskCommand;
-  readonly commandToken: string;
+  readonly continuationToken: string;
   readonly retryUnreachable?: { readonly attempts: number; readonly delayMs: number };
 }): Promise<{ readonly runId: string } | undefined> {
   const payload: TaskCommandHookPayload = { command: input.command, kind: "task-command" };
   const attempts = Math.max(1, input.retryUnreachable?.attempts ?? 1);
   for (let attempt = 0; ; attempt += 1) {
     try {
-      const owner = await resumeHook(input.commandToken, payload);
+      const owner = await resumeHook(input.continuationToken, payload);
       if (
         typeof owner !== "object" ||
         owner === null ||
         !("runId" in owner) ||
         typeof owner.runId !== "string"
       ) {
-        throw new Error(`Task command hook "${input.commandToken}" returned no owner run id.`);
+        throw new Error(
+          `Task continuation hook "${input.continuationToken}" returned no owner run id.`,
+        );
       }
       return { runId: owner.runId };
     } catch (error) {
@@ -96,11 +98,11 @@ export async function sendTaskCommandToOwner(input: {
  * hook, so the payload is stale by definition.
  */
 export async function sendTaskInboundPayload(input: {
-  readonly commandToken: string;
+  readonly continuationToken: string;
   readonly payload: TaskRunInboundPayload;
 }): Promise<"delivered" | "unreachable"> {
   try {
-    await resumeHook(input.commandToken, input.payload);
+    await resumeHook(input.continuationToken, input.payload);
     return "delivered";
   } catch (error) {
     if (!isFinishedTaskRunTarget(error)) {

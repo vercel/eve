@@ -51,15 +51,23 @@ export async function wakeTaskAuthorizationParentStep(input: {
 }): Promise<void> {
   "use step";
 
-  const hookPayload: SubagentAuthorizationEventHookPayload = input.request;
+  const hookPayload: SubagentAuthorizationEventHookPayload = {
+    callId: input.request.callId,
+    childSessionId: input.request.childSessionId,
+    event: input.request.event,
+    kind: "subagent-authorization-event",
+    subagentName: input.request.subagentName,
+  };
   const data = input.request.event.data;
   const payload: {
     message?: string;
-    taskAuthorizationEvents: {
-      hookPayload: SubagentAuthorizationEventHookPayload;
-      taskId: string;
-    }[];
-  } = { taskAuthorizationEvents: [{ hookPayload, taskId: input.taskId }] };
+    task: {
+      authorizationEvents: {
+        hookPayload: SubagentAuthorizationEventHookPayload;
+        taskId: string;
+      }[];
+    };
+  } = { task: { authorizationEvents: [{ hookPayload, taskId: input.taskId }] } };
   if (input.request.event.type === "authorization.required") {
     payload.message = `Background task ${input.taskId} needs authorization.`;
   }
@@ -90,10 +98,10 @@ export async function wakeTaskParentStep(input: {
 }): Promise<void> {
   "use step";
 
-  const payload: { message: string; taskSnapshots?: readonly TaskView[] } = {
+  const payload: { message: string; task?: { snapshots: readonly TaskView[] } } = {
     message: formatTaskNotification(input.view),
   };
-  if (isTerminalTaskStatus(input.view.status)) payload.taskSnapshots = [input.view];
+  if (isTerminalTaskStatus(input.view.status)) payload.task = { snapshots: [input.view] };
   const command: SessionCommand = {
     kind: "send",
     payload,
@@ -124,12 +132,14 @@ export async function wakeTaskInputRequestParentStep(input: {
   const command: SessionCommand = {
     kind: "send",
     payload: {
-      taskInputRequests: [
-        {
-          hookPayload: input.request as SubagentInputRequestHookPayload,
-          taskId: input.taskId,
-        },
-      ],
+      task: {
+        inputRequests: [
+          {
+            hookPayload: input.request as SubagentInputRequestHookPayload,
+            taskId: input.taskId,
+          },
+        ],
+      },
     },
     taskDeliveryId: `${input.taskId}:input:${input.request.event.turnId}:${input.request.event.stepIndex}:${input.request.event.sequence}`,
   };

@@ -162,18 +162,21 @@ export interface DeliverPayload {
   readonly message?: string | UserContent;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
-  /** Framework-only task HITL envelopes consumed before adapter/model delivery. */
-  readonly taskInputRequests?: readonly {
-    readonly hookPayload: SubagentInputRequestHookPayload;
-    readonly taskId: string;
-  }[];
-  /** Framework-only task authorization events projected through the parent channel. */
-  readonly taskAuthorizationEvents?: readonly {
-    readonly hookPayload: SubagentAuthorizationEventHookPayload;
-    readonly taskId: string;
-  }[];
-  /** Framework-only terminal snapshots cached before task-run retention expires. */
-  readonly taskSnapshots?: readonly TaskView[];
+  /** Framework-only task envelopes consumed before adapter/model delivery. */
+  readonly task?: {
+    /** Task HITL input-request batches for the parent's pre-model router. */
+    readonly inputRequests?: readonly {
+      readonly hookPayload: SubagentInputRequestHookPayload;
+      readonly taskId: string;
+    }[];
+    /** Task authorization events projected through the parent channel. */
+    readonly authorizationEvents?: readonly {
+      readonly hookPayload: SubagentAuthorizationEventHookPayload;
+      readonly taskId: string;
+    }[];
+    /** Terminal snapshots cached before task-run retention expires. */
+    readonly snapshots?: readonly TaskView[];
+  };
   readonly [key: string]: unknown;
 }
 
@@ -192,7 +195,11 @@ export type SessionCommand =
       readonly payload: DeliverPayload;
       readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
-      /** Replay-stable identity for one task-owned child delivery. */
+      /**
+       * Replay-stable identity for one task-owned child delivery; lets the
+       * parent inbox dedupe retried durable-step deliveries. See
+       * {@link DeliverHookPayload.taskDeliveryId}.
+       */
       readonly taskDeliveryId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
@@ -249,6 +256,12 @@ export interface DeliverHookPayload {
   readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
   /** Inbound channel request id used only for workflow attributes. */
   readonly requestId?: string;
+  /**
+   * Replay-stable identity for one task-owned child delivery. Task-run steps
+   * derive it from deterministic inputs (task id, event kind, sequence) so the
+   * parent inbox can drop the duplicate when a durable step retries after
+   * `resumeHook` already succeeded.
+   */
   readonly taskDeliveryId?: string;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
