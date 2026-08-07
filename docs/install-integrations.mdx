@@ -22,6 +22,8 @@ Some integrations package several independently installable components. For exam
 
 When an official item declares an interactive setup flow or flows, eve asks whether to run them after installation and runs multiple flows in declaration order. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later; it reruns the selected components' declared flows from the beginning.
 
+For non-interactive automation, run `eve add <item> --non-interactive`. Add `--yes` to accept recommended setup values and reduce setup round trips; explicit `--answer` values take precedence. Eve returns structured component, setup-input, or prerequisite instructions instead of prompting. Use the continuation command in the response and add the requested answer; it adds `--skip-install` once registry installation has completed; resupply any prior answers from the calling agent's state. Pass non-secret answers with repeatable `--answer 'key=<JSON value>'` options. Supply secrets through the integration's documented environment variable or secret store rather than command-line arguments.
+
 ## Find an integration
 
 Browse the [Integrations directory](/integrations) to see the official integrations available from the eve registry.

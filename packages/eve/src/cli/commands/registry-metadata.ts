@@ -14,6 +14,8 @@ const EveRegistryItemMetadataSchema = z.object({
       eve: z
         .object({
           requires: z.string().optional(),
+          docs: z.string().min(1).optional(),
+          implementation: z.enum(["native", "chat-sdk"]).optional(),
           setup: z
             .union([RegistrySetupSchema, z.array(RegistrySetupSchema).min(1)])
             .transform((setup) => (Array.isArray(setup) ? setup : [setup]))

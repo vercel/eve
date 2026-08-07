@@ -110,9 +110,10 @@ export function registerRegistryCommands(input: {
 
   registry
     .command("view <item>")
-    .description("Print one registry item as JSON.")
-    .action(async (item: string) => {
+    .description("Inspect one registry item.")
+    .option("--json", "Output the raw registry item as JSON.")
+    .action(async (item: string, options: { json?: boolean }) => {
       const { runRegistryViewCommand } = await import("./registry.js");
-      await runRegistryViewCommand(logger, appRoot, item);
+      await runRegistryViewCommand(logger, appRoot, item, options);
     });
 }

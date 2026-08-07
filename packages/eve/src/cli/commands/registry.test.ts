@@ -206,6 +206,41 @@ describe("registry commands", () => {
     expect(process.exitCode).toBe(2);
   });
 
+  it("surfaces required deployment in non-interactive completion", async () => {
+    const logger = createLogger();
+    const runSetupCommand = vi.fn(async () => ({
+      kind: "completed" as const,
+      facts: [],
+      deploymentRequired: true as const,
+    }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: {
+          eve: {
+            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "web"] }],
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/web",
+      { nonInteractive: true, yes: true },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(JSON.parse(logger.logs.at(-1)!)).toEqual({
+      version: 1,
+      type: "completed",
+      item: "channel/web",
+      completedItems: ["channel/web"],
+      deploymentRequired: true,
+      next: { command: "eve", args: ["deploy"] },
+    });
+  });
+
   it("uses an answered component selection headlessly", async () => {
     const logger = createLogger();
     getRegistryItems
@@ -1162,6 +1197,49 @@ describe("registry commands", () => {
     expect(logger.logs).toEqual(['No registry items match "missing".']);
   });
 
+  it("includes official implementation and docs metadata in search JSON", async () => {
+    const logger = createLogger();
+    searchRegistries.mockResolvedValue({
+      items: [
+        {
+          registry: "https://eve.dev/r/registry.json",
+          name: "channel/photon-imessage",
+          addCommandArgument: "https://eve.dev/r/channel/photon-imessage.json",
+        },
+      ],
+      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              items: [
+                {
+                  name: "channel/photon-imessage",
+                  meta: {
+                    eve: {
+                      docs: "/docs/channels/photon",
+                      implementation: "native",
+                    },
+                  },
+                },
+              ],
+            }),
+          ),
+      ),
+    );
+
+    await runRegistrySearchCommand(logger, "/project", "imessage", undefined, { json: true });
+
+    expect(JSON.parse(logger.logs[0]!).items[0]).toMatchObject({
+      name: "channel/photon-imessage",
+      docs: "/docs/channels/photon",
+      implementation: "native",
+    });
+  });
+
   it("emits search results as JSON", async () => {
     const logger = createLogger();
     const result = {
@@ -1231,22 +1309,38 @@ describe("registry commands", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it("prints a registry item as JSON", async () => {
+  it("prints a planning-oriented registry item view", async () => {
     const logger = createLogger();
-    getRegistryItems.mockResolvedValue([{ name: "browser", type: "registry:item" }]);
-
-    await runRegistryViewCommand(logger, "/project", "extension/browser");
-
-    expect(getRegistryItems).toHaveBeenCalledWith(["https://eve.dev/r/extension/browser.json"], {
-      config: {
-        registries: {
-          "@skills": "https://www.skills.sh/r/{name}?agent=eve",
-          "@acme": "https://example.com/r/{name}.json",
+    getRegistryItems.mockResolvedValue([
+      {
+        title: "Photon iMessage",
+        description: "Connect an eve agent to iMessage through Photon.",
+        dependencies: ["@vercel/connect@>=0.5.0"],
+        files: [{ target: "agent/channels/photon.ts" }],
+        meta: {
+          eve: {
+            docs: "/docs/channels/photon",
+            implementation: "native",
+            setup: { package: "eve", bin: "eve", args: ["integration", "setup", "photon"] },
+          },
         },
       },
-    });
-    expect(logger.logs).toEqual([
-      JSON.stringify({ name: "browser", type: "registry:item" }, null, 2),
     ]);
+
+    await runRegistryViewCommand(logger, "/project", "channel/photon-imessage");
+
+    expect(logger.logs[0]).toContain("Photon iMessage\nchannel/photon-imessage");
+    expect(logger.logs[0]).toContain("Implementation  First-class eve channel");
+    expect(logger.logs[0]).toContain("Documentation   https://eve.dev/docs/channels/photon");
+  });
+
+  it("prints the raw registry item with --json", async () => {
+    const logger = createLogger();
+    const item = { name: "browser", type: "registry:item" };
+    getRegistryItems.mockResolvedValue([item]);
+
+    await runRegistryViewCommand(logger, "/project", "extension/browser", { json: true });
+
+    expect(logger.logs).toEqual([JSON.stringify(item, null, 2)]);
   });
 });

@@ -17,7 +17,14 @@ export type HeadlessSetupEvent =
       userCode?: string;
     }
   | { version: 1; type: "external_action_resolved"; id: string }
-  | { version: 1; type: "completed"; item: string; completedItems: readonly string[] }
+  | {
+      version: 1;
+      type: "completed";
+      item: string;
+      completedItems: readonly string[];
+      deploymentRequired?: true;
+      next?: HeadlessSetupCommand;
+    }
   | ({
       version: 1;
       type: "blocked";

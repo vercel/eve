@@ -1200,7 +1200,9 @@
             "bin": "eve",
             "args": ["integration", "setup", "slack"]
           },
-          "requires": ">=0.31.4"
+          "requires": ">=0.31.4",
+          "docs": "/docs/channels/slack",
+          "implementation": "native"
         }
       },
       "dependencies": ["@vercel/connect@>=0.4.2"]
@@ -1219,7 +1221,9 @@
             "bin": "eve",
             "args": ["integration", "setup", "discord"]
           },
-          "requires": ">=0.31.4"
+          "requires": ">=0.31.4",
+          "docs": "/docs/channels/discord",
+          "implementation": "native"
         }
       }
     },
@@ -1238,7 +1242,13 @@
           "type": "registry:file",
           "target": "agent/channels/teams.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/teams",
+          "implementation": "native"
+        }
+      }
     },
     {
       "name": "channel/telegram",
@@ -1254,7 +1264,13 @@
           "type": "registry:file",
           "target": "agent/channels/telegram.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/telegram",
+          "implementation": "native"
+        }
+      }
     },
     {
       "name": "channel/twilio",
@@ -1271,7 +1287,13 @@
           "type": "registry:file",
           "target": "agent/channels/twilio.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/twilio",
+          "implementation": "native"
+        }
+      }
     },
     {
       "name": "channel/github",
@@ -1286,7 +1308,9 @@
             "bin": "eve",
             "args": ["integration", "setup", "github"]
           },
-          "requires": ">=0.31.4"
+          "requires": ">=0.31.4",
+          "docs": "/docs/channels/github",
+          "implementation": "native"
         }
       },
       "dependencies": ["@vercel/connect@>=0.6.0"]
@@ -1304,7 +1328,9 @@
             "bin": "eve",
             "args": ["integration", "setup", "linear"]
           },
-          "requires": ">=0.31.4"
+          "requires": ">=0.31.4",
+          "docs": "/docs/channels/linear",
+          "implementation": "native"
         }
       },
       "dependencies": ["@vercel/connect"]
@@ -1322,7 +1348,9 @@
             "bin": "eve",
             "args": ["integration", "setup", "web"]
           },
-          "requires": ">=0.31.4"
+          "requires": ">=0.31.4",
+          "docs": "/docs/channels/eve",
+          "implementation": "native"
         }
       },
       "dependencies": [
@@ -1557,6 +1585,12 @@
       ],
       "envVars": {
         "GOOGLE_CHAT_CREDENTIALS": ""
+      },
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
       }
     },
     {
@@ -1577,6 +1611,12 @@
         "WHATSAPP_APP_SECRET": "",
         "WHATSAPP_PHONE_NUMBER_ID": "",
         "WHATSAPP_VERIFY_TOKEN": ""
+      },
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
       }
     },
     {
@@ -1595,6 +1635,12 @@
       "envVars": {
         "X_CONSUMER_SECRET": "",
         "X_USER_ACCESS_TOKEN": ""
+      },
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
       }
     },
     {
@@ -1614,6 +1660,12 @@
         "FACEBOOK_APP_SECRET": "",
         "FACEBOOK_PAGE_ACCESS_TOKEN": "",
         "FACEBOOK_VERIFY_TOKEN": ""
+      },
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
       }
     },
     {
@@ -1632,7 +1684,13 @@
           "type": "registry:file",
           "target": "agent/channels/zernio.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
+      }
     },
     {
       "name": "channel/chat-sdk-velt",
@@ -1650,7 +1708,13 @@
           "type": "registry:file",
           "target": "agent/channels/velt.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
+      }
     },
     {
       "name": "channel/chat-sdk-sendblue",
@@ -1669,7 +1733,13 @@
           "type": "registry:file",
           "target": "agent/channels/sendblue.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
+      }
     },
     {
       "name": "channel/chat-sdk-novu",
@@ -1687,6 +1757,12 @@
       "envVars": {
         "NOVU_SECRET_KEY": "",
         "NOVU_AGENT_IDENTIFIER": ""
+      },
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
       }
     },
     {
@@ -1705,7 +1781,13 @@
           "type": "registry:file",
           "target": "agent/channels/liveblocks.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
+      }
     },
     {
       "name": "channel/chat-sdk-linq",
@@ -1723,7 +1805,13 @@
           "type": "registry:file",
           "target": "agent/channels/linq.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
+      }
     },
     {
       "name": "channel/chat-sdk-kapso",
@@ -1742,7 +1830,13 @@
           "type": "registry:file",
           "target": "agent/channels/kapso.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
+      }
     },
     {
       "name": "channel/photon-imessage",
@@ -1758,7 +1852,9 @@
             "bin": "eve",
             "args": ["integration", "setup", "photon"]
           },
-          "requires": ">=0.31.4"
+          "requires": ">=0.31.4",
+          "docs": "/docs/channels/photon",
+          "implementation": "native"
         }
       }
     },
@@ -1779,7 +1875,13 @@
           "type": "registry:file",
           "target": "agent/channels/dial.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
+      }
     },
     {
       "name": "channel/chat-sdk-agentphone",
@@ -1798,7 +1900,13 @@
           "type": "registry:file",
           "target": "agent/channels/agentphone.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
+      }
     },
     {
       "name": "channel/chat-sdk-lark",
@@ -1816,7 +1924,13 @@
           "type": "registry:file",
           "target": "agent/channels/lark.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
+      }
     },
     {
       "name": "channel/chat-sdk-beeper",
@@ -1834,6 +1948,12 @@
       "envVars": {
         "MATRIX_BASE_URL": "",
         "MATRIX_ACCESS_TOKEN": ""
+      },
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
       }
     },
     {
@@ -1853,7 +1973,13 @@
           "type": "registry:file",
           "target": "agent/channels/resend.ts"
         }
-      ]
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/chat-sdk",
+          "implementation": "chat-sdk"
+        }
+      }
     },
     {
       "name": "instrumentation/braintrust",
