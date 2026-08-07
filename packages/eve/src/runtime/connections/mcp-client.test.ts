@@ -85,10 +85,10 @@ describe("McpConnectionClient", () => {
             inputSchema: {
               additionalProperties: false,
               properties: {
-                meta: { type: "object" },
+                context: { type: "object" },
                 query: { type: "string" },
               },
-              required: ["query", "meta"],
+              required: ["query", "context"],
               type: "object",
             },
             name: "lookup",
@@ -100,12 +100,11 @@ describe("McpConnectionClient", () => {
     createMCPClient.mockResolvedValue(client);
 
     const resolver = vi.fn(({ session, toolName }) => ({
-      "ucp-agent": {
-        profile: `https://agent.example.com/${session.id}/${toolName}`,
-      },
+      sessionId: session.id,
+      toolName,
     }));
     const mcpClient = new McpConnectionClient(
-      makeConnection({ toolCall: { providedArguments: { meta: resolver } } }),
+      makeConnection({ toolCall: { providedArguments: { context: resolver } } }),
     );
     const ctx = ctxWithAuth(null);
 
@@ -122,7 +121,7 @@ describe("McpConnectionClient", () => {
         }),
       ]);
       await expect(
-        mcpClient.executeTool("lookup", { meta: { from: "model" }, query: "boots" }),
+        mcpClient.executeTool("lookup", { context: { from: "model" }, query: "boots" }),
       ).resolves.toEqual({ ok: true });
     });
 
@@ -139,10 +138,9 @@ describe("McpConnectionClient", () => {
     expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ toolName: "lookup" }));
     expect(execute).toHaveBeenCalledWith(
       {
-        meta: {
-          "ucp-agent": {
-            profile: "https://agent.example.com/session-1/lookup",
-          },
+        context: {
+          sessionId: "session-1",
+          toolName: "lookup",
         },
         query: "boots",
       },

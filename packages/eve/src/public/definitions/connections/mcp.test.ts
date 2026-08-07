@@ -29,17 +29,15 @@ describe("defineMcpClientConnection", () => {
 
   it("accepts application-provided tool arguments", () => {
     const definition = defineMcpClientConnection({
-      description: "UCP storefront",
+      description: "Tenant-aware catalog",
       toolCall: {
         providedArguments: {
-          meta: ({ session }) => ({
-            "ucp-agent": { profile: `https://agent.example.com/${session.id}/profile` },
-          }),
+          tenantId: ({ session }) => `tenant-for-${session.id}`,
         },
       },
       url: "https://shop.example.com/mcp",
     });
 
-    expect(typeof definition.toolCall?.providedArguments?.meta).toBe("function");
+    expect(typeof definition.toolCall?.providedArguments?.tenantId).toBe("function");
   });
 });

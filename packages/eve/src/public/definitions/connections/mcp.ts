@@ -76,9 +76,9 @@ export interface McpClientConnectionDefinition {
   /**
    * Per-call behavior for tools exposed by this MCP connection.
    *
-   * Use `providedArguments` for application-owned values such as UCP's
-   * `arguments.meta`. eve removes configured keys from the model-facing input
-   * schema and adds their resolved values immediately before execution.
+   * Use `providedArguments` for application-owned values that should not be
+   * controlled by the model. eve removes configured keys from the model-facing
+   * input schema and adds their resolved values immediately before execution.
    */
   toolCall?: ConnectionToolCallDefinition;
   /**
