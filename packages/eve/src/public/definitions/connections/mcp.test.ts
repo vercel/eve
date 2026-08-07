@@ -26,4 +26,20 @@ describe("defineMcpClientConnection", () => {
 
     expect(typeof definition.auth).toBe("function");
   });
+
+  it("accepts application-provided tool arguments", () => {
+    const definition = defineMcpClientConnection({
+      description: "UCP storefront",
+      toolCall: {
+        providedArguments: {
+          meta: ({ session }) => ({
+            "ucp-agent": { profile: `https://agent.example.com/${session.id}/profile` },
+          }),
+        },
+      },
+      url: "https://shop.example.com/mcp",
+    });
+
+    expect(typeof definition.toolCall?.providedArguments?.meta).toBe("function");
+  });
 });

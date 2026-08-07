@@ -89,6 +89,34 @@ export default defineMcpClientConnection({
 
 `auth` and `headers` can also be functions that receive the active session context. Use that when credentials, tenants, or routing depend on the caller.
 
+## Application-provided tool arguments
+
+Some MCP servers require arguments that belong to the application rather than the model. For example, UCP servers expect the agent profile in `arguments.meta` on every tool call. Configure those values with `toolCall.providedArguments`:
+
+```ts title="agent/connections/storefront.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+const profileUrl = "https://agent.example.com/.well-known/ucp";
+
+export default defineMcpClientConnection({
+  url: "https://store.example.com/api/ucp/mcp",
+  description: "Storefront catalog, carts, checkouts, and orders.",
+  toolCall: {
+    providedArguments: {
+      meta: ({ session }) => ({
+        "ucp-agent": {
+          profile: `${profileUrl}?session=${encodeURIComponent(session.id)}`,
+        },
+      }),
+    },
+  },
+});
+```
+
+Values may be JSON values, promises, or callbacks. Callbacks receive the active session context plus the bare remote `toolName`.
+
+eve treats configured keys as application-owned: it removes them from every remote tool's model-facing input schema and adds their resolved values immediately before execution. They apply to every tool call on the connection and replace any conflicting model value. Approval policies continue to receive only the model-authored input.
+
 ## No auth
 
 Omit `auth` and `headers` only for intentionally public or local-only servers:
@@ -193,7 +221,7 @@ Return `"user-approval"` (or `true`) to pause for a person and `"not-applicable"
 | `principal_required`                       | A user-scoped `connect("...")` ran without an authenticated user. Return `principalType: "user"` from route auth, or use app-scoped auth. |
 | The model does not find the remote tool    | Improve the connection `description`, then check `tools.allow` / `tools.block`.                                                           |
 | OAuth works locally but fails after deploy | Attach the Connect connector to the deployed Vercel project and verify the UID in `connect("...")`.                                       |
-| The server rejects requests                | Confirm the MCP URL, transport support, auth scheme, and any required headers.                                                            |
+| The server rejects requests                | Confirm the MCP URL, transport support, auth scheme, required headers, and application-provided arguments.                                |
 
 ## What to read next
 

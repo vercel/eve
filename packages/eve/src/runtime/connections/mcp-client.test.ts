@@ -73,6 +73,83 @@ describe("McpConnectionClient", () => {
     createMCPClient.mockReset();
   });
 
+  it("hides provided arguments from schemas and adds resolved values at execution", async () => {
+    const execute = vi.fn().mockResolvedValue({ ok: true });
+    const toolsFromDefinitions = vi.fn().mockReturnValue({ lookup: { execute } });
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockResolvedValue({
+        tools: [
+          {
+            description: "Look up a product",
+            inputSchema: {
+              additionalProperties: false,
+              properties: {
+                meta: { type: "object" },
+                query: { type: "string" },
+              },
+              required: ["query", "meta"],
+              type: "object",
+            },
+            name: "lookup",
+          },
+        ],
+      }),
+      toolsFromDefinitions,
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const resolver = vi.fn(({ session, toolName }) => ({
+      "ucp-agent": {
+        profile: `https://agent.example.com/${session.id}/${toolName}`,
+      },
+    }));
+    const mcpClient = new McpConnectionClient(
+      makeConnection({ toolCall: { providedArguments: { meta: resolver } } }),
+    );
+    const ctx = ctxWithAuth(null);
+
+    await contextStorage.run(ctx, async () => {
+      await expect(mcpClient.getToolMetadata()).resolves.toEqual([
+        expect.objectContaining({
+          inputSchema: {
+            additionalProperties: false,
+            properties: { query: { type: "string" } },
+            required: ["query"],
+            type: "object",
+          },
+          name: "lookup",
+        }),
+      ]);
+      await expect(
+        mcpClient.executeTool("lookup", { meta: { from: "model" }, query: "boots" }),
+      ).resolves.toEqual({ ok: true });
+    });
+
+    expect(toolsFromDefinitions).toHaveBeenCalledWith({
+      tools: [
+        expect.objectContaining({
+          inputSchema: expect.objectContaining({
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          }),
+        }),
+      ],
+    });
+    expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ toolName: "lookup" }));
+    expect(execute).toHaveBeenCalledWith(
+      {
+        meta: {
+          "ucp-agent": {
+            profile: "https://agent.example.com/session-1/lookup",
+          },
+        },
+        query: "boots",
+      },
+      expect.any(Object),
+    );
+  });
+
   it("creates an HTTP MCP client with resolved connection headers", async () => {
     const client = {
       close: vi.fn(),

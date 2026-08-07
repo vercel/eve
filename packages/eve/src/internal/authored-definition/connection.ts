@@ -1,4 +1,8 @@
-import type { McpClientConnectionDefinition } from "#public/definitions/connections/mcp.js";
+import type {
+  McpClientConnectionDefinition,
+  McpToolCallDefinition,
+  ProvidedArgumentsDefinition,
+} from "#public/definitions/connections/mcp.js";
 import type { OpenAPIConnectionDefinition } from "#public/definitions/connections/openapi.js";
 import type {
   ConnectionAuthDefinition,
@@ -7,12 +11,14 @@ import type {
 } from "#runtime/connections/types.js";
 import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
 import { expectObjectRecord, expectOnlyKnownKeys } from "#internal/authored-module.js";
+import { parseJsonValue } from "#shared/json.js";
 
 const KNOWN_TOP_LEVEL_KEYS = [
   "approval",
   "auth",
   "description",
   "headers",
+  "toolCall",
   "tools",
   "url",
 ] as const;
@@ -42,6 +48,7 @@ const KNOWN_AUTHORIZATION_KEYS = [
   // canonical producer.
   "vercelConnect",
 ] as const;
+const KNOWN_TOOL_CALL_KEYS = ["providedArguments"] as const;
 
 /**
  * Validates one authored MCP client connection module export at build time
@@ -62,6 +69,7 @@ export function normalizeMcpClientConnectionDefinition(
 
   const authorization = normalizeAuthorization(record, message);
   const headers = normalizeHeaders(record, message);
+  const toolCall = normalizeMcpToolCall(record, message);
   const tools = normalizeToolFilter(record, message);
 
   if (authorization !== undefined && headers !== undefined && typeof headers !== "function") {
@@ -84,6 +92,9 @@ export function normalizeMcpClientConnectionDefinition(
   if (headers !== undefined) {
     result.headers = headers;
   }
+  if (toolCall !== undefined) {
+    result.toolCall = toolCall;
+  }
   if (tools !== undefined) {
     result.tools = tools;
   }
@@ -96,6 +107,52 @@ export function normalizeMcpClientConnectionDefinition(
   }
 
   return result;
+}
+
+function normalizeMcpToolCall(
+  record: Record<string, unknown>,
+  message: string,
+): McpToolCallDefinition | undefined {
+  if (record.toolCall === undefined) {
+    return undefined;
+  }
+
+  const toolCall = expectObjectRecord(
+    record.toolCall,
+    `${message} The "toolCall" field must be a plain object.`,
+  );
+  expectOnlyKnownKeys(toolCall, KNOWN_TOOL_CALL_KEYS, `${message} The "toolCall" field`);
+
+  if (toolCall.providedArguments === undefined) {
+    return {};
+  }
+
+  const providedArguments = expectObjectRecord(
+    toolCall.providedArguments,
+    `${message} The "toolCall.providedArguments" field must be a plain object.`,
+  );
+
+  for (const [key, value] of Object.entries(providedArguments)) {
+    if (typeof value === "function") {
+      continue;
+    }
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      typeof (value as { then?: unknown }).then === "function"
+    ) {
+      continue;
+    }
+    try {
+      parseJsonValue(value);
+    } catch {
+      throw new Error(
+        `${message} The "toolCall.providedArguments.${key}" value must be JSON-serializable, a Promise, or a function.`,
+      );
+    }
+  }
+
+  return { providedArguments: providedArguments as ProvidedArgumentsDefinition };
 }
 
 /**

@@ -20,6 +20,10 @@ export type { JsonValue } from "#public/types/json.js";
 export {
   defineMcpClientConnection,
   type McpClientConnectionDefinition,
+  type McpToolCallDefinition,
+  type ProvidedArgumentContext,
+  type ProvidedArgumentsDefinition,
+  type ProvidedArgumentValue,
 } from "#public/definitions/connections/mcp.js";
 export {
   defineOpenAPIConnection,
