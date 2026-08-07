@@ -28,6 +28,7 @@ export interface PendingInputBatchEvent {
 export interface PendingInputBatch {
   readonly event?: PendingInputBatchEvent;
   readonly requests: readonly InputRequest[];
+  readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
 }
 
@@ -132,6 +133,7 @@ function setPendingInputBatches(
   } else {
     state[PENDING_INPUT_BATCHES_KEY] = batches.map((batch) => ({
       event: batch.event,
+      responseAuthRequiredRequestIds: batch.responseAuthRequiredRequestIds,
       requests: [...batch.requests],
       responseMessages: [...batch.responseMessages],
     }));
@@ -147,6 +149,7 @@ function setPendingInputBatches(
 export function appendPendingInputBatch(input: {
   readonly event?: PendingInputBatchEvent;
   readonly requests: readonly InputRequest[];
+  readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
 }): HarnessSession {
@@ -154,6 +157,7 @@ export function appendPendingInputBatch(input: {
     ...getPendingInputBatches(input.session.state),
     {
       event: input.event,
+      responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
       requests: input.requests,
       responseMessages: input.responseMessages,
     },

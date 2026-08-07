@@ -33,25 +33,26 @@ export function dropStaleSessionLimitContinuationResponses(input: {
   readonly pendingRequestIds: ReadonlySet<string>;
   readonly stepInput?: StepInput;
 }): StepInput | undefined {
-  const responses = input.stepInput?.inputResponses;
-  if (input.stepInput === undefined || responses === undefined || responses.length === 0) {
+  if (input.stepInput === undefined) return undefined;
+  const responses = input.stepInput.inputResponses ?? [];
+  const attributed = input.stepInput.attributedInputResponses ?? [];
+  const keep = (requestId: string) =>
+    input.pendingRequestIds.has(requestId) || !isSessionLimitContinuationRequestId(requestId);
+  const retained = responses.filter((response) => keep(response.requestId));
+  const retainedAttributed = attributed.filter(({ response }) => keep(response.requestId));
+  if (retained.length === responses.length && retainedAttributed.length === attributed.length) {
     return input.stepInput;
   }
 
-  const retained = responses.filter(
-    (response) =>
-      input.pendingRequestIds.has(response.requestId) ||
-      !isSessionLimitContinuationRequestId(response.requestId),
-  );
-  if (retained.length === responses.length) {
-    return input.stepInput;
-  }
-
-  const { inputResponses: _dropped, ...remainingInput } = input.stepInput;
-  if (retained.length === 0) {
-    return remainingInput;
-  }
-  return { ...remainingInput, inputResponses: retained };
+  const {
+    attributedInputResponses: _attributed,
+    inputResponses: _responses,
+    ...remainingInput
+  } = input.stepInput;
+  const result: { -readonly [K in keyof StepInput]: StepInput[K] } = remainingInput;
+  if (retained.length > 0) result.inputResponses = retained;
+  if (retainedAttributed.length > 0) result.attributedInputResponses = retainedAttributed;
+  return result;
 }
 
 /**
@@ -72,18 +73,26 @@ export function convertStaleResponsesToUserMessage(input: {
   readonly pendingRequestIds: ReadonlySet<string>;
   readonly stepInput?: StepInput;
 }): StaleResponseConversion {
-  const responses = input.stepInput?.inputResponses;
-  if (input.stepInput === undefined || responses === undefined || responses.length === 0) {
+  if (input.stepInput === undefined) return { kind: "unchanged" };
+  const responses = input.stepInput.inputResponses ?? [];
+  const attributed = input.stepInput.attributedInputResponses ?? [];
+  if (responses.length === 0 && attributed.length === 0) {
     return { kind: "unchanged", stepInput: input.stepInput };
   }
 
   const currentResponses: InputResponse[] = [];
+  const currentAttributed: NonNullable<StepInput["attributedInputResponses"]>[number][] = [];
   const staleResponses: InputResponse[] = [];
   for (const response of responses) {
-    if (input.pendingRequestIds.has(response.requestId)) {
-      currentResponses.push(response);
+    (input.pendingRequestIds.has(response.requestId) ? currentResponses : staleResponses).push(
+      response,
+    );
+  }
+  for (const entry of attributed) {
+    if (input.pendingRequestIds.has(entry.response.requestId)) {
+      currentAttributed.push(entry);
     } else {
-      staleResponses.push(response);
+      staleResponses.push(entry.response);
     }
   }
 
@@ -103,14 +112,17 @@ export function convertStaleResponsesToUserMessage(input: {
     input.stepInput.message,
     formatDisplayMessage(staleResponses, requests),
   );
-  const { inputResponses: _responses, ...remainingInput } = input.stepInput;
+  const {
+    attributedInputResponses: _attributed,
+    inputResponses: _responses,
+    ...remainingInput
+  } = input.stepInput;
   const stepInput: { -readonly [K in keyof StepInput]: StepInput[K] } = {
     ...remainingInput,
     message: modelMessage,
   };
-  if (currentResponses.length > 0) {
-    stepInput.inputResponses = currentResponses;
-  }
+  if (currentResponses.length > 0) stepInput.inputResponses = currentResponses;
+  if (currentAttributed.length > 0) stepInput.attributedInputResponses = currentAttributed;
 
   return { displayMessage, kind: "converted", stepInput };
 }

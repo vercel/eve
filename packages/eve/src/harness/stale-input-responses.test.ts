@@ -70,12 +70,22 @@ it("converts a stale approval into a non-authorizing user message", () => {
   );
 });
 
-it("converts a stale question selection using its option label", () => {
+it("converts an attributed stale question selection using its option label", () => {
   const result = convertStaleResponsesToUserMessage({
     history: questionHistory,
     pendingRequestIds: new Set(),
     stepInput: {
-      inputResponses: [{ optionId: "candidate", requestId: "question-1" }],
+      attributedInputResponses: [
+        {
+          auth: {
+            attributes: {},
+            authenticator: "test",
+            principalId: "user-1",
+            principalType: "user",
+          },
+          response: { optionId: "candidate", requestId: "question-1" },
+        },
+      ],
     },
   });
 
