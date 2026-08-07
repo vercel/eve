@@ -253,11 +253,11 @@ describe("applyTaskTransition", () => {
     const cancelled = applyTaskTransition(createView("working"), { kind: "cancel" });
     if (cancelled.outcome !== "accepted") throw new Error("Expected cancellation to commit.");
 
-    const result = applyTaskTransition(cancelled.view, { kind: "record-usage", usage });
+    const result = applyTaskTransition(cancelled.view, { kind: "settle-executor", usage });
 
     expect(result).toEqual({
       outcome: "accepted",
-      view: { ...cancelled.view, usage },
+      view: { ...cancelled.view, executor: { lifecycle: "terminal" }, usage },
     });
   });
 });

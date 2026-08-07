@@ -4,6 +4,7 @@ import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution
 import {
   appendTaskSnapshotStep,
   deliverTaskInputResponsesStep,
+  wakeTaskAuthorizationParentStep,
   wakeTaskInputRequestParentStep,
   wakeTaskParentStep,
 } from "#execution/tasks/run-steps.js";
@@ -13,8 +14,10 @@ import {
   isReadyTaskStatus,
   isTerminalTaskStatus,
   readTaskInputRequestId,
+  readTaskUsage,
   type TaskCommand,
   type TaskInboundAnswerInput,
+  type TaskInboundAuthorizationEvent,
   type TaskInboundInputRequest,
   type TaskRunInboundPayload,
   type TaskView,
@@ -77,20 +80,33 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
     let view = input.initialView;
     let pendingInputRequest: TaskInboundInputRequest | undefined;
+    let pendingAuthorizationEvent: TaskInboundAuthorizationEvent | undefined;
     let dispatchAcknowledged = false;
     await appendTaskSnapshotStep({ view });
 
-    while (!isTerminalTaskStatus(view.status) || !dispatchAcknowledged) {
+    while (
+      !isTerminalTaskStatus(view.status) ||
+      !dispatchAcknowledged ||
+      (view.status === "cancelled" && view.executor?.lifecycle !== "terminal")
+    ) {
       const next = await iterator.next();
       if (next.done === true) return;
       if (next.value.kind === "task-command") dispatchAcknowledged = true;
       if (next.value.kind === "subagent-input-request") {
         pendingInputRequest = next.value;
       }
+      if (next.value.kind === "subagent-authorization-event") {
+        pendingAuthorizationEvent = next.value;
+      }
       const command =
-        next.value.kind === "task-answer-input"
-          ? await resolveAnsweredCommand(view, next.value)
-          : translateTaskInboundPayload(next.value);
+        view.status === "cancelled" && next.value.kind === "runtime-action-result"
+          ? {
+              kind: "settle-executor" as const,
+              usage: readTaskUsage(next.value.results[0]?.outcome?.usageDelta),
+            }
+          : next.value.kind === "task-answer-input"
+            ? await resolveAnsweredCommand(view, next.value)
+            : translateTaskInboundPayload(next.value);
       if (command === undefined) continue;
       const result = applyTaskTransition(view, command);
       if (result.outcome !== "accepted") continue;
@@ -99,6 +115,14 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       const becameReady = !isReadyTaskStatus(view.status) && isReadyTaskStatus(result.view.status);
       view = result.view;
       await appendTaskSnapshotStep({ view });
+      if (pendingAuthorizationEvent !== undefined && input.wakeToken !== undefined) {
+        await wakeTaskAuthorizationParentStep({
+          request: pendingAuthorizationEvent,
+          taskId: view.taskId,
+          token: input.wakeToken,
+        });
+        pendingAuthorizationEvent = undefined;
+      }
       const routableInputRequest =
         pendingInputRequest !== undefined &&
         dispatchAcknowledged &&

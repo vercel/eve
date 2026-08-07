@@ -200,7 +200,7 @@ async function readWithTimeout(
   }
 }
 
-function isFinishedTaskRunTarget(error: unknown): boolean {
+export function isFinishedTaskRunTarget(error: unknown): boolean {
   for (const candidate of walkCauseChain(error)) {
     if (
       HookNotFoundError.is(candidate) ||

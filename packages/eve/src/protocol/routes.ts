@@ -38,6 +38,11 @@ export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessi
 export const EVE_SESSION_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stream`;
 
 /**
+ * Parent-origin proxy route for one remotely executed child session stream.
+ */
+export const EVE_SUBAGENT_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:parentSessionId/subagents/:callId/:childSessionId/stream`;
+
+/**
  * Framework-owned route pattern for dispatching one authored schedule
  * exactly once from the dev server.
  *
@@ -110,6 +115,9 @@ export const EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 
+/** Capability route used by a parent task to answer a remote child HITL batch. */
+export const EVE_TASK_INPUT_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/task-input/:token`;
+
 /** Builds the ID-addressed message route for one session. */
 export function createEveSessionRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}`;
@@ -118,6 +126,15 @@ export function createEveSessionRoutePath(sessionId: string): string {
 /** Builds the ID-addressed cancel route for one session. */
 export function createEveSessionCancelRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/cancel`;
+}
+
+/** Builds the parent-origin stream path for one remote child session. */
+export function createEveSubagentStreamRoutePath(input: {
+  readonly callId: string;
+  readonly childSessionId: string;
+  readonly parentSessionId: string;
+}): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(input.parentSessionId)}/subagents/${encodeURIComponent(input.callId)}/${encodeURIComponent(input.childSessionId)}/stream`;
 }
 
 /** Builds the ID-addressed compact route for one session. */
@@ -163,4 +180,9 @@ export function createEveConnectionCallbackRoutePath(
  */
 export function createEveCallbackRoutePath(token: string): string {
   return `${EVE_ROUTE_PREFIX}/callback/${encodeURIComponent(token)}`;
+}
+
+/** Builds the capability path used to answer one remote child turn. */
+export function createEveTaskInputRoutePath(token: string): string {
+  return `${EVE_ROUTE_PREFIX}/task-input/${encodeURIComponent(token)}`;
 }

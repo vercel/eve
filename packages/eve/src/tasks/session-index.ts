@@ -120,6 +120,22 @@ export function getSessionTaskIndex(
   return parsed.data.tasks;
 }
 
+/** Caches one terminal snapshot beside its task-run address. */
+export function cacheTerminalTaskSnapshot(
+  state: SessionStateMap | undefined,
+  snapshot: TaskView,
+): SessionStateMap | undefined {
+  if (!isTerminalTaskStatus(snapshot.status)) {
+    throw new Error(`Cannot cache nonterminal task "${snapshot.taskId}".`);
+  }
+  const entries = getSessionTaskIndex(state);
+  const index = entries.findIndex((entry) => entry.taskId === snapshot.taskId);
+  if (index < 0) return state;
+  const tasks = [...entries];
+  tasks[index] = { ...tasks[index]!, terminalSnapshot: snapshot };
+  return { ...state, [SESSION_TASKS_STATE_KEY]: { tasks } };
+}
+
 /** Finds one owned task; `undefined` enforces parent-session ownership. */
 export function findSessionTaskEntry(
   state: SessionStateMap | undefined,

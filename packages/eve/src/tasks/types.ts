@@ -1,4 +1,5 @@
 import type { JsonValue } from "#shared/json.js";
+import type { SubagentAuthorizationEvent } from "#channel/types.js";
 
 /**
  * Task lifecycle contract for `experimental.tasks`.
@@ -169,8 +170,8 @@ export type TaskCommand =
       readonly lifecycle?: "parked" | "terminal";
       readonly usage?: TaskUsage;
     }
-  /** Retains late executor usage without changing an already-terminal lifecycle. */
-  | { readonly kind: "record-usage"; readonly usage: TaskUsage }
+  /** Retains a late executor settlement without changing task terminal status. */
+  | { readonly kind: "settle-executor"; readonly usage?: TaskUsage }
   | { readonly kind: "require-input"; readonly inputRequests: readonly TaskInputRequest[] }
   | { readonly kind: "ready" }
   /**
@@ -245,11 +246,11 @@ export interface TaskInboundTurnStarted {
 }
 
 export interface TaskInboundAuthorizationEvent {
+  readonly callId: string;
+  readonly childSessionId: string;
   readonly kind: "subagent-authorization-event";
-  readonly event: {
-    readonly data: JsonValue;
-    readonly type: "authorization.required" | "authorization.completed";
-  };
+  readonly event: SubagentAuthorizationEvent;
+  readonly subagentName: string;
 }
 
 /**
@@ -261,6 +262,7 @@ export interface TaskInboundAuthorizationEvent {
 export interface TaskInboundAnswerInput {
   readonly auth?: unknown;
   readonly childContinuationToken: string;
+  readonly childResponseUrl?: string;
   readonly inputResponses: readonly TaskInputResponse[];
   readonly kind: "task-answer-input";
   readonly taskId: string;
