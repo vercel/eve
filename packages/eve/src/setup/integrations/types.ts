@@ -11,6 +11,11 @@ export interface IntegrationSetupContext {
   readonly signal?: AbortSignal;
   readonly force?: boolean;
   readonly yes?: boolean;
+  /**
+   * When true, shared prerequisites such as Vercel project linking must already
+   * be satisfied; they must not open an interactive wizard mid-flow.
+   */
+  readonly headless?: boolean;
 }
 
 /** Outcome from one registry-owned integration setup flow. */

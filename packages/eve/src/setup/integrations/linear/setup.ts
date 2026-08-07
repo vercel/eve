@@ -139,6 +139,7 @@ export async function setupLinear(
       appRoot: context.appRoot,
       prompter: context.ui.prompter,
       signal: context.signal,
+      headless: context.headless,
     });
     const connector = await chooseConnector(context, deps, project);
     if (connector === undefined) return { kind: "cancelled" };

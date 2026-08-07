@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { text } from "#setup/ask.js";
+import { text, type Asker } from "#setup/ask.js";
 import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
@@ -57,6 +57,112 @@ export default discordChannel({
 `;
 }
 
+/** Decisions collected before any irreversible Discord / Connect mutation. */
+export interface DiscordSetupDecisions {
+  botToken: string;
+  commandName: string;
+  commandDescription: string;
+}
+
+/**
+ * Phase 1: resolve every keyed Discord decision through the Asker. Must not
+ * call Discord, Connect, or the filesystem with side effects.
+ */
+export async function gatherDiscordSetupDecisions(asker: Asker): Promise<DiscordSetupDecisions> {
+  const botToken = (
+    await asker.ask(
+      text({
+        key: "discord-bot-token",
+        message: "Discord bot token",
+        required: true,
+        sensitive: true,
+      }),
+    )
+  ).trim();
+  const commandName = await asker.ask(
+    text({
+      key: "discord-command-name",
+      message: "Discord command name",
+      detected: "ask",
+      required: true,
+      validate: validateCommandName,
+    }),
+  );
+  const commandDescription = await asker.ask(
+    text({
+      key: "discord-command-description",
+      message: "Discord command description",
+      detected: "Ask the eve agent",
+      required: true,
+      validate: (value) =>
+        value.trim().length === 0
+          ? "Command description is required."
+          : value.trim().length > 100
+            ? "Command description must be 100 characters or fewer."
+            : null,
+    }),
+  );
+  return {
+    botToken,
+    commandName: commandName.trim(),
+    commandDescription: commandDescription.trim(),
+  };
+}
+
+/**
+ * Phase 2: apply gathered decisions. Idempotent where possible; fails closed
+ * rather than opening interactive prerequisites when {@link IntegrationSetupContext.headless}.
+ */
+async function performDiscordSetup(
+  context: IntegrationSetupContext,
+  decisions: DiscordSetupDecisions,
+  deps: DiscordSetupDeps,
+): Promise<IntegrationSetupResult> {
+  const application = await deps.resolveApplication(decisions.botToken);
+  const project = await deps.ensureVercelProject({
+    appRoot: context.appRoot,
+    prompter: context.ui.prompter,
+    signal: context.signal,
+    headless: context.headless,
+  });
+  const connector = await deps.provisionConnector({
+    botToken: decisions.botToken,
+    log: context.ui.prompter.log,
+    project,
+    projectRoot: context.appRoot,
+    slug: await deps.deriveConnectorSlug(context.appRoot),
+    signal: context.signal,
+  });
+  await deps.registerCommand(application.id, decisions.botToken, {
+    name: decisions.commandName,
+    description: decisions.commandDescription,
+  });
+  // Connect configures this automatically when supported; the explicit call
+  // makes setup deterministic while older API deployments are still live.
+  await deps.configureEndpoint(decisions.botToken, connector.id);
+  await deps.writeTextFile(
+    join(context.appRoot, "agent/channels/discord.ts"),
+    connectTemplate(connector.uid),
+    { force: context.force },
+  );
+  const installUrl =
+    `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(application.id)}` +
+    `&scope=${encodeURIComponent("bot applications.commands")}&permissions=3072`;
+  context.ui.nextSteps([
+    `Install the Discord application, then try /${decisions.commandName}: ${installUrl}`,
+  ]);
+  return {
+    kind: "done",
+    facts: [
+      {
+        label: "Discord application",
+        value: `https://discord.com/developers/applications/${application.id}/information`,
+        kind: "url",
+      },
+    ],
+  };
+}
+
 /** Runs guided Discord connector, command, and channel setup. */
 export async function setupDiscord(
   context: IntegrationSetupContext,
@@ -81,81 +187,8 @@ export async function setupDiscord(
     } else {
       context.ui.prompter.log.info(`Discord application\n${applicationInstructions.join("\n")}`);
     }
-    const botToken = (
-      await context.ui.asker.ask(
-        text({
-          key: "discord-bot-token",
-          message: "Discord bot token",
-          required: true,
-          sensitive: true,
-        }),
-      )
-    ).trim();
-    const commandName = await context.ui.asker.ask(
-      text({
-        key: "discord-command-name",
-        message: "Discord command name",
-        detected: "ask",
-        required: true,
-        validate: validateCommandName,
-      }),
-    );
-    const commandDescription = await context.ui.asker.ask(
-      text({
-        key: "discord-command-description",
-        message: "Discord command description",
-        detected: "Ask the eve agent",
-        required: true,
-        validate: (value) =>
-          value.trim().length === 0
-            ? "Command description is required."
-            : value.trim().length > 100
-              ? "Command description must be 100 characters or fewer."
-              : null,
-      }),
-    );
-    const application = await deps.resolveApplication(botToken);
-    const project = await deps.ensureVercelProject({
-      appRoot: context.appRoot,
-      prompter: context.ui.prompter,
-      signal: context.signal,
-    });
-    const connector = await deps.provisionConnector({
-      botToken,
-      log: context.ui.prompter.log,
-      project,
-      projectRoot: context.appRoot,
-      slug: await deps.deriveConnectorSlug(context.appRoot),
-      signal: context.signal,
-    });
-    await deps.registerCommand(application.id, botToken, {
-      name: commandName.trim(),
-      description: commandDescription.trim(),
-    });
-    // Connect configures this automatically when supported; the explicit call
-    // makes setup deterministic while older API deployments are still live.
-    await deps.configureEndpoint(botToken, connector.id);
-    await deps.writeTextFile(
-      join(context.appRoot, "agent/channels/discord.ts"),
-      connectTemplate(connector.uid),
-      { force: context.force },
-    );
-    const installUrl =
-      `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(application.id)}` +
-      `&scope=${encodeURIComponent("bot applications.commands")}&permissions=3072`;
-    context.ui.nextSteps([
-      `Install the Discord application, then try /${commandName.trim()}: ${installUrl}`,
-    ]);
-    return {
-      kind: "done",
-      facts: [
-        {
-          label: "Discord application",
-          value: `https://discord.com/developers/applications/${application.id}/information`,
-          kind: "url",
-        },
-      ],
-    };
+    const decisions = await gatherDiscordSetupDecisions(context.ui.asker);
+    return await performDiscordSetup(context, decisions, deps);
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };
     throw error;

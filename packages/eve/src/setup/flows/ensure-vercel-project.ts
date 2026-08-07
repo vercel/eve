@@ -4,6 +4,7 @@ import {
   resolveProvisioning,
   type ResolveProvisioningDeps,
 } from "../boxes/resolve-provisioning.js";
+import { HumanActionRequiredError } from "../human-action.js";
 import type { Prompter } from "../prompter.js";
 import { readProjectLink, type VercelProjectReference } from "../project-resolution.js";
 import { runInteractive, type AnySetupBox } from "../runner.js";
@@ -22,12 +23,27 @@ export async function ensureVercelProject(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
+  /**
+   * Headless / agent runs must not open the interactive link wizard. When no
+   * on-disk link exists, throw {@link HumanActionRequiredError} so the caller
+   * completes `vercel link` (or equivalent) separately and retries.
+   */
+  headless?: boolean;
   teamSelectMessage?: (currentTeam: string) => string;
   deps?: Partial<EnsureVercelProjectDeps>;
 }): Promise<VercelProjectReference> {
   const readLink = input.deps?.readProjectLink ?? readProjectLink;
   const existing = await readLink(input.appRoot);
   if (existing !== undefined) return existing;
+
+  if (input.headless) {
+    throw new HumanActionRequiredError({
+      kind: "vercel-link",
+      command: "vercel link",
+      reason:
+        "Integration setup needs this directory linked to a Vercel project before continuing.",
+    });
+  }
 
   const state = inProjectSetupState(input.appRoot, { kind: "unresolved" });
   const boxes: AnySetupBox<SetupState>[] = [

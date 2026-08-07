@@ -25,6 +25,8 @@ export interface PhotonSetupOptions {
   ui: IntegrationSetupUi;
   signal?: AbortSignal;
   force?: boolean;
+  /** When true, skip interactive Vercel linking; require an existing project link. */
+  headless?: boolean;
   deps?: PhotonSetupDeps;
 }
 
@@ -233,6 +235,7 @@ async function scaffoldPhoton(
         appRoot: projectRoot,
         prompter: options.ui.prompter,
         signal: options.signal,
+        headless: options.headless,
       });
       const connector = await deps.provisionConnector({
         credentials: managedProject,

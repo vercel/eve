@@ -121,6 +121,7 @@ export async function setupGitHub(
       appRoot: context.appRoot,
       prompter: context.ui.prompter,
       signal: context.signal,
+      headless: context.headless,
     });
     const connector = await deps.provisionConnector({
       log: context.ui.prompter.log,

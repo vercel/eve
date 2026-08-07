@@ -17,6 +17,7 @@ export const PHOTON_SETUP: SetupIntegration = {
       ui: context.ui,
       signal: context.signal,
       force: context.force,
+      headless: context.headless,
     });
     if (result.kind === "cancelled") return result;
     return {

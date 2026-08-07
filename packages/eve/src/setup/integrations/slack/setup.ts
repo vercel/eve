@@ -198,6 +198,7 @@ export async function setupSlack(
     appRoot: context.appRoot,
     prompter: context.ui.prompter,
     signal: context.signal,
+    headless: context.headless,
   });
   if (project.projectId.length === 0) throw new Error(SLACK_REQUIRES_VERCEL);
   const slackbot = await provisionSlack(context, deps, slug);

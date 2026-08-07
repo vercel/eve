@@ -1,4 +1,4 @@
-import { interactiveAsker } from "#setup/ask.js";
+import { headlessAsker, interactiveAsker, withAnswers, type Asker } from "#setup/ask.js";
 import type { RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 import { detectDeployment, projectResolutionFromDeployment } from "#setup/project-resolution.js";
 import type { Prompter } from "#setup/prompter.js";
@@ -17,6 +17,14 @@ export interface RunIntegrationSetupOptions {
   prompter: Prompter;
   signal?: AbortSignal;
   yes?: boolean;
+  /**
+   * Prefer the headless Asker base so required decisions refuse with
+   * {@link import("#setup/ask.js").InteractionRequired} instead of prompting.
+   * Pair with {@link answers} for agent/flag-driven runs.
+   */
+  headless?: boolean;
+  /** Pre-answers keyed by question `key` (flags, agent tool args). */
+  answers?: Record<string, unknown>;
 }
 
 /** Effects shared by the built-in integration setup runner. */
@@ -34,6 +42,20 @@ const defaultDeps: IntegrationSetupRunnerDeps = {
 export type IntegrationSetupOutcome =
   | { kind: "cancelled" }
   | { kind: "done"; facts?: readonly RegistrySetupFact[] };
+
+/**
+ * Composes the Asker stack for one integration setup run. Interactive default
+ * matches today's CLI; headless uses {@link headlessAsker} so missing required
+ * keys refuse structurally. Optional {@link withAnswers} sits outside either base.
+ */
+export function composeIntegrationAsker(options: {
+  prompter: Prompter;
+  headless?: boolean;
+  answers?: Record<string, unknown>;
+}): Asker {
+  const base = options.headless ? headlessAsker() : interactiveAsker(options.prompter);
+  return options.answers === undefined ? base : withAnswers(options.answers)(base);
+}
 
 /** Runs one built-in integration setup flow selected by its registry setup name. */
 export async function runIntegrationSetup(
@@ -55,10 +77,15 @@ export async function runIntegrationSetup(
     environment,
     appRoot: options.appRoot,
     ui: createIntegrationSetupUi({
-      asker: interactiveAsker(options.prompter),
+      asker: composeIntegrationAsker({
+        prompter: options.prompter,
+        headless: options.headless,
+        answers: options.answers,
+      }),
       prompter: options.prompter,
     }),
     yes: options.yes,
+    headless: options.headless,
     signal: options.signal,
   });
   return result;

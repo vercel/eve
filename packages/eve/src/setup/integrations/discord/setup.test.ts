@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import type { Asker, Question } from "#setup/ask.js";
+import {
+  headlessAsker,
+  InteractionRequired,
+  withAnswers,
+  type Asker,
+  type Question,
+} from "#setup/ask.js";
+import { HumanActionRequiredError } from "#setup/human-action.js";
 import { integrationSetupEnvironment } from "../shared/environment.js";
 import { createIntegrationSetupUi } from "../shared/ui.js";
 import { setupDiscord, type DiscordSetupDeps } from "./setup.js";
@@ -29,6 +36,12 @@ function deps(): DiscordSetupDeps {
   };
 }
 
+const DISCORD_ANSWERS = {
+  "discord-bot-token": "  bot-token  ",
+  "discord-command-name": "ask",
+  "discord-command-description": "Ask the eve agent",
+} as const;
+
 describe("Discord setup", () => {
   it("provisions Connect, registers the command and callback, and scaffolds the channel", async () => {
     const fake = createFakePrompter();
@@ -40,11 +53,7 @@ describe("Discord setup", () => {
           appRoot: "/project",
           environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
           ui: createIntegrationSetupUi({
-            asker: asker({
-              "discord-bot-token": "  bot-token  ",
-              "discord-command-name": "ask",
-              "discord-command-description": "Ask the eve agent",
-            }),
+            asker: asker({ ...DISCORD_ANSWERS }),
             prompter: fake.prompter,
           }),
         },
@@ -110,5 +119,89 @@ describe("Discord setup", () => {
         ui: createIntegrationSetupUi({ asker: asker({}), prompter: fake.prompter }),
       }),
     ).rejects.toThrow("vercel login");
+  });
+
+  it("headless answers-by-key succeeds without prompting and passes headless to ensureVercelProject", async () => {
+    const fake = createFakePrompter();
+    const effects = deps();
+    const headless = withAnswers({ ...DISCORD_ANSWERS })(headlessAsker());
+
+    await expect(
+      setupDiscord(
+        {
+          appRoot: "/project",
+          environment: integrationSetupEnvironment("authenticated", {
+            kind: "linked",
+            projectId: "project-id",
+          }),
+          headless: true,
+          ui: createIntegrationSetupUi({ asker: headless, prompter: fake.prompter }),
+        },
+        effects,
+      ),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(effects.ensureVercelProject).toHaveBeenCalledWith(
+      expect.objectContaining({ headless: true }),
+    );
+    expect(fake.selectMessages).toEqual([]);
+  });
+
+  it("missing required answer throws InteractionRequired before any mutation", async () => {
+    const fake = createFakePrompter();
+    const effects = deps();
+    const headless = withAnswers({})(headlessAsker());
+
+    await expect(
+      setupDiscord(
+        {
+          appRoot: "/project",
+          environment: integrationSetupEnvironment("authenticated", {
+            kind: "linked",
+            projectId: "project-id",
+          }),
+          headless: true,
+          ui: createIntegrationSetupUi({ asker: headless, prompter: fake.prompter }),
+        },
+        effects,
+      ),
+    ).rejects.toBeInstanceOf(InteractionRequired);
+
+    expect(effects.resolveApplication).not.toHaveBeenCalled();
+    expect(effects.ensureVercelProject).not.toHaveBeenCalled();
+    expect(effects.provisionConnector).not.toHaveBeenCalled();
+    expect(effects.registerCommand).not.toHaveBeenCalled();
+    expect(effects.configureEndpoint).not.toHaveBeenCalled();
+    expect(effects.writeTextFile).not.toHaveBeenCalled();
+  });
+
+  it("propagates ensureVercelProject headless failure without Connect mutation", async () => {
+    const fake = createFakePrompter();
+    const effects = deps();
+    effects.ensureVercelProject = vi.fn(async () => {
+      throw new HumanActionRequiredError({
+        kind: "vercel-link",
+        command: "vercel link",
+        reason:
+          "Integration setup needs this directory linked to a Vercel project before continuing.",
+      });
+    });
+    const headless = withAnswers({ ...DISCORD_ANSWERS })(headlessAsker());
+
+    await expect(
+      setupDiscord(
+        {
+          appRoot: "/project",
+          environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
+          headless: true,
+          ui: createIntegrationSetupUi({ asker: headless, prompter: fake.prompter }),
+        },
+        effects,
+      ),
+    ).rejects.toBeInstanceOf(HumanActionRequiredError);
+
+    expect(effects.resolveApplication).toHaveBeenCalled();
+    expect(effects.provisionConnector).not.toHaveBeenCalled();
+    expect(effects.writeTextFile).not.toHaveBeenCalled();
   });
 });
