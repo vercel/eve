@@ -14,7 +14,7 @@ import { type AlsContext, contextStorage, loadContext } from "#context/container
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import {
   type AuthorizationSignal,
-  getAuthorizationResult,
+  consumeAuthorizationResult,
   getHookUrl,
   requestAuthorization,
 } from "#harness/authorization.js";
@@ -136,7 +136,7 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
   const { scope, authorization, connection } = input;
   if (!supportsInteractiveAuthorization(authorization)) return false;
 
-  const result = getAuthorizationResult(scope);
+  const result = consumeAuthorizationResult(scope);
   if (result === undefined) return false;
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;

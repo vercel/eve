@@ -126,6 +126,30 @@ export function getAuthorizationResult(name?: string): AuthorizationResult | und
 }
 
 /**
+ * Removes and returns one authorization callback result.
+ *
+ * Callback results are one-shot inputs to `completeAuthorization`. Consuming
+ * before completion prevents a failed or replayed callback from poisoning
+ * every later tool call in the same step.
+ */
+export function consumeAuthorizationResult(name: string): AuthorizationResult | undefined {
+  const ctx = loadContext();
+  const results = ctx.get(PendingAuthorizationResultKey);
+  if (!results || results.length === 0) return undefined;
+
+  const index = results.findIndex((result) => result.name === name);
+  if (index === -1) return undefined;
+
+  const result = results[index]!;
+  const remaining = results.filter((_, resultIndex) => resultIndex !== index);
+  ctx.delete(PendingAuthorizationResultKey);
+  if (remaining.length > 0) {
+    ctx.set(PendingAuthorizationResultKey, remaining);
+  }
+  return result;
+}
+
+/**
  * Builds a callback URL for external systems. `name` identifies the
  * callback in the URL path (e.g. a connection name or custom label).
  *

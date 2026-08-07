@@ -5,7 +5,7 @@ import { ContextKey } from "#context/key.js";
 import {
   type AuthorizationChallenge,
   type AuthorizationSignal,
-  getAuthorizationResult,
+  consumeAuthorizationResult,
   getHookUrl,
   requestAuthorization,
 } from "#harness/authorization.js";
@@ -30,6 +30,7 @@ import {
   type InteractiveAuthorizationDefinition,
   supportsInteractiveAuthorization,
 } from "#runtime/connections/types.js";
+import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
 import { toError } from "#shared/errors.js";
 import type { ModelMessage } from "ai";
@@ -146,11 +147,14 @@ async function resolveInteractiveAuth(
  * following load, the freshly minted token is itself being rejected, so
  * the connection must fail terminally rather than re-challenge forever.
  */
-async function completePendingAuthorizations(registry: ConnectionRegistry): Promise<Set<string>> {
+async function completePendingAuthorizations(
+  registry: ConnectionRegistry,
+  connections: readonly ResolvedConnectionDefinition[],
+): Promise<Set<string>> {
   const ctx = loadContext();
   const completed = new Set<string>();
-  for (const conn of registry.getConnections()) {
-    const result = getAuthorizationResult(conn.connectionName);
+  for (const conn of connections) {
+    const result = consumeAuthorizationResult(conn.connectionName);
     if (!result) continue;
     const auth = await resolveInteractiveAuth(registry, conn.connectionName);
     if (!auth) continue;
@@ -179,8 +183,6 @@ async function executeConnectionSearch(
     return [];
   }
 
-  const justAuthorized = await completePendingAuthorizations(registry);
-
   const limit = input.limit ?? 10;
   const queryTokens = tokenize(input.keywords);
   const results: Array<{ item: ConnectionSearchResultItem; score: number }> = [];
@@ -196,6 +198,8 @@ async function executeConnectionSearch(
       `Connection "${input.connection}" is not registered. Available connections: ${registry.getConnectionNames().join(", ")}.`,
     );
   }
+
+  const justAuthorized = await completePendingAuthorizations(registry, targetConnections);
 
   const authChallenges: AuthorizationChallenge[] = [];
 
@@ -445,7 +449,7 @@ const connectionSearchDynamicDefinition = defineDynamic({
 
             let justCompletedAuth = false;
             if (interactiveAuth) {
-              const authResult = getAuthorizationResult(connectionName);
+              const authResult = consumeAuthorizationResult(connectionName);
               if (authResult) {
                 justCompletedAuth = true;
                 const ctx = loadContext();

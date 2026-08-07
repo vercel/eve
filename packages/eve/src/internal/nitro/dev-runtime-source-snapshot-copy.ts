@@ -17,6 +17,7 @@ import {
 } from "#internal/nitro/dev-runtime-source-snapshot.js";
 
 const SNAPSHOT_SKIP_NAMES = new Set([
+  ".devtools",
   ".generated",
   ".eve",
   ".git",
