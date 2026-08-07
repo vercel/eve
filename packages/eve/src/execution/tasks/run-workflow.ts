@@ -115,7 +115,11 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       const becameReady = !isReadyTaskStatus(view.status) && isReadyTaskStatus(result.view.status);
       view = result.view;
       await appendTaskSnapshotStep({ view });
-      if (pendingAuthorizationEvent !== undefined && input.wakeToken !== undefined) {
+      if (
+        pendingAuthorizationEvent !== undefined &&
+        dispatchAcknowledged &&
+        input.wakeToken !== undefined
+      ) {
         await wakeTaskAuthorizationParentStep({
           request: pendingAuthorizationEvent,
           taskId: view.taskId,
@@ -126,8 +130,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       const routableInputRequest =
         pendingInputRequest !== undefined &&
         dispatchAcknowledged &&
-        view.status === "input_required" &&
-        view.metadata.mode === "local";
+        view.status === "input_required";
       if (routableInputRequest && input.wakeToken !== undefined) {
         await wakeTaskInputRequestParentStep({
           request: pendingInputRequest as TaskInboundInputRequest,
@@ -137,8 +140,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         pendingInputRequest = undefined;
       } else if (
         (becameTerminal ||
-          (becameReady &&
-            !(pendingInputRequest !== undefined && view.metadata.mode === "local"))) &&
+          (becameReady && pendingInputRequest === undefined)) &&
         input.wakeToken !== undefined
       ) {
         await wakeTaskParentStep({ token: input.wakeToken, view });

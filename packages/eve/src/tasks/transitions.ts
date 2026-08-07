@@ -1,4 +1,11 @@
-import type { TaskCommand, TaskOutput, TaskStatus, TaskUsage, TaskView } from "#tasks/types.js";
+import type {
+  TaskCommand,
+  TaskInputRequest,
+  TaskOutput,
+  TaskStatus,
+  TaskUsage,
+  TaskView,
+} from "#tasks/types.js";
 import { isTerminalTaskStatus, readTaskInputRequestId } from "#tasks/types.js";
 
 /**
@@ -116,6 +123,13 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
         view,
       };
     case "require-input":
+      if (!isValidInputRequestBatch(command.inputRequests)) {
+        return {
+          outcome: "rejected",
+          reason: `Task "${view.taskId}" received an invalid input request batch.`,
+          view,
+        };
+      }
       return {
         outcome: "accepted",
         view: {
@@ -208,6 +222,15 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
       };
     }
   }
+}
+
+function isValidInputRequestBatch(requests: readonly TaskInputRequest[]): boolean {
+  if (requests.length === 0) return false;
+  const ids = requests.map(readTaskInputRequestId);
+  return (
+    ids.every((id): id is string => id !== undefined && id.length > 0) &&
+    new Set(ids).size === ids.length
+  );
 }
 
 function sameUsage(left: TaskUsage | undefined, right: TaskUsage | undefined): boolean {

@@ -99,13 +99,38 @@ describe("session task index", () => {
     expect(findSessionTaskEntry(session.state, "task_a")?.terminalSnapshot).toEqual(
       terminalSnapshot,
     );
-    expect(() =>
-      getSessionTaskIndex({
-        [SESSION_TASKS_STATE_KEY]: {
-          tasks: [{ ...base, terminalSnapshot: { metadata, status: "working", taskId: "task_a" } }],
-        },
-      }),
-    ).toThrow(`Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}"`);
+    for (const invalidSnapshot of [
+      { metadata, status: "working", taskId: "task_a" },
+      { metadata, status: "completed", taskId: "task_a" },
+      {
+        lastOutput: { data: "wrong", type: "result" },
+        metadata,
+        status: "failed",
+        taskId: "task_a",
+      },
+      {
+        lastOutput: { data: "wrong", type: "result" },
+        metadata,
+        status: "cancelled",
+        taskId: "task_a",
+      },
+      {
+        inputRequests: [{ requestId: "stale" }],
+        lastOutput: { data: "done", type: "result" },
+        metadata,
+        status: "completed",
+        taskId: "task_a",
+      },
+      { ...terminalSnapshot, taskId: "task_other" },
+    ]) {
+      expect(() =>
+        getSessionTaskIndex({
+          [SESSION_TASKS_STATE_KEY]: {
+            tasks: [{ ...base, terminalSnapshot: invalidSnapshot }],
+          },
+        }),
+      ).toThrow(`Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}"`);
+    }
   });
 
   it("throws on a corrupt index instead of treating it as absent", () => {

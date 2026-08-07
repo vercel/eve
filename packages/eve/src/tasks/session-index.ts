@@ -2,7 +2,7 @@ import { z } from "#compiled/zod/index.js";
 
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { JsonValue } from "#shared/json.js";
-import { isTerminalTaskStatus, type TaskMetadata, type TaskView } from "#tasks/types.js";
+import type { TaskMetadata, TaskView } from "#tasks/types.js";
 
 /**
  * Session-state key for the parent's live-task index.
@@ -68,8 +68,8 @@ const taskViewSchema: z.ZodType<TaskView> = z
       })
       .optional(),
   })
-  .refine((view) => isTerminalTaskStatus(view.status), {
-    message: "Cached task snapshots must be terminal.",
+  .refine((view) => isValidTerminalSnapshot(view), {
+    message: "Cached task snapshots must satisfy terminal status invariants.",
   });
 
 const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictObject({
@@ -92,6 +92,16 @@ const sessionTaskIndexSchema = z
     {
       message: "Task ids must be unique.",
     },
+  )
+  .refine(
+    (index) =>
+      index.tasks.every(
+        (entry) =>
+          entry.terminalSnapshot === undefined ||
+          (entry.terminalSnapshot.taskId === entry.taskId &&
+            sameTaskMetadata(entry.terminalSnapshot.metadata, entry.metadata)),
+      ),
+    { message: "Cached terminal snapshots must match their task index entry." },
   );
 
 interface SessionTaskIndex {
@@ -125,15 +135,42 @@ export function cacheTerminalTaskSnapshot(
   state: SessionStateMap | undefined,
   snapshot: TaskView,
 ): SessionStateMap | undefined {
-  if (!isTerminalTaskStatus(snapshot.status)) {
-    throw new Error(`Cannot cache nonterminal task "${snapshot.taskId}".`);
+  if (!isValidTerminalSnapshot(snapshot)) {
+    throw new Error(`Cannot cache invalid terminal task "${snapshot.taskId}".`);
   }
   const entries = getSessionTaskIndex(state);
   const index = entries.findIndex((entry) => entry.taskId === snapshot.taskId);
   if (index < 0) return state;
+  if (!sameTaskMetadata(entries[index]!.metadata, snapshot.metadata)) {
+    throw new Error(`Task snapshot metadata does not match index entry "${snapshot.taskId}".`);
+  }
   const tasks = [...entries];
   tasks[index] = { ...tasks[index]!, terminalSnapshot: snapshot };
   return { ...state, [SESSION_TASKS_STATE_KEY]: { tasks } };
+}
+
+function isValidTerminalSnapshot(view: TaskView): boolean {
+  if (view.inputRequests !== undefined) return false;
+  switch (view.status) {
+    case "completed":
+      return view.lastOutput?.type === "result";
+    case "failed":
+      return view.lastOutput?.type === "error";
+    case "cancelled":
+      return view.lastOutput === undefined;
+    case "working":
+    case "input_required":
+      return false;
+  }
+}
+
+function sameTaskMetadata(left: TaskMetadata, right: TaskMetadata): boolean {
+  return (
+    left.agentId === right.agentId &&
+    left.kind === right.kind &&
+    left.mode === right.mode &&
+    left.name === right.name
+  );
 }
 
 /** Finds one owned task; `undefined` enforces parent-session ownership. */
