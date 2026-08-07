@@ -97,6 +97,11 @@ const copyDeclarations = createDeclarationCopier({
       stubBaseName: "_ms",
       build: buildMsStub,
     },
+    "quickjs-wasi": {
+      kind: "stub",
+      stubBaseName: "_quickjs-wasi",
+      build: buildOpaqueTypesStub,
+    },
   },
 });
 
