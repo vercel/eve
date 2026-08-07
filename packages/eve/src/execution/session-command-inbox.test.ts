@@ -84,6 +84,28 @@ describe("createSessionCommandInbox", () => {
     await inbox.dispose();
   });
 
+  it("durably claims one invocation update per pending input set", async () => {
+    const first = invocationUpdate("mcp-update:question-set:answer-a");
+    installHooks(
+      createMockHook({
+        reads: [
+          Promise.resolve(resolved(first)),
+          Promise.resolve(resolved(invocationUpdate("mcp-update:question-set:answer-b"))),
+          Promise.resolve(resolved({ kind: "clear" })),
+        ],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionCommandInbox();
+
+    await inbox.claimStable("stable");
+    await expect(inbox.next()).resolves.toEqual(resolved(first));
+    inbox.consumeNext();
+    await expect(inbox.next()).resolves.toEqual(resolved({ kind: "clear" }));
+    inbox.consumeNext();
+    await inbox.dispose();
+  });
+
   it("disposes a conflicting continuation candidate without releasing current ownership", async () => {
     const stable = createMockHook({ token: "stable" });
     const current = createMockHook({ token: "current" });
@@ -189,6 +211,14 @@ function installHooks(...hooks: readonly MockHook[]): void {
 
 function send(message: string): SessionInboxPayload {
   return { kind: "send", payload: { message } };
+}
+
+function invocationUpdate(requestId: string): SessionInboxPayload {
+  return {
+    kind: "deliver",
+    payloads: [{ inputResponses: [{ optionId: "yes", requestId: "question" }] }],
+    requestId,
+  };
 }
 
 function resolved(value: SessionInboxPayload): IteratorResult<SessionInboxPayload> {

@@ -22,8 +22,8 @@ import {
   invocationUpdateRequestId,
 } from "#internal/invocation/metadata.js";
 import {
-  INVOCATION_UPDATE_RECEIPT_ATTRIBUTE,
-  invocationUpdateReceiptFromRequestId,
+  invocationUpdateIdentityFromRequestId,
+  invocationUpdateIdentityFromTurnStartedEvent,
 } from "#internal/invocation/attributes.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
@@ -101,14 +101,17 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
     readonly responses: readonly InputResponse[];
   }): Promise<AgentInvocationMutationResult> {
     const updateRequestId = invocationUpdateRequestId(input.responses);
-    const updateReceipt = invocationUpdateReceiptFromRequestId(updateRequestId);
-    if (updateReceipt === undefined) throw new Error("Invocation update receipt was unavailable.");
+    const update = invocationUpdateIdentityFromRequestId(updateRequestId);
+    if (update === undefined) throw new Error("Invocation update identity was unavailable.");
     const current = await this.read(input);
     if (current === undefined) return { type: "not_found" };
     const run = await this.#readInvocationRun(input.invocationId, input.auth);
     if (run === undefined) return { type: "not_found" };
-    if (run.attributes[INVOCATION_UPDATE_RECEIPT_ATTRIBUTE] === updateReceipt) {
-      return { invocation: current, type: "success" };
+    const recorded = (await readInvocationUpdateReceipts(input.invocationId))[update.claim];
+    if (recorded !== undefined) {
+      return recorded === update.receipt
+        ? { invocation: current, type: "success" }
+        : conflict("Input was already answered with a different response.");
     }
     if (current.status !== "input_required") {
       return conflict("Invocation is not waiting for input.");
@@ -121,6 +124,7 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
 
     const token = run.attributes[INVOCATION_TOKEN_ATTRIBUTE];
     if (token === undefined) return { type: "not_found" };
+    let deliveryError: unknown;
     try {
       const source = this.#from(token) as InternalChannelSource;
       await source[INTERNAL_CHANNEL_DELIVER](
@@ -129,14 +133,16 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
       );
     } catch (error) {
       if (RunExpiredError.is(error)) return { type: "not_found" };
-      const accepted = await this.#readInvocationRun(input.invocationId, input.auth);
-      if (accepted?.attributes[INVOCATION_UPDATE_RECEIPT_ATTRIBUTE] === updateReceipt) {
-        return {
-          invocation: workingInvocation(input.invocationId, current.createdAt, current.expiresAt),
-          type: "success",
-        };
-      }
-      throw error;
+      deliveryError = error;
+    }
+
+    const acceptedReceipt = await waitForInvocationUpdateReceipt(input.invocationId, update.claim);
+    if (acceptedReceipt === undefined) {
+      if (deliveryError !== undefined) throw deliveryError;
+      throw new Error("Timed out waiting for the durable invocation update receipt.");
+    }
+    if (acceptedReceipt !== update.receipt) {
+      return conflict("Input was already answered with a different response.");
     }
 
     return {
@@ -176,6 +182,50 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
 }
 
 const INVOCATION_EVENT_WINDOW_SIZE = 64;
+const INVOCATION_UPDATE_RECEIPT_TIMEOUT_MS = 10_000;
+
+async function waitForInvocationUpdateReceipt(
+  invocationId: string,
+  claim: string,
+): Promise<string | undefined> {
+  const deadline = Date.now() + INVOCATION_UPDATE_RECEIPT_TIMEOUT_MS;
+  while (true) {
+    const receipt = (await readInvocationUpdateReceipts(invocationId))[claim];
+    if (receipt !== undefined) return receipt;
+    if (Date.now() >= deadline) return undefined;
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+async function readInvocationUpdateReceipts(
+  invocationId: string,
+): Promise<Readonly<Record<string, string>>> {
+  const readable = getRun(invocationId).getReadable<Uint8Array>({
+    startIndex: 0,
+  });
+  const tailIndex = await readable.getTailIndex();
+  if (tailIndex < 0) {
+    await readable.cancel("invocation event stream is empty").catch(() => {});
+    return {};
+  }
+  const expectedEvents = tailIndex + 1;
+  const reader = parseNdjsonStream<HandleMessageStreamEvent>(() => readable).getReader();
+  const receipts: Record<string, string> = {};
+  try {
+    for (let index = 0; index < expectedEvents; index += 1) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.type === "turn.started") {
+        const update = invocationUpdateIdentityFromTurnStartedEvent(value);
+        if (update !== undefined) receipts[update.claim] = update.receipt;
+      }
+    }
+    return receipts;
+  } finally {
+    await reader.cancel("invocation update receipt read complete").catch(() => {});
+    reader.releaseLock();
+  }
+}
 
 async function readRecentPersistedEvents(
   invocationId: string,

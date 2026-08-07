@@ -59,9 +59,11 @@ OAuth mode adds Protected Resource Metadata and bearer challenges, but eve remai
 resource server. Authorization, token issuance, registration, PKCE, and refresh-token policy belong
 to the configured provider.
 
-Each invocation stores a SHA-256 owner key derived from the authenticated principal tuple. Raw
-principal data and bearer credentials are never persisted. Every read, update, and cancel recomputes
-the owner key; an invocation ID alone is not authority.
+Each invocation's searchable owner attribute stores only a SHA-256 key derived from the
+authenticated principal tuple. As with other authenticated eve sessions, the token-free
+`SessionAuthContext` remains in the durable session context so the workflow can enforce identity;
+bearer credentials are never persisted. Every read, update, and cancel recomputes the owner key, so
+an invocation ID alone is not authority.
 
 Deployment Protection is a separate edge layer. Generic MCP OAuth is supported only where the MCP
 resource can return its own challenge, or where a trusted gateway forwards a short-lived verified

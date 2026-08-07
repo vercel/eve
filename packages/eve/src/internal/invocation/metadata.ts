@@ -36,8 +36,11 @@ export function invocationUpdateRequestId(responses: readonly InputResponse[]): 
       text: response.text ?? null,
     }))
     .toSorted((left, right) => left.requestId.localeCompare(right.requestId));
-  const fingerprint = createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
-  return `${INVOCATION_UPDATE_REQUEST_ID_PREFIX}${fingerprint}`;
+  const claim = createHash("sha256")
+    .update(JSON.stringify(canonical.map((response) => response.requestId)), "utf8")
+    .digest("hex");
+  const receipt = createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
+  return `${INVOCATION_UPDATE_REQUEST_ID_PREFIX}${claim}:${receipt}`;
 }
 
 export function buildInvocationAttributes(

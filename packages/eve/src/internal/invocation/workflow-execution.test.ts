@@ -8,6 +8,10 @@ import {
   invocationOwnerKey,
   invocationUpdateRequestId,
 } from "#internal/invocation/metadata.js";
+import {
+  invocationUpdateIdentityFromRequestId,
+  stampInvocationUpdateIdentity,
+} from "#internal/invocation/attributes.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -164,34 +168,39 @@ describe("WorkflowAgentInvocationExecution", () => {
 
   it("returns working immediately after accepting pending input", async () => {
     runsGet.mockResolvedValue(run({ status: "running" }));
-    getReadable.mockReturnValue(
-      eventStream([
-        {
-          type: "input.requested",
-          data: {
-            sequence: 0,
-            stepIndex: 0,
-            turnId: "turn_1",
-            requests: [
-              {
-                action: {
-                  callId: "call_1",
-                  input: {},
-                  kind: "tool-call",
-                  toolName: "ask_question",
-                },
-                kind: "question",
-                options: [{ id: "yes", label: "Yes" }],
-                prompt: "Proceed?",
-                requestId: "question",
+    let events: HandleMessageStreamEvent[] = [
+      {
+        type: "input.requested",
+        data: {
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_1",
+          requests: [
+            {
+              action: {
+                callId: "call_1",
+                input: {},
+                kind: "tool-call",
+                toolName: "ask_question",
               },
-            ],
-          },
-          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
-        } as HandleMessageStreamEvent,
-      ]),
-    );
-    deliver.mockResolvedValue({ sessionId: "wrun_invocation" });
+              kind: "question",
+              options: [{ id: "yes", label: "Yes" }],
+              prompt: "Proceed?",
+              requestId: "question",
+            },
+          ],
+        },
+        meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
+      } as HandleMessageStreamEvent,
+    ];
+    getReadable.mockImplementation(() => eventStream(events));
+    deliver.mockImplementation(async () => {
+      const update = invocationUpdateIdentityFromRequestId(
+        invocationUpdateRequestId([{ optionId: "yes", requestId: "question" }]),
+      )!;
+      events = [...events, updateAcceptedEvent(update.claim, update.receipt)];
+      return { sessionId: "wrun_invocation" };
+    });
 
     await expect(
       execution().update({
@@ -211,13 +220,16 @@ describe("WorkflowAgentInvocationExecution", () => {
         requestId: invocationUpdateRequestId([{ optionId: "yes", requestId: "question" }]),
       },
     );
-    expect(getReadable).toHaveBeenCalledOnce();
+    expect(getReadable).toHaveBeenCalledWith({ startIndex: -64 });
   });
 
   it("returns the recorded result for a repeated accepted update", async () => {
     const responses = [{ optionId: "yes", requestId: "question" }] as const;
-    const receipt = invocationUpdateRequestId(responses).slice("mcp-update:".length);
-    runsGet.mockResolvedValue(run({ receipt, status: "running" }));
+    const update = invocationUpdateIdentityFromRequestId(invocationUpdateRequestId(responses))!;
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    getReadable.mockImplementation(() =>
+      eventStream([updateAcceptedEvent(update.claim, update.receipt)]),
+    );
 
     await expect(
       execution().update({ auth, invocationId: "wrun_invocation", responses }),
@@ -225,41 +237,60 @@ describe("WorkflowAgentInvocationExecution", () => {
     expect(deliver).not.toHaveBeenCalled();
   });
 
+  it("rejects a different answer after the pending input set was claimed", async () => {
+    const accepted = [{ optionId: "yes", requestId: "question" }] as const;
+    const attempted = [{ optionId: "no", requestId: "question" }] as const;
+    const acceptedUpdate = invocationUpdateIdentityFromRequestId(
+      invocationUpdateRequestId(accepted),
+    )!;
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    getReadable.mockImplementation(() =>
+      eventStream([updateAcceptedEvent(acceptedUpdate.claim, acceptedUpdate.receipt)]),
+    );
+
+    await expect(
+      execution().update({ auth, invocationId: "wrun_invocation", responses: attempted }),
+    ).resolves.toEqual({
+      message: "Input was already answered with a different response.",
+      type: "conflict",
+    });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it("converges when a concurrent update accepts the same response first", async () => {
     const responses = [{ optionId: "yes", requestId: "question" }] as const;
-    const receipt = invocationUpdateRequestId(responses).slice("mcp-update:".length);
+    const update = invocationUpdateIdentityFromRequestId(invocationUpdateRequestId(responses))!;
     const pendingRun = run({ status: "running" });
-    runsGet
-      .mockResolvedValueOnce(pendingRun)
-      .mockResolvedValueOnce(pendingRun)
-      .mockResolvedValueOnce(run({ receipt, status: "running" }));
-    getReadable.mockReturnValue(
-      eventStream([
-        {
-          type: "input.requested",
-          data: {
-            requests: [
-              {
-                action: {
-                  callId: "call_1",
-                  input: {},
-                  kind: "tool-call",
-                  toolName: "ask_question",
-                },
-                kind: "question",
-                prompt: "Proceed?",
-                requestId: "question",
+    runsGet.mockResolvedValue(pendingRun);
+    let events: HandleMessageStreamEvent[] = [
+      {
+        type: "input.requested",
+        data: {
+          requests: [
+            {
+              action: {
+                callId: "call_1",
+                input: {},
+                kind: "tool-call",
+                toolName: "ask_question",
               },
-            ],
-            sequence: 0,
-            stepIndex: 0,
-            turnId: "turn_1",
-          },
-          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
-        } as HandleMessageStreamEvent,
-      ]),
-    );
-    deliver.mockRejectedValue(new Error("continuation was already consumed"));
+              kind: "question",
+              prompt: "Proceed?",
+              requestId: "question",
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+        meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
+      } as HandleMessageStreamEvent,
+    ];
+    getReadable.mockImplementation(() => eventStream(events));
+    deliver.mockImplementation(async () => {
+      events = [...events, updateAcceptedEvent(update.claim, update.receipt)];
+      throw new Error("continuation was already consumed");
+    });
 
     await expect(
       execution().update({ auth, invocationId: "wrun_invocation", responses }),
@@ -405,12 +436,11 @@ function execution(): WorkflowAgentInvocationExecution {
   return new WorkflowAgentInvocationExecution({ channelName: "mcp", createSession, from });
 }
 
-function run(input: { ownerKey?: string; receipt?: string; status: string }) {
+function run(input: { ownerKey?: string; status: string }) {
   const attributes: Record<string, string> = {
     "$eve.invocation_owner": input.ownerKey ?? invocationOwnerKey(auth),
     "$eve.invocation_token": "invocation:token",
   };
-  if (input.receipt !== undefined) attributes["$eve.invocation_update"] = input.receipt;
   return {
     attributes,
     createdAt: new Date("2026-07-20T00:00:00.000Z"),
@@ -418,6 +448,19 @@ function run(input: { ownerKey?: string; receipt?: string; status: string }) {
     runId: "wrun_invocation",
     status: input.status,
   };
+}
+
+function updateAcceptedEvent(claim: string, receipt: string): HandleMessageStreamEvent {
+  const event: HandleMessageStreamEvent = {
+    data: {
+      sequence: 1,
+      turnId: "turn_2",
+    },
+    meta: { at: "2026-07-20T00:00:02.000Z", id: "event_update" },
+    type: "turn.started",
+  };
+  stampInvocationUpdateIdentity(event, { claim, receipt });
+  return event;
 }
 
 function eventStream(

@@ -3,6 +3,7 @@ import type { LanguageModel, ModelMessage, UserContent } from "ai";
 import type { SessionCapabilities } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
 import type { UnstampedMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
+import type { InvocationUpdateIdentity } from "#internal/invocation/attributes.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -123,6 +124,8 @@ export interface SessionLimits {
  * `runStep` before the model call.
  */
 export interface StepInput {
+  /** Framework-owned durable receipt carried onto the resumed turn boundary. */
+  readonly invocationUpdate?: InvocationUpdateIdentity;
   readonly inputResponses?: readonly InputResponse[];
   readonly message?: string | UserContent;
   /**

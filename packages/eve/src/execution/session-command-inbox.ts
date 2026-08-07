@@ -6,6 +6,7 @@ import type {
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
+import { invocationUpdateIdentityFromRequestId } from "#internal/invocation/attributes.js";
 
 /**
  * Payloads accepted by a session driver's stable and channel aliases.
@@ -63,6 +64,13 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
   let offered: Promise<IteratorResult<SessionInboxPayload>> | null = null;
   let offeredRead: HookRead | undefined;
   let wake: (() => void) | undefined;
+  const claimedInvocationUpdates = new Set<string>();
+
+  const consume = (read: HookRead): void => {
+    read.state.pending = false;
+    read.state.resolved = undefined;
+    if (read.result.done) read.state.closed = true;
+  };
 
   const enqueue = (read: HookRead): void => {
     ready.push(read);
@@ -133,9 +141,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
         throw new Error("Cannot consume a session command before it resolves.");
       }
 
-      offeredRead.state.pending = false;
-      offeredRead.state.resolved = undefined;
-      if (offeredRead.result.done) offeredRead.state.closed = true;
+      consume(offeredRead);
       offeredRead = undefined;
       offered = null;
     },
@@ -170,15 +176,28 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
       }
 
       offered = (async () => {
-        while (ready.length === 0) {
-          await new Promise<void>((resolve) => {
-            wake = resolve;
-          });
-        }
+        while (true) {
+          while (ready.length === 0) {
+            await new Promise<void>((resolve) => {
+              wake = resolve;
+            });
+          }
 
-        const read = ready.shift()!;
-        offeredRead = read;
-        return read.result;
+          const read = ready.shift()!;
+          const update = read.result.done
+            ? undefined
+            : invocationUpdateIdentityFromRequestId(
+                "requestId" in read.result.value ? read.result.value.requestId : undefined,
+              );
+          if (update !== undefined && claimedInvocationUpdates.has(update.claim)) {
+            consume(read);
+            arm(read.state);
+            continue;
+          }
+          if (update !== undefined) claimedInvocationUpdates.add(update.claim);
+          offeredRead = read;
+          return read.result;
+        }
       })();
       return offered;
     },
