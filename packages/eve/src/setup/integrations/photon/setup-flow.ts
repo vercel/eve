@@ -2,11 +2,10 @@ import { basename, join } from "node:path";
 
 import { select, text } from "../../ask.js";
 import { appendEnv } from "../../append-env.js";
-import { readProjectLink, type VercelProjectReference } from "../../project-resolution.js";
+import type { VercelProjectReference } from "../../project-resolution.js";
 import { openUrl } from "../../primitives/open-url.js";
 import { deriveSlackConnectorSlug } from "../../scaffold/index.js";
 import { writeTextFile } from "../../scaffold/files.js";
-import { resolveIntegrationVercelProject } from "../shared/vercel-project.js";
 import type { SetupApplyContext, SetupPrepareContext } from "../types.js";
 import { provisionPhotonConnector } from "./connect.js";
 import {
@@ -31,7 +30,6 @@ export interface PhotonSetupDeps {
   appendEnv: typeof appendEnv;
   deriveConnectorSlug: typeof deriveSlackConnectorSlug;
   findDedicatedLine: typeof findDedicatedPhotonLine;
-  readProjectLink: typeof readProjectLink;
   openUrl: typeof openUrl;
   provisionConnector: typeof provisionPhotonConnector;
   provisionProject: typeof provisionPhotonProject;
@@ -43,7 +41,6 @@ const defaultDeps: PhotonSetupDeps = {
   appendEnv,
   deriveConnectorSlug: deriveSlackConnectorSlug,
   findDedicatedLine: findDedicatedPhotonLine,
-  readProjectLink,
   openUrl,
   provisionConnector: provisionPhotonConnector,
   provisionProject: provisionPhotonProject,
@@ -170,14 +167,7 @@ export async function preparePhotonSetup(
         )
       : undefined;
   const vercelProject =
-    credentials === "vercel-connect"
-      ? await resolveIntegrationVercelProject({
-          appRoot: context.appRoot,
-          integration: "Photon",
-          signal: context.signal,
-          deps,
-        })
-      : undefined;
+    credentials === "vercel-connect" ? await context.resolveVercelProject("Photon") : undefined;
   const plan: PhotonSetupPlan = {
     agentName,
     credentials,
@@ -266,12 +256,12 @@ export async function applyPhotonSetup(
     context.presenter.note(dashboardUrl, "Photon project", { tone: "success" });
     return {
       facts: [
-        { label: "Photon project", value: dashboardUrl, kind: "url" as const },
+        { label: "Photon project dashboard", value: dashboardUrl, kind: "url" as const },
         ...(managedProject.assignedPhoneNumber === undefined
           ? []
           : [
               {
-                label: "Phone number",
+                label: "Agent phone number",
                 value: managedProject.assignedPhoneNumber,
                 kind: "phone" as const,
               },

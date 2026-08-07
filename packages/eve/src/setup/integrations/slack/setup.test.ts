@@ -25,7 +25,6 @@ function deps(): SlackSetupDeps {
       state: "not-found" as const,
       connectorUids: new Set<string>(),
     })),
-    readProjectLink: vi.fn(async () => ({ orgId: "team", projectId: "project" })),
     provisionSlackbot: vi.fn(async () => ({
       state: "attached" as const,
       connectorUid: "slack/agent",
@@ -40,6 +39,7 @@ function contexts(answers: Record<string, unknown>, assume = false) {
     asker: withAnswers(answers)(assume ? withPolicy("assume")(base) : base),
     environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
     prompter: createFakePrompter().prompter,
+    resolveVercelProject: vi.fn(async () => ({ orgId: "team", projectId: "project" })),
   });
 }
 

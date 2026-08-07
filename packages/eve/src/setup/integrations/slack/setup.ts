@@ -1,5 +1,5 @@
 import { select } from "#setup/ask.js";
-import { readProjectLink, type VercelProjectReference } from "#setup/project-resolution.js";
+import type { VercelProjectReference } from "#setup/project-resolution.js";
 import {
   deriveSlackConnectorSlug,
   ensureChannel,
@@ -17,7 +17,6 @@ import { slackMessageDeepLink } from "#setup/slack-connect.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import { installScaffoldDependencies, reportOverwrittenFiles } from "../shared/scaffold.js";
-import { resolveIntegrationVercelProject } from "../shared/vercel-project.js";
 import {
   defineSetupIntegration,
   type SetupApplyContext,
@@ -82,7 +81,6 @@ export interface SlackSetupDeps {
   deriveSlackConnectorSlug: typeof deriveSlackConnectorSlug;
   ensureChannel: typeof ensureChannel;
   inspectConnectors: typeof inspectSlackbotConnectors;
-  readProjectLink: typeof readProjectLink;
   provisionSlackbot: typeof provisionSlackbot;
   reconcileSlackUid: typeof reconcileSlackUid;
 }
@@ -91,7 +89,6 @@ const defaultDeps: SlackSetupDeps = {
   deriveSlackConnectorSlug,
   ensureChannel,
   inspectConnectors: inspectSlackbotConnectors,
-  readProjectLink,
   provisionSlackbot,
   reconcileSlackUid,
 };
@@ -163,12 +160,7 @@ export async function prepareSlackSetup(
       "Vercel Connect requires an authenticated Vercel CLI. Run `vercel login`, then retry Slack setup.",
     );
   }
-  const project = await resolveIntegrationVercelProject({
-    appRoot: context.appRoot,
-    integration: "Slack",
-    signal: context.signal,
-    deps,
-  });
+  const project = await context.resolveVercelProject("Slack");
   if (project.projectId.length === 0) throw new Error(SLACK_REQUIRES_VERCEL);
   const lookup = await deps.inspectConnectors(
     context.presenter.log,
@@ -252,7 +244,7 @@ export async function applySlackSetup(
         ? []
         : [
             {
-              label: "Open Slack DM",
+              label: "Agent Slack DM",
               value: slackMessageDeepLink(result.chatUrl),
               kind: "url" as const,
             },

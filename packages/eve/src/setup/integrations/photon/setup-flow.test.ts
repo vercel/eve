@@ -16,7 +16,6 @@ function deps(): PhotonSetupDeps {
     appendEnv: vi.fn(async () => ({ written: [], skipped: [] })),
     deriveConnectorSlug: vi.fn(async () => "agent" as never),
     findDedicatedLine: vi.fn(async () => undefined),
-    readProjectLink: vi.fn(async () => ({ orgId: "team", projectId: "project" })),
     openUrl: vi.fn(),
     provisionConnector: vi.fn(async () => ({ id: "connector", uid: "photon/agent" })),
     provisionProject: vi.fn(async () => ({
@@ -31,12 +30,14 @@ function deps(): PhotonSetupDeps {
 function contexts(
   answers: Record<string, unknown>,
   auth: "authenticated" | "cli-missing" = "authenticated",
+  resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" })),
 ) {
   return createSetupContexts({
     appRoot: "/project",
     asker: withAnswers(answers)(headlessAsker()),
     environment: integrationSetupEnvironment(auth, { kind: "unresolved" }),
     prompter: createFakePrompter().prompter,
+    resolveVercelProject,
   });
 }
 
@@ -82,7 +83,7 @@ describe("Photon setup", () => {
       "photon-project-secret": "project-secret",
     });
 
-    const plan = await preparePhotonSetup(ctx.prepare, "agent", effects);
+    const plan = await preparePhotonSetup(ctx.prepare, effects);
     await applyPhotonSetup(plan, ctx.apply, effects);
 
     expect(effects.useProject).toHaveBeenCalledWith({
@@ -95,9 +96,18 @@ describe("Photon setup", () => {
 
   it("requires a linked project for Connect", async () => {
     const effects = deps();
-    vi.mocked(effects.readProjectLink).mockResolvedValue(undefined);
+    const resolveVercelProject = vi.fn(async () => {
+      throw new Error("eve link");
+    });
     await expect(
-      preparePhotonSetup(contexts({ ...ANSWERS, "photon-credentials": "vercel" }).prepare, effects),
+      preparePhotonSetup(
+        contexts(
+          { ...ANSWERS, "photon-credentials": "vercel" },
+          "authenticated",
+          resolveVercelProject,
+        ).prepare,
+        effects,
+      ),
     ).rejects.toThrow("eve link");
     expect(effects.provisionProject).not.toHaveBeenCalled();
   });

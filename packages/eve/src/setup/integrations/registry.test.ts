@@ -25,6 +25,7 @@ describe("setup integrations", () => {
       asker: cancelling,
       environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
       prompter: createFakePrompter().prompter,
+      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
     await expect(setupIntegration("slack").run(contexts)).resolves.toEqual({ kind: "cancelled" });
   });

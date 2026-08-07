@@ -35,6 +35,7 @@ describe("Web setup", () => {
       asker: headlessAsker(),
       environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
       prompter: createFakePrompter().prompter,
+      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
     const plan = await prepareWebSetup(ctx.prepare, effects);
     await applyWebSetup(plan, ctx.apply, effects);

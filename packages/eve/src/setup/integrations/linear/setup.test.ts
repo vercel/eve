@@ -14,18 +14,21 @@ function deps(): LinearSetupDeps {
   return {
     attachConnector: vi.fn(async () => {}),
     deriveConnectorSlug: vi.fn(async () => "agent" as never),
-    readProjectLink: vi.fn(async () => ({ orgId: "team", projectId: "project" })),
     findConnector: vi.fn(async () => undefined),
     provisionConnector: vi.fn(async () => ({ id: "connector", uid: "linear/agent" })),
     writeTextFile: vi.fn(async () => {}),
   };
 }
-function contexts(answers: Record<string, unknown> = {}) {
+function contexts(
+  answers: Record<string, unknown> = {},
+  resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" })),
+) {
   return createSetupContexts({
     appRoot: "/project",
     asker: withAnswers(answers)(withPolicy("assume")(headlessAsker())),
     environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
     prompter: createFakePrompter().prompter,
+    resolveVercelProject,
   });
 }
 
@@ -55,8 +58,12 @@ describe("Linear setup", () => {
   });
   it("requires a linked project", async () => {
     const effects = deps();
-    vi.mocked(effects.readProjectLink).mockResolvedValue(undefined);
-    await expect(prepareLinearSetup(contexts().prepare, effects)).rejects.toThrow("eve link");
+    const resolveVercelProject = vi.fn(async () => {
+      throw new Error("eve link");
+    });
+    await expect(
+      prepareLinearSetup(contexts({}, resolveVercelProject).prepare, effects),
+    ).rejects.toThrow("eve link");
     expect(effects.findConnector).not.toHaveBeenCalled();
   });
 });

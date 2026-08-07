@@ -1,5 +1,9 @@
 import { interactiveAsker, type Asker } from "#setup/ask.js";
-import { detectDeployment, projectResolutionFromDeployment } from "#setup/project-resolution.js";
+import {
+  detectDeployment,
+  projectResolutionFromDeployment,
+  type VercelProjectReference,
+} from "#setup/project-resolution.js";
 import type { Prompter } from "#setup/prompter.js";
 import { getVercelAuthStatus } from "#setup/vercel-project.js";
 
@@ -7,6 +11,7 @@ import {
   integrationSetupEnvironment,
   describeIntegrationSetupEnvironment,
 } from "./shared/environment.js";
+import { resolveIntegrationVercelProject } from "./shared/vercel-project.js";
 import { createSetupContexts } from "./shared/ui.js";
 import { setupIntegration } from "./registry.js";
 import type { IntegrationSetupResult } from "./types.js";
@@ -20,9 +25,12 @@ export interface RunIntegrationSetupOptions {
   signal?: AbortSignal;
   force?: boolean;
   onExternalAction?: (input: { url: string; userCode?: string; message: string }) => void;
+  resolveVercelProject?: SetupProjectResolver;
 }
 
 /** Effects shared by the built-in integration setup runner. */
+export type SetupProjectResolver = (integration: string) => Promise<VercelProjectReference>;
+
 export interface IntegrationSetupRunnerDeps {
   detectDeployment: typeof detectDeployment;
   getVercelAuthStatus: typeof getVercelAuthStatus;
@@ -55,6 +63,14 @@ export async function runIntegrationSetup(
       asker: options.asker ?? interactiveAsker(options.prompter),
       environment,
       prompter: options.prompter,
+      resolveVercelProject:
+        options.resolveVercelProject ??
+        ((integration) =>
+          resolveIntegrationVercelProject({
+            appRoot: options.appRoot,
+            integration,
+            signal: options.signal,
+          })),
       signal: options.signal,
       force: options.force,
       onExternalAction: options.onExternalAction,

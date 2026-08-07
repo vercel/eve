@@ -8,17 +8,20 @@ import { applyGitHubSetup, prepareGitHubSetup, type GitHubSetupDeps } from "./se
 function deps(): GitHubSetupDeps {
   return {
     deriveConnectorSlug: vi.fn(async () => "agent" as never),
-    readProjectLink: vi.fn(async () => ({ orgId: "team", projectId: "project" })),
     provisionConnector: vi.fn(async () => ({ appSlug: "agent", id: "id", uid: "github/agent" })),
     writeTextFile: vi.fn(async () => {}),
   };
 }
-function contexts(answers: Record<string, unknown>) {
+function contexts(
+  answers: Record<string, unknown>,
+  resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" })),
+) {
   return createSetupContexts({
     appRoot: "/project",
     asker: withAnswers(answers)(headlessAsker()),
     environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
     prompter: createFakePrompter().prompter,
+    resolveVercelProject,
   });
 }
 
@@ -42,14 +45,15 @@ describe("GitHub setup", () => {
     await expect(prepareGitHubSetup(contexts({}).prepare, effects)).rejects.toBeInstanceOf(
       InteractionRequired,
     );
-    expect(effects.readProjectLink).not.toHaveBeenCalled();
+    expect(effects.provisionConnector).not.toHaveBeenCalled();
   });
   it("requires a linked project", async () => {
     const effects = deps();
-    vi.mocked(effects.readProjectLink).mockResolvedValue(undefined);
-    await expect(
-      prepareGitHubSetup(contexts({ "github-events": ["issue_comment"] }).prepare, effects),
-    ).rejects.toThrow("eve link");
+    const resolveVercelProject = vi.fn(async () => {
+      throw new Error("eve link");
+    });
+    const ctx = contexts({ "github-events": ["issue_comment"] }, resolveVercelProject);
+    await expect(prepareGitHubSetup(ctx.prepare, effects)).rejects.toThrow("eve link");
     expect(effects.provisionConnector).not.toHaveBeenCalled();
   });
 });

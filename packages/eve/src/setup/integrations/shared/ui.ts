@@ -29,6 +29,7 @@ export function createSetupContexts(input: {
   asker: Asker;
   environment: SetupPrepareContext["environment"];
   prompter: Prompter;
+  resolveVercelProject: SetupPrepareContext["resolveVercelProject"];
   signal?: AbortSignal;
   force?: boolean;
   onExternalAction?: (input: { url: string; userCode?: string; message: string }) => void;
@@ -38,7 +39,12 @@ export function createSetupContexts(input: {
   if (input.signal !== undefined) apply.signal = input.signal;
   if (input.force !== undefined) apply.force = input.force;
   return {
-    prepare: { ...apply, asker: input.asker, environment: input.environment },
+    prepare: {
+      ...apply,
+      asker: input.asker,
+      environment: input.environment,
+      resolveVercelProject: input.resolveVercelProject,
+    },
     apply,
   };
 }

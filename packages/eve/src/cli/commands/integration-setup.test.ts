@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
 import { runIntegrationSetup } from "#setup/integrations/runner.js";
 
 import { runIntegrationSetupCommand } from "./integration-setup.js";
@@ -13,6 +14,7 @@ vi.mock("#setup/scaffold/index.js", async (importOriginal) => ({
   isEveProject,
 }));
 vi.mock("#setup/integrations/runner.js", () => ({ runIntegrationSetup: vi.fn() }));
+vi.mock("#setup/flows/ensure-vercel-project.js", () => ({ ensureVercelProject: vi.fn() }));
 
 function logger(): RegistryCommandLogger & { errors: string[] } {
   const errors: string[] = [];
@@ -45,9 +47,21 @@ describe("runIntegrationSetupCommand", () => {
 
     expect(runIntegrationSetup).toHaveBeenCalledWith(
       "web",
-      expect.objectContaining({ appRoot: "/project", prompter: fake.prompter }),
+      expect.objectContaining({
+        appRoot: "/project",
+        prompter: fake.prompter,
+        resolveVercelProject: expect.any(Function),
+      }),
       undefined,
     );
+    const resolveVercelProject =
+      vi.mocked(runIntegrationSetup).mock.calls[0]?.[1].resolveVercelProject;
+    await resolveVercelProject?.("GitHub");
+    expect(ensureVercelProject).toHaveBeenCalledWith({
+      appRoot: "/project",
+      prompter: fake.prompter,
+      signal: undefined,
+    });
     expect(output.errors).toEqual([]);
   });
 });

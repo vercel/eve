@@ -1,5 +1,6 @@
 import type { Asker } from "#setup/ask.js";
 import type { Prompter } from "#setup/prompter.js";
+import type { VercelProjectReference } from "#setup/project-resolution.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
 
@@ -15,6 +16,7 @@ export interface SetupPrepareContext {
   readonly asker: Asker;
   readonly environment: IntegrationSetupEnvironment;
   readonly presenter: SetupPresenter;
+  readonly resolveVercelProject: (integration: string) => Promise<VercelProjectReference>;
   signal?: AbortSignal;
   force?: boolean;
 }

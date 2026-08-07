@@ -1,11 +1,10 @@
 import { join } from "node:path";
 
 import type { MultiSelectQuestion } from "#setup/ask.js";
-import { readProjectLink, type VercelProjectReference } from "#setup/project-resolution.js";
+import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
 
-import { resolveIntegrationVercelProject } from "../shared/vercel-project.js";
 import {
   defineSetupIntegration,
   type SetupApplyContext,
@@ -15,14 +14,12 @@ import { provisionGitHubConnector } from "./connect.js";
 
 export interface GitHubSetupDeps {
   deriveConnectorSlug: typeof deriveSlackConnectorSlug;
-  readProjectLink: typeof readProjectLink;
   provisionConnector: typeof provisionGitHubConnector;
   writeTextFile: typeof writeTextFile;
 }
 
 const defaultDeps: GitHubSetupDeps = {
   deriveConnectorSlug: deriveSlackConnectorSlug,
-  readProjectLink,
   provisionConnector: provisionGitHubConnector,
   writeTextFile,
 };
@@ -112,12 +109,7 @@ export async function prepareGitHubSetup(
     );
   }
   const events = await context.asker.askMany(githubEventsQuestion);
-  const project = await resolveIntegrationVercelProject({
-    appRoot: context.appRoot,
-    integration: "GitHub",
-    signal: context.signal,
-    deps,
-  });
+  const project = await context.resolveVercelProject("GitHub");
   return { events, project, slug: await deps.deriveConnectorSlug(context.appRoot) };
 }
 
@@ -143,15 +135,11 @@ export async function applyGitHubSetup(
     connectTemplate(connector.uid, connector.appSlug, plan.events),
     { force: context.force },
   );
-  const dashboardUrl = "https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Open+Vercel+Connect";
   context.presenter.nextSteps([
     "Deploy the agent, then open the GitHub App in Vercel Connect and install it in the organization or account where you want to use it.",
     `Add @${connector.appSlug} to a new issue, pull request, or review comment to invoke the agent. GitHub may not autocomplete or render the token as a linked mention.`,
   ]);
-  return {
-    facts: [{ label: "Vercel Connect", value: dashboardUrl, kind: "url" as const }],
-    deploymentRequired: true as const,
-  };
+  return { facts: [], deploymentRequired: true as const };
 }
 
 export const GITHUB_SETUP = defineSetupIntegration({

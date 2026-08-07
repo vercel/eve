@@ -1,12 +1,11 @@
 import { join } from "node:path";
 
 import { select, text } from "#setup/ask.js";
-import { readProjectLink, type VercelProjectReference } from "#setup/project-resolution.js";
+import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { deriveSlackConnectorSlug, normalizeSlackConnectorSlug } from "#setup/scaffold/index.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { resolveIntegrationVercelProject } from "../shared/vercel-project.js";
 import {
   defineSetupIntegration,
   type SetupApplyContext,
@@ -22,7 +21,6 @@ import {
 export interface LinearSetupDeps {
   attachConnector: typeof attachLinearConnector;
   deriveConnectorSlug: typeof deriveSlackConnectorSlug;
-  readProjectLink: typeof readProjectLink;
   findConnector: typeof findLinearConnector;
   provisionConnector: typeof provisionLinearConnector;
   writeTextFile: typeof writeTextFile;
@@ -31,7 +29,6 @@ export interface LinearSetupDeps {
 const defaultDeps: LinearSetupDeps = {
   attachConnector: attachLinearConnector,
   deriveConnectorSlug: deriveSlackConnectorSlug,
-  readProjectLink,
   findConnector: findLinearConnector,
   provisionConnector: provisionLinearConnector,
   writeTextFile,
@@ -70,12 +67,7 @@ export async function prepareLinearSetup(
       "Linear setup requires an authenticated Vercel CLI. Run `vercel login`, then retry.",
     );
   }
-  const project = await resolveIntegrationVercelProject({
-    appRoot: context.appRoot,
-    integration: "Linear",
-    signal: context.signal,
-    deps,
-  });
+  const project = await context.resolveVercelProject("Linear");
   const defaultSlug = linearSafeConnectorSlug(await deps.deriveConnectorSlug(context.appRoot));
   const slug = linearSafeConnectorSlug(
     await context.asker.ask(
@@ -150,24 +142,11 @@ export async function applyLinearSetup(
     connectTemplate(connector.uid),
     { force: context.force },
   );
-  const dashboardUrl = "https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Open+Vercel+Connect";
-  return {
-    facts: [
-      { label: "Vercel Connect", value: dashboardUrl, kind: "url" as const },
-      {
-        label: "Next step",
-        value:
-          "Deploy the agent, then open the Linear app in Vercel Connect and install it in the workspace where you want to delegate issues and comments.",
-      },
-      {
-        label: "In Linear",
-        value:
-          "Delegate an issue or mention the agent in an Agent Session to start a conversation.",
-      },
-      { label: "Open Linear", value: "https://linear.app", kind: "url" as const },
-    ],
-    deploymentRequired: true as const,
-  };
+  context.presenter.nextSteps([
+    "Deploy the agent, then open the Linear app in Vercel Connect and install it in the workspace where you want to delegate issues and comments.",
+    "Delegate an issue or mention the agent in an Agent Session to start a conversation.",
+  ]);
+  return { facts: [], deploymentRequired: true as const };
 }
 
 export const LINEAR_SETUP = defineSetupIntegration({

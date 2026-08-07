@@ -1,11 +1,10 @@
 import { join } from "node:path";
 
 import { text } from "#setup/ask.js";
-import { readProjectLink, type VercelProjectReference } from "#setup/project-resolution.js";
+import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
 
-import { resolveIntegrationVercelProject } from "../shared/vercel-project.js";
 import {
   defineSetupIntegration,
   type SetupApplyContext,
@@ -21,7 +20,6 @@ import { provisionDiscordConnector } from "./connect.js";
 export interface DiscordSetupDeps {
   configureEndpoint: typeof configureDiscordInteractionsEndpoint;
   deriveConnectorSlug: typeof deriveSlackConnectorSlug;
-  readProjectLink: typeof readProjectLink;
   provisionConnector: typeof provisionDiscordConnector;
   registerCommand: typeof registerDiscordCommand;
   resolveApplication: typeof resolveDiscordApplication;
@@ -31,7 +29,6 @@ export interface DiscordSetupDeps {
 const defaultDeps: DiscordSetupDeps = {
   configureEndpoint: configureDiscordInteractionsEndpoint,
   deriveConnectorSlug: deriveSlackConnectorSlug,
-  readProjectLink,
   provisionConnector: provisionDiscordConnector,
   registerCommand: registerDiscordCommand,
   resolveApplication: resolveDiscordApplication,
@@ -111,12 +108,7 @@ export async function prepareDiscordSetup(
             : null,
     }),
   );
-  const project = await resolveIntegrationVercelProject({
-    appRoot: context.appRoot,
-    integration: "Discord",
-    signal: context.signal,
-    deps,
-  });
+  const project = await context.resolveVercelProject("Discord");
   return {
     botToken,
     commandName: commandName.trim(),
@@ -158,7 +150,7 @@ export async function applyDiscordSetup(
     deploymentRequired: true as const,
     facts: [
       {
-        label: "Discord application",
+        label: "Discord application dashboard",
         value: `https://discord.com/developers/applications/${application.id}/information`,
         kind: "url" as const,
       },
