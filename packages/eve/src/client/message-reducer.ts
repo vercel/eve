@@ -168,6 +168,42 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       return next;
     }
 
+    case "approval.candidate":
+      // Candidate progress is responder-specific. Applications can consume the
+      // raw stream event for private UI without changing the shared tool part.
+      return data;
+
+    case "approval.settled": {
+      const existing = findToolPartByApprovalId(data, event.data.requestId);
+      if (existing === undefined) return data;
+      if (event.data.outcome === "approved") {
+        return updateToolPart(data, existing.toolCallId, {
+          approval: { approved: true, id: event.data.requestId, reason: undefined },
+          input: existing.input,
+          state: "approval-responded",
+          stepIndex: existing.stepIndex,
+          toolCallId: existing.toolCallId,
+          toolMetadata: existing.toolMetadata,
+          toolName: existing.toolName,
+          type: "dynamic-tool",
+        });
+      }
+      return updateToolPart(data, existing.toolCallId, {
+        approval: {
+          approved: false,
+          id: event.data.requestId,
+          reason: "Tool execution was cancelled.",
+        },
+        input: existing.input,
+        state: "output-denied",
+        stepIndex: existing.stepIndex,
+        toolCallId: existing.toolCallId,
+        toolMetadata: existing.toolMetadata,
+        toolName: existing.toolName,
+        type: "dynamic-tool",
+      });
+    }
+
     case "action.result": {
       const descriptor = normalizeActionResult(event.data.result);
       const existing = findToolPart(data, event.data.result.callId);

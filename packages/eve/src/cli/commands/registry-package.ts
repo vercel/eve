@@ -76,7 +76,11 @@ async function selectComponents(
   try {
     return await asker.askMany(question);
   } catch (error) {
-    if (!options.nonInteractive || !(error instanceof Error) || error.name !== "InteractionRequired")
+    if (
+      !options.nonInteractive ||
+      !(error instanceof Error) ||
+      error.name !== "InteractionRequired"
+    )
       throw error;
     const question = (error as import("#setup/ask.js").InteractionRequired).question;
     const { setupQuestionToWire } = await import("#setup/setup-question-wire.js");
@@ -139,7 +143,12 @@ export async function runRegistryPackage(input: {
     });
   let completion: RegistrySetupCompletion = { facts: [] };
   if (options.skipSetup === true) return completion;
-  if (!options.nonInteractive && options.yes !== true && options.prompter === undefined && !interactive) {
+  if (
+    !options.nonInteractive &&
+    options.yes !== true &&
+    options.prompter === undefined &&
+    !interactive
+  ) {
     logger.log(operations.setupReminder(item));
     return completion;
   }

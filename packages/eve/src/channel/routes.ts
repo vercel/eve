@@ -36,6 +36,7 @@ export interface RouteHandlerArgs<TState = undefined> {
 
 export interface SendPayload {
   readonly message?: string | UserContent;
+  readonly [key: string]: unknown;
   readonly inputResponses?: readonly InputResponse[];
   /**
    * Context strings contributed by the channel. eve appends each entry

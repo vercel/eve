@@ -393,9 +393,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           schemaSession = setHarnessEmissionState(schemaSession, emissionState);
         }
         for (const { authorization, result } of completedAuths) {
+          const candidateId = pendingAuth?.challenges.find(
+            (challenge) => challenge.attemptId === result.attemptId,
+          )?.candidateId;
           await handleEvent(
             createAuthorizationCompletedEvent({
               authorization,
+              candidateId,
               name: result.name,
               outcome: "authorized",
               sequence: emissionState.sequence,

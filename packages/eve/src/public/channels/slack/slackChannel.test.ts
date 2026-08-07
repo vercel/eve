@@ -583,6 +583,12 @@ describe("slackChannel() default event handlers", () => {
         value: "approve",
       },
     ]);
+    expect(ctx.state.pendingApprovalCards).toEqual({
+      approval_abc123: {
+        messageBlocks: controlsBody.blocks,
+        messageTs: "1700000001.000001",
+      },
+    });
   });
 
   it("keeps a large tool input out of the Slack button callback", async () => {
