@@ -1146,6 +1146,54 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("keeps late background child output inside its section across parent turns", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.backgroundSubagent({ callId: "s1" });
+
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "parent-1", delta: "Research task started." },
+        { type: "assistant-complete", id: "parent-1" },
+        { type: "finish" },
+      ]),
+      { continueSession: true },
+    );
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "parent-2", delta: "It is still running." },
+        { type: "assistant-complete", id: "parent-2" },
+        { type: "finish" },
+      ]),
+      { continueSession: true, submittedPrompt: "cool" },
+    );
+
+    // The child emits after both parent turns. It still inserts beside its
+    // call's header, not at the current transcript edge beneath parent-2.
+    renderer.upsertSubagentTool({
+      callId: "s1",
+      subagentName: "researcher",
+      childCallId: "dig-1",
+      toolName: "dig",
+      input: { phase: "sources" },
+      status: "executing",
+    });
+
+    const snapshot = screen.snapshot();
+    const header = snapshot.indexOf("※ subagent(researcher)");
+    const child = snapshot.indexOf("dig");
+    const firstParent = snapshot.indexOf("Research task started.");
+    const user = snapshot.indexOf("cool");
+    const secondParent = snapshot.indexOf("It is still running.");
+    expect(firstParent).toBeGreaterThan(-1);
+    expect(user).toBeGreaterThan(firstParent);
+    expect(secondParent).toBeGreaterThan(user);
+    expect(header).toBeGreaterThan(secondParent);
+    expect(child).toBeGreaterThan(header);
+    renderer.shutdown();
+  });
+
   it("swaps a dispatch's preparing placeholder for the section header", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1246,7 +1294,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Fetched https://one.example");
     expect(screen.snapshot()).not.toContain("Done");
 
-    renderer.completeSubagent({ callId: "s1" });
+    renderer.completeSubagent({ authoritative: true, callId: "s1" });
     const snapshot = screen.snapshot();
     // Completed: the corner reports Done with the counted footnote and the
     // children fold away — the parent's reply carries the conclusion.
@@ -1255,6 +1303,112 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("SUBAGENT_TOKEN=echo-marker-9F2X");
     renderer.shutdown();
   });
+
+  it("commits an authoritative background completion out of the live prompt region", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.backgroundSubagent({ callId: "s1" });
+    renderer.upsertSubagentTool({
+      callId: "s1",
+      subagentName: "researcher",
+      childCallId: "dig-1",
+      toolName: "dig",
+      input: { phase: "sources" },
+      status: "done",
+      output: { ok: true },
+    });
+
+    renderer.completeSubagent({ authoritative: true, callId: "s1" });
+    const outputAfterCommit = screen.rawOutput().length;
+    const prompt = renderer.readPrompt();
+    input.type("next message");
+
+    // Prompt repaint must not redraw the completed subagent cohort: it has
+    // moved to immutable scrollback and no longer occupies the live region.
+    expect(screen.rawOutput().slice(outputAfterCommit)).not.toContain("subagent(researcher)");
+    input.enter();
+    expect(await prompt).toBe("next message");
+    renderer.shutdown();
+  });
+
+  it("keeps parent completion provisional until delayed child output reaches its boundary", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.upsertSubagentStep({
+      callId: "s1",
+      subagentName: "researcher",
+      sectionKey: 0,
+      reasoning: "",
+      message: "parent-visible output",
+      finalized: true,
+    });
+    renderer.completeSubagent({ authoritative: false, callId: "s1" });
+    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
+
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.upsertSubagentStep({
+      callId: "s1",
+      subagentName: "researcher",
+      sectionKey: 1,
+      reasoning: "",
+      message: "delayed child output",
+      finalized: true,
+    });
+
+    expect(screen.snapshot()).toContain("delayed child output");
+    expect(screen.snapshot()).not.toContain("└ Done");
+
+    renderer.completeSubagent({ authoritative: true, callId: "s1" });
+    const outputAfterCommit = screen.rawOutput().length;
+    const prompt = renderer.readPrompt();
+    input.type("next");
+    expect(screen.rawOutput().slice(outputAfterCommit)).not.toContain("subagent(researcher)");
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
+  it.each(["active", "idle"] as const)(
+    "settles only the %s cancelled turn's top-level tools",
+    async (mode) => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      renderer.beginSubagent({ callId: "background", name: "researcher" });
+      renderer.backgroundSubagent({ callId: "background" });
+      renderer.upsertSubagentTool({
+        callId: "background",
+        subagentName: "researcher",
+        childCallId: "child-bash",
+        toolName: "bash",
+        input: { command: "background-child" },
+        status: "executing",
+      });
+      const result = streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "current-bash",
+          toolName: "bash",
+          input: { command: "idle-current" },
+        },
+        { type: "turn-cancelled" },
+        { type: "finish" },
+      ]);
+
+      if (mode === "active") {
+        await renderer.renderStream(result, { continueSession: true });
+      } else {
+        await renderer.renderIdleStream(result, { continueSession: true });
+      }
+
+      const snapshot = screen.snapshot();
+      expect(snapshot).toContain("background-child");
+      expect(snapshot).toContain("idle-current");
+      expect(countOccurrences(snapshot, "interrupted")).toBe(1);
+      renderer.shutdown();
+    },
+  );
 
   it("renders parallel calls to the same subagent as ordinal-numbered sections", async () => {
     const { screen, renderer } = makeRenderer();
@@ -1399,6 +1553,39 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     streamController?.close();
     await rendering;
+    renderer.shutdown();
+  });
+
+  it("renders an idle wake turn without corrupting the active prompt draft", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.type("draft in progress");
+
+    await renderer.renderIdleStream(
+      streamOf([
+        {
+          type: "tool-call",
+          input: { taskIds: ["task_123"] },
+          toolCallId: "peek-1",
+          toolName: "task_peek",
+        },
+        {
+          type: "tool-result",
+          output: { tasks: [{ status: "completed", taskId: "task_123" }] },
+          toolCallId: "peek-1",
+        },
+        { type: "assistant-delta", id: "wake-1", delta: "Research finished." },
+        { type: "assistant-complete", id: "wake-1" },
+        { type: "finish" },
+      ]),
+      { continueSession: true },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Research finished.");
+    expect(snapshot).toContain("draft in progress");
+    input.enter();
+    expect(await prompt).toBe("draft in progress");
     renderer.shutdown();
   });
 

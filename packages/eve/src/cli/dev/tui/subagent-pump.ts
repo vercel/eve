@@ -7,6 +7,7 @@
  */
 
 import type { Client } from "#client/index.js";
+import { readNdjsonStream } from "#client/ndjson.js";
 import { createEventDeduper, type EventDeduper } from "#protocol/event-dedupe.js";
 import {
   isCurrentTurnBoundaryEvent,
@@ -14,9 +15,8 @@ import {
   type MessageStreamEvent,
   type SubagentCalledStreamEvent,
 } from "#protocol/message.js";
-import { toErrorMessage } from "#shared/errors.js";
-
-import { isAbortLikeError } from "./errors.js";
+const childStreamReconnectBaseDelayMs = 100;
+const childStreamReconnectMaxDelayMs = 2_000;
 
 /**
  * The renderer's subagent surface. One cohesive capability: a renderer that
@@ -29,12 +29,14 @@ import { isAbortLikeError } from "./errors.js";
 export interface SubagentView {
   /** Opens a call's section the moment its dispatch is announced. */
   begin(update: { callId: string; name: string }): void;
+  /** Keeps a receipt-returned background call mutable across parent turns. */
+  background(update: { callId: string }): void;
   upsertStep(update: SubagentStepUpdate): void;
   upsertTool(update: SubagentToolUpdate): void;
   /** Drops a child tool row whose call never materialized. */
   removeTool(update: { callId: string; childCallId: string }): void;
   /** Marks a call complete so its section collapses on `└ Done…`. */
-  complete(update: { callId: string }): void;
+  complete(update: { authoritative: boolean; callId: string }): void;
   /** Suppresses the parent-level tool row for a child-owned call id. */
   markChildToolCallId(callId: string): void;
 }
@@ -63,14 +65,16 @@ type SubagentToolState = {
 
 export type SubagentRun = {
   name: string;
-  /**
-   * The run's one lifecycle authority. `settled` means the final assistant
-   * message is in (the child's turn boundary, or the parent's
-   * `subagent.completed` fallback); a late child event — a HITL-parked
-   * turn resuming — explicitly reopens the run rather than mutating a
-   * completed section by accident.
-   */
-  status: "running" | "settled";
+  /** Parent turn that originated this dispatch; cancellation is scoped to it. */
+  parentTurnId: string;
+  /** A receipt-returned task survives cancellation of its originating turn. */
+  background: boolean;
+  /** Parent completion is provisional; only a child boundary is authoritative. */
+  status: "open" | "provisional" | "authoritative";
+  /** Parent-authored route on the parent origin, valid for local and remote children. */
+  childStreamPath: string;
+  /** Absolute durable cursor retained across exhausted transport sources. */
+  childStreamIndex: number;
   /**
    * One entry per logical "child message" — independent of the child's
    * `stepIndex` field, which the harness can reuse across multiple
@@ -149,7 +153,11 @@ export class SubagentPump {
     if (existing === undefined) {
       this.#runs.set(callId, {
         name: called.data.name,
-        status: "running",
+        parentTurnId: called.data.turnId,
+        background: false,
+        status: "open",
+        childStreamPath: called.data.childStreamPath,
+        childStreamIndex: 0,
         steps: new Map(),
         currentSectionKey: null,
         nextSectionKey: 0,
@@ -160,21 +168,31 @@ export class SubagentPump {
       existing.name = called.data.name;
     }
     this.#view?.markChildToolCallId(callId);
+    if (existing !== undefined && existing.status !== "open") return;
     this.#view?.begin({ callId, name: called.data.name });
     this.#startPump(called);
   }
 
   /**
-   * Parent reports subagent.completed. The child stream pump terminates
-   * itself on the child's own turn boundary — the authoritative finish
-   * signal, which already finalized the section — so this is a fallback
-   * for runs whose boundary never reached us (a dropped child stream, a
-   * HITL-parked turn resuming later). We do NOT abort the pump here,
-   * because the child's `message.completed` event may still be in flight
-   * (the parent and child streams are independent HTTP connections).
+   * Parent completion is provisional because the child's final events can be
+   * in flight on an independent connection. The pump remains open until the
+   * child boundary supplies authoritative completion.
    */
   settle(callId: string): void {
-    this.#finalizeRun(callId);
+    this.#finalizeRun(callId, false);
+  }
+
+  /**
+   * The originating call returned a task receipt, not the child's result.
+   * Keep the section open until the child stream reaches its own boundary.
+   * A child that already settled before the receipt raced in stays settled.
+   */
+  background(callId: string): void {
+    const run = this.#runs.get(callId);
+    if (run === undefined) return;
+    run.background = true;
+    if (run.status === "authoritative") return;
+    this.#view?.background({ callId });
   }
 
   abortAll(): void {
@@ -186,21 +204,16 @@ export class SubagentPump {
   }
 
   /**
-   * Settles every live run and stops its child stream. Called when the
-   * parent turn is cancelled (`/cancel`, a key-driven steer, or an empty-queue
-   * cancel): the server cancels the pending descendants, so their sections must
-   * close now. A child still flushing reasoning would otherwise keep painting
-   * stale sections into the next (steered) turn's transcript. Runs stay
-   * registered so a late parent `subagent.completed` settles as a no-op.
+   * Settles and aborts only foreground descendants of the cancelled parent
+   * turn. Background tasks survive even when that same turn started them.
    */
-  settleAll(): void {
-    for (const callId of this.#runs.keys()) {
-      this.#finalizeRun(callId);
+  settleCancelledTurn(turnId: string): void {
+    for (const [callId, run] of this.#runs) {
+      if (run.parentTurnId !== turnId || run.background) continue;
+      this.#finalizeRun(callId, true);
+      this.#pumps.get(callId)?.abort();
+      this.#pumps.delete(callId);
     }
-    for (const controller of this.#pumps.values()) {
-      controller.abort();
-    }
-    this.#pumps.clear();
   }
 
   /**
@@ -220,55 +233,52 @@ export class SubagentPump {
     if (this.#pumps.has(callId)) return;
     const client = this.#client;
     if (!client) return;
+    const run = this.#runs.get(callId);
+    if (run === undefined || run.status === "authoritative") return;
 
     const controller = new AbortController();
     this.#pumps.set(callId, controller);
 
     void (async () => {
-      let boundaryReached = false;
+      let reconnectDelayMs = childStreamReconnectBaseDelayMs;
       try {
-        const childSession = client.session({
-          sessionId: called.data.childSessionId,
-          streamIndex: 0,
-        });
-        const stream = childSession.stream({ signal: controller.signal });
-        for await (const event of stream) {
-          if (controller.signal.aborted) break;
-          this.#applyChildEvent(callId, event);
-          if (isCurrentTurnBoundaryEvent(event)) {
-            // The child's own turn boundary — its final assistant message
-            // is in — is what finishes the section. The parent's
-            // `subagent.completed` arrives independently (often later, once
-            // the parent's turn resumes) and only acts as a fallback.
-            boundaryReached = true;
-            break;
+        while (!controller.signal.aborted && run.status !== "authoritative") {
+          let deliveredEvent = false;
+          try {
+            const response = await client.fetch(
+              streamPathAt(run.childStreamPath, run.childStreamIndex),
+              {
+                cache: "no-store",
+                signal: controller.signal,
+              },
+            );
+            if (!response.ok || response.body === null) {
+              await response.body?.cancel().catch(() => {});
+              throw new Error(`Child stream returned ${response.status}.`);
+            }
+
+            for await (const event of readNdjsonStream(response.body)) {
+              if (controller.signal.aborted) return;
+              deliveredEvent = true;
+              run.childStreamIndex += 1;
+              this.#applyChildEvent(callId, event);
+              if (isCurrentTurnBoundaryEvent(event)) {
+                this.#finalizeRun(callId, true);
+                return;
+              }
+            }
+          } catch {
+            if (controller.signal.aborted) return;
           }
-        }
-      } catch (error) {
-        if (!isAbortLikeError(error)) {
-          const errorText = toErrorMessage(error);
-          const run = this.#runs.get(callId);
-          if (run) {
-            const { key, step } = openCurrentSubagentSection(run);
-            step.message = step.message
-              ? `${step.message}\n\nstream error: ${errorText}`
-              : `stream error: ${errorText}`;
-            step.finalized = true;
-            run.currentSectionKey = null;
-            this.#view?.upsertStep({
-              callId,
-              subagentName: run.name,
-              sectionKey: key,
-              reasoning: step.reasoning,
-              message: step.message,
-              finalized: true,
-            });
-          }
+
+          reconnectDelayMs = deliveredEvent
+            ? childStreamReconnectBaseDelayMs
+            : Math.min(reconnectDelayMs * 2, childStreamReconnectMaxDelayMs);
+          await abortableDelay(reconnectDelayMs, controller.signal);
         }
       } finally {
-        this.#pumps.delete(callId);
+        if (this.#pumps.get(callId) === controller) this.#pumps.delete(callId);
       }
-      if (boundaryReached) this.#finalizeRun(callId);
     })();
   }
 
@@ -329,10 +339,11 @@ export class SubagentPump {
    * the idempotency authority — the child's turn boundary and the parent's
    * `subagent.completed` can both land here.
    */
-  #finalizeRun(callId: string): void {
+  #finalizeRun(callId: string, authoritative: boolean): void {
     const run = this.#runs.get(callId);
-    if (!run || run.status === "settled") return;
-    run.status = "settled";
+    if (!run || run.status === "authoritative") return;
+    if (!authoritative && run.status === "provisional") return;
+    run.status = authoritative ? "authoritative" : "provisional";
     for (const [sectionKey, step] of run.steps) {
       if (!step.finalized) {
         step.finalized = true;
@@ -348,7 +359,7 @@ export class SubagentPump {
     }
     run.currentSectionKey = null;
     this.#sweepPreparingTools(callId, run);
-    this.#view?.complete({ callId });
+    this.#view?.complete({ authoritative, callId });
   }
 
   /**
@@ -369,11 +380,10 @@ export class SubagentPump {
     const run = this.#runs.get(callId);
     if (!run) return;
     if (!run.seenChildEvents.admit(event)) return;
-    // A child event after settle is a HITL-parked turn resuming: reopen the
-    // run explicitly (begin clears the header's Done mark) instead of
-    // mutating a completed section by accident.
-    if (run.status === "settled") {
-      run.status = "running";
+    // Parent completion is provisional. Any delayed child event reopens the
+    // mutable cohort until the child stream supplies its own boundary.
+    if (run.status === "provisional") {
+      run.status = "open";
       this.#view?.begin({ callId, name: run.name });
     }
     const view = this.#view;
@@ -509,6 +519,27 @@ export class SubagentPump {
         break;
     }
   }
+}
+
+function streamPathAt(path: string, startIndex: number): string {
+  if (startIndex === 0) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}startIndex=${startIndex}`;
+}
+
+async function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    timer.unref?.();
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function openCurrentSubagentSection(run: SubagentRun): {

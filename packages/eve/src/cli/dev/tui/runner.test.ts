@@ -74,6 +74,19 @@ function messageResponseOf(events: readonly unknown[]): MessageResponse {
   });
 }
 
+function messageStreamResponseOf(events: readonly MessageStreamEvent[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const event of events)
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        controller.close();
+      },
+    }),
+  );
+}
+
 function isStamped(event: unknown): event is MessageStreamEvent {
   return typeof (event as MessageStreamEvent).meta?.id === "string";
 }
@@ -536,6 +549,236 @@ function sessionYieldingTurns(turns: ReadonlyArray<readonly unknown[]>): ClientS
   });
   return session;
 }
+
+describe("EveTUIRunner idle session follow", () => {
+  it("renders a wake turn while prompting, then stops before send without replay", async () => {
+    const client = stubClient();
+    const session = client.session({
+      continuationToken: "eve:test",
+      sessionId: "session_test",
+      streamIndex: 0,
+    });
+    const prompt = createDeferred<string | undefined>();
+    const wakeRendered = createDeferred<void>();
+    const idleEvents: AgentTUIStreamEvent[] = [];
+    const sendEvents: AgentTUIStreamEvent[] = [];
+    let idleStopped = false;
+    let streamCalls = 0;
+    const wakeEvents = [
+      {
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: "peek-1",
+              input: { taskIds: ["task_123"] },
+              kind: "tool-call",
+              toolName: "task_peek",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "wake-turn",
+        },
+      },
+      {
+        type: "action.result",
+        data: {
+          result: {
+            callId: "peek-1",
+            kind: "tool-result",
+            output: { tasks: [{ status: "completed", taskId: "task_123" }] },
+            toolName: "task_peek",
+          },
+          sequence: 1,
+          status: "completed",
+          stepIndex: 0,
+          turnId: "wake-turn",
+        },
+      },
+      {
+        type: "message.appended",
+        data: {
+          messageDelta: "Background research finished.",
+          messageSoFar: "Background research finished.",
+          sequence: 1,
+          stepIndex: 1,
+          turnId: "wake-turn",
+        },
+      },
+      {
+        type: "message.completed",
+        data: {
+          finishReason: "stop",
+          message: "Background research finished.",
+          sequence: 1,
+          stepIndex: 1,
+          turnId: "wake-turn",
+        },
+      },
+      { type: "turn.completed", data: { sequence: 1, turnId: "wake-turn" } },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ].map((event, index) => stampTestEvent(event as UnstampedMessageStreamEvent, index));
+    vi.spyOn(session, "stream").mockImplementation((options) => {
+      streamCalls += 1;
+      const signal = options?.signal;
+      const events = streamCalls === 1 ? wakeEvents : [];
+      return {
+        async *[Symbol.asyncIterator]() {
+          try {
+            for (const event of events) yield event;
+            await new Promise<void>((resolve) => {
+              if (signal?.aborted) resolve();
+              else signal?.addEventListener("abort", () => resolve(), { once: true });
+            });
+          } finally {
+            idleStopped = true;
+          }
+        },
+      };
+    });
+    const send = vi.spyOn(session, "send").mockImplementation(async () => {
+      expect(idleStopped).toBe(true);
+      return messageResponseOf([
+        {
+          type: "message.appended",
+          data: {
+            messageDelta: "Follow-up answer.",
+            messageSoFar: "Follow-up answer.",
+            sequence: 2,
+            stepIndex: 0,
+            turnId: "follow-up-turn",
+          },
+        },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
+      ]);
+    });
+    const renderer = fakeRenderer({
+      readPrompt: vi
+        .fn()
+        .mockImplementationOnce(() => prompt.promise)
+        .mockResolvedValueOnce(undefined),
+      renderIdleStream: vi.fn(async (result) => {
+        for await (const event of result.events) idleEvents.push(event);
+        if (idleEvents.some((event) => event.type === "assistant-delta")) wakeRendered.resolve();
+      }),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events) sendEvents.push(event);
+      }),
+    });
+    const runner = new EveTUIRunner({ client, session, renderer, name: "Research Agent" });
+
+    const running = runner.run();
+    await wakeRendered.promise;
+    prompt.resolve("What else?");
+    await running;
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(idleEvents.filter((event) => event.type === "assistant-delta")).toEqual([
+      {
+        delta: "Background research finished.",
+        id: "text:wake-turn:1",
+        type: "assistant-delta",
+      },
+    ]);
+    expect(sendEvents.filter((event) => event.type === "assistant-delta")).toEqual([
+      {
+        delta: "Follow-up answer.",
+        id: "text:follow-up-turn:0",
+        type: "assistant-delta",
+      },
+    ]);
+  });
+
+  it("replaces a failed idle source exactly once before submitting the prompt", async () => {
+    const client = stubClient();
+    const failedSession = client.session({
+      continuationToken: "eve:failed",
+      sessionId: "session-a",
+      streamIndex: 0,
+    });
+    const failedSend = vi.spyOn(failedSession, "send");
+    vi.spyOn(failedSession, "stream").mockReturnValue(
+      (async function* () {
+        yield stampTestEvent({
+          type: "session.failed",
+          data: { code: "SESSION_FAILED", message: "idle source failed", sessionId: "session-a" },
+        } as UnstampedMessageStreamEvent);
+      })(),
+    );
+    const replacement = sessionYielding([{ type: "session.waiting" }]);
+    const createSession = vi.spyOn(client, "session").mockReturnValue(replacement);
+    const prompt = createDeferred<string | undefined>();
+    const prompts: Array<Promise<string | undefined> | string | undefined> = [
+      prompt.promise,
+      undefined,
+    ];
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn(async () => await prompts.shift()),
+      renderIdleStream: vi.fn(async (result) => {
+        for await (const event of result.events) void event;
+        prompt.resolve("hello after failure");
+      }),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events) void event;
+      }),
+    });
+
+    await new EveTUIRunner({ client, session: failedSession, renderer }).run();
+
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(replacement.send).toHaveBeenCalledOnce();
+    expect(replacement.send).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "hello after failure" }),
+    );
+    expect(failedSend).not.toHaveBeenCalled();
+  });
+
+  it("does not replace B for a stale idle failure from A", async () => {
+    const client = stubClient();
+    const failedSession = client.session({
+      continuationToken: "eve:failed",
+      sessionId: "session-a",
+      streamIndex: 0,
+    });
+    vi.spyOn(failedSession, "stream").mockReturnValue(
+      (async function* () {
+        yield stampTestEvent({
+          type: "session.failed",
+          data: { code: "SESSION_FAILED", message: "idle source failed", sessionId: "session-a" },
+        } as UnstampedMessageStreamEvent);
+      })(),
+    );
+    vi.spyOn(failedSession, "reset").mockResolvedValue({
+      previousSessionId: "session-a",
+      status: "reset",
+    });
+    const sessionB = sessionYielding([{ type: "session.waiting" }]);
+    const createSession = vi.spyOn(client, "session").mockReturnValue(sessionB);
+    const firstPrompt = createDeferred<string | undefined>();
+    const prompts: Array<Promise<string | undefined> | string | undefined> = [
+      firstPrompt.promise,
+      "hello on B",
+      undefined,
+    ];
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn(async () => await prompts.shift()),
+      renderIdleStream: vi.fn(async (result) => {
+        for await (const event of result.events) void event;
+        firstPrompt.resolve("/reset");
+      }),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events) void event;
+      }),
+    });
+
+    await new EveTUIRunner({ client, session: failedSession, renderer }).run();
+
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(sessionB.send).toHaveBeenCalledOnce();
+    expect(sessionB.send).toHaveBeenCalledWith(expect.objectContaining({ message: "hello on B" }));
+  });
+});
 
 describe("EveTUIRunner development session continuity", () => {
   it("keeps the REPL session when HMR publishes a new runtime revision", async () => {
@@ -2244,11 +2487,9 @@ describe("EveTUIRunner renderer teardown", () => {
 
   it("finishes the section on the child's own turn boundary, before subagent.completed", async () => {
     const client = stubClient();
-    const childSession = client.session({ sessionId: "child-session", streamIndex: 0 });
-    vi.spyOn(client, "session").mockReturnValue(childSession);
-    vi.spyOn(childSession, "stream").mockImplementation(() => ({
-      async *[Symbol.asyncIterator]() {
-        yield stampTestEvent(
+    vi.spyOn(client, "fetch").mockResolvedValue(
+      messageStreamResponseOf([
+        stampTestEvent(
           {
             type: "message.completed",
             data: {
@@ -2260,16 +2501,16 @@ describe("EveTUIRunner renderer teardown", () => {
             },
           } as UnstampedMessageStreamEvent,
           0,
-        );
-        yield stampTestEvent(
+        ),
+        stampTestEvent(
           {
             type: "session.waiting",
             data: { wait: "next-user-message" },
           } as UnstampedMessageStreamEvent,
           1,
-        );
-      },
-    }));
+        ),
+      ]),
+    );
 
     const completeSubagent = vi.fn();
     const completed = createDeferred<void>();
@@ -2291,11 +2532,12 @@ describe("EveTUIRunner renderer teardown", () => {
         }),
         subagents: {
           begin: vi.fn(),
+          background: vi.fn(),
           upsertStep: vi.fn(),
           upsertTool: vi.fn(),
           removeTool: vi.fn(),
           markChildToolCallId: vi.fn(),
-          complete: (update: { callId: string }) => {
+          complete: (update: { authoritative: boolean; callId: string }) => {
             completeSubagent(update);
             completed.resolve();
           },
@@ -2307,6 +2549,7 @@ describe("EveTUIRunner renderer teardown", () => {
           data: {
             callId: "call-child",
             childSessionId: "child-session",
+            childStreamPath: "/eve/v1/session/child-session/stream",
             name: "weather-child",
             sequence: 0,
             sessionId: "parent-session",
@@ -2325,34 +2568,80 @@ describe("EveTUIRunner renderer teardown", () => {
     await runner.run();
     await completed.promise;
 
-    expect(completeSubagent).toHaveBeenCalledWith({ callId: "call-child" });
+    expect(completeSubagent).toHaveBeenCalledWith({ authoritative: true, callId: "call-child" });
+  });
+
+  it("does not settle a subagent section when completed carries a background receipt", async () => {
+    const backgroundSubagent = vi.fn();
+    const completeSubagent = vi.fn();
+    const runner = new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn().mockResolvedValueOnce("delegate").mockResolvedValueOnce(undefined),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) void event;
+        }),
+        subagents: {
+          begin: vi.fn(),
+          background: backgroundSubagent,
+          upsertStep: vi.fn(),
+          upsertTool: vi.fn(),
+          removeTool: vi.fn(),
+          markChildToolCallId: vi.fn(),
+          complete: completeSubagent,
+        },
+      }),
+      session: sessionYielding([
+        {
+          type: "subagent.called",
+          data: {
+            callId: "call-child",
+            childSessionId: "child-session",
+            childStreamPath: "/eve/v1/session/child-session/stream",
+            name: "researcher",
+            sequence: 0,
+            sessionId: "parent-session",
+            toolName: "researcher",
+            turnId: "turn-parent",
+            workflowId: "workflow-parent",
+          },
+        },
+        {
+          type: "subagent.completed",
+          data: {
+            backgroundTask: { status: "working", taskId: "task_123" },
+            callId: "call-child",
+            output: '{"status":"working","taskId":"task_123"}',
+            subagentName: "researcher",
+          },
+        },
+        { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
+      ]),
+    });
+
+    await runner.run();
+
+    expect(backgroundSubagent).toHaveBeenCalledWith({ callId: "call-child" });
+    expect(completeSubagent).not.toHaveBeenCalled();
   });
 
   it("aborts child-session streams when Ctrl-C exits the runner", async () => {
     const client = stubClient();
-    const childSession = client.session({ sessionId: "child-session", streamIndex: 0 });
     let childSignal: AbortSignal | undefined;
-    vi.spyOn(client, "session").mockReturnValue(childSession);
-    vi.spyOn(childSession, "stream").mockImplementation((options) => {
-      const signal = options?.signal;
+    vi.spyOn(client, "fetch").mockImplementation(async (_path, init) => {
+      const signal = init?.signal as AbortSignal | undefined;
       if (signal === undefined) {
         throw new Error("Expected the child stream to receive an abort signal.");
       }
       childSignal = signal;
-      return {
-        async *[Symbol.asyncIterator]() {
-          await new Promise<void>((resolve) => {
-            signal.addEventListener("abort", () => resolve(), { once: true });
-          });
-          yield stampTestEvent(
-            {
-              type: "session.waiting",
-              data: { wait: "next-user-message" },
-            } as UnstampedMessageStreamEvent,
-            1,
-          );
-        },
-      };
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal.addEventListener("abort", () => controller.close(), { once: true });
+          },
+        }),
+      );
     });
 
     const runner = new EveTUIRunner({
@@ -2373,6 +2662,7 @@ describe("EveTUIRunner renderer teardown", () => {
           data: {
             callId: "call-child",
             childSessionId: "child-session",
+            childStreamPath: "/eve/v1/session/child-session/stream",
             name: "weather-child",
             sequence: 0,
             sessionId: "parent-session",
@@ -3247,32 +3537,37 @@ describe("EveTUIRunner session id reporting", () => {
 describe("EveTUIRunner cancelled-turn subagent settling", () => {
   it("settles subagent sections when the turn is cancelled by a steer", async () => {
     // A child stream that never ends on its own — it only stops when the
-    // pump aborts it (the settleAll path under test).
-    const childStream = (options?: { signal?: AbortSignal }) => ({
-      [Symbol.asyncIterator](): AsyncIterator<unknown> {
-        return {
-          next: () =>
-            new Promise((resolve) => {
-              options?.signal?.addEventListener(
-                "abort",
-                () => resolve({ done: true, value: undefined }),
-                { once: true },
-              );
-            }),
-        };
-      },
-    });
+    // pump aborts it (the scoped cancellation path under test).
     const client = stubClient();
-    vi.spyOn(client, "session").mockReturnValue({
-      stream: (options?: { signal?: AbortSignal }) => childStream(options),
-    } as never);
+    vi.spyOn(client, "fetch").mockImplementation(
+      async (_path, init) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              init?.signal?.addEventListener("abort", () => controller.close(), { once: true });
+            },
+          }),
+        ),
+    );
 
     const session = sessionYielding([
       {
         type: "subagent.called",
         data: {
+          callId: "call-a",
+          childSessionId: "child-a",
+          childStreamPath: "/eve/v1/session/child-a/stream",
+          name: "researcher",
+          sequence: 0,
+          turnId: "turn-a",
+        },
+      },
+      {
+        type: "subagent.called",
+        data: {
           callId: "call-1",
           childSessionId: "child-1",
+          childStreamPath: "/eve/v1/session/child-1/stream",
           name: "researcher",
           sequence: 1,
           turnId: "turn-1",
@@ -3283,6 +3578,7 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
     ]);
     const view = {
       begin: vi.fn(),
+      background: vi.fn(),
       upsertStep: vi.fn(),
       upsertTool: vi.fn(),
       removeTool: vi.fn(),
@@ -3303,10 +3599,12 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
     const runner = new EveTUIRunner({ session, client, renderer, name: "Weather Agent" });
     await runner.run();
 
+    expect(view.begin).toHaveBeenCalledWith({ callId: "call-a", name: "researcher" });
     expect(view.begin).toHaveBeenCalledWith({ callId: "call-1", name: "researcher" });
     // `subagent.completed` never arrives for a cancelled delegation — the
     // cancellation itself must close the section.
-    expect(view.complete).toHaveBeenCalledWith({ callId: "call-1" });
+    expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" });
+    expect(view.complete).not.toHaveBeenCalledWith({ authoritative: true, callId: "call-a" });
   });
 });
 
