@@ -244,7 +244,6 @@ describe("registry commands", () => {
       multiple: (options) => {
         expect(options).toMatchObject({
           message: "Add linear",
-          description: "Select what you want to add to your agent.",
           initialValues: ["channel/linear-agent", "connection/linear"],
         });
         return ["connection/linear"];

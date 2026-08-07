@@ -59,7 +59,6 @@ async function selectComponents(
   const question = {
     key: "components",
     message: `Add ${item}`,
-    description: "Select what you want to add to your agent.",
     required: true,
     recommended: components.filter((component) => component.default),
     options: components.map((component) => ({
