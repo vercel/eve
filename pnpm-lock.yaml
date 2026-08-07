@@ -279,9 +279,6 @@ importers:
       '@opentelemetry/sdk-trace-base':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
-      '@photon-ai/chat-adapter-imessage':
-        specifier: 3.2.0
-        version: 3.2.0(ai@7.0.38(zod@4.4.3))(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(typescript@6.0.3)(zod@4.4.3)
       '@posthog/ai':
         specifier: 7.19.6
         version: 7.19.6(@ai-sdk/provider@3.0.10)(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))(bufferutil@4.1.0)(posthog-node@5.47.3)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)(svelte@5.56.1(@typescript-eslint/types@8.59.4))(vue@3.5.35(typescript@6.0.3))(ws@8.21.1(bufferutil@4.1.0))
@@ -19110,20 +19107,6 @@ snapshots:
       nice-grpc: 2.1.16
       nice-grpc-common: 2.0.3
 
-  '@photon-ai/chat-adapter-imessage@3.2.0(ai@7.0.38(zod@4.4.3))(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(typescript@6.0.3)(zod@4.4.3)':
-    dependencies:
-      '@chat-adapter/shared': 4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
-      '@spectrum-ts/core': 10.0.0(supports-color@10.2.2)(typescript@6.0.3)
-      '@spectrum-ts/imessage': 10.0.0(@spectrum-ts/core@10.0.0(supports-color@10.2.2)(typescript@6.0.3))(supports-color@10.2.2)(typescript@6.0.3)
-      chat: 4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
-      mime-types: 3.0.2
-    transitivePeerDependencies:
-      - ai
-      - ffmpeg-static
-      - supports-color
-      - typescript
-      - zod
-
   '@photon-ai/chat-adapter-imessage@3.2.0(ai@7.0.38(zod@4.4.3))(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(typescript@7.0.2)(zod@4.4.3)':
     dependencies:
       '@chat-adapter/shared': 4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
@@ -19137,27 +19120,6 @@ snapshots:
       - supports-color
       - typescript
       - zod
-
-  '@photon-ai/otel@3.3.0(supports-color@10.2.2)(typescript@6.0.3)':
-    dependencies:
-      '@opentelemetry/api': 1.9.1
-      '@opentelemetry/api-logs': 0.218.0
-      '@opentelemetry/context-async-hooks': 2.10.0(@opentelemetry/api@1.9.1)
-      '@opentelemetry/core': 2.10.0(@opentelemetry/api@1.9.1)
-      '@opentelemetry/exporter-logs-otlp-http': 0.218.0(@opentelemetry/api@1.9.1)
-      '@opentelemetry/exporter-metrics-otlp-http': 0.218.0(@opentelemetry/api@1.9.1)
-      '@opentelemetry/exporter-trace-otlp-http': 0.218.0(@opentelemetry/api@1.9.1)
-      '@opentelemetry/resources': 2.10.0(@opentelemetry/api@1.9.1)
-      '@opentelemetry/sdk-logs': 0.218.0(@opentelemetry/api@1.9.1)
-      '@opentelemetry/sdk-metrics': 2.10.0(@opentelemetry/api@1.9.1)
-      '@opentelemetry/sdk-trace-base': 2.10.0(@opentelemetry/api@1.9.1)
-      '@opentelemetry/semantic-conventions': 1.43.0
-      typescript: 6.0.3
-    optionalDependencies:
-      '@opentelemetry/instrumentation': 0.219.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2)
-      '@opentelemetry/instrumentation-undici': 0.29.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2)
-    transitivePeerDependencies:
-      - supports-color
 
   '@photon-ai/otel@3.3.0(supports-color@10.2.2)(typescript@7.0.2)':
     dependencies:
@@ -20944,20 +20906,6 @@ snapshots:
 
   '@socket.io/component-emitter@3.1.2': {}
 
-  '@spectrum-ts/core@10.0.0(supports-color@10.2.2)(typescript@6.0.3)':
-    dependencies:
-      '@photon-ai/otel': 3.3.0(supports-color@10.2.2)(typescript@6.0.3)
-      '@photon-ai/proto': 0.2.4
-      '@repeaterjs/repeater': 3.1.0
-      marked: 18.0.7
-      mime-types: 3.0.2
-      open-graph-scraper: 6.12.0
-      typescript: 6.0.3
-      vcf: 2.1.2
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - supports-color
-
   '@spectrum-ts/core@10.0.0(supports-color@10.2.2)(typescript@7.0.2)':
     dependencies:
       '@photon-ai/otel': 3.3.0(supports-color@10.2.2)(typescript@7.0.2)
@@ -20968,18 +20916,6 @@ snapshots:
       open-graph-scraper: 6.12.0
       typescript: 7.0.2
       vcf: 2.1.2
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - supports-color
-
-  '@spectrum-ts/imessage@10.0.0(@spectrum-ts/core@10.0.0(supports-color@10.2.2)(typescript@6.0.3))(supports-color@10.2.2)(typescript@6.0.3)':
-    dependencies:
-      '@photon-ai/advanced-imessage': 1.0.0
-      '@photon-ai/otel': 3.3.0(supports-color@10.2.2)(typescript@6.0.3)
-      '@spectrum-ts/core': 10.0.0(supports-color@10.2.2)(typescript@6.0.3)
-      lru-cache: 11.5.2
-      marked: 18.0.7
-      typescript: 6.0.3
       zod: 4.4.3
     transitivePeerDependencies:
       - supports-color

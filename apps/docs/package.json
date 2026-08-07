@@ -68,7 +68,6 @@
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "0.221.0",
     "@opentelemetry/sdk-trace-base": "catalog:",
-    "@photon-ai/chat-adapter-imessage": "3.2.0",
     "@posthog/ai": "7.19.6",
     "@resend/chat-sdk-adapter": "0.2.2",
     "@tailwindcss/postcss": "4.3.0",
