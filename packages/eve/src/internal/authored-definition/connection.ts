@@ -1,9 +1,9 @@
-import type {
-  McpClientConnectionDefinition,
-  McpToolCallDefinition,
-  ProvidedArgumentsDefinition,
-} from "#public/definitions/connections/mcp.js";
+import type { McpClientConnectionDefinition } from "#public/definitions/connections/mcp.js";
 import type { OpenAPIConnectionDefinition } from "#public/definitions/connections/openapi.js";
+import type {
+  ConnectionToolCallDefinition,
+  ProvidedArgumentsDefinition,
+} from "#public/definitions/connections/tool-call.js";
 import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
@@ -30,6 +30,7 @@ const KNOWN_OPENAPI_TOP_LEVEL_KEYS = [
   "headers",
   "operations",
   "spec",
+  "toolCall",
 ] as const;
 const KNOWN_AUTHORIZATION_KEYS = [
   "completeAuthorization",
@@ -69,7 +70,7 @@ export function normalizeMcpClientConnectionDefinition(
 
   const authorization = normalizeAuthorization(record, message);
   const headers = normalizeHeaders(record, message);
-  const toolCall = normalizeMcpToolCall(record, message);
+  const toolCall = normalizeConnectionToolCall(record, message);
   const tools = normalizeToolFilter(record, message);
 
   if (authorization !== undefined && headers !== undefined && typeof headers !== "function") {
@@ -109,10 +110,10 @@ export function normalizeMcpClientConnectionDefinition(
   return result;
 }
 
-function normalizeMcpToolCall(
+function normalizeConnectionToolCall(
   record: Record<string, unknown>,
   message: string,
-): McpToolCallDefinition | undefined {
+): ConnectionToolCallDefinition | undefined {
   if (record.toolCall === undefined) {
     return undefined;
   }
@@ -176,6 +177,7 @@ export function normalizeOpenApiConnectionDefinition(
   const authorization = normalizeAuthorization(record, message);
   const headers = normalizeHeaders(record, message);
   const operations = normalizeFilterField(record, "operations", message);
+  const toolCall = normalizeConnectionToolCall(record, message);
 
   if (authorization !== undefined && headers !== undefined && typeof headers !== "function") {
     const headerKeys = Object.keys(headers as Record<string, unknown>);
@@ -202,6 +204,9 @@ export function normalizeOpenApiConnectionDefinition(
   }
   if (headers !== undefined) {
     result.headers = headers;
+  }
+  if (toolCall !== undefined) {
+    result.toolCall = toolCall;
   }
   if (operations !== undefined) {
     result.operations = operations;

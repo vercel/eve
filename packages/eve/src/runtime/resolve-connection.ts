@@ -1,7 +1,7 @@
 import type { CompiledConnectionDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
-import type { McpToolCallDefinition } from "#public/definitions/connections/mcp.js";
+import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type {
@@ -75,7 +75,7 @@ export async function resolveConnectionDefinition(
       sourceId: string;
       sourceKind: "module";
       spec?: ResolvedConnectionDefinition["spec"];
-      toolCall?: Readonly<McpToolCallDefinition>;
+      toolCall?: Readonly<ConnectionToolCallDefinition>;
       tools?: Readonly<ToolFilterDefinition>;
       url: string;
     } = {
@@ -111,8 +111,8 @@ export async function resolveConnectionDefinition(
       result.headers = resolvedRecord.headers as Readonly<HeadersDefinition>;
     }
 
-    if (definition.protocol === "mcp" && resolvedRecord.toolCall !== undefined) {
-      result.toolCall = resolvedRecord.toolCall as Readonly<McpToolCallDefinition>;
+    if (resolvedRecord.toolCall !== undefined) {
+      result.toolCall = resolvedRecord.toolCall as Readonly<ConnectionToolCallDefinition>;
     }
 
     if (filter !== undefined) {

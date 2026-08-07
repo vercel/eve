@@ -3,38 +3,11 @@ import type {
   HeadersDefinition,
   ToolFilterDefinition,
 } from "#runtime/connections/types.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { JsonValue } from "#public/types/json.js";
+import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
 import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
-
-/** Context available while resolving an application-provided MCP tool argument. */
-export type ProvidedArgumentContext = SessionContext & {
-  /** Bare tool name published by the remote MCP server. */
-  readonly toolName: string;
-};
-
-/** A static or per-call value for one application-provided MCP tool argument. */
-export type ProvidedArgumentValue =
-  | JsonValue
-  | Promise<JsonValue>
-  | ((ctx: ProvidedArgumentContext) => JsonValue | Promise<JsonValue>);
-
-/**
- * MCP tool argument values supplied by the application instead of the model.
- *
- * Configured keys are removed from remote input schemas before the schemas are
- * exposed to the model, then resolved and added to every outgoing tool call.
- */
-export type ProvidedArgumentsDefinition = Readonly<Record<string, ProvidedArgumentValue>>;
-
-/** Per-call behavior for tools exposed by an MCP connection. */
-export interface McpToolCallDefinition {
-  /** Application-owned arguments hidden from the model and added at execution time. */
-  readonly providedArguments?: ProvidedArgumentsDefinition;
-}
 
 /**
  * Public definition for an MCP client connection authored in
@@ -107,7 +80,7 @@ export interface McpClientConnectionDefinition {
    * `arguments.meta`. eve removes configured keys from the model-facing input
    * schema and adds their resolved values immediately before execution.
    */
-  toolCall?: McpToolCallDefinition;
+  toolCall?: ConnectionToolCallDefinition;
   /**
    * Client-side tool filter. When set, the model sees only tools
    * whose names pass the filter; `connection_search` drops all

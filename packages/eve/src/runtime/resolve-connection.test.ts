@@ -5,7 +5,7 @@ import {
   type CompiledConnectionDefinition,
 } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
-import type { McpToolCallDefinition } from "#public/definitions/connections/mcp.js";
+import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
 import type { ConnectionAuthResolver, HeadersDefinition } from "#runtime/connections/types.js";
 
@@ -15,7 +15,7 @@ describe("resolveConnectionDefinition", () => {
       getToken: async () => ({ token: ctx.session.id }),
     });
     const headers: HeadersDefinition = (ctx) => ({ "X-Session": ctx.session.id });
-    const toolCall: McpToolCallDefinition = {
+    const toolCall: ConnectionToolCallDefinition = {
       providedArguments: { meta: ({ session }) => ({ sessionId: session.id }) },
     };
     const definition: CompiledConnectionDefinition = {
