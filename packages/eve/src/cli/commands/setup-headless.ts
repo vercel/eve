@@ -1,8 +1,22 @@
-import type { RegistrySetupRefusal } from "#setup/registry-setup-protocol.js";
+import type { RegistrySetupBlocker } from "#setup/registry-setup-protocol.js";
+
+export interface HeadlessSetupCommand {
+  command: string;
+  args: readonly string[];
+}
 
 export type HeadlessSetupEvent =
   | { version: 1; type: "progress"; level?: "warning"; message: string }
-  | { version: 1; type: "external_action"; message: string; url: string; userCode?: string }
+  | {
+      version: 1;
+      type: "external_action";
+      id: string;
+      blocking: true;
+      message: string;
+      url: string;
+      userCode?: string;
+    }
+  | { version: 1; type: "external_action_resolved"; id: string }
   | { version: 1; type: "completed"; item: string; completedItems: readonly string[] }
   | ({
       version: 1;
@@ -10,38 +24,51 @@ export type HeadlessSetupEvent =
       item: string;
       installed: boolean;
       completedItems: readonly string[];
-      next: { command: string };
-    } & RegistrySetupRefusal)
+      next: HeadlessSetupCommand;
+    } & RegistrySetupBlocker)
   | {
       version: 1;
       type: "failed";
       item: string;
       completedItems: readonly string[];
       message: string;
-      next?: { command: string };
+      next?: HeadlessSetupCommand;
     }
   | {
       version: 1;
       type: "cancelled";
       item: string;
       completedItems: readonly string[];
-      next?: { command: string };
+      next?: HeadlessSetupCommand;
     };
 
-function shell(value: string): string {
-  return /^[\w@./:-]+$/u.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
+export function headlessSetupContinuation(input: {
+  item: string;
+  installed: boolean;
+}): HeadlessSetupCommand {
+  return {
+    command: "eve",
+    args: ["add", input.item, "--non-interactive", ...(input.installed ? ["--skip-install"] : [])],
+  };
 }
 
-export function headlessSetupContinuation(input: { item: string; installed: boolean }): string {
-  return [
-    "eve",
-    "add",
-    shell(input.item),
-    "--headless",
-    ...(input.installed ? ["--skip-install"] : []),
-  ].join(" ");
-}
+export type HeadlessIntegrationSetupEvent =
+  | {
+      version: 1;
+      type: "external_action";
+      id: string;
+      blocking: true;
+      message: string;
+      url: string;
+      userCode?: string;
+    }
+  | { version: 1; type: "external_action_resolved"; id: string }
+  | { version: 1; type: "completed"; item: string }
+  | { version: 1; type: "cancelled"; item: string }
+  | ({ version: 1; type: "blocked" } & RegistrySetupBlocker);
 
-export function formatHeadlessSetupEvent(event: HeadlessSetupEvent): string {
+export function serializeHeadlessSetupEvent(
+  event: HeadlessSetupEvent | HeadlessIntegrationSetupEvent,
+): string {
   return JSON.stringify(event);
 }

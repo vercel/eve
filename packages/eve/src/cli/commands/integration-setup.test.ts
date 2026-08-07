@@ -10,6 +10,18 @@ import type { RegistryCommandLogger } from "./registry.js";
 
 const { isEveProject } = vi.hoisted(() => ({ isEveProject: vi.fn(async () => true) }));
 
+class SetupProcess {
+  connected = true;
+  readonly sent: unknown[] = [];
+  send = (message: unknown) => {
+    this.sent.push(message);
+    return true;
+  };
+  disconnect() {}
+  on() {}
+  off() {}
+}
+
 vi.mock("#setup/scaffold/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#setup/scaffold/index.js")>()),
   isEveProject,
@@ -66,6 +78,25 @@ describe("runIntegrationSetupCommand", () => {
     expect(output.errors).toEqual([]);
   });
 
+  it("assumes recommended setup answers with --yes in interactive mode", async () => {
+    vi.mocked(runIntegrationSetup).mockImplementation(async (_kind, options) => {
+      await expect(
+        options.asker?.ask(
+          select({
+            key: "mode",
+            message: "Mode?",
+            options: [{ id: "portable", label: "Portable", value: "environment" }],
+            recommended: "environment",
+            required: true,
+          }),
+        ),
+      ).resolves.toBe("environment");
+      return { kind: "done", completion: { facts: [] } };
+    });
+
+    await runIntegrationSetupCommand(logger(), "/project", "web", { yes: true });
+  });
+
   it("passes answer-backed headless setup to the runner", async () => {
     vi.mocked(runIntegrationSetup).mockImplementation(async (_kind, options) => {
       await expect(
@@ -83,9 +114,76 @@ describe("runIntegrationSetupCommand", () => {
     });
 
     await runIntegrationSetupCommand(logger(), "/project", "web", {
-      headless: true,
+      nonInteractive: true,
       answers: { mode: "portable" },
     });
+  });
+
+  it("marks external actions as blocking while the command keeps running", async () => {
+    const output = logger();
+    const logs: string[] = [];
+    output.log = (message) => logs.push(message);
+    vi.mocked(runIntegrationSetup).mockImplementation(async (_kind, options) => {
+      const action = options.onExternalAction?.({
+        message: "Authorize Photon",
+        url: "https://example.com/device",
+        userCode: "ABCD1234",
+      });
+      action?.resolve();
+      return { kind: "done", completion: { facts: [] } };
+    });
+
+    await runIntegrationSetupCommand(output, "/project", "photon", { nonInteractive: true });
+
+    expect(JSON.parse(logs[0]!)).toMatchObject({
+      version: 1,
+      type: "external_action",
+      blocking: true,
+      message: "Authorize Photon",
+      url: "https://example.com/device",
+      userCode: "ABCD1234",
+    });
+    const started = JSON.parse(logs[0]!) as { id: string };
+    expect(JSON.parse(logs[1]!)).toEqual({
+      version: 1,
+      type: "external_action_resolved",
+      id: started.id,
+    });
+  });
+
+  it("leaves blocked event ownership to the parent setup process", async () => {
+    const previousProtocol = process.env.EVE_SETUP_PROTOCOL;
+    process.env.EVE_SETUP_PROTOCOL = "2";
+    const setupProcess = new SetupProcess();
+    const output = logger();
+    vi.mocked(runIntegrationSetup).mockRejectedValue(
+      new InteractionRequired(
+        select({ key: "mode", message: "Mode?", options: [], required: true }),
+      ),
+    );
+
+    try {
+      await runIntegrationSetupCommand(
+        output,
+        "/project",
+        "web",
+        { nonInteractive: true },
+        {
+          setupProcess,
+        },
+      );
+    } finally {
+      if (previousProtocol === undefined) delete process.env.EVE_SETUP_PROTOCOL;
+      else process.env.EVE_SETUP_PROTOCOL = previousProtocol;
+    }
+
+    expect(output.errors).toEqual([]);
+    expect(setupProcess.sent).toContainEqual(
+      expect.objectContaining({
+        type: "result",
+        outcome: expect.objectContaining({ kind: "blocked" }),
+      }),
+    );
   });
 
   it("serializes structured missing input in headless JSON mode", async () => {
@@ -96,7 +194,7 @@ describe("runIntegrationSetupCommand", () => {
     );
     const output = logger();
 
-    await runIntegrationSetupCommand(output, "/project", "web", { headless: true });
+    await runIntegrationSetupCommand(output, "/project", "web", { nonInteractive: true });
 
     expect(JSON.parse(output.errors[0]!)).toMatchObject({
       status: "input_required",

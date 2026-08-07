@@ -19,7 +19,7 @@ import {
   type RegistrySetupPrompt,
 } from "./registry-setup-protocol.js";
 
-interface SetupProcess {
+export interface SetupProcess {
   connected?: boolean;
   send?: (message: RegistrySetupChildMessage) => boolean;
   disconnect?: () => void;
@@ -34,33 +34,26 @@ function send(process: SetupProcess, message: RegistrySetupChildMessage): void {
   process.send(message);
 }
 
-function registrySetupError(error: unknown): {
-  message: string;
-  details?: readonly string[];
-  refusal?: import("./registry-setup-protocol.js").RegistrySetupRefusal;
-} {
+function registrySetupBlocker(
+  error: unknown,
+): import("./registry-setup-protocol.js").RegistrySetupBlocker | undefined {
   if (error instanceof InteractionRequired) {
-    return {
-      message: error.message,
-      refusal: { status: "input_required", question: setupQuestionToWire(error.question) },
-    };
+    return { status: "input_required", question: setupQuestionToWire(error.question) };
   }
   if (error instanceof InvalidAnswerError) {
     return {
-      message: error.message,
-      refusal: {
-        status: "input_required",
-        question: setupQuestionToWire(error.question),
-        issue: { code: "invalid_answer", message: error.message },
-      },
+      status: "input_required",
+      question: setupQuestionToWire(error.question),
+      issue: { code: "invalid_answer", message: error.message },
     };
   }
   if (error instanceof SetupPrerequisiteRequired) {
-    return {
-      message: error.message,
-      refusal: { status: "prerequisite_required", prerequisite: error.prerequisite },
-    };
+    return { status: "prerequisite_required", prerequisite: error.prerequisite };
   }
+  return undefined;
+}
+
+function registrySetupError(error: unknown): { message: string; details?: readonly string[] } {
   if (!(error instanceof Error)) return { message: String(error) };
   const details = error.stack
     ?.split("\n")
@@ -243,6 +236,13 @@ export function createRegistrySetupClient(
     signal: controller.signal,
     complete: (completion = { facts: [] }) => finish({ kind: "completed", ...completion }),
     cancel: () => finish({ kind: "cancelled" }),
-    fail: (error) => finish({ kind: "failed", error: registrySetupError(error) }),
+    fail(error) {
+      const blocker = registrySetupBlocker(error);
+      finish(
+        blocker === undefined
+          ? { kind: "failed", error: registrySetupError(error) }
+          : { kind: "blocked", blocker },
+      );
+    },
   };
 }

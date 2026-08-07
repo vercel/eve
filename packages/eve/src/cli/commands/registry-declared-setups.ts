@@ -5,11 +5,11 @@ import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js"
 
 import type { RegistryCommandLogger, RegistrySetupDependencies } from "./registry.js";
 import type { RegistrySetupCommand } from "./registry-setup-command.js";
-import { formatHeadlessSetupEvent, headlessSetupContinuation } from "./setup-headless.js";
+import { headlessSetupContinuation, serializeHeadlessSetupEvent } from "./setup-headless.js";
 
 export interface DeclaredSetupOptions {
   yes?: boolean;
-  headless?: boolean;
+  nonInteractive?: boolean;
   answers?: Record<string, unknown>;
   silent?: boolean;
   prompter?: Prompter;
@@ -32,7 +32,7 @@ export async function runDeclaredSetups(input: {
   const runSetupCommand = await input.dependencies.loadSetupCommandRunner();
   const prompter =
     input.options.prompter ??
-    (input.options.headless ? createHeadlessPrompter(input.logger.log) : createPrompter());
+    (input.options.nonInteractive ? createHeadlessPrompter(input.logger.log) : createPrompter());
   try {
     for (const setup of input.setups) {
       const result = await runSetupCommand(
@@ -42,7 +42,7 @@ export async function runDeclaredSetups(input: {
           args: [
             ...setup.args,
             ...(input.options.yes ? ["--yes"] : []),
-            ...(input.options.headless ? ["--headless"] : []),
+            ...(input.options.nonInteractive ? ["--non-interactive"] : []),
             ...Object.entries(input.options.answers ?? {}).flatMap(([key, value]) => [
               "--answer",
               `${key}=${JSON.stringify(value)}`,
@@ -56,17 +56,17 @@ export async function runDeclaredSetups(input: {
         input.logger.log(input.cancelledReminder);
         return false;
       }
-      if (result.kind === "refused") {
-        if (!input.options.headless) throw new Error("Setup requires more input.");
+      if (result.kind === "blocked") {
+        if (!input.options.nonInteractive) throw new Error("Setup requires more input.");
         input.logger.error(
-          formatHeadlessSetupEvent({
+          serializeHeadlessSetupEvent({
             version: 1,
             type: "blocked",
             item: input.item,
             installed: true,
             completedItems: [],
-            ...result.refusal,
-            next: { command: headlessSetupContinuation({ item: input.item, installed: true }) },
+            ...result.blocker,
+            next: headlessSetupContinuation({ item: input.item, installed: true }),
           }),
         );
         process.exitCode = 2;
@@ -79,15 +79,15 @@ export async function runDeclaredSetups(input: {
     return completion;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (input.options.headless) {
+    if (input.options.nonInteractive) {
       input.logger.error(
-        formatHeadlessSetupEvent({
+        serializeHeadlessSetupEvent({
           version: 1,
           type: "failed",
           item: input.item,
           completedItems: [],
           message,
-          next: { command: headlessSetupContinuation({ item: input.item, installed: true }) },
+          next: headlessSetupContinuation({ item: input.item, installed: true }),
         }),
       );
       process.exitCode = 1;

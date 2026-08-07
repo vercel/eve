@@ -2,7 +2,7 @@ export type SetupPrerequisite =
   | { kind: "command"; code: string; message: string; command: string }
   | { kind: "environment"; code: string; message: string; variable: string; sensitive: true };
 
-/** A read-only setup refusal whose prerequisite must be satisfied by the caller. */
+/** A setup blocker whose prerequisite must be satisfied by the caller. */
 export class SetupPrerequisiteRequired extends Error {
   readonly prerequisite: SetupPrerequisite;
 

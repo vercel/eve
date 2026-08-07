@@ -191,7 +191,7 @@ describe("registry commands", () => {
       logger,
       "/project",
       "linear",
-      { headless: true },
+      { nonInteractive: true },
       { loadSetupCommandRunner: vi.fn() },
     );
 
@@ -201,7 +201,7 @@ describe("registry commands", () => {
       item: "linear",
       installed: false,
       question: { key: "components" },
-      next: { command: "eve add linear --headless" },
+      next: { command: "eve", args: ["add", "linear", "--non-interactive"] },
     });
     expect(process.exitCode).toBe(2);
   });
@@ -227,7 +227,7 @@ describe("registry commands", () => {
       logger,
       "/project",
       "linear",
-      { headless: true, answers: { components: ["channel/linear-agent"] } },
+      { nonInteractive: true, answers: { components: ["channel/linear-agent"] } },
       { loadSetupCommandRunner: vi.fn() },
     );
 

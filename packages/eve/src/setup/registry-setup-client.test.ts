@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { InteractionRequired, select } from "./ask.js";
 import { createRegistrySetupClient, type RegistrySetupClient } from "./registry-setup-client.js";
 import type { RegistrySetupChildMessage } from "./registry-setup-protocol.js";
 
@@ -49,6 +50,25 @@ describe("createRegistrySetupClient", () => {
     });
     expect(processStub.disconnect).toHaveBeenCalledOnce();
     expect(processStub.listenerCount("message")).toBe(0);
+  });
+
+  it("reports expected setup blockers separately from failures", () => {
+    const processStub = new SetupProcessStub();
+    const setup = client(processStub);
+
+    setup.fail(
+      new InteractionRequired(
+        select({ key: "mode", message: "Mode?", options: [], required: true }),
+      ),
+    );
+
+    expect(processStub.sent.at(-1)).toMatchObject({
+      type: "result",
+      outcome: {
+        kind: "blocked",
+        blocker: { status: "input_required", question: { key: "mode" } },
+      },
+    });
   });
 
   it("reports only the first terminal outcome", () => {

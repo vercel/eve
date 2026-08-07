@@ -6,9 +6,17 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import type { IntegrationSetupEnvironment } from "./shared/environment.js";
 
+export interface SetupExternalAction {
+  complete(): void;
+}
+
 export type SetupPresenter = Pick<Prompter, "log" | "note"> & {
   nextSteps(lines: readonly string[]): void;
-  beginExternalAction(input: { url: string; userCode?: string; message: string }): void;
+  beginExternalAction(input: {
+    url: string;
+    userCode?: string;
+    message: string;
+  }): SetupExternalAction;
 };
 
 export interface SetupPrepareContext {

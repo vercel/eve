@@ -38,10 +38,10 @@ export function registerRegistryCommands(input: {
     .option("-o, --overwrite", "Overwrite existing files.")
     .option("--skip-install", "Run the item's setup flow without installing it.")
     .option("--skip-setup", "Skip the item's setup flow.")
-    .option("--headless", "Never prompt and emit NDJSON setup events.")
+    .option("--non-interactive", "Never prompt and emit NDJSON setup events.")
     .option(
       "--answer <key=value>",
-      "Answer a setup question; repeat for multiple answers.",
+      "Answer a setup question with JSON; repeat for multiple answers.",
       parseSetupAnswer,
       {},
     )
@@ -53,13 +53,13 @@ export function registerRegistryCommands(input: {
           skipInstall?: boolean;
           overwrite?: boolean;
           skipSetup?: boolean;
-          headless?: boolean;
+          nonInteractive?: boolean;
           answer?: Record<string, unknown>;
           yes?: boolean;
         },
       ) => {
-        if (options.answer !== undefined && !options.headless) {
-          throw new InvalidArgumentError("--answer requires --headless.");
+        if (options.answer !== undefined && !options.nonInteractive) {
+          throw new InvalidArgumentError("--answer requires --non-interactive.");
         }
         const { runAddCommand } = await import("./registry.js");
         await runAddCommand(logger, appRoot, item, { ...options, answers: options.answer });

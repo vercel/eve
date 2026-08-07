@@ -17,7 +17,7 @@ export type RegistrySetupCompletion = {
   facts: readonly RegistrySetupFact[];
   deploymentRequired?: true;
 };
-export type RegistrySetupRefusal =
+export type RegistrySetupBlocker =
   | {
       status: "input_required";
       question: SetupWireQuestion;
@@ -27,10 +27,10 @@ export type RegistrySetupRefusal =
 export type RegistrySetupError = {
   message: string;
   details?: readonly string[];
-  refusal?: RegistrySetupRefusal;
 };
 export type RegistrySetupOutcome =
   | ({ kind: "completed" } & RegistrySetupCompletion)
+  | { kind: "blocked"; blocker: RegistrySetupBlocker }
   | { kind: "cancelled" }
   | { kind: "failed"; error: RegistrySetupError };
 

@@ -98,7 +98,7 @@ eve registry view @acme/my-extension
 eve add @acme/my-extension
 ```
 
-`eve add` asks before running setup declared by an official item and runs multiple declared flows in declaration order. Product-level packages can offer independently installable components: `eve add linear` lets you select the Linear Channel, Linear MCP, or both, with both selected by default. `--yes` installs a package's default components.
+`eve add` asks before running setup declared by an official item and runs multiple declared flows in declaration order. Product-level packages can offer independently installable components: `eve add linear` lets you select the Linear Channel, Linear MCP, or both, with both selected by default. `--yes` installs a package's default components and accepts detected or recommended setup answers.
 
 When setup is skipped or cancelled, eve prints the matching `eve add <item> --skip-install` command. `--skip-install` reruns the selected components' declared flows from the beginning without reinstalling them.
 

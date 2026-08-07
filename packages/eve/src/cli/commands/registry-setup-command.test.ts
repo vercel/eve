@@ -298,19 +298,16 @@ describe("runRegistrySetupCommand", () => {
     ).rejects.toThrow("exited with code 0 before reporting a result");
   });
 
-  it("returns a structured setup refusal from the child", async () => {
+  it("returns a structured setup blocker from the child", async () => {
     spawn.mockReturnValue(
       protocolChild(0, null, (child) =>
         child.emit("message", {
           type: "result",
           outcome: {
-            kind: "failed",
-            error: {
-              message: "Input required",
-              refusal: {
-                status: "input_required",
-                question: { key: "mode", kind: "confirm", message: "Mode?", required: true },
-              },
+            kind: "blocked",
+            blocker: {
+              status: "input_required",
+              question: { key: "mode", kind: "confirm", message: "Mode?", required: true },
             },
           },
         }),
@@ -325,8 +322,8 @@ describe("runRegistrySetupCommand", () => {
         options(),
       ),
     ).resolves.toMatchObject({
-      kind: "refused",
-      refusal: { status: "input_required", question: { key: "mode" } },
+      kind: "blocked",
+      blocker: { status: "input_required", question: { key: "mode" } },
     });
   });
 

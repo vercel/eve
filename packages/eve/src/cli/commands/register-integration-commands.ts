@@ -20,21 +20,21 @@ export function registerIntegrationCommands(input: {
   integration
     .command("setup <kind>")
     .option("-y, --yes")
-    .option("--headless")
+    .option("--non-interactive")
     .option("--answer <key=value>", "Answer a setup question.", parseSetupAnswer, {})
     .action(
       async (
         kind: string,
         options: {
           yes?: boolean;
-          headless?: boolean;
+          nonInteractive?: boolean;
           answer?: Record<string, unknown>;
         },
       ) => {
         const { runIntegrationSetupCommand } = await import("./integration-setup.js");
         await runIntegrationSetupCommand(logger, appRoot, kind, {
           yes: options.yes,
-          headless: options.headless,
+          nonInteractive: options.nonInteractive,
           answers: options.answer,
         });
       },

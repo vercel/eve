@@ -196,13 +196,14 @@ async function resolvePhotonProject(
     kind: "external-action",
     emphasis: "browser",
   });
+  let authorizationAction: ReturnType<SetupApplyContext["presenter"]["beginExternalAction"]> | undefined;
   try {
-    return await deps.provisionProject({
+    const project = await deps.provisionProject({
       projectName: plan.photonProjectName ?? `eve · ${plan.agentName || "agent"}`,
       phoneNumber: plan.phoneNumber,
       signal: context.signal,
       onAuthorization(authorization) {
-        context.presenter.beginExternalAction({
+        authorizationAction = context.presenter.beginExternalAction({
           message: "Authorize Photon",
           url: authorization.verificationUrl,
           userCode: authorization.userCode,
@@ -210,6 +211,8 @@ async function resolvePhotonProject(
         deps.openUrl(authorization.verificationUrl);
       },
     });
+    authorizationAction?.complete();
+    return project;
   } finally {
     spinner?.stop();
   }

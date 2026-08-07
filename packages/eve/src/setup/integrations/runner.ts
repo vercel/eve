@@ -14,7 +14,7 @@ import {
 import { resolveIntegrationVercelProject } from "./shared/vercel-project.js";
 import { createSetupContexts } from "./shared/ui.js";
 import { setupIntegration } from "./registry.js";
-import type { IntegrationSetupResult } from "./types.js";
+import type { IntegrationSetupResult, SetupExternalAction } from "./types.js";
 
 /** Inputs shared by every registry-owned integration setup flow. */
 export interface RunIntegrationSetupOptions {
@@ -24,7 +24,11 @@ export interface RunIntegrationSetupOptions {
   asker?: Asker;
   signal?: AbortSignal;
   force?: boolean;
-  beginExternalAction?: (input: { url: string; userCode?: string; message: string }) => void;
+  beginExternalAction?: (input: {
+    url: string;
+    userCode?: string;
+    message: string;
+  }) => SetupExternalAction;
   resolveVercelProject?: SetupProjectResolver;
 }
 

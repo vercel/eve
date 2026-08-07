@@ -12,7 +12,7 @@ import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js"
 import { hasInteractiveTerminal } from "./preconditions.js";
 import type { AddCommandOptions, RegistryCommandLogger } from "./registry.js";
 import type { RegistrySetupCommand } from "./registry-setup-command.js";
-import { formatHeadlessSetupEvent, headlessSetupContinuation } from "./setup-headless.js";
+import { headlessSetupContinuation, serializeHeadlessSetupEvent } from "./setup-headless.js";
 
 export const RegistryPackageComponentSchema = z.object({
   item: z.string().min(1),
@@ -51,7 +51,7 @@ async function selectComponents(
 ): Promise<readonly RegistryPackageComponent[] | undefined> {
   if (
     options.prompter === undefined &&
-    !options.headless &&
+    !options.nonInteractive &&
     (options.yes === true || !interactive)
   ) {
     return components.filter((component) => component.default);
@@ -68,7 +68,7 @@ async function selectComponents(
       hint: component.description,
     })),
   };
-  const asker = options.headless
+  const asker = options.nonInteractive
     ? withAnswers(options.answers ?? {})(
         options.yes ? withPolicy("assume")(headlessAsker()) : headlessAsker(),
       )
@@ -76,12 +76,12 @@ async function selectComponents(
   try {
     return await asker.askMany(question);
   } catch (error) {
-    if (!options.headless || !(error instanceof Error) || error.name !== "InteractionRequired")
+    if (!options.nonInteractive || !(error instanceof Error) || error.name !== "InteractionRequired")
       throw error;
     const question = (error as import("#setup/ask.js").InteractionRequired).question;
     const { setupQuestionToWire } = await import("#setup/setup-question-wire.js");
     logger.error(
-      formatHeadlessSetupEvent({
+      serializeHeadlessSetupEvent({
         version: 1,
         type: "blocked",
         status: "input_required",
@@ -89,7 +89,7 @@ async function selectComponents(
         installed: false,
         completedItems: [],
         question: setupQuestionToWire(question),
-        next: { command: headlessSetupContinuation({ item, installed: false }) },
+        next: headlessSetupContinuation({ item, installed: false }),
       }),
     );
     process.exitCode = 2;
@@ -139,7 +139,7 @@ export async function runRegistryPackage(input: {
     });
   let completion: RegistrySetupCompletion = { facts: [] };
   if (options.skipSetup === true) return completion;
-  if (!options.headless && options.yes !== true && options.prompter === undefined && !interactive) {
+  if (!options.nonInteractive && options.yes !== true && options.prompter === undefined && !interactive) {
     logger.log(operations.setupReminder(item));
     return completion;
   }

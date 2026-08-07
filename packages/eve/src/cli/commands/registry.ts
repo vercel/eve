@@ -19,7 +19,7 @@ import { runDeclaredSetups } from "./registry-declared-setups.js";
 import { eveMetadataFromRegistryItem } from "./registry-metadata.js";
 import { runRegistryPackage } from "./registry-package.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
-import { formatHeadlessSetupEvent } from "./setup-headless.js";
+import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
 
 export interface RegistryCommandLogger {
@@ -32,7 +32,7 @@ export interface AddCommandOptions {
   overwrite?: boolean;
   skipSetup?: boolean;
   yes?: boolean;
-  headless?: boolean;
+  nonInteractive?: boolean;
   answers?: Record<string, unknown>;
   /** Suppresses the registry SDK's terminal-native progress output. */
   silent?: boolean;
@@ -542,7 +542,7 @@ export async function runAddCommand(
               setups,
               options: {
                 yes: options.yes,
-                headless: options.headless,
+                nonInteractive: options.nonInteractive,
                 answers: options.answers,
                 prompter,
                 signal: options.signal,
@@ -585,9 +585,9 @@ export async function runAddCommand(
     const interactive =
       dependencies.hasInteractiveTerminal?.() ??
       defaultAddCommandDependencies.hasInteractiveTerminal!();
-    if (options.headless) {
+    if (options.nonInteractive) {
       logger.log(
-        formatHeadlessSetupEvent({
+        serializeHeadlessSetupEvent({
           version: 1,
           type: "progress",
           message: options.skipInstall ? `Setup ${item}` : `Installed ${item}`,
@@ -596,7 +596,7 @@ export async function runAddCommand(
     }
     if (
       options.skipSetup === true ||
-      (!options.headless &&
+      (!options.nonInteractive &&
         !options.yes &&
         !interactive &&
         options.setupAuthorized !== true)
@@ -605,7 +605,7 @@ export async function runAddCommand(
       return;
     }
 
-    if (!options.headless && !options.yes && options.setupAuthorized !== true) {
+    if (!options.nonInteractive && !options.yes && options.setupAuthorized !== true) {
       try {
         const prompter =
           options.prompter ??
@@ -640,9 +640,9 @@ export async function runAddCommand(
       cancelledReminder: setupReminder(item, "cancelled"),
       resumeCommand: setupResumeCommand(item),
     });
-    if (completion !== false && options.headless) {
+    if (completion !== false && options.nonInteractive) {
       logger.log(
-        formatHeadlessSetupEvent({
+        serializeHeadlessSetupEvent({
           version: 1,
           type: "completed",
           item,

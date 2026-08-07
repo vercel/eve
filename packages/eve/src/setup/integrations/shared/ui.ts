@@ -1,10 +1,19 @@
 import type { Asker } from "../../ask.js";
 import type { Prompter } from "../../prompter.js";
-import type { SetupApplyContext, SetupPrepareContext, SetupPresenter } from "../types.js";
+import type {
+  SetupApplyContext,
+  SetupExternalAction,
+  SetupPrepareContext,
+  SetupPresenter,
+} from "../types.js";
 
 export function createSetupPresenter(
   prompter: Prompter,
-  beginExternalAction?: (input: { url: string; userCode?: string; message: string }) => void,
+  beginExternalAction?: (input: {
+    url: string;
+    userCode?: string;
+    message: string;
+  }) => SetupExternalAction,
 ): SetupPresenter {
   return {
     log: prompter.log,
@@ -13,13 +22,11 @@ export function createSetupPresenter(
       if (lines.length > 0) prompter.note(lines.join("\n"), "Next steps", { tone: "success" });
     },
     beginExternalAction(input) {
-      if (beginExternalAction !== undefined) {
-        beginExternalAction(input);
-        return;
-      }
+      if (beginExternalAction !== undefined) return beginExternalAction(input);
       prompter.log.message(input.message);
       prompter.log.message(input.url);
       if (input.userCode !== undefined) prompter.log.message(`Code: ${input.userCode}`);
+      return { complete() {} };
     },
   };
 }
@@ -32,7 +39,11 @@ export function createSetupContexts(input: {
   resolveVercelProject: SetupPrepareContext["resolveVercelProject"];
   signal?: AbortSignal;
   force?: boolean;
-  beginExternalAction?: (input: { url: string; userCode?: string; message: string }) => void;
+  beginExternalAction?: (input: {
+    url: string;
+    userCode?: string;
+    message: string;
+  }) => SetupExternalAction;
 }): { prepare: SetupPrepareContext; apply: SetupApplyContext } {
   const presenter = createSetupPresenter(input.prompter, input.beginExternalAction);
   const apply: SetupApplyContext = { appRoot: input.appRoot, presenter };

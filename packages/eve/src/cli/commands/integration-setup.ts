@@ -1,6 +1,7 @@
 import {
   headlessAsker,
   InteractionRequired,
+  interactiveAsker,
   InvalidAnswerError,
   withAnswers,
   withPolicy,
@@ -9,7 +10,7 @@ import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
 import { createHeadlessPrompter } from "#setup/headless.js";
 import { SetupPrerequisiteRequired } from "#setup/integrations/shared/prerequisite.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
-import { createRegistrySetupClient } from "#setup/registry-setup-client.js";
+import { createRegistrySetupClient, type SetupProcess } from "#setup/registry-setup-client.js";
 import {
   runIntegrationSetup,
   type IntegrationSetupRunnerDeps,
@@ -19,10 +20,11 @@ import { setupQuestionToWire } from "#setup/setup-question-wire.js";
 
 import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import type { RegistryCommandLogger } from "./registry.js";
+import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 
 export interface IntegrationSetupOptions {
   yes?: boolean;
-  headless?: boolean;
+  nonInteractive?: boolean;
   answers?: Record<string, unknown>;
   signal?: AbortSignal;
 }
@@ -30,6 +32,7 @@ export interface IntegrationSetupOptions {
 export interface IntegrationSetupDependencies {
   createPrompter?: () => Prompter;
   runnerDeps?: IntegrationSetupRunnerDeps;
+  setupProcess?: SetupProcess;
 }
 
 const defaultIntegrationSetupDependencies: IntegrationSetupDependencies = {};
@@ -48,24 +51,26 @@ export async function runIntegrationSetupCommand(
     return;
   }
 
-  const client = createRegistrySetupClient({ signal: options.signal });
+  const client = createRegistrySetupClient({
+    process: dependencies.setupProcess,
+    signal: options.signal,
+  });
   try {
-    const headless = options.headless === true;
+    const nonInteractive = options.nonInteractive === true;
     const prompter =
       client?.prompter ??
       dependencies.createPrompter?.() ??
-      (headless ? createHeadlessPrompter(() => {}) : createPrompter());
-    const base = headlessAsker();
-    const asker = headless
-      ? withAnswers(options.answers ?? {})(options.yes ? withPolicy("assume")(base) : base)
-      : undefined;
+      (nonInteractive ? createHeadlessPrompter(() => {}) : createPrompter());
+    const base = nonInteractive ? headlessAsker() : interactiveAsker(prompter);
+    const policy = options.yes ? withPolicy("assume")(base) : base;
+    const asker = withAnswers(options.answers ?? {})(policy);
     const result = await runIntegrationSetup(
       kind,
       {
         appRoot,
         prompter,
         asker,
-        resolveVercelProject: headless
+        resolveVercelProject: nonInteractive
           ? undefined
           : () =>
               ensureVercelProject({
@@ -74,9 +79,30 @@ export async function runIntegrationSetupCommand(
                 signal: client?.signal ?? options.signal,
               }),
         signal: client?.signal ?? options.signal,
-        onExternalAction: headless
-          ? (action) =>
-              logger.log(JSON.stringify({ version: 1, type: "external_action", ...action }))
+        onExternalAction: nonInteractive
+          ? (action) => {
+              const id = `external-action-${crypto.randomUUID()}`;
+              logger.log(
+                serializeHeadlessSetupEvent({
+                  version: 1,
+                  type: "external_action",
+                  id,
+                  blocking: true,
+                  ...action,
+                }),
+              );
+              return {
+                resolve() {
+                  logger.log(
+                    serializeHeadlessSetupEvent({
+                      version: 1,
+                      type: "external_action_resolved",
+                      id,
+                    }),
+                  );
+                },
+              };
+            }
           : undefined,
       },
       dependencies.runnerDeps,
@@ -84,20 +110,21 @@ export async function runIntegrationSetupCommand(
     if (result.kind === "cancelled") {
       client?.cancel();
       if (process.env.EVE_SETUP === "1") process.exitCode = 130;
-      else if (headless)
-        logger.error(JSON.stringify({ version: 1, type: "cancelled", item: kind }));
+      else if (nonInteractive)
+        logger.error(serializeHeadlessSetupEvent({ version: 1, type: "cancelled", item: kind }));
       return;
     }
     prompter.outro("Integration set up.");
     client?.complete(result.completion);
-    if (headless && client === undefined) {
-      logger.log(JSON.stringify({ version: 1, type: "completed", item: kind }));
+    if (nonInteractive && client === undefined) {
+      logger.log(serializeHeadlessSetupEvent({ version: 1, type: "completed", item: kind }));
     }
   } catch (error) {
     client?.fail(error);
-    if (options.headless && error instanceof InteractionRequired) {
+    if (client !== undefined) return;
+    if (options.nonInteractive && error instanceof InteractionRequired) {
       logger.error(
-        JSON.stringify({
+        serializeHeadlessSetupEvent({
           version: 1,
           type: "blocked",
           status: "input_required",
@@ -105,9 +132,9 @@ export async function runIntegrationSetupCommand(
         }),
       );
       process.exitCode = 2;
-    } else if (options.headless && error instanceof InvalidAnswerError) {
+    } else if (options.nonInteractive && error instanceof InvalidAnswerError) {
       logger.error(
-        JSON.stringify({
+        serializeHeadlessSetupEvent({
           version: 1,
           type: "blocked",
           status: "input_required",
@@ -116,9 +143,9 @@ export async function runIntegrationSetupCommand(
         }),
       );
       process.exitCode = 2;
-    } else if (options.headless && error instanceof SetupPrerequisiteRequired) {
+    } else if (options.nonInteractive && error instanceof SetupPrerequisiteRequired) {
       logger.error(
-        JSON.stringify({
+        serializeHeadlessSetupEvent({
           version: 1,
           type: "blocked",
           status: "prerequisite_required",
