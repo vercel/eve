@@ -67,6 +67,13 @@ describe("session callback route", () => {
     const event = {
       requests: [
         {
+          action: {
+            callId: "release-call",
+            input: { marker: "RELEASE" },
+            kind: "tool-call",
+            toolName: "release",
+          },
+          allowFreeform: false,
           display: "confirmation",
           kind: "tool-approval",
           options: [
@@ -74,7 +81,7 @@ describe("session callback route", () => {
             { id: "reject", label: "Reject" },
           ],
           requestId: "req-1",
-          toolName: "release",
+          prompt: "Approve release",
         },
       ],
       sequence: 3,

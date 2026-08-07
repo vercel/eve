@@ -170,4 +170,27 @@ describe("task cancellation identity", () => {
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
     expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
   });
+
+  it("fails instead of reporting success when cancellation does not commit", async () => {
+    vi.useFakeTimers();
+    vi.mocked(readLatestTaskSnapshot).mockResolvedValue({
+      metadata: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" },
+      status: "working",
+      taskId: "task-1",
+    });
+    try {
+      const pending = executeTaskControlAction({
+        action,
+        bundle: {} as CompiledBundle,
+        parentTurnId: "turn-parent",
+        session: createSession("local"),
+      });
+      const rejected = expect(pending).rejects.toThrow("did not commit cancellation");
+      await vi.runAllTimersAsync();
+      await rejected;
+      expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

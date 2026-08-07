@@ -158,7 +158,7 @@ export interface TurnCaller {
   readonly taskId?: string;
   readonly replyTo:
     | { readonly kind: "hook"; readonly token: string }
-    | { readonly kind: "callback"; readonly url: string };
+    | { readonly kind: "callback"; readonly token: string; readonly url: string };
 }
 
 /**

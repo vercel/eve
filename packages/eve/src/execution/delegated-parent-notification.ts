@@ -12,6 +12,7 @@ import { SessionCallbackKey } from "#context/keys.js";
 import {
   isSubagentAdapterState,
   SUBAGENT_ADAPTER_KIND,
+  type SubagentAdapterState,
 } from "#execution/subagent-adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { SUBAGENT_EXECUTION_FAILED } from "#harness/agent-handle-errors.js";
@@ -131,6 +132,36 @@ export async function notifyTurnCallerStep(input: {
   await resumeSettledTurnHook(input.caller.replyTo.token, result);
 }
 
+/** Settles a task-owned caller after the child turn is cooperatively cancelled. */
+export async function notifyCancelledTaskCallerStep(input: {
+  readonly caller: TurnCaller | undefined;
+  readonly sessionId: string;
+  readonly usage?: TokenUsage;
+}): Promise<void> {
+  "use step";
+
+  if (input.caller?.taskId === undefined) return;
+  const usageDelta = input.usage ?? ZERO_TOKEN_USAGE;
+  const base: RuntimeSubagentChildResult = {
+    callId: input.caller.callId,
+    kind: "subagent-result",
+    origin: "child",
+    outcome: {
+      kind: "parked",
+      result: { kind: "cancelled" },
+      usageDelta,
+    },
+    output: "",
+    subagentName: input.caller.subagentName,
+  };
+  const result = input.usage === undefined ? base : { ...base, usage: input.usage };
+  if (input.caller.replyTo.kind === "callback") {
+    await postSettledTurnCallback({ result, sessionId: input.sessionId, url: input.caller.replyTo.url });
+    return;
+  }
+  await resumeSettledTurnHook(input.caller.replyTo.token, result);
+}
+
 /** Binds a durable task to the exact child turn before execution starts. */
 export async function notifyTaskTurnStartedStep(input: {
   readonly caller: TurnCaller | undefined;
@@ -229,7 +260,11 @@ export async function resolveInitialTurnCallerStep(input: {
     }
     return {
       callId: parsed.callback.callId,
-      replyTo: { kind: "callback", url: parsed.callback.url },
+      replyTo: {
+        kind: "callback",
+        token: parsed.callback.token,
+        url: parsed.callback.url,
+      },
       subagentName: parsed.callback.subagentName,
       taskId: parsed.callback.taskId ?? readTaskIdFromCommandToken(parsed.callback.token),
     };
@@ -246,6 +281,52 @@ export async function resolveInitialTurnCallerStep(input: {
     replyTo: { kind: "hook", token: adapter.state.parentContinuationToken },
     subagentName: adapter.state.subagentName,
     taskId: readTaskIdFromCommandToken(adapter.state.parentContinuationToken),
+  };
+}
+
+/** Rebinds child event forwarding to the task that owns the next accepted turn. */
+export async function bindTurnCallerContextStep(input: {
+  readonly caller: TurnCaller | undefined;
+  readonly serializedContext: Record<string, unknown>;
+}): Promise<Record<string, unknown>> {
+  "use step";
+
+  const caller = input.caller;
+  if (caller?.taskId === undefined) return input.serializedContext;
+  if (caller.replyTo.kind === "callback") {
+    return {
+      ...input.serializedContext,
+      [SessionCallbackKey.name]: {
+        callId: caller.callId,
+        subagentName: caller.subagentName,
+        taskId: caller.taskId,
+        token: caller.replyTo.token,
+        url: caller.replyTo.url,
+      },
+    };
+  }
+
+  const adapter = input.serializedContext[ChannelKey.name];
+  if (
+    adapter === null ||
+    typeof adapter !== "object" ||
+    Reflect.get(adapter, "kind") !== SUBAGENT_ADAPTER_KIND ||
+    !isSubagentAdapterState(Reflect.get(adapter, "state"))
+  ) {
+    throw new Error("Task-owned local turn is missing its subagent adapter binding.");
+  }
+  const state = Reflect.get(adapter, "state") as SubagentAdapterState;
+  return {
+    ...input.serializedContext,
+    [ChannelKey.name]: {
+      ...adapter,
+      state: {
+        ...state,
+        callId: caller.callId,
+        parentContinuationToken: caller.replyTo.token,
+        subagentName: caller.subagentName,
+      },
+    },
   };
 }
 

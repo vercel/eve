@@ -352,7 +352,7 @@ async function waitForOwnedCommandHook(token: string, sessionId: string): Promis
   }
 }
 
-async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
+export async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
     try {

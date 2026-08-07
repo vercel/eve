@@ -474,8 +474,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body.callback !== undefined) {
           sendOptions.caller = {
             callId: body.callback.callId,
-            replyTo: { kind: "callback", url: body.callback.url },
+            replyTo: { kind: "callback", token: body.callback.token, url: body.callback.url },
             subagentName: body.callback.subagentName,
+            taskId: body.callback.taskId,
           };
         }
 

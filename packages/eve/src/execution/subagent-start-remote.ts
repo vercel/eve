@@ -89,6 +89,11 @@ export async function startRemoteSubagent(input: {
       remote: resolvedRemote,
       session: input.session,
     });
+    if (input.taskOwned && child.continuationToken === undefined) {
+      throw new Error(
+        `Remote agent "${action.remoteAgentName}" does not support task continuations.`,
+      );
+    }
     const address = {
       callbackBaseUrl,
       kind: "agent/remote",

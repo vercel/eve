@@ -9,6 +9,7 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { acknowledgeDelegatedTasksStep } from "#execution/tasks/delegate.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import {
   migrateTurnWorkflowInput,
@@ -175,6 +176,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           sessionState: cursor.sessionState,
         });
         await cursor.adopt(dispatchResult);
+        await acknowledgeDelegatedTasksStep({ tasks: dispatchResult.taskReadiness });
 
         const results = await waitForRuntimeActionResults({
           bufferedDeliveries,

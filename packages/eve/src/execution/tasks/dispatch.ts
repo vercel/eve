@@ -4,16 +4,17 @@ import {
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
 import {
-  createPendingTaskView,
   createTaskControlError,
   createTaskViewsResult,
   createUnknownTasksError,
   findTaskAgentAddress,
   lookupTaskEntries,
   readTaskViews,
+  readTaskView,
 } from "#execution/tasks/control-shared.js";
 import { executeTaskSend } from "#execution/tasks/send.js";
-import { readLatestTaskSnapshot, sendTaskCommand } from "#execution/tasks/run-control.js";
+import type { DelegatedTask } from "#execution/tasks/delegate.js";
+import { sendTaskCommand } from "#execution/tasks/run-control.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type {
@@ -67,6 +68,7 @@ export async function executeTaskControlAction(input: {
 }): Promise<{
   readonly result: RuntimeActionResult | undefined;
   readonly session: RuntimeSession;
+  readonly taskReadiness?: DelegatedTask;
 }> {
   const { action, session } = input;
 
@@ -122,7 +124,7 @@ export async function cancelOwnedTask(input: {
 
   // The `cancelled` state must commit before the executor abort
   // propagates, so a late child result can never revive the task.
-  let view = await readLatestTaskSnapshot({ taskRunId: entry.taskRunId });
+  let view = await readTaskView(entry);
   for (
     let attempt = 0;
     attempt < CANCEL_COMMIT_POLL_ATTEMPTS &&
@@ -130,9 +132,12 @@ export async function cancelOwnedTask(input: {
     attempt += 1
   ) {
     await new Promise((resolve) => setTimeout(resolve, CANCEL_COMMIT_POLL_DELAY_MS));
-    view = await readLatestTaskSnapshot({ taskRunId: entry.taskRunId });
+    view = await readTaskView(entry);
   }
-  const settledView = view ?? createPendingTaskView(entry);
+  if (!isTerminalTaskStatus(view.status)) {
+    throw new Error(`Task "${entry.taskId}" did not commit cancellation before timeout.`);
+  }
+  const settledView = view;
 
   if (settledView.status === "cancelled" && delivery === "delivered") {
     await propagateTaskCancel({ bundle: input.bundle, session: input.session, view: settledView });

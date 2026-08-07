@@ -35,6 +35,12 @@ export async function recordTaskInputRequestStep(input: {
   ) {
     return { accepted: false, sessionState: input.sessionState };
   }
+  if (
+    handle.address.kind === "agent/remote" &&
+    handle.address.continuationToken !== input.hookPayload.childContinuationToken
+  ) {
+    return { accepted: false, sessionState: input.sessionState };
+  }
   const view = await readLatestTaskSnapshot({ taskRunId: entry.taskRunId });
   const eventRequestIds = input.hookPayload.event.requests.map((request) => request.requestId);
   const viewRequestIds =

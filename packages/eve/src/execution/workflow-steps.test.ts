@@ -683,6 +683,7 @@ describe("dispatchRuntimeActionsStep", () => {
         },
       ],
       sessionState: expect.any(Object),
+      taskReadiness: [],
     });
     // The started child stays owned as a running handle; the dead start's
     // prepared handle was rejected.
@@ -1124,6 +1125,7 @@ describe("dispatchRuntimeActionsStep", () => {
         },
       ],
       sessionState,
+      taskReadiness: [],
     });
     expect(startMock).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
@@ -1221,6 +1223,7 @@ describe("dispatchRuntimeActionsStep", () => {
         },
       ],
       sessionState,
+      taskReadiness: [],
     });
     expect(startMock).not.toHaveBeenCalled();
   });

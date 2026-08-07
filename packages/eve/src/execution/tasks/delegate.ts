@@ -1,8 +1,10 @@
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
 import {
+  readLatestTaskSnapshot,
   sendTaskCommand,
   sendTaskCommandToOwner,
   startTaskRun,
+  waitForTaskCommandOwner,
 } from "#execution/tasks/run-control.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
@@ -10,7 +12,7 @@ import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";
 import { recordSessionTask } from "#tasks/session-index.js";
 import { deriveTaskCommandToken, deriveTaskId } from "#tasks/task-id.js";
-import type { TaskMetadata } from "#tasks/types.js";
+import { isTerminalTaskStatus, type TaskMetadata } from "#tasks/types.js";
 
 /** A prepared delegated task: identity plus its started durable run. */
 export interface DelegatedTask {
@@ -59,7 +61,7 @@ export async function beginDelegatedTask(input: {
     mode: input.mode,
     name: input.name,
   };
-  const run = await startTaskRun({
+  await startTaskRun({
     commandToken,
     initialView: {
       metadata,
@@ -68,6 +70,7 @@ export async function beginDelegatedTask(input: {
     },
     wakeToken: sessionCommandHookToken(input.session.sessionId),
   });
+  const owner = await waitForTaskCommandOwner({ commandToken });
   return {
     commandToken,
     createdByStepIndex: input.parentStepIndex ?? 0,
@@ -75,7 +78,7 @@ export async function beginDelegatedTask(input: {
     metadata,
     operationId,
     taskId,
-    taskRunId: run.runId,
+    taskRunId: owner.runId,
   };
 }
 
@@ -91,14 +94,6 @@ export async function settleDelegatedDispatch(input: {
   readonly subagentName: string;
   readonly task: DelegatedTask;
 }): Promise<{ readonly receipt: RuntimeSubagentChildResult; readonly session: RuntimeSession }> {
-  const owner = await sendTaskCommandToOwner({
-    command: { kind: "ready" },
-    commandToken: input.task.commandToken,
-    retryUnreachable: { attempts: 20, delayMs: 250 },
-  });
-  if (owner === undefined) {
-    throw new Error(`Task run "${input.task.taskId}" did not accept its readiness command.`);
-  }
   const receiptOutput = {
     agentId: input.task.metadata.agentId,
     status: "working" as const,
@@ -128,9 +123,32 @@ export async function settleDelegatedDispatch(input: {
       metadata: input.task.metadata,
       operationId: input.task.operationId,
       taskId: input.task.taskId,
-      taskRunId: owner.runId,
+      taskRunId: input.task.taskRunId,
     }),
   };
+}
+
+/** Releases task events only after the parent session index committed. */
+export async function acknowledgeDelegatedTasksStep(input: {
+  readonly tasks: readonly {
+    readonly commandToken: string;
+    readonly taskId: string;
+    readonly taskRunId: string;
+  }[];
+}): Promise<void> {
+  "use step";
+
+  for (const task of input.tasks) {
+    const owner = await sendTaskCommandToOwner({
+      command: { kind: "ready" },
+      commandToken: task.commandToken,
+      retryUnreachable: { attempts: 20, delayMs: 250 },
+    });
+    if (owner !== undefined) continue;
+    const view = await readLatestTaskSnapshot({ taskRunId: task.taskRunId });
+    if (view !== undefined && isTerminalTaskStatus(view.status)) continue;
+    throw new Error(`Task run "${task.taskId}" did not accept its readiness command.`);
+  }
 }
 
 /**

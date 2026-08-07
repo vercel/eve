@@ -12,6 +12,8 @@ import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow
 import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import {
+  bindTurnCallerContextStep,
+  notifyCancelledTaskCallerStep,
   notifyDelegatedParentStep,
   notifyTaskTurnStartedStep,
   notifyTurnCallerStep,
@@ -339,6 +341,10 @@ async function runDriverLoop(input: {
         childTurnId: activeTurnId(args.sessionState.emissionState),
       });
     }
+    const serializedContext = await bindTurnCallerContextStep({
+      caller,
+      serializedContext: args.serializedContext,
+    });
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
       bufferedSessionControls,
@@ -349,7 +355,7 @@ async function runDriverLoop(input: {
       delivery: args.delivery,
       mode: input.mode,
       parentWritable: input.driverWritable,
-      serializedContext: args.serializedContext,
+      serializedContext,
       seenTaskDeliveries,
       sessionState: args.sessionState,
     });
@@ -410,6 +416,15 @@ async function runDriverLoop(input: {
           serializedContext: settled.serializedContext,
           sessionState: settled.sessionState,
         };
+        const cancelledCaller = {
+          caller: input.crashCleanupState.caller,
+          sessionId: action.sessionState.sessionId,
+        };
+        await notifyCancelledTaskCallerStep(
+          settled.usage === undefined
+            ? cancelledCaller
+            : { ...cancelledCaller, usage: settled.usage },
+        );
         input.crashCleanupState.lastSessionState = action.sessionState;
       }
 

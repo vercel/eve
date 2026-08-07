@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
-import { settleDelegatedDispatch, type DelegatedTask } from "#execution/tasks/delegate.js";
+import {
+  acknowledgeDelegatedTasksStep,
+  settleDelegatedDispatch,
+  type DelegatedTask,
+} from "#execution/tasks/delegate.js";
 import { sendTaskCommandToOwner } from "#execution/tasks/run-control.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 
 vi.mock("#execution/tasks/run-control.js", () => ({
+  readLatestTaskSnapshot: vi.fn(),
   sendTaskCommandToOwner: vi.fn(),
 }));
 
@@ -15,7 +20,7 @@ describe("delegated task settlement", () => {
     vi.mocked(sendTaskCommandToOwner).mockResolvedValue({ runId: "run-owner" });
   });
 
-  it("indexes the command-hook owner after the readiness barrier", async () => {
+  it("indexes the resolved command-hook owner before readiness", async () => {
     const session = {
       agent: { modelReference: { id: "model" }, system: "", tools: [] },
       compaction: { recentWindowSize: 4, threshold: 1_000_000 },
@@ -44,12 +49,15 @@ describe("delegated task settlement", () => {
       task,
     });
 
+    expect(sendTaskCommandToOwner).not.toHaveBeenCalled();
+    expect(getSessionTaskIndex(result.session.state)[0]).toMatchObject({
+      taskId: "task-1",
+      taskRunId: "run-candidate",
+    });
+
+    await acknowledgeDelegatedTasksStep({ tasks: [task] });
     expect(sendTaskCommandToOwner).toHaveBeenCalledWith(
       expect.objectContaining({ command: { kind: "ready" } }),
     );
-    expect(getSessionTaskIndex(result.session.state)[0]).toMatchObject({
-      taskId: "task-1",
-      taskRunId: "run-owner",
-    });
   });
 });

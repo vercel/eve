@@ -53,6 +53,7 @@ import type {
 } from "#runtime/actions/types.js";
 import {
   beginDelegatedTask,
+  type DelegatedTask,
   executeTaskControlAction,
   isTaskControlAction,
   settleDelegatedDispatch,
@@ -135,6 +136,11 @@ export async function dispatchRuntimeActionsStep(input: {
 }): Promise<{
   readonly results: readonly RuntimeActionResult[];
   readonly sessionState: DurableSessionState;
+  readonly taskReadiness: readonly {
+    readonly commandToken: string;
+    readonly taskId: string;
+    readonly taskRunId: string;
+  }[];
 }> {
   "use step";
 
@@ -142,7 +148,7 @@ export async function dispatchRuntimeActionsStep(input: {
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) {
-    return { results: [], sessionState: input.sessionState };
+    return { results: [], sessionState: input.sessionState, taskReadiness: [] };
   }
   assertUniqueRuntimeActionCallIds(batch.actions);
 
@@ -189,6 +195,7 @@ export async function dispatchRuntimeActionsStep(input: {
 
   let nextSession = session;
   const results: RuntimeActionResult[] = [];
+  const taskReadiness: DelegatedTask[] = [];
 
   try {
     for (const entry of plan) {
@@ -206,6 +213,7 @@ export async function dispatchRuntimeActionsStep(input: {
           session: nextSession,
         });
         nextSession = control.session;
+        if (control.taskReadiness !== undefined) taskReadiness.push(control.taskReadiness);
         if (control.result !== undefined) {
           results.push(control.result);
         }
@@ -304,6 +312,7 @@ export async function dispatchRuntimeActionsStep(input: {
             session: nextSession,
           }),
         );
+        if (delegated !== undefined) taskReadiness.push(delegated);
         continue;
       }
 
@@ -320,6 +329,7 @@ export async function dispatchRuntimeActionsStep(input: {
           nextSession = settled.session;
           results.push(settled.receipt);
         }
+        taskReadiness.push(delegated);
       }
 
       // Emission is observability, not control flow: a failure here must not
@@ -378,6 +388,7 @@ export async function dispatchRuntimeActionsStep(input: {
   return {
     results,
     sessionState: nextState,
+    taskReadiness,
   };
 }
 

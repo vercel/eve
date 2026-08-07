@@ -9,6 +9,7 @@ import type { TaskRunWorkflowInput } from "#execution/tasks/run-workflow.js";
 import {
   startWorkflowPreferLatest,
   taskRunWorkflowReference,
+  waitForCommandHookOwner,
 } from "#execution/workflow-runtime.js";
 import { getRun, resumeHook } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
@@ -35,6 +36,13 @@ export async function startTaskRun(
 ): Promise<{ readonly runId: string }> {
   const run = await startWorkflowPreferLatest(taskRunWorkflowReference, [input]);
   return { runId: run.runId };
+}
+
+/** Resolves the task run that won ownership of one replay-stable command token. */
+export async function waitForTaskCommandOwner(input: {
+  readonly commandToken: string;
+}): Promise<{ readonly runId: string }> {
+  return await waitForCommandHookOwner(input.commandToken);
 }
 
 /**

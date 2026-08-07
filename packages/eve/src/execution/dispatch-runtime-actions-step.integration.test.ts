@@ -62,6 +62,7 @@ vi.mock("#execution/workflow-runtime.js", () => ({
   workflowEntryReference: { workflowId: "workflow//eve//workflowEntry" },
   startWorkflowPreferLatest: mocks.startWorkflowPreferLatest,
   taskRunWorkflowReference: { workflowId: "workflow//eve//taskRun" },
+  waitForCommandHookOwner: vi.fn().mockResolvedValue({ runId: "task-run-1" }),
 }));
 
 // Only the network calls are mocked; error classification and registry

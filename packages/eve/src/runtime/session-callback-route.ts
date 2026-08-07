@@ -6,6 +6,7 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import { agentTurnOutcomeSchema, type AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import type { JsonValue } from "#shared/json.js";
+import { isInputRequest } from "#runtime/input/types.js";
 import { tokenUsageSchema, type TokenUsage } from "#shared/token-usage.js";
 import type {
   TaskInboundAuthorizationEvent,
@@ -191,6 +192,9 @@ function projectTaskEvent(
     return Response.json({ error: "Invalid task event callback.", ok: false }, { status: 400 });
   }
   if (payload.kind === "task.input-requested") {
+    if (!isTaskInputEvent(payload.event)) {
+      return Response.json({ error: "Invalid task input callback event.", ok: false }, { status: 400 });
+    }
     return {
       callId: payload.callId,
       childContinuationToken: payload.childContinuationToken,
@@ -200,6 +204,12 @@ function projectTaskEvent(
       subagentName: payload.subagentName,
     };
   }
+  if (!isTaskAuthorizationEvent(payload.event)) {
+    return Response.json(
+      { error: "Invalid task authorization callback event.", ok: false },
+      { status: 400 },
+    );
+  }
   return {
     callId: payload.callId,
     childSessionId: payload.childSessionId,
@@ -207,6 +217,49 @@ function projectTaskEvent(
     kind: "subagent-authorization-event",
     subagentName: payload.subagentName,
   };
+}
+
+function isTaskInputEvent(value: unknown): value is TaskInboundInputRequest["event"] {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const requests = Reflect.get(value, "requests");
+  return (
+    Array.isArray(requests) &&
+    requests.length > 0 &&
+    requests.every(isInputRequest) &&
+    isEventCoordinate(value, "sequence") &&
+    isEventCoordinate(value, "stepIndex") &&
+    typeof Reflect.get(value, "turnId") === "string"
+  );
+}
+
+function isTaskAuthorizationEvent(
+  value: unknown,
+): value is TaskInboundAuthorizationEvent["event"] {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const type = Reflect.get(value, "type");
+  const data = Reflect.get(value, "data");
+  if (
+    (type !== "authorization.required" && type !== "authorization.completed") ||
+    data === null ||
+    typeof data !== "object" ||
+    Array.isArray(data)
+  ) {
+    return false;
+  }
+  return (
+    typeof Reflect.get(data, "name") === "string" &&
+    typeof Reflect.get(data, "turnId") === "string" &&
+    isEventCoordinate(data, "sequence") &&
+    isEventCoordinate(data, "stepIndex") &&
+    (type === "authorization.required"
+      ? typeof Reflect.get(data, "description") === "string"
+      : typeof Reflect.get(data, "outcome") === "string")
+  );
+}
+
+function isEventCoordinate(value: object, key: string): boolean {
+  const coordinate = Reflect.get(value, key);
+  return typeof coordinate === "number" && Number.isInteger(coordinate) && coordinate >= 0;
 }
 
 function projectTaskTurnStarted(value: unknown): TaskInboundTurnStarted | Response | undefined {

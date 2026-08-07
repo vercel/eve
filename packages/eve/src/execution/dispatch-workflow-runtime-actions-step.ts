@@ -35,15 +35,24 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 }): Promise<{
   readonly results: readonly RuntimeActionResult[];
   readonly sessionState: DurableSessionState;
+  readonly taskReadiness: readonly {
+    readonly commandToken: string;
+    readonly taskId: string;
+    readonly taskRunId: string;
+  }[];
 }> {
   "use step";
 
   const durableSession = await readDurableSession(input.sessionState);
   const pending = getPendingWorkflowInterrupt(durableSession.state);
-  if (pending === undefined) return { results: [], sessionState: input.sessionState };
+  if (pending === undefined) {
+    return { results: [], sessionState: input.sessionState, taskReadiness: [] };
+  }
 
   const actions = buildRuntimeActionsFromWorkflowInterrupt(pending.interrupt);
-  if (actions.length === 0) return { results: [], sessionState: input.sessionState };
+  if (actions.length === 0) {
+    return { results: [], sessionState: input.sessionState, taskReadiness: [] };
+  }
 
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
@@ -68,7 +77,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   });
 
   if (plan.allowed.length === 0) {
-    return { results: blockedResults, sessionState: input.sessionState };
+    return { results: blockedResults, sessionState: input.sessionState, taskReadiness: [] };
   }
 
   const session = hydrateDurableSession({
@@ -101,6 +110,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   return {
     results: [...dispatched.results, ...blockedResults],
     sessionState: dispatched.sessionState,
+    taskReadiness: dispatched.taskReadiness,
   };
 }
 

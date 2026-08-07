@@ -4,18 +4,18 @@ import {
   type RuntimeSession,
 } from "#execution/agent-handle-dispatch.js";
 import {
-  createPendingTaskView,
   createTaskControlError,
   createUnknownTasksError,
   findActiveTaskForAgent,
   findTaskAgentAddress,
+  readTaskView,
 } from "#execution/tasks/control-shared.js";
 import {
   beginDelegatedTask,
+  type DelegatedTask,
   failDelegatedDispatch,
   settleDelegatedDispatch,
 } from "#execution/tasks/delegate.js";
-import { readLatestTaskSnapshot } from "#execution/tasks/run-control.js";
 import { AGENT_BUSY, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -41,6 +41,7 @@ export async function executeTaskSend(input: {
 }): Promise<{
   readonly result: RuntimeActionResult | undefined;
   readonly session: RuntimeSession;
+  readonly taskReadiness?: DelegatedTask;
 }> {
   const { action, session } = input;
   const send = readTaskSendInput(action.input);
@@ -53,8 +54,7 @@ export async function executeTaskSend(input: {
     return { result: createUnknownTasksError(action, [send.taskId]), session };
   }
 
-  const view =
-    (await readLatestTaskSnapshot({ taskRunId: entry.taskRunId })) ?? createPendingTaskView(entry);
+  const view = await readTaskView(entry);
 
   if (view.status === "working") {
     return {
@@ -95,7 +95,11 @@ async function followUpTerminalTask(input: {
   readonly parentTurnId: string;
   readonly session: RuntimeSession;
   readonly view: TaskView;
-}): Promise<{ readonly result: RuntimeActionResult; readonly session: RuntimeSession }> {
+}): Promise<{
+  readonly result: RuntimeActionResult;
+  readonly session: RuntimeSession;
+  readonly taskReadiness?: DelegatedTask;
+}> {
   const { action, view } = input;
   const active = await findActiveTaskForAgent(
     input.session,
@@ -180,6 +184,7 @@ async function followUpTerminalTask(input: {
         toolName: action.toolName,
       },
       session: outcome.session,
+      taskReadiness: task,
     };
   }
 
@@ -191,6 +196,7 @@ async function followUpTerminalTask(input: {
       toolName: action.toolName,
     },
     session: outcome.session,
+    taskReadiness: task,
   };
 }
 
