@@ -119,7 +119,7 @@ describe("runRegistrySetupCommand", () => {
     );
   });
 
-  it("streams child output through the parent prompter", async () => {
+  it("streams child output through a plain parent prompter", async () => {
     const child = protocolChild();
     const prompter = createPrompter();
     spawn.mockReturnValue(child);
@@ -135,7 +135,33 @@ describe("runRegistrySetupCommand", () => {
     expect(prompter.log.commandOutput).toHaveBeenCalledWith("connecting");
   });
 
-  it("uses a structured child failure instead of the exit code", async () => {
+  it("keeps successful child presentation transient for replaceable TUI flows", async () => {
+    const child = protocolChild(0, null, (running) => {
+      running.emit("message", { type: "log", level: "success", text: "Scaffolded channel" });
+      running.emit("message", {
+        type: "note",
+        title: "Text your agent",
+        message: "+15551234567",
+        tone: "success",
+      });
+      running.emit("message", { type: "result", outcome: { kind: "completed", facts: [] } });
+    });
+    const prompter = createPrompter();
+    prompter.replaceContent = vi.fn();
+    spawn.mockReturnValue(child);
+
+    await runRegistrySetupCommand(
+      "/project",
+      { package: "@acme/slack", bin: "acme-slack", args: [] },
+      "channel/photon-imessage",
+      { prompter },
+    );
+
+    expect(prompter.log.success).not.toHaveBeenCalled();
+    expect(prompter.note).not.toHaveBeenCalled();
+  });
+
+  it("uses a structured child failure without exposing its stack", async () => {
     const child = protocolChild(1, null, (running) => {
       running.emit("message", {
         type: "result",
@@ -154,7 +180,7 @@ describe("runRegistrySetupCommand", () => {
         "channel/photon-imessage",
         options(),
       ),
-    ).rejects.toThrow("Photon approval was denied.\nat setupPhoton");
+    ).rejects.toThrow(/^Photon approval was denied\.$/);
   });
 
   it("preserves additive deployment metadata on protocol v1", async () => {

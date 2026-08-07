@@ -152,7 +152,7 @@ export async function setupDiscord(
         deploymentRequired: true,
         facts: [
           {
-            label: "Discord application",
+            label: "Discord application dashboard",
             value: `https://discord.com/developers/applications/${application.id}/information`,
             kind: "url",
           },

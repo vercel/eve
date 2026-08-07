@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
-import { runRegistryFlow, type RegistryFlowDeps } from "./registry.js";
+import { RegistryFlowFailedError, runRegistryFlow, type RegistryFlowDeps } from "./registry.js";
 
 const APP_ROOT = "/tmp/agent";
 
@@ -31,7 +31,6 @@ function deps(overrides: Partial<RegistryFlowDeps> = {}): RegistryFlowDeps {
     })),
     installRegistryItem: vi.fn(async () => ({ output: [] })),
     detectDeployment: vi.fn(async () => ({ state: "unlinked" as const })),
-    openUrl: vi.fn(),
     runDeployFlow: vi.fn(async () => ({ kind: "deployed" as const })),
     ...overrides,
   };
@@ -54,6 +53,14 @@ describe("runRegistryFlow", () => {
     ).resolves.toEqual({
       kind: "done",
       addedItems: ["extension/agent-browser"],
+      items: [
+        {
+          address: "extension/agent-browser",
+          title: "Agent Browser",
+          facts: [],
+          output: [],
+        },
+      ],
       facts: [],
       output: [],
     });
@@ -291,8 +298,8 @@ describe("runRegistryFlow", () => {
       "category:channel",
       "item:0",
       "add",
-      "production",
-      "0",
+      "deploy",
+      "yes",
     ];
     const prompts: unknown[] = [];
     const fake = createFakePrompter({
@@ -334,15 +341,94 @@ describe("runRegistryFlow", () => {
       ],
     });
     expect(flowDeps.runDeployFlow).toHaveBeenCalledTimes(1);
-    expect(prompts.at(-1)).toMatchObject({
-      message: "Open a link?",
+    expect(prompts[3]).toMatchObject({
+      initialValue: "add-more",
+      hintLayout: "inline",
       options: [
-        { value: "0", label: "Open Slack", hint: "https://slack.com/app" },
-        { value: "1", label: "Open Slack", hint: "https://slack.com/app" },
-        { value: "none", label: "Not now" },
+        { value: "add-more", label: "Add more" },
+        { value: "deploy", label: "Deploy" },
+        { value: "finish", label: "Finish" },
       ],
     });
-    expect(flowDeps.openUrl).toHaveBeenCalledWith("https://slack.com/app");
+    expect(prompts[8]).toMatchObject({
+      message: "Deploy to prod?",
+      initialValue: "yes",
+      options: [
+        { value: "yes", label: "Yes" },
+        { value: "back", label: "Back" },
+      ],
+    });
+  });
+
+  it("returns to continuation options when production deployment is not confirmed", async () => {
+    const answers = ["category:channel", "item:0", "add", "deploy", "back", "finish"];
+    const fake = createFakePrompter({ single: () => answers.shift()! });
+    const flowDeps = deps({
+      browseRegistryCatalog: vi.fn(async () => ({
+        items: [{ address: "channel/github", name: "channel/github", source: "Vercel" }],
+        total: 1,
+        errors: [],
+      })),
+      detectDeployment: vi.fn(async () => ({ state: "linked" as const, projectId: "prj_1" })),
+      installRegistryItem: vi.fn(async () => ({
+        output: [],
+        setup: { facts: [], deploymentRequired: true as const },
+      })),
+    });
+
+    await expect(
+      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps }),
+    ).resolves.toMatchObject({ addedItems: ["channel/github"] });
+    expect(flowDeps.runDeployFlow).not.toHaveBeenCalled();
+  });
+
+  it("preserves earlier setup results when a later item fails", async () => {
+    const answers = [
+      "category:channel",
+      "item:0",
+      "add",
+      "add-more",
+      "category:channel",
+      "item:0",
+      "add",
+    ];
+    const fake = createFakePrompter({ single: () => answers.shift()! });
+    let installs = 0;
+    const flowDeps = deps({
+      browseRegistryCatalog: vi.fn(async () => ({
+        items: [
+          { address: "channel/photon-imessage", name: "channel/photon-imessage", source: "Vercel" },
+        ],
+        total: 1,
+        errors: [],
+      })),
+      installRegistryItem: vi.fn(async () => {
+        installs += 1;
+        if (installs === 2) throw new Error("Refusing to overwrite photon.ts");
+        return {
+          output: [],
+          setup: {
+            facts: [{ label: "Agent phone number", value: "+15551234567" }],
+            deploymentRequired: true as const,
+          },
+        };
+      }),
+    });
+
+    const error = await runRegistryFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      deps: flowDeps,
+    }).catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(RegistryFlowFailedError);
+    expect(error).toMatchObject({
+      message: "Refusing to overwrite photon.ts",
+      completed: {
+        addedItems: ["channel/photon-imessage"],
+        facts: [{ label: "Agent phone number", value: "+15551234567" }],
+      },
+    });
   });
 
   it("does not offer another item or deployment after a non-deployable setup", async () => {
@@ -360,7 +446,7 @@ describe("runRegistryFlow", () => {
 
     await expect(
       runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() }),
-    ).resolves.toEqual({ kind: "done", addedItems: [], facts: [], output: [] });
+    ).resolves.toEqual({ kind: "done", addedItems: [], items: [], facts: [], output: [] });
 
     expect(fake.selectMessages).toEqual([
       "Add an integration",

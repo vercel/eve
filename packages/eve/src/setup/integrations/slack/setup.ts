@@ -238,7 +238,7 @@ export async function setupSlack(
           ? []
           : [
               {
-                label: "Open Slack DM",
+                label: "Agent Slack DM",
                 value: slackMessageDeepLink(slackbot.chatUrl),
                 kind: "url",
               },

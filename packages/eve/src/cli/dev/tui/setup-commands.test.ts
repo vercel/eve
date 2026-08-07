@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
+import { RegistryFlowFailedError } from "#setup/flows/registry.js";
 
 import {
   runTuiSetupCommand,
@@ -29,6 +30,7 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
     setStatus: vi.fn(),
     renderLine: vi.fn(),
+    replaceContent: vi.fn(),
     renderOutput: vi.fn(),
     withInheritedStdio: (task) => task(),
     waitForInterrupt: vi.fn(() => ({
@@ -57,6 +59,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
     runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
       kind: "done",
       addedItems: [],
+      items: [],
       facts: [],
     })),
     runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => ({
@@ -97,6 +100,7 @@ describe("runTuiSetupCommand", () => {
     const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
       kind: "done",
       addedItems: [],
+      items: [],
       facts: [],
     }));
 
@@ -331,10 +335,15 @@ describe("runTuiSetupCommand", () => {
   it.each([
     [
       "added",
-      { kind: "done", addedItems: ["extension/browser"], facts: [] },
-      "Registry items added: extension/browser.",
+      {
+        kind: "done",
+        addedItems: ["extension/browser"],
+        items: [{ address: "extension/browser", title: "Agent Browser", facts: [], output: [] }],
+        facts: [],
+      },
+      "Added Agent Browser",
     ],
-    ["empty", { kind: "done", addedItems: [], facts: [] }, "No registry items added."],
+    ["empty", { kind: "done", addedItems: [], items: [], facts: [] }, "No registry items added."],
     ["cancelled", { kind: "cancelled" }, "/add dismissed."],
   ] as const)("reports a %s registry flow", async (_case, result, message) => {
     const runRegistryFlow = vi.fn(async () => result);
@@ -350,6 +359,75 @@ describe("runTuiSetupCommand", () => {
     if (result.kind === "done" && result.addedItems.length > 0) expected.tone = "success";
     expect(outcome).toEqual(expected);
     expect(runRegistryFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+  });
+
+  it("overrides a settled success tone when add is interrupted", async () => {
+    const renderer = fakePanelRenderer();
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(
+        ({ signal }) =>
+          new Promise((resolve) => {
+            signal?.addEventListener(
+              "abort",
+              () =>
+                resolve({
+                  kind: "done",
+                  addedItems: ["channel/github"],
+                  items: [{ address: "channel/github", title: "GitHub", facts: [], output: [] }],
+                  facts: [],
+                }),
+              { once: true },
+            );
+          }),
+      ),
+    });
+
+    const result = run({ command: "add", flows, renderer });
+    renderer.fireInterrupt();
+
+    await expect(result).resolves.toEqual({
+      message: "/add interrupted.",
+      tone: "error",
+      preserveFlowDiagnostics: true,
+    });
+  });
+
+  it("reports completed items and facts when a later add fails", async () => {
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => {
+        throw new RegistryFlowFailedError(new Error("Refusing to overwrite github.ts"), {
+          kind: "done",
+          addedItems: ["channel/photon-imessage"],
+          items: [
+            {
+              address: "channel/photon-imessage",
+              title: "Photon iMessage",
+              output: [],
+              facts: [
+                { label: "Agent phone number", value: "+15551234567" },
+                { label: "Photon project dashboard", value: "https://app.photon.codes/project" },
+              ],
+            },
+          ],
+          output: [],
+          facts: [
+            { label: "Agent phone number", value: "+15551234567" },
+            { label: "Photon project dashboard", value: "https://app.photon.codes/project" },
+          ],
+        });
+      }),
+    });
+
+    await expect(run({ command: "add", flows })).resolves.toEqual({
+      message:
+        "Added Photon iMessage\n\n" +
+        "Photon iMessage\n" +
+        "  Agent phone number        +15551234567\n" +
+        "  Photon project dashboard  https://app.photon.codes/project\n\n" +
+        "Refusing to overwrite github.ts",
+      tone: "error",
+      preserveFlowDiagnostics: true,
+    });
   });
 
   it("reports the production URL after a deploy", async () => {
@@ -398,6 +476,7 @@ describe("runTuiSetupCommand", () => {
 
     await expect(result).resolves.toEqual({
       message: "/model interrupted.",
+      tone: "error",
       preserveFlowDiagnostics: true,
       effect: { kind: "model-access-changed" },
     });

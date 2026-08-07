@@ -143,7 +143,8 @@ export async function setupGitHub(
     return {
       kind: "done",
       completion: {
-        facts: [{ label: "Vercel Connect", value: dashboardUrl, kind: "url" }],
+        facts: [{ label: "GitHub App dashboard", value: dashboardUrl, kind: "url" }],
+        deploymentRequired: true,
       },
     };
   } catch (error) {

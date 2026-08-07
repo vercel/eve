@@ -7,7 +7,7 @@ import {
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import { runModelFlow, type ModelProviderOutcome } from "#setup/flows/model.js";
 import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
-import { runRegistryFlow } from "#setup/flows/registry.js";
+import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.js";
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
@@ -63,6 +63,27 @@ export interface TuiSetupFlows {
   runDeployFlow: typeof runDeployFlow;
 }
 
+function joinedTitles(titles: readonly string[]): string {
+  if (titles.length === 0) return "";
+  if (titles.length === 1) return titles[0]!;
+  if (titles.length === 2) return `${titles[0]} and ${titles[1]}`;
+  return `${titles.slice(0, -1).join(", ")}, and ${titles.at(-1)}`;
+}
+
+function registryResultMessage(
+  result: Extract<Awaited<ReturnType<typeof runRegistryFlow>>, { kind: "done" }>,
+): string {
+  const lines = [`Added ${joinedTitles(result.items.map((item) => item.title))}`];
+  for (const item of result.items) {
+    if (item.facts.length === 0 && item.output.length === 0) continue;
+    lines.push("", item.title);
+    const width = Math.max(0, ...item.facts.map((fact) => fact.label.length));
+    for (const fact of item.facts) lines.push(`  ${fact.label.padEnd(width)}  ${fact.value}`);
+    for (const output of item.output) lines.push(`  ${output}`);
+  }
+  return lines.join("\n");
+}
+
 export interface TuiSetupCommandResult {
   message: string;
   /** Promotes an outcome to a top-level status. */
@@ -107,6 +128,9 @@ function muteableRenderer(
         renderer.renderLine(text, tone);
       }
     },
+    replaceContent: (content) => {
+      if (!isMuted()) renderer.replaceContent?.(content);
+    },
     renderOutput: (text) => {
       if (!isMuted()) renderer.renderOutput(text);
     },
@@ -146,6 +170,7 @@ export async function runTuiSetupCommand(
     return {
       ...settled,
       message: `/${command} interrupted.`,
+      tone: "error",
       preserveFlowDiagnostics: true,
     };
   } finally {
@@ -233,11 +258,7 @@ async function executeSetupCommand(
         }
         if (result.addedItems.length > 0) {
           return {
-            message: [
-              `Registry items added: ${result.addedItems.join(", ")}.`,
-              ...(result.output ?? []),
-              ...result.facts.map((fact) => `${fact.label}: ${fact.value}`),
-            ].join("\n"),
+            message: registryResultMessage(result),
             tone: "success",
             preserveFlowDiagnostics: true,
           };
@@ -264,6 +285,14 @@ async function executeSetupCommand(
       }
     }
   } catch (error) {
+    if (error instanceof RegistryFlowFailedError) {
+      const completed = error.completed;
+      return {
+        message: `${registryResultMessage(completed)}\n\n${error.message}`,
+        tone: "error",
+        preserveFlowDiagnostics: true,
+      };
+    }
     if (error instanceof WizardCancelledError) {
       return {
         message: `/${command} dismissed.`,

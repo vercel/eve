@@ -42,7 +42,7 @@ describe("GitHub setup", () => {
         },
         effects,
       ),
-    ).resolves.toMatchObject({ kind: "done" });
+    ).resolves.toMatchObject({ kind: "done", completion: { deploymentRequired: true } });
 
     expect(effects.provisionConnector).toHaveBeenCalledWith(
       expect.objectContaining({ events: selectedEvents }),

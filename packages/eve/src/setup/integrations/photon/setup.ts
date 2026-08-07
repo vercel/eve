@@ -28,12 +28,12 @@ export const PHOTON_SETUP: SetupIntegration = {
             ? []
             : [
                 {
-                  label: "Text your agent",
+                  label: "Agent phone number",
                   value: result.assignedPhoneNumber,
                   kind: "phone" as const,
                 },
               ]),
-          { label: "Photon project", value: result.dashboardUrl, kind: "url" as const },
+          { label: "Photon project dashboard", value: result.dashboardUrl, kind: "url" as const },
         ],
       },
     };

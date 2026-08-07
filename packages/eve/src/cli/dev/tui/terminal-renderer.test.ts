@@ -4104,6 +4104,41 @@ describe("TerminalRenderer setup flow session", () => {
     renderer.shutdown();
   });
 
+  it("replaces setup lines with a compact current-item summary", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    renderer.setupFlow.begin("Add to your agent");
+    renderer.setupFlow.renderLine("Scaffolded channel: photon", "success");
+    renderer.setupFlow.renderLine("Photon project: https://app.photon.codes", "success");
+    renderer.setupFlow.replaceContent?.({
+      headline: "Scaffolded channel/photon-imessage",
+      facts: [
+        { label: "Agent phone number", value: "+15551234567" },
+        { label: "Photon project dashboard", value: "https://app.photon.codes" },
+      ],
+    });
+    const answer = renderer.setupFlow.readSelect({
+      kind: "task-list",
+      message: "What would you like to do next?",
+      options: [
+        { value: "add-more", label: "Add more" },
+        { value: "finish", label: "Finish", trailingAction: true },
+      ],
+    });
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Scaffolded channel/photon-imessage");
+    expect(snapshot).toContain("Agent phone number: +15551234567");
+    expect(snapshot).toContain("Photon project dashboard: https://app.photon.codes");
+    expect(snapshot).not.toContain("Scaffolded channel: photon");
+    expect(snapshot).not.toContain("Photon project: https://app.photon.codes");
+
+    input.enter();
+    await expect(answer).resolves.toEqual(["add-more"]);
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    renderer.shutdown();
+  });
+
   it("keeps enter on a completed setup row as a no-op", async () => {
     const { input, renderer } = makeRenderer();
     const answer = renderer.setupFlow.readSelect({

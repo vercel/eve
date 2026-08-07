@@ -7,7 +7,6 @@ import type {
   SingleSelectOptions,
 } from "#setup/prompter.js";
 import { runDeployFlow } from "#setup/flows/deploy.js";
-import { openUrl } from "#setup/primitives/open-url.js";
 import { detectDeployment } from "#setup/project-resolution.js";
 import type { RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
@@ -65,7 +64,6 @@ export interface RegistryFlowDeps {
   detectDeployment: typeof detectDeployment;
   getRegistryItemManifest: (typeof import("#cli/commands/registry.js"))["getRegistryItemManifest"];
   installRegistryItem: (typeof import("#cli/commands/registry.js"))["installRegistryItem"];
-  openUrl: typeof openUrl;
   runDeployFlow: typeof runDeployFlow;
 }
 
@@ -73,11 +71,22 @@ export type RegistryFlowResult =
   | {
       kind: "done";
       addedItems: readonly string[];
+      items: readonly import("./registry-session.js").RegistrySessionItemResult[];
       facts: readonly RegistrySetupFact[];
       output?: readonly string[];
-      deployed?: "production" | "preview";
+      deployed?: "production";
     }
   | { kind: "cancelled" };
+
+export class RegistryFlowFailedError extends Error {
+  readonly completed: Extract<RegistryFlowResult, { kind: "done" }>;
+
+  constructor(error: unknown, completed: Extract<RegistryFlowResult, { kind: "done" }>) {
+    super(error instanceof Error ? error.message : String(error), { cause: error });
+    this.name = "RegistryFlowFailedError";
+    this.completed = completed;
+  }
+}
 
 function itemLabel(item: RegistryCatalogItem): string {
   if (item.title !== undefined) return item.title;
@@ -279,7 +288,6 @@ export async function runRegistryFlow(input: {
     detectDeployment: input.deps?.detectDeployment ?? detectDeployment,
     getRegistryItemManifest: input.deps?.getRegistryItemManifest ?? loaded!.getRegistryItemManifest,
     installRegistryItem: input.deps?.installRegistryItem ?? loaded!.installRegistryItem,
-    openUrl: input.deps?.openUrl ?? openUrl,
     runDeployFlow: input.deps?.runDeployFlow ?? runDeployFlow,
   };
   let notices: SelectNotice[] = [];
@@ -343,7 +351,12 @@ export async function runRegistryFlow(input: {
       );
       if (inspected.kind !== "added") continue;
 
-      session.add(resolved.item.address, inspected.output, inspected.setup);
+      session.add(
+        resolved.item.address,
+        itemLabel(resolved.item),
+        inspected.output,
+        inspected.setup,
+      );
       const next = await session.continueAfterInstall({
         appRoot: input.appRoot,
         prompter: input.prompter,
@@ -354,6 +367,8 @@ export async function runRegistryFlow(input: {
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };
+    const completed = session.result();
+    if (completed.addedItems.length > 0) throw new RegistryFlowFailedError(error, completed);
     throw error;
   }
 }

@@ -499,6 +499,31 @@ describe("registry commands", () => {
     ]);
   });
 
+  it("does not ask again after the TUI authorizes installation", async () => {
+    const fake = createFakePrompter();
+    const runSetup = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await installRegistryItem(
+      "/project",
+      "channel/slack",
+      { prompter: fake.prompter },
+      { loadSetupCommandRunner: async () => runSetup },
+    );
+
+    expect(fake.selectMessages).toEqual([]);
+    expect(runSetup).toHaveBeenCalledWith(
+      "/project",
+      { package: "@acme/slack", bin: "eve-slack", args: ["setup"] },
+      "channel/slack",
+      expect.objectContaining({ prompter: fake.prompter }),
+    );
+  });
+
   it("asks before setup and prints the resume command when declined", async () => {
     const logger = createLogger();
     const runSetup = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));

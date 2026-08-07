@@ -56,6 +56,12 @@ export interface AddCommandDependencies extends RegistrySetupDependencies {
   hasInteractiveTerminal?: () => boolean;
 }
 
+type RunAddCommandOptions = AddCommandOptions & {
+  prompter?: Prompter;
+  signal?: AbortSignal;
+  setupAuthorized?: boolean;
+};
+
 /** One discoverable item from an eve-compatible registry catalog. */
 export interface RegistryCatalogItem {
   address: string;
@@ -466,7 +472,11 @@ export async function installRegistryItem(
     logger,
     appRoot,
     item,
-    { ...options, yes: options.prompter === undefined ? true : options.yes },
+    {
+      ...options,
+      yes: options.prompter === undefined ? true : options.yes,
+      setupAuthorized: options.prompter !== undefined,
+    },
     dependencies,
   );
   process.exitCode = previousExitCode;
@@ -481,7 +491,7 @@ export async function runAddCommand(
   logger: RegistryCommandLogger,
   appRoot: string,
   item: string,
-  options: AddCommandOptions & { prompter?: Prompter; signal?: AbortSignal },
+  options: RunAddCommandOptions,
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
 ): Promise<RegistrySetupCompletion | undefined> {
   return runRegistryAction(logger, appRoot, async () => {
@@ -566,12 +576,15 @@ export async function runAddCommand(
     const interactive =
       dependencies.hasInteractiveTerminal?.() ??
       defaultAddCommandDependencies.hasInteractiveTerminal!();
-    if (options.skipSetup === true || (!options.yes && !interactive)) {
+    if (
+      options.skipSetup === true ||
+      (!options.yes && !interactive && options.setupAuthorized !== true)
+    ) {
       logger.log(setupReminder(item, "skipped"));
       return;
     }
 
-    if (!options.yes) {
+    if (!options.yes && options.setupAuthorized !== true) {
       try {
         const prompter =
           options.prompter ??
