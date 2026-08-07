@@ -115,8 +115,7 @@ describe("local instrumentation runtime", () => {
         turnId: "turn-1",
         type: "turn.completed",
       });
-      // The turn span itself is emitted at the session transition, carrying
-      // the span id its descendants already parented to.
+      // Settling the turn emits the turn span with the pre-allocated id.
       await runtime.hooks.publish({
         sessionId: "session-1",
         turnId: "turn-1",

@@ -218,8 +218,6 @@ describe("eve traces", () => {
 
     await runTraceShowCommand(output.logger, root, "session-one");
 
-    // The session window root is the only zero-duration marker eve records;
-    // it borrows its descendants' extent.
     expect(output.out[0]).toContain("agent.session  85ms");
     expect(output.out[0]).toContain("agent.turn  85ms");
     expect(output.out[0]).toContain("agent.step  70ms");

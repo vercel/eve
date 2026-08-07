@@ -1,12 +1,8 @@
 /**
- * Trace/span id source shared by the local OTel registration and the agent
- * OTel provider.
- *
- * A turn outlives the worker that starts it, so no live span object can cover
- * it. The provider allocates the turn's span id up front, parents descendants
- * through the persisted span context, and emits the span itself at the turn's
- * terminal — priming this generator so the emitted span carries the id its
- * descendants already reference.
+ * Id generator shared by `registerOTel` and the agent OTel provider. A span
+ * whose lifetime crosses durable worker boundaries (`agent.turn`) is emitted
+ * at its terminal; priming the next span id lets that span carry the
+ * pre-allocated id its descendants already parented to.
  */
 export class AgentSpanIdGenerator {
   #primedSpanId: string | undefined;

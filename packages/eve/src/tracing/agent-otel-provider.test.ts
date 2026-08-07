@@ -261,8 +261,6 @@ describe("createAgentOtelInstrumentation", () => {
       "turn.completed",
       "session.waiting",
     ]);
-    // The turn span carries the turn's real extent: it is emitted at the
-    // session transition with the start time recorded at `turn.started`.
     // Turn timestamps are millisecond-quantized (`Date.now`), so the end
     // comparison against the step's sub-millisecond clock gets 1ms of slack.
     expect(turn.attributes).toMatchObject({ "agent.name": "weather", "agent.session.window": 0 });
@@ -532,9 +530,8 @@ describe("createAgentOtelInstrumentation", () => {
     });
     await replacementRuntime.provider.forceFlush();
 
-    // The worker that started the turn emitted no turn span — the
-    // replacement's session transition emits it with the span id the first
-    // worker allocated, so descendants from both workers stay attached.
+    // The replacement's session transition emits the turn span with the span
+    // id the first worker allocated, so descendants from both workers attach.
     expect(byName(firstRuntime.exporter.getFinishedSpans(), "agent.turn")).toHaveLength(0);
     const replacementSpans = replacementRuntime.exporter.getFinishedSpans();
     const turn = byName(replacementSpans, "agent.turn")[0]!;

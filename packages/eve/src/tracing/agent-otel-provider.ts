@@ -63,9 +63,9 @@ export interface AgentOtelInstrumentationInput {
   readonly captureContent?: boolean;
   readonly frameworkVersion: string;
   /**
-   * Must also be the registered tracer provider's id generator: a turn span
-   * is emitted at the turn's terminal with the pre-allocated span id its
-   * descendants already parented to.
+   * Must be the registered tracer provider's id generator, so a turn span
+   * emitted at its terminal carries the pre-allocated id (see
+   * {@link AgentSpanIdGenerator}).
    */
   readonly idGenerator: AgentSpanIdGenerator;
   readonly stateStore: AgentTraceStateStore;
@@ -108,10 +108,9 @@ export function createAgentOtelInstrumentation(
         type: "session.started",
       }),
     );
-    // The turn outlives this worker, so no live span object can cover it.
-    // Its span id is allocated now — descendants parent through the persisted
-    // context — and the span itself is emitted with real timestamps at the
-    // turn's session transition.
+    // The turn outlives this worker, so no live span can cover it: the span
+    // id is allocated now for descendants to parent through, and the span
+    // itself is emitted at the turn's session transition.
     const turnContext: SpanContext = {
       isRemote: false,
       spanId: input.idGenerator.allocateSpanId(),
