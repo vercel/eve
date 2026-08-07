@@ -801,7 +801,8 @@ describe("turnWorkflow", () => {
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "continue",
       remainder: undefined,
-      sessionState: retiredProxyState,
+      serializedContext: { state: "proxied" },
+      sessionState: proxyState,
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -882,7 +883,8 @@ describe("turnWorkflow", () => {
     });
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "cancel-turn",
-      sessionState: retiredProxyState,
+      serializedContext: { state: "proxied" },
+      sessionState: proxyState,
     });
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "park",
@@ -1096,6 +1098,7 @@ describe("turnWorkflow", () => {
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "continue",
       remainder: undefined,
+      serializedContext: {},
       sessionState: pendingState,
     });
     vi.mocked(turnStep)

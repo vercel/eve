@@ -45,7 +45,7 @@ export type CompileAgentNodeManifestFn = (
   options?: {
     readonly agentConfigDefinition?: unknown;
     readonly externalDependencies?: readonly string[];
-    readonly allowWorkflowConfig?: boolean;
+    readonly allowRootOnlyConfig?: boolean;
   },
 ) => Promise<CompiledAgentNodeManifest>;
 
@@ -218,10 +218,23 @@ async function compileSubagent(input: {
   if (input.configResolver === undefined) {
     const agent = await input.compileAgentNodeManifest(sourceManifest, input.context, {
       agentConfigDefinition: input.agentConfigDefinition,
-      allowWorkflowConfig: false,
-      externalDependencies: inheritedExternalDependencies,
-    });
-    const description = agent.config.description;
+      allowRootOnlyConfig: false,
+      externalDependencies: input.externalDependencies,
+    },
+  );
+
+  const description = agent.config.description;
+
+  let variant:
+    | { readonly description: string; readonly dynamic?: never }
+    | {
+        readonly description?: never;
+        readonly dynamic: { readonly eventNames: readonly string[] };
+      };
+
+  if (input.dynamic !== undefined) {
+    variant = { dynamic: input.dynamic };
+  } else {
     if (!description) {
       throw new Error(
         `Local subagent "${input.source.logicalPath}" is missing a "description" field on its agent config. Add \`description\` to \`defineAgent({ ... })\` so the parent agent can decide when to delegate to this subagent.`,

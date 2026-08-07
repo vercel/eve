@@ -430,7 +430,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["cancel"]>>;
         try {
-          result = await attachSession(sessionId).cancel({ turnId: body.turnId });
+          result = await attachSession(sessionId).cancel({
+            taskId: body.taskId,
+            turnId: body.turnId,
+          });
         } catch (error) {
           const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
           return Response.json(
@@ -797,6 +800,7 @@ function parseSessionMessageBody(
 }
 
 interface ParsedCancelTurnBody {
+  taskId?: string;
   turnId?: string;
 }
 
@@ -807,16 +811,23 @@ async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody |
   if (tokenRejection !== null) return tokenRejection;
 
   const turnId = payload.turnId;
-  if (turnId === undefined) {
-    return {};
-  }
-  if (typeof turnId !== "string" || turnId.length === 0) {
+  const taskId = payload.taskId;
+  if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
     return Response.json(
       { error: "Expected 'turnId' to be a non-empty string.", ok: false },
       { status: 400 },
     );
   }
-  return { turnId };
+  if (taskId !== undefined && (typeof taskId !== "string" || taskId.length === 0)) {
+    return Response.json(
+      { error: "Expected 'taskId' to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
+  const result: ParsedCancelTurnBody = {};
+  if (typeof taskId === "string") result.taskId = taskId;
+  if (typeof turnId === "string") result.turnId = turnId;
+  return result;
 }
 
 async function parseJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {

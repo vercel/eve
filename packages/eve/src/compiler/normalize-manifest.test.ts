@@ -148,6 +148,53 @@ describe("compileAgentManifest", () => {
     });
   });
 
+  it("rejects background-task configuration on subagents", async () => {
+    const subagentManifest = createAgentSourceManifest({
+      agentId: "research",
+      agentRoot: "/app/agent/subagents/research",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({
+        logicalPath: "agent.ts",
+      }),
+    });
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      subagents: [
+        createLocalSubagentSourceRef({
+          entryPath: "subagents/research/agent.ts",
+          logicalPath: "subagents/research",
+          manifest: subagentManifest,
+          rootPath: "/app/agent/subagents/research",
+          subagentId: "research",
+        }),
+      ],
+    });
+
+    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) => {
+      if (input.agentId === "research") {
+        return createConfig({
+          description: "Research subagent",
+          name: "research",
+          experimental: {
+            tasks: true,
+          },
+        });
+      }
+
+      return createConfig({ name: "root" });
+    });
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      description: "Research subagent",
+      model: "openai/gpt-5.5",
+    });
+
+    await expect(compileAgentManifest(manifest)).rejects.toThrow(
+      'Remove "experimental.tasks" from "research"',
+    );
+  });
+
   it("compiles experimental Workflow tool configuration", async () => {
     const manifest = createAgentSourceManifest({
       agentId: "root",

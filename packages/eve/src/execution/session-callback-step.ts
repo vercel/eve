@@ -1,4 +1,4 @@
-import type { SessionCallback } from "#channel/types.js";
+import type { SessionCallback, SubagentAuthorizationEvent } from "#channel/types.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { SessionCallbackKey } from "#context/keys.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
@@ -6,8 +6,41 @@ import { SESSION_FAILED } from "#harness/agent-handle-errors.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 const log = createLogger("execution.session-callback");
+
+/** Sends task-owned remote HITL and authorization events to the parent callback capability. */
+export async function fireTaskEventCallbackStep(input: {
+  readonly callback: unknown;
+  readonly childContinuationToken: string;
+  readonly childSessionId: string;
+  readonly event:
+    | SubagentAuthorizationEvent
+    | Extract<UnstampedMessageStreamEvent, { type: "input.requested" }>;
+}): Promise<void> {
+  "use step";
+
+  const callback = parseSerializedSessionCallback(input.callback);
+  if (callback.taskId === undefined) return;
+  const inputRequested = input.event.type === "input.requested";
+  const kind = inputRequested ? "task.input-requested" : "task.authorization";
+  const response = await postSessionCallbackRequest({
+    body: {
+      callId: callback.callId,
+      childContinuationToken: input.childContinuationToken,
+      childSessionId: input.childSessionId,
+      event: inputRequested ? input.event.data : input.event,
+      kind,
+      subagentName: callback.subagentName,
+      taskId: callback.taskId,
+    },
+    url: callback.url,
+  });
+  if (!response.ok) {
+    throw new Error(`Task event callback failed with HTTP ${response.status}.`);
+  }
+}
 
 /**
  * Sends the configured session terminal callback.
@@ -57,6 +90,7 @@ export async function fireSessionCallbackStep(input: {
             kind: "session.failed" as const,
             sessionId,
             subagentName: callback.subagentName,
+            usage: input.usage,
           };
 
     const response = await postSessionCallbackRequest({ body, url: callback.url });

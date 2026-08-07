@@ -1126,12 +1126,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // assistant-final histories. See resolveAgentsAnnouncement for the role
     // rationale (assistant-final rejection, prompt-cache preservation).
     if (config.persistentSubagentSessions === true) {
-      const announcement = resolveAgentsAnnouncement({
-        messages,
-        store: getAgentHandleStore(session.state),
-      });
-      if (announcement !== undefined) {
-        messages.push({ content: announcement, role: "user" });
+      const store = getAgentHandleStore(session.state);
+      if (store?.handles.some((handle) => handle.phase === "addressed") !== true) {
+        const announcement = resolveAgentsAnnouncement({ messages, store });
+        if (announcement !== undefined) {
+          messages.push({ content: announcement, role: "user" });
+        }
       }
     }
 

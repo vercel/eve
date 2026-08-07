@@ -68,8 +68,10 @@ export async function emitProxiedInputRequest(input: {
 export interface RoutedDeliverPayload {
   readonly forChildren: readonly {
     readonly childContinuationToken: string;
+    readonly childResponseUrl?: string;
     readonly payload: { readonly inputResponses: readonly InputResponse[] };
-    readonly retireRequestIds: readonly string[];
+    /** Present when the child is owned by a task run, which delivers on the parent's behalf. */
+    readonly taskId?: string;
   }[];
   readonly forSelf: DeliverPayload | undefined;
   readonly parentAction: { readonly kind: "cancel-turn" } | undefined;
@@ -77,6 +79,7 @@ export interface RoutedDeliverPayload {
 
 /** Splits a deliver payload into parent-local and proxied-child buckets. */
 export function routeDeliverPayload(input: {
+  readonly allowRoute?: (requestId: string, route: ProxyInputRequest) => boolean;
   readonly payload: DeliverPayload;
   readonly state: SessionStateMap | undefined;
 }): RoutedDeliverPayload {
@@ -85,7 +88,12 @@ export function routeDeliverPayload(input: {
 
   const responsesByChild = new Map<
     string,
-    { responses: InputResponse[]; routes: ProxyInputRequest[] }
+    {
+      readonly childContinuationToken: string;
+      readonly childResponseUrl?: string;
+      readonly responses: InputResponse[];
+      taskId?: string;
+    }
   >();
   const unroutedResponses: InputResponse[] = [];
   let parentAction: RoutedDeliverPayload["parentAction"];
@@ -93,7 +101,7 @@ export function routeDeliverPayload(input: {
   for (const response of inputResponses) {
     const route = entries.get(response.requestId);
 
-    if (route === undefined) {
+    if (route === undefined || input.allowRoute?.(response.requestId, route) === false) {
       unroutedResponses.push(response);
       continue;
     }
@@ -102,38 +110,44 @@ export function routeDeliverPayload(input: {
       parentAction = { kind: "cancel-turn" };
     }
 
-    const existing = responsesByChild.get(route.childContinuationToken);
+    const bucketKey =
+      route.taskId === undefined
+        ? route.childContinuationToken
+        : `${route.childContinuationToken}\0${route.childResponseUrl ?? "local"}\0${route.taskId}`;
+    const existing = responsesByChild.get(bucketKey);
 
     if (existing === undefined) {
-      responsesByChild.set(route.childContinuationToken, {
+      const bucket = {
+        childContinuationToken: route.childContinuationToken,
+        childResponseUrl: route.childResponseUrl,
         responses: [response],
-        routes: [route],
-      });
+      } as {
+        readonly childContinuationToken: string;
+        readonly childResponseUrl?: string;
+        readonly responses: InputResponse[];
+        taskId?: string;
+      };
+      if (route.taskId !== undefined) bucket.taskId = route.taskId;
+      responsesByChild.set(bucketKey, bucket);
     } else {
       existing.responses.push(response);
-      existing.routes.push(route);
     }
   }
 
-  const forChildren: RoutedDeliverPayload["forChildren"] = [...responsesByChild.entries()].map(
-    ([childContinuationToken, bucket]) => {
-      const responseIds = new Set(bucket.responses.map((response) => response.requestId));
-      const retireRequestIds = new Set(responseIds);
-
-      for (const route of bucket.routes) {
-        if (
-          route.batch !== undefined &&
-          batchResolves({ batch: route.batch, childContinuationToken, entries, responseIds })
-        ) {
-          for (const requestId of route.batch.requestIds) retireRequestIds.add(requestId);
-        }
-      }
-
-      return {
+  const forChildren: RoutedDeliverPayload["forChildren"] = [...responsesByChild.values()].map(
+    ({ childContinuationToken, childResponseUrl, responses, taskId }) => {
+      const bucket: {
+        readonly childContinuationToken: string;
+        childResponseUrl?: string;
+        readonly payload: { readonly inputResponses: readonly InputResponse[] };
+        taskId?: string;
+      } = {
         childContinuationToken,
-        payload: { inputResponses: bucket.responses },
-        retireRequestIds: [...retireRequestIds],
+        payload: { inputResponses: responses },
       };
+      if (childResponseUrl !== undefined) bucket.childResponseUrl = childResponseUrl;
+      if (taskId !== undefined) bucket.taskId = taskId;
+      return bucket;
     },
   );
 

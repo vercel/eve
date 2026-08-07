@@ -1,9 +1,19 @@
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import {
   routeProxiedDeliverStep,
   type RoutedDeliverResult,
-} from "#execution/route-proxied-deliver-step.js";
+} from "#execution/proxied-deliver-step.js";
+import {
+  emitRecordedTaskAuthorizationEventStep,
+  emitRecordedTaskInputRequestStep,
+} from "#execution/subagent-event-proxy-step.js";
+import {
+  acceptTaskAuthorizationEventStep,
+  recordTerminalTaskSnapshotsStep,
+  recordTaskInputRequestStep,
+} from "#execution/tasks/hitl-proxy-steps.js";
 
 /**
  * Coalesces inbound deliver payloads and routes any descendant-bound input
@@ -16,17 +26,78 @@ import {
  * re-export plain helpers into a workflow body).
  */
 export async function routeDeliverToChildren(input: {
-  readonly delivery: DeliverHookPayload;
+  readonly auth?: SessionAuthContext | null;
   readonly parentWritable: WritableStream<Uint8Array>;
+  readonly payloads: readonly DeliverPayload[];
   readonly sessionState: DurableSessionState;
+  readonly serializedContext: Record<string, unknown>;
 }): Promise<RoutedDeliverResult> {
-  if (!input.sessionState.hasProxyInputRequests) {
-    return { kind: "continue", remainder: input.delivery, sessionState: input.sessionState };
+  let payload = coalesceDeliverPayloads(input.payloads);
+  let serializedContext = input.serializedContext;
+  let sessionState = input.sessionState;
+
+  if ((payload.task?.snapshots?.length ?? 0) > 0) {
+    sessionState = await recordTerminalTaskSnapshotsStep({
+      sessionState,
+      snapshots: payload.task?.snapshots ?? [],
+    });
+  }
+
+  for (const request of payload.task?.inputRequests ?? []) {
+    const recorded = await recordTaskInputRequestStep({
+      hookPayload: request.hookPayload,
+      serializedContext,
+      sessionState,
+      taskId: request.taskId,
+    });
+    sessionState = recorded.sessionState;
+    if (!recorded.accepted) continue;
+    const emitted = await emitRecordedTaskInputRequestStep({
+      hookPayload: request.hookPayload,
+      parentWritable: input.parentWritable,
+      serializedContext,
+      sessionState,
+    });
+    serializedContext = emitted.serializedContext;
+    sessionState = emitted.sessionState;
+  }
+
+  for (const request of payload.task?.authorizationEvents ?? []) {
+    const accepted = await acceptTaskAuthorizationEventStep({
+      hookPayload: request.hookPayload,
+      sessionState,
+      taskId: request.taskId,
+    });
+    if (!accepted) continue;
+    const emitted = await emitRecordedTaskAuthorizationEventStep({
+      hookPayload: request.hookPayload,
+      parentWritable: input.parentWritable,
+      serializedContext,
+      sessionState,
+    });
+    serializedContext = emitted.serializedContext;
+    sessionState = emitted.sessionState;
+  }
+
+  if (payload.task !== undefined) {
+    const ordinaryPayload = { ...payload };
+    delete ordinaryPayload.task;
+    payload = ordinaryPayload;
+  }
+  if (!sessionState.hasProxyInputRequests) {
+    return {
+      kind: "continue",
+      remainder: Object.keys(payload).length === 0 ? undefined : payload,
+      serializedContext,
+      sessionState,
+    };
   }
 
   return await routeProxiedDeliverStep({
-    delivery: input.delivery,
+    auth: input.auth,
     parentWritable: input.parentWritable,
-    sessionState: input.sessionState,
+    payload,
+    serializedContext,
+    sessionState,
   });
 }
