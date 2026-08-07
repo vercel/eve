@@ -63,7 +63,11 @@ export function hasStepInput(input?: StepInput): boolean {
     return false;
   }
 
-  return input.message !== undefined || (input.inputResponses?.length ?? 0) > 0;
+  return (
+    input.message !== undefined ||
+    (input.inputResponses?.length ?? 0) > 0 ||
+    (input.attributedInputResponses?.length ?? 0) > 0
+  );
 }
 
 /**
@@ -272,7 +276,11 @@ export function normalizePendingInputResponses(input: {
   const pendingBatch = getPendingInputBatch(input.state);
   const stepInput = input.stepInput;
   if (pendingBatch === undefined) return stepInput;
-  if (typeof stepInput?.message !== "string" || (stepInput.inputResponses?.length ?? 0) > 0) {
+  if (
+    typeof stepInput?.message !== "string" ||
+    (stepInput.inputResponses?.length ?? 0) > 0 ||
+    (stepInput.attributedInputResponses?.length ?? 0) > 0
+  ) {
     return stepInput;
   }
 
@@ -283,8 +291,11 @@ export function normalizePendingInputResponses(input: {
 
   return compactStepInput({
     ...stepInput,
-    inputResponses: responses,
-    inputResponseAuth: responses.map(() => stepInput.messageAuth),
+    attributedInputResponses:
+      stepInput.messageAuth === undefined
+        ? undefined
+        : responses.map((response) => ({ auth: stepInput.messageAuth!, response })),
+    inputResponses: stepInput.messageAuth === undefined ? responses : undefined,
     messageConsumed: true,
     message: undefined,
   });
@@ -299,8 +310,8 @@ function compactStepInput(
 
   const result: {
     context?: StepInput["context"];
+    attributedInputResponses?: StepInput["attributedInputResponses"];
     inputResponses?: StepInput["inputResponses"];
-    inputResponseAuth?: StepInput["inputResponseAuth"];
     message?: StepInput["message"];
     messageAuth?: StepInput["messageAuth"];
     messageConsumed?: boolean;
@@ -310,10 +321,10 @@ function compactStepInput(
   if ((input.context?.length ?? 0) > 0) {
     result.context = input.context;
   }
-  if ((input.inputResponses?.length ?? 0) > 0) {
-    result.inputResponses = input.inputResponses;
-    result.inputResponseAuth = input.inputResponseAuth;
+  if ((input.attributedInputResponses?.length ?? 0) > 0) {
+    result.attributedInputResponses = input.attributedInputResponses;
   }
+  if ((input.inputResponses?.length ?? 0) > 0) result.inputResponses = input.inputResponses;
   if (input.message !== undefined) {
     result.message = input.message;
     result.messageAuth = input.messageAuth;

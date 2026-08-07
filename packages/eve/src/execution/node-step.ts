@@ -2,7 +2,7 @@ import type { LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
-import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
+import { resolveStepDynamicTools } from "#context/dynamic-tool-lifecycle.js";
 import { createHarnessDelegationToolDefinition } from "#execution/delegation-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -103,8 +103,8 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     onCompaction: preserveFrameworkStateOnCompaction,
     persistentSubagentSessions:
       input.node.agent.config?.experimental?.subagentPersistentSessions === true,
-    refreshStepDynamicTools: ({ ctx, event, messages }) =>
-      dispatchDynamicToolEvent({
+    resolveStepDynamicTools: ({ ctx, event, messages }) =>
+      resolveStepDynamicTools({
         ctx: ctx as import("#context/container.js").ContextContainer,
         event,
         messages,

@@ -1,6 +1,6 @@
 import type { ModelMessage, TextPart, UserContent } from "ai";
 
-import type { DurableDeliverPayload, SessionAuthContext } from "#channel/types.js";
+import type { AttributedDeliverPayload } from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { StepInput } from "#harness/types.js";
 
@@ -16,9 +16,9 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     a: a.inputResponses,
     b: b.inputResponses,
   });
-  const inputResponseAuth = [
-    ...(a.inputResponseAuth ?? a.inputResponses?.map(() => undefined) ?? []),
-    ...(b.inputResponseAuth ?? b.inputResponses?.map(() => undefined) ?? []),
+  const attributedInputResponses = [
+    ...(a.attributedInputResponses ?? []),
+    ...(b.attributedInputResponses ?? []),
   ];
   const message = coalesceMessage({
     a: a.message,
@@ -31,17 +31,17 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
   const outputSchema = b.outputSchema ?? a.outputSchema;
 
   const result: {
+    attributedInputResponses?: StepInput["attributedInputResponses"];
     inputResponses?: readonly InputResponse[];
-    inputResponseAuth?: StepInput["inputResponseAuth"];
     message?: string | UserContent;
     messageAuth?: StepInput["messageAuth"];
     context?: readonly string[];
     outputSchema?: StepInput["outputSchema"];
   } = {};
 
-  if (inputResponses !== undefined) {
-    result.inputResponses = inputResponses;
-    result.inputResponseAuth = inputResponseAuth;
+  if (inputResponses !== undefined) result.inputResponses = inputResponses;
+  if (attributedInputResponses.length > 0) {
+    result.attributedInputResponses = attributedInputResponses;
   }
 
   if (message !== undefined) {
@@ -222,15 +222,13 @@ function toUserContentArray(value: string | UserContent): UserContentArray {
  * runtime type.
  */
 interface DeliverLike {
-  readonly auth?: SessionAuthContext | null;
   readonly kind: "deliver";
-  readonly payloads: readonly DurableDeliverPayload[];
+  readonly payloads: readonly AttributedDeliverPayload[];
 }
 
 /**
  * Coalesces an array of deliver-like items into a single item by
- * collecting all payloads. New deliveries carry per-payload attribution;
- * outer auth is retained only for persisted legacy deliveries.
+ * collecting all responder-attributed payloads.
  *
  * Used by the workflow runtime to batch follow-up deliveries that
  * arrived while a turn or subagent delegation was in progress. Each

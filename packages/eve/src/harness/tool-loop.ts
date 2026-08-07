@@ -683,18 +683,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ? { ...effectiveStepInput, message: staleConversion.displayMessage }
         : effectiveStepInput;
 
-    let stepStartedEmitted = false;
     let coordinated = await coordinateApprovalDelivery({
       session,
       stepInput: effectiveStepInput,
     });
     if (coordinated.kind === "policy-work-required") {
       const approvalContext = contextStorage.getStore();
-      if (emit !== undefined) {
-        await emitStepStarted(emit, emissionState, resolvedRuntimeActions.messages);
-        stepStartedEmitted = true;
-      } else if (approvalContext !== undefined && config.refreshStepDynamicTools !== undefined) {
-        await config.refreshStepDynamicTools({
+      if (approvalContext !== undefined && config.resolveStepDynamicTools !== undefined) {
+        await config.resolveStepDynamicTools({
           ctx: approvalContext,
           event: createStepStartedEvent({
             sequence: emissionState.sequence,
@@ -1287,7 +1283,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // Emit step.started before building the toolset so dynamic tool
     // resolvers subscribed to step.started write to LiveStepToolsKey.
-    if (emit && !stepStartedEmitted) {
+    if (emit) {
       await emitStepStarted(emit, emissionState, messages);
     }
 

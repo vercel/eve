@@ -207,7 +207,7 @@ describe("workflowEntry integration", () => {
         );
         await resumeHook(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "follow up after auth" }],
+          payloads: [{ auth: null, payload: { message: "follow up after auth" } }],
         });
 
         const followupTurn = await stream.nextUntil(
@@ -463,7 +463,7 @@ describe("workflowEntry integration", () => {
 
         await resumeHook(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "owner follow up" }],
+          payloads: [{ auth: null, payload: { message: "owner follow up" } }],
         });
         const ownerFollowUp = await ownerStream.nextTurn();
 
@@ -528,7 +528,7 @@ describe("workflowEntry integration", () => {
 
         await resumeHook(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "follow up without structured output" }],
+          payloads: [{ auth: null, payload: { message: "follow up without structured output" } }],
         });
 
         const secondTurn = await stream.nextTurn();

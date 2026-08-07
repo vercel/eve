@@ -99,7 +99,7 @@ describe("turnWorkflow", () => {
     const parentWritable = new WritableStream<Uint8Array>();
     const delivery = {
       kind: "deliver",
-      payloads: [{ message: "hello" }],
+      payloads: [{ auth: null, payload: { message: "hello" } }],
     } satisfies HookPayload;
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "done",
@@ -761,7 +761,12 @@ describe("turnWorkflow", () => {
       {
         delivery: {
           kind: "deliver",
-          payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+          payloads: [
+            {
+              auth: null,
+              payload: { inputResponses: [{ optionId: "approve", requestId: "approval-1" }] },
+            },
+          ],
         },
         kind: "driver-delivery",
         requestId,
@@ -827,7 +832,12 @@ describe("turnWorkflow", () => {
     });
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({
-        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+        payloads: [
+          {
+            auth: null,
+            payload: { inputResponses: [{ optionId: "approve", requestId: "approval-1" }] },
+          },
+        ],
         sessionState: proxyState,
       }),
     );
@@ -849,7 +859,9 @@ describe("turnWorkflow", () => {
       {
         delivery: {
           kind: "deliver",
-          payloads: [{ inputResponses: [{ optionId: "stop", requestId }] }],
+          payloads: [
+            { auth: null, payload: { inputResponses: [{ optionId: "stop", requestId }] } },
+          ],
         },
         kind: "driver-delivery",
         requestId: "turn-token:inbox:delivery:0",
@@ -1050,7 +1062,12 @@ describe("turnWorkflow", () => {
       {
         delivery: {
           kind: "deliver",
-          payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+          payloads: [
+            {
+              auth: null,
+              payload: { inputResponses: [{ optionId: "approve", requestId: "approval-1" }] },
+            },
+          ],
         },
         kind: "driver-delivery",
         requestId: "turn-token:inbox:delivery:0",
@@ -1251,7 +1268,10 @@ function createInput(
       completionToken: "turn-token",
       mode: "conversation",
       stepInput: {
-        input: { kind: "deliver", payloads: [{ message: "hello" }] } satisfies HookPayload,
+        input: {
+          kind: "deliver",
+          payloads: [{ auth: null, payload: { message: "hello" } }],
+        } satisfies HookPayload,
         parentWritable,
         serializedContext: { state: "start" },
         sessionState,

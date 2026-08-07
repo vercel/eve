@@ -969,8 +969,9 @@ describe("coordinateApprovalDelivery", () => {
       now: 100,
       session: pendingSession(),
       stepInput: {
-        inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
-        inputResponseAuth: [null],
+        attributedInputResponses: [
+          { auth: null, response: { optionId: "approve", requestId: "approval-1" } },
+        ],
       },
     });
 
@@ -995,8 +996,9 @@ describe("coordinateApprovalDelivery", () => {
         now: 100,
         session: pendingSession(),
         stepInput: {
-          inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
-          inputResponseAuth: [bob],
+          attributedInputResponses: [
+            { auth: bob, response: { optionId: "approve", requestId: "approval-1" } },
+          ],
           message: "Alice's later message",
           messageAuth: {
             ...bob,

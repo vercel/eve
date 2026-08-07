@@ -222,11 +222,8 @@ export function createWorkflowRuntime(config: {
 
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
       const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
-        auth: input.auth,
         kind: "deliver",
-        payloads: [
-          { auth: input.auth, kind: "attributed-deliver-payload", payload: input.payload },
-        ],
+        payloads: [{ auth: input.auth ?? null, payload: input.payload }],
         requestId: input.requestId,
       };
       try {

@@ -105,7 +105,7 @@ describe("session-limit continuation decline integration", () => {
         // Turn 2 parks on the continuation prompt before any model call.
         await deliver(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "keep going please" }],
+          payloads: [{ auth: null, payload: { message: "keep going please" } }],
         });
         const promptTurn = await stream.nextTurn();
         expect(promptTurn.at(-1)?.type).toBe("session.waiting");
@@ -115,7 +115,9 @@ describe("session-limit continuation decline integration", () => {
         // error, and not a session end.
         await deliver(continuationToken, {
           kind: "deliver",
-          payloads: [{ inputResponses: [{ optionId: "stop", requestId }] }],
+          payloads: [
+            { auth: null, payload: { inputResponses: [{ optionId: "stop", requestId }] } },
+          ],
         });
         const declinedTurn = await stream.nextTurn();
 
@@ -135,7 +137,7 @@ describe("session-limit continuation decline integration", () => {
         // prompt (fail-closed) instead of running a model call.
         await deliver(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "try again" }],
+          payloads: [{ auth: null, payload: { message: "try again" } }],
         });
         const repromptTurn = await stream.nextTurn();
 
@@ -193,7 +195,9 @@ describe("session-limit continuation decline integration", () => {
         // resumable -- same contract as the direct-decline case above.
         await deliver(continuationToken, {
           kind: "deliver",
-          payloads: [{ inputResponses: [{ optionId: "stop", requestId }] }],
+          payloads: [
+            { auth: null, payload: { inputResponses: [{ optionId: "stop", requestId }] } },
+          ],
         });
         const declinedTurn = await stream.nextTurn();
         expect(declinedTurn.at(-1)?.type).toBe("session.waiting");
@@ -207,7 +211,7 @@ describe("session-limit continuation decline integration", () => {
         // running a model call or re-dispatching the delegation.
         await deliver(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "follow up after decline" }],
+          payloads: [{ auth: null, payload: { message: "follow up after decline" } }],
         });
         const followUpTurn = await stream.nextTurn();
 

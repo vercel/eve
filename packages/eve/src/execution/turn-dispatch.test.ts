@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type DeliverHookPayload, type HookPayload, unwrapDeliverPayload } from "#channel/types.js";
+import { type DeliverHookPayload, type HookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
@@ -42,7 +42,7 @@ describe("dispatchAndAwaitTurn", () => {
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
       controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      delivery: { kind: "deliver", payloads: [{ auth: null, payload: { message: "start" } }] },
       deliveryHook,
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
@@ -75,7 +75,7 @@ describe("dispatchAndAwaitTurn", () => {
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
       controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      delivery: { kind: "deliver", payloads: [{ auth: null, payload: { message: "start" } }] },
       deliveryHook,
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
@@ -120,7 +120,12 @@ describe("dispatchAndAwaitTurn", () => {
           done: false,
           value: {
             action: { kind: "park", serializedContext: {}, sessionState: state },
-            bufferedDeliveries: [{ kind: "deliver", payloads: [{ message: "earlier remainder" }] }],
+            bufferedDeliveries: [
+              {
+                kind: "deliver",
+                payloads: [{ auth: null, payload: { message: "earlier remainder" } }],
+              },
+            ],
             kind: "turn-result",
           },
         };
@@ -131,11 +136,14 @@ describe("dispatchAndAwaitTurn", () => {
     await dispatchAndAwaitTurn({
       bufferedDeliveries,
       controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      delivery: { kind: "deliver", payloads: [{ auth: null, payload: { message: "start" } }] },
       deliveryHook: createDeliveryHook({
         next: async () => ({
           done: false,
-          value: { kind: "deliver", payloads: [{ message: "later delivery" }] },
+          value: {
+            kind: "deliver",
+            payloads: [{ auth: null, payload: { message: "later delivery" } }],
+          },
         }),
       }),
       mode: "conversation",
@@ -146,16 +154,17 @@ describe("dispatchAndAwaitTurn", () => {
 
     expect(
       bufferedDeliveries.map((item) =>
-        item.payloads[0]
-          ? unwrapDeliverPayload(item.payloads[0], item.auth).payload.message
-          : undefined,
+        item.payloads[0] ? item.payloads[0].payload.message : undefined,
       ),
     ).toEqual(["earlier remainder", "later delivery"]);
   });
 
   it("re-buffers a forwarded delivery when the turn inbox is already gone", async () => {
     const state = createState("http:test");
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "relayed" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ auth: null, payload: { message: "relayed" } }],
+    };
     vi.mocked(forwardTurnDeliveryStep).mockRejectedValue(
       Object.assign(new Error("inbox gone"), { name: "HookNotFoundError" }),
     );
@@ -176,7 +185,7 @@ describe("dispatchAndAwaitTurn", () => {
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
       controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      delivery: { kind: "deliver", payloads: [{ auth: null, payload: { message: "start" } }] },
       deliveryHook: createDeliveryHook(),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
@@ -201,7 +210,7 @@ describe("dispatchAndAwaitTurn", () => {
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
       controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      delivery: { kind: "deliver", payloads: [{ auth: null, payload: { message: "start" } }] },
       deliveryHook: createDeliveryHook(),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),

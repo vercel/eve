@@ -182,40 +182,18 @@ export interface DeliverPayload {
 
 /** One delivery payload paired with the actor that originated it. */
 export interface AttributedDeliverPayload {
-  readonly auth?: SessionAuthContext | null;
-  readonly kind: "attributed-deliver-payload";
+  readonly auth: SessionAuthContext | null;
   readonly payload: DeliverPayload;
-}
-
-export type DurableDeliverPayload = DeliverPayload | AttributedDeliverPayload;
-
-/** Returns the raw payload and its per-delivery actor, falling back to legacy outer auth. */
-export function unwrapDeliverPayload(
-  value: DurableDeliverPayload,
-  legacyAuth?: SessionAuthContext | null,
-): AttributedDeliverPayload {
-  if (isAttributedDeliverPayload(value)) {
-    return value;
-  }
-  return { auth: legacyAuth, kind: "attributed-deliver-payload", payload: value };
-}
-
-function isAttributedDeliverPayload(
-  value: DurableDeliverPayload,
-): value is AttributedDeliverPayload {
-  return value.kind === "attributed-deliver-payload";
 }
 
 /** Deliver payload sent through the workflow `resumeHook`. */
 export interface DeliverHookPayload {
-  /** Legacy batch-level attribution for persisted pre-attribution deliveries. */
-  readonly auth?: SessionAuthContext | null;
   /** Delegated caller waiting for this turn's settled result. */
   readonly caller?: TurnCaller;
   /** Inbound channel request id used only for workflow attributes. */
   readonly requestId?: string;
   readonly kind: "deliver";
-  readonly payloads: readonly DurableDeliverPayload[];
+  readonly payloads: readonly AttributedDeliverPayload[];
 }
 
 /** Internal wake-up that asks the coordinator to expire due approval candidates. */

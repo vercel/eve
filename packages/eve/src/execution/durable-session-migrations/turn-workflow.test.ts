@@ -156,7 +156,7 @@ describe("turn workflow wire migrations", () => {
 });
 
 function createDelivery(): HookPayload {
-  return { kind: "deliver", payloads: [{ message: "hello" }] };
+  return { kind: "deliver", payloads: [{ auth: null, payload: { message: "hello" } }] };
 }
 
 function createSessionState(overrides: Partial<DurableSessionState> = {}): DurableSessionState {

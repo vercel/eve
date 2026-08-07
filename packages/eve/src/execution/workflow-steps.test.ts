@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { resumeHook } from "#internal/workflow/runtime.js";
+
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
@@ -40,6 +42,7 @@ import { emitTerminalSessionFailureStep } from "#execution/terminal-session-fail
 import {
   dispatchTurnStep,
   resolveEffectiveOutputSchema,
+  routeProxiedDeliverStep,
   turnStep,
 } from "#execution/workflow-steps.js";
 import {
@@ -210,7 +213,7 @@ describe("dispatchTurnStep", () => {
       completionToken: "turn-control",
       delivery: {
         kind: "deliver",
-        payloads: [{ message: "hello" }],
+        payloads: [{ auth: null, payload: { message: "hello" } }],
         requestId: "req_turn",
       },
       mode: "conversation",
@@ -1007,7 +1010,7 @@ describe("turnStep", () => {
     await turnStep({
       input: {
         kind: "deliver",
-        payloads: [{ message: "research this" }],
+        payloads: [{ auth: null, payload: { message: "research this" } }],
       },
       parentWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
@@ -1045,7 +1048,7 @@ describe("turnStep", () => {
     await turnStep({
       input: {
         kind: "deliver",
-        payloads: [{ message: "hello from turn step" }],
+        payloads: [{ auth: null, payload: { message: "hello from turn step" } }],
       },
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
@@ -1074,7 +1077,7 @@ describe("turnStep", () => {
     const result = await turnStep({
       input: {
         kind: "deliver",
-        payloads: [{ message: "wait before checking" }],
+        payloads: [{ auth: null, payload: { message: "wait before checking" } }],
       },
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
@@ -1138,7 +1141,7 @@ describe("turnStep", () => {
     const first = await turnStep({
       input: {
         kind: "deliver",
-        payloads: [{ message: "seed:alpha" }],
+        payloads: [{ auth: null, payload: { message: "seed:alpha" } }],
       },
       parentWritable,
       serializedContext: createSerializedContext(),
@@ -1152,7 +1155,7 @@ describe("turnStep", () => {
     const second = await turnStep({
       input: {
         kind: "deliver",
-        payloads: [{ message: "follow up" }],
+        payloads: [{ auth: null, payload: { message: "follow up" } }],
       },
       parentWritable,
       serializedContext: first.serializedContext,
@@ -1215,7 +1218,7 @@ describe("turnStep", () => {
     const result = await turnStep({
       input: {
         kind: "deliver",
-        payloads: [{ message: "finish up" }],
+        payloads: [{ auth: null, payload: { message: "finish up" } }],
       },
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
@@ -1288,7 +1291,7 @@ describe("turnStep", () => {
     await turnStep({
       input: {
         kind: "deliver",
-        payloads: [{ message: "follow up" }],
+        payloads: [{ auth: null, payload: { message: "follow up" } }],
       },
       parentWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
@@ -1388,7 +1391,7 @@ describe("turnStep", () => {
     const result = await turnStep({
       input: {
         kind: "deliver",
-        payloads: [{ message: "follow up" }],
+        payloads: [{ auth: null, payload: { message: "follow up" } }],
       },
       parentWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
@@ -1463,9 +1466,12 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [
           {
-            authorizationCallback: {
-              callback: { code: "oauth-code" },
-              connectionName: "statuspage",
+            auth: null,
+            payload: {
+              authorizationCallback: {
+                callback: { code: "oauth-code" },
+                connectionName: "statuspage",
+              },
             },
           },
         ],
@@ -1538,9 +1544,12 @@ describe("turnStep", () => {
         kind: "deliver",
         payloads: [
           {
-            authorizationCallback: {
-              callback: { code: "oauth-code" },
-              connectionName: "statuspage",
+            auth: null,
+            payload: {
+              authorizationCallback: {
+                callback: { code: "oauth-code" },
+                connectionName: "statuspage",
+              },
             },
           },
         ],
@@ -1955,5 +1964,54 @@ describe("resolveEffectiveOutputSchema", () => {
       session,
     });
     expect(resolved).toBe(session);
+  });
+
+  describe("routeProxiedDeliverStep", () => {
+    it("routes an attributed batch in one decision and groups deliveries per child", async () => {
+      const session = createStubSession({
+        state: {
+          "eve.runtime.proxyInputRequests": {
+            "req-a": { childContinuationToken: "child", kind: "tool-approval" },
+            "req-b": { childContinuationToken: "child", kind: "tool-approval" },
+          },
+        },
+      });
+      installSessionStoreMocks([session]);
+      vi.mocked(readDurableSession).mockClear();
+      vi.mocked(resumeHook).mockClear();
+
+      const bob = {
+        attributes: {},
+        authenticator: "slack",
+        principalId: "bob",
+        principalType: "user",
+      } as const;
+      const alice = { ...bob, principalId: "alice" };
+      const result = await routeProxiedDeliverStep({
+        parentWritable: new WritableStream<Uint8Array>(),
+        payloads: [
+          {
+            auth: bob,
+            payload: { inputResponses: [{ optionId: "approve", requestId: "req-a" }] },
+          },
+          {
+            auth: alice,
+            payload: { inputResponses: [{ optionId: "approve", requestId: "req-b" }] },
+          },
+        ],
+        sessionState: createDurableSessionState({ session }),
+      });
+
+      expect(result).toEqual({ kind: "continue", remainder: undefined });
+      expect(readDurableSession).toHaveBeenCalledTimes(1);
+      expect(resumeHook).toHaveBeenCalledOnce();
+      expect(resumeHook).toHaveBeenCalledWith("child", {
+        kind: "deliver",
+        payloads: [
+          expect.objectContaining({ auth: bob }),
+          expect.objectContaining({ auth: alice }),
+        ],
+      });
+    });
   });
 });

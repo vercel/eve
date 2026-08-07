@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type DeliverHookPayload, type HookPayload, unwrapDeliverPayload } from "#channel/types.js";
+import { type DeliverHookPayload, type HookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
@@ -24,7 +24,10 @@ describe("TurnControlReceiver", () => {
   });
 
   it("forwards a buffered delivery and consumes it once the turn accepts", async () => {
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "hello" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ auth: null, payload: { message: "hello" } }],
+    };
     installControlHook([
       deliveryRequest("req-1"),
       { kind: "turn-delivery-accepted", requestId: "req-1" },
@@ -43,7 +46,10 @@ describe("TurnControlReceiver", () => {
   });
 
   it("re-buffers the outstanding delivery when the turn cancels its request", async () => {
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "hello" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ auth: null, payload: { message: "hello" } }],
+    };
     installControlHook([
       deliveryRequest("req-1"),
       { kind: "turn-delivery-cancelled", requestId: "req-1" },
@@ -59,7 +65,10 @@ describe("TurnControlReceiver", () => {
   });
 
   it("re-buffers an unresolved forwarded delivery when the turn terminates", async () => {
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "hello" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ auth: null, payload: { message: "hello" } }],
+    };
     installControlHook([
       deliveryRequest("req-1"),
       {
@@ -76,8 +85,14 @@ describe("TurnControlReceiver", () => {
   });
 
   it("hands the turn's remainders back ahead of existing buffered deliveries", async () => {
-    const earlier: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "earlier" }] };
-    const handBack: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "from-turn" }] };
+    const earlier: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ auth: null, payload: { message: "earlier" } }],
+    };
+    const handBack: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ auth: null, payload: { message: "from-turn" } }],
+    };
     installControlHook([{ ...parkResult(), bufferedDeliveries: [handBack] }]);
     const bufferedDeliveries: DeliverHookPayload[] = [earlier];
 
@@ -85,9 +100,7 @@ describe("TurnControlReceiver", () => {
 
     expect(
       bufferedDeliveries.map((item) =>
-        item.payloads[0]
-          ? unwrapDeliverPayload(item.payloads[0], item.auth).payload.message
-          : undefined,
+        item.payloads[0] ? item.payloads[0].payload.message : undefined,
       ),
     ).toEqual(["from-turn", "earlier"]);
   });

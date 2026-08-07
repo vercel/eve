@@ -1,11 +1,6 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
-import {
-  type DeliverPayload,
-  type DurableDeliverPayload,
-  type SessionAuthContext,
-  unwrapDeliverPayload,
-} from "#channel/types.js";
+import { type AttributedDeliverPayload } from "#channel/types.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
@@ -185,9 +180,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   if (pendingAuth && input.input?.kind === "deliver") {
     const authResults: Array<{ name: string } & AuthorizationResult> = [];
     const completed: Array<{ name: string; authorization: ConnectionAuthorizationChallenge }> = [];
-    const remainingPayloads: DurableDeliverPayload[] = [];
+    const remainingPayloads: AttributedDeliverPayload[] = [];
     for (const attributed of input.input.payloads) {
-      const { payload } = unwrapDeliverPayload(attributed, input.input.auth);
+      const { payload } = attributed;
       const cb = payload["authorizationCallback"] as
         | { connectionName: string; callback: AuthorizationCallback }
         | undefined;
@@ -223,12 +218,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
   }
 
-  // Apply deliver-time auth ferried via `resumeHook` (initial-turn
-  // input has no auth; it was seeded by buildRunContext).
-  if (input.input?.kind === "deliver" && input.input.auth !== undefined) {
-    ctx.set(AuthKey, input.input.auth ?? null);
-  }
-
   const initialSession = hydrateDurableSession({
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
@@ -245,7 +234,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   if (input.input?.kind === "deliver") {
     const results: StepInput[] = [];
     for (const attributed of input.input.payloads) {
-      const { auth, payload } = unwrapDeliverPayload(attributed, input.input.auth);
+      const { auth, payload } = attributed;
       ctx.set(AuthKey, auth ?? null);
       const result = adapter.deliver
         ? await adapter.deliver(payload, adapterCtx)
@@ -254,7 +243,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       if (result !== undefined && result !== null) {
         results.push({
           ...result,
-          inputResponseAuth: result.inputResponses?.map(() => auth),
+          attributedInputResponses: result.inputResponses?.map((response) => ({
+            auth: auth ?? null,
+            response,
+          })),
+          inputResponses: undefined,
           messageAuth: result.message === undefined ? undefined : auth,
         });
       }
@@ -593,13 +586,11 @@ export function resolveEffectiveOutputSchema(input: {
 }
 
 export type RoutedDeliverResult =
-  | {
-      readonly kind: "cancel-turn";
-    }
+  | { readonly kind: "cancel-turn" }
   | {
       readonly kind: "continue";
-      /** `undefined` when the entire payload was routed to descendants. */
-      readonly remainder: DeliverPayload | undefined;
+      /** `undefined` when every payload was routed to descendants. */
+      readonly remainder: readonly AttributedDeliverPayload[] | undefined;
     };
 
 /**
@@ -608,28 +599,39 @@ export type RoutedDeliverResult =
  * `resumeHook`. Read-only: never appends a snapshot.
  */
 export async function routeProxiedDeliverStep(input: {
-  readonly auth?: SessionAuthContext | null;
   readonly parentWritable: WritableStream<Uint8Array>;
-  readonly payload: DeliverPayload;
+  readonly payloads: readonly AttributedDeliverPayload[];
   readonly sessionState: DurableSessionState;
 }): Promise<RoutedDeliverResult> {
   "use step";
 
   const durableSession = await readDurableSession(input.sessionState);
-  const routed = routeDeliverPayload({
-    payload: input.payload,
-    state: durableSession.state,
-  });
+  const forChildren = new Map<string, AttributedDeliverPayload[]>();
+  const remainder: AttributedDeliverPayload[] = [];
+  let cancelTurn = false;
 
-  for (const forChild of routed.forChildren) {
-    await resumeHook(forChild.childContinuationToken, {
-      auth: input.auth,
-      kind: "deliver",
-      payloads: [forChild.payload],
-    });
+  for (const attributed of input.payloads) {
+    const { auth, payload } = attributed;
+    const routed = routeDeliverPayload({ payload, state: durableSession.state });
+    cancelTurn ||= routed.parentAction?.kind === "cancel-turn";
+
+    for (const child of routed.forChildren) {
+      const payloads = forChildren.get(child.childContinuationToken) ?? [];
+      payloads.push({ auth, payload: child.payload });
+      forChildren.set(child.childContinuationToken, payloads);
+    }
+    if (routed.forSelf !== undefined) {
+      remainder.push({ auth, payload: routed.forSelf });
+    }
   }
 
-  return routed.parentAction ?? { kind: "continue", remainder: routed.forSelf };
+  for (const [childContinuationToken, payloads] of forChildren) {
+    await resumeHook(childContinuationToken, { kind: "deliver", payloads });
+  }
+
+  return cancelTurn
+    ? { kind: "cancel-turn" }
+    : { kind: "continue", remainder: remainder.length === 0 ? undefined : remainder };
 }
 
 /** Starts a per-turn child workflow for the current driver session. */

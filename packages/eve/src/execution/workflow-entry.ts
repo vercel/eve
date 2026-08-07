@@ -144,9 +144,12 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         kind: "deliver",
         payloads: [
           {
-            message: input.input.message,
-            context: input.input.context,
-            outputSchema: input.input.outputSchema,
+            auth: null,
+            payload: {
+              message: input.input.message,
+              context: input.input.context,
+              outputSchema: input.input.outputSchema,
+            },
           },
         ],
         requestId: readChannelRequestId(input.serializedContext),
@@ -360,7 +363,6 @@ async function runDriverLoop(input: {
       }
 
       const routed = await routeDeliverToChildren({
-        auth: nextDeliver.auth,
         parentWritable: input.driverWritable,
         payloads: nextDeliver.payloads,
         sessionState: action.sessionState,
@@ -391,17 +393,8 @@ async function runDriverLoop(input: {
 
       action = await runTurn({
         delivery: {
-          auth: nextDeliver.auth,
           kind: "deliver",
-          payloads: Array.isArray(routed.remainder)
-            ? routed.remainder
-            : [
-                {
-                  auth: nextDeliver.auth,
-                  kind: "attributed-deliver-payload",
-                  payload: routed.remainder,
-                },
-              ],
+          payloads: routed.remainder,
           requestId: nextDeliver.requestId,
         },
         serializedContext: action.serializedContext,

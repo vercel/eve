@@ -1,4 +1,4 @@
-import { type DeliverHookPayload, type HookPayload, unwrapDeliverPayload } from "#channel/types.js";
+import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
 import {
   createSessionDeliveryHook,
   type SessionDeliveryHook,
@@ -49,8 +49,7 @@ function collectMessages(
 }
 
 function appendMessages(delivery: DeliverHookPayload, messages: string[]): void {
-  for (const attributed of delivery.payloads) {
-    const { payload } = unwrapDeliverPayload(attributed, delivery.auth);
+  for (const { payload } of delivery.payloads) {
     if (typeof payload.message === "string") messages.push(payload.message);
   }
 }

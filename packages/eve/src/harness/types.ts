@@ -122,10 +122,15 @@ export interface SessionLimits {
  * channels. The harness resolves any pending input batch at the start of
  * `runStep` before the model call.
  */
+export interface AttributedInputResponse {
+  readonly auth: SessionAuthContext | null;
+  readonly response: InputResponse;
+}
+
 export interface StepInput {
+  /** Internal responder-bound input produced at the delivery boundary. */
+  readonly attributedInputResponses?: readonly AttributedInputResponse[];
   readonly inputResponses?: readonly InputResponse[];
-  /** Internal actor attribution aligned by index with `inputResponses`. */
-  readonly inputResponseAuth?: readonly (SessionAuthContext | null | undefined)[];
   readonly message?: string | UserContent;
   /** Internal actor attribution for `message`. */
   readonly messageAuth?: SessionAuthContext | null;
@@ -291,8 +296,8 @@ export interface ToolLoopHarnessConfig {
    * handles injected into each model call.
    */
   readonly persistentSubagentSessions?: boolean;
-  /** Resolves step-scoped dynamic tools before approval response policy work. */
-  readonly refreshStepDynamicTools?: (input: {
+  /** Resolves step-scoped dynamic tools once for approval policy and model work. */
+  readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;
     readonly event: UnstampedMessageStreamEvent;
     readonly messages: readonly ModelMessage[];

@@ -366,7 +366,6 @@ async function waitForRuntimeActionResults(input: {
       pendingDeliveryRequest = undefined;
 
       const routed = await routeDeliverToChildren({
-        auth: value.delivery.auth,
         parentWritable: input.cursor.parentWritable,
         payloads: value.delivery.payloads,
         sessionState: input.cursor.sessionState,

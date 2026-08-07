@@ -118,9 +118,8 @@ describe("createWorkflowRuntime#deliver", () => {
     ).resolves.toEqual({ sessionId: "driver-run" });
 
     expect(resumeHookMock).toHaveBeenCalledWith("test:token", {
-      auth: null,
       kind: "deliver",
-      payloads: [{ auth: null, kind: "attributed-deliver-payload", payload: { message: "hello" } }],
+      payloads: [{ auth: null, payload: { message: "hello" } }],
       requestId: "req_deliver",
     });
   });
@@ -139,9 +138,8 @@ describe("createWorkflowRuntime#deliver", () => {
     ).resolves.toEqual({ sessionId: "owner-session" });
     expect(resumeHookMock).toHaveBeenCalledOnce();
     expect(resumeHookMock).toHaveBeenCalledWith("test:active-hook", {
-      auth: null,
       kind: "deliver",
-      payloads: [{ auth: null, kind: "attributed-deliver-payload", payload: { message: "hello" } }],
+      payloads: [{ auth: null, payload: { message: "hello" } }],
       requestId: undefined,
     });
   });

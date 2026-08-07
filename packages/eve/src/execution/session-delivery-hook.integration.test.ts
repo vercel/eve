@@ -28,7 +28,7 @@ describe("session delivery hook integration", () => {
       for (const owner of order) {
         await resumeHook(tokens[owner], {
           kind: "deliver",
-          payloads: [{ message: owner }],
+          payloads: [{ auth: null, payload: { message: owner } }],
         });
       }
 
@@ -38,7 +38,7 @@ describe("session delivery hook integration", () => {
       await expect(
         resumeHook(oldToken, {
           kind: "deliver",
-          payloads: [{ message: "too late" }],
+          payloads: [{ auth: null, payload: { message: "too late" } }],
         }),
       ).rejects.toMatchObject({ name: "HookNotFoundError" });
       await expect(run.returnValue).resolves.toEqual(order);

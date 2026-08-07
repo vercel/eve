@@ -342,7 +342,7 @@ describe("turn cancellation integration", () => {
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "follow up after cancel" }],
+          payloads: [{ auth: null, payload: { message: "follow up after cancel" } }],
         });
 
         const followUpTurn = await stream.nextTurn();
@@ -419,7 +419,7 @@ describe("turn cancellation integration", () => {
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "follow up after route cancel" }],
+          payloads: [{ auth: null, payload: { message: "follow up after route cancel" } }],
         });
 
         const followUpTurn = await stream.nextTurn();
@@ -503,7 +503,7 @@ describe("turn cancellation integration", () => {
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "follow up after helper cancel" }],
+          payloads: [{ auth: null, payload: { message: "follow up after helper cancel" } }],
         });
 
         const followUpTurn = await stream.nextTurn();
@@ -568,7 +568,7 @@ describe("turn cancellation integration", () => {
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "follow up after subagent cancel" }],
+          payloads: [{ auth: null, payload: { message: "follow up after subagent cancel" } }],
         });
 
         const followUpTurn = await stream.nextTurn();
@@ -755,7 +755,7 @@ describe("turn cancellation integration", () => {
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "follow up after late cancel" }],
+          payloads: [{ auth: null, payload: { message: "follow up after late cancel" } }],
         });
 
         const secondTurn = await stream.nextTurn();
@@ -800,7 +800,7 @@ describe("turn cancellation integration", () => {
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
           kind: "deliver",
-          payloads: [{ message: "second turn" }],
+          payloads: [{ auth: null, payload: { message: "second turn" } }],
         });
         expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
 

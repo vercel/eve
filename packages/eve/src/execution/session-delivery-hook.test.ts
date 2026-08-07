@@ -293,7 +293,7 @@ function delivery(message: string): IteratorResult<HookPayload> {
 }
 
 function deliveryPayload(message: string): DeliverHookPayload {
-  return { kind: "deliver", payloads: [{ message }] };
+  return { kind: "deliver", payloads: [{ auth: null, payload: { message } }] };
 }
 
 function sessionTimeout(): IteratorResult<HookPayload> {

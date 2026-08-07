@@ -101,11 +101,14 @@ export async function coordinateApprovalDelivery(input: {
   let didCommit = false;
   const candidatesAtStart = getApprovalAuditState(session.state).activeCandidates;
 
-  for (const [responseIndex, response] of (stepInput?.inputResponses ?? []).entries()) {
+  const deliveredResponses = [
+    ...(stepInput?.attributedInputResponses ?? []),
+    ...(stepInput?.inputResponses ?? []).map((response) => ({ auth: undefined, response })),
+  ];
+  for (const { auth: attributedResponder, response } of deliveredResponses) {
     const request = requests.get(response.requestId);
     if (request === undefined || !isApprovalRequest(request)) continue;
 
-    const attributedResponder = stepInput?.inputResponseAuth?.[responseIndex];
     const requiresAuthorization = authorizationRequiredRequestIds.has(response.requestId);
     if (!requiresAuthorization) {
       const context = contextStorage.getStore();
@@ -397,17 +400,18 @@ function removeConsumedResponses(
   stepInput: StepInput | undefined,
   consumed: ReadonlySet<string>,
 ): StepInput | undefined {
-  if (stepInput?.inputResponses === undefined) return stepInput;
-  const keptIndexes = stepInput.inputResponses.flatMap((response, index) =>
-    consumed.has(response.requestId) ? [] : [index],
+  if (stepInput === undefined) return undefined;
+  const attributed = (stepInput.attributedInputResponses ?? []).filter(
+    ({ response }) => !consumed.has(response.requestId),
   );
+  const plain = (stepInput.inputResponses ?? []).filter(
+    (response) => !consumed.has(response.requestId),
+  );
+  const inputResponses = [...plain, ...attributed.map(({ response }) => response)];
   return {
     ...stepInput,
-    inputResponses: keptIndexes.map((index) => stepInput.inputResponses![index]!),
-    inputResponseAuth:
-      stepInput.inputResponseAuth && keptIndexes.length > 0
-        ? keptIndexes.map((index) => stepInput.inputResponseAuth![index])
-        : undefined,
+    attributedInputResponses: undefined,
+    inputResponses,
   };
 }
 

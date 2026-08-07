@@ -168,7 +168,7 @@ describe("workflowEntry", () => {
         completionToken: expect.any(String),
         delivery: {
           kind: "deliver",
-          payloads: [{ message: "hello there", context: undefined }],
+          payloads: [{ auth: null, payload: { message: "hello there", context: undefined } }],
         },
         serializedContext: expect.objectContaining({
           "eve.continuationToken": "http:test",
@@ -283,7 +283,7 @@ describe("workflowEntry", () => {
     expect(vi.mocked(dispatchTurnStep).mock.calls[0]?.[0].delivery).toEqual({
       requestId: "req_initial",
       kind: "deliver",
-      payloads: [{ message: "hello there", context: undefined }],
+      payloads: [{ auth: null, payload: { message: "hello there", context: undefined } }],
     });
   });
 
@@ -542,7 +542,7 @@ describe("workflowEntry", () => {
             {
               requestId: "req_followup",
               kind: "deliver",
-              payloads: [{ message: "follow up" }],
+              payloads: [{ auth: null, payload: { message: "follow up" } }],
             },
           ],
         },
@@ -562,7 +562,7 @@ describe("workflowEntry", () => {
       auth: undefined,
       requestId: "req_followup",
       kind: "deliver",
-      payloads: [{ message: "follow up" }],
+      payloads: [{ auth: null, payload: { message: "follow up" } }],
     });
   });
 
@@ -574,7 +574,12 @@ describe("workflowEntry", () => {
       deliveryHooks: [
         {
           token: "http:test",
-          values: [{ kind: "deliver", payloads: [{ message: "cancel while waiting" }] }],
+          values: [
+            {
+              kind: "deliver",
+              payloads: [{ auth: null, payload: { message: "cancel while waiting" } }],
+            },
+          ],
         },
       ],
       turnControls: [
@@ -600,7 +605,7 @@ describe("workflowEntry", () => {
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     const callback = {
       kind: "deliver",
-      payloads: [{ authorizationCallback: { connectionName: "github" } }],
+      payloads: [{ auth: null, payload: { authorizationCallback: { connectionName: "github" } } }],
     } satisfies HookPayload;
     installHookMocks({
       authHook: { values: [callback] },
@@ -712,7 +717,12 @@ describe("workflowEntry", () => {
         values: [
           {
             kind: "deliver",
-            payloads: [{ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }],
+            payloads: [
+              {
+                auth: null,
+                payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
+              },
+            ],
           },
         ],
       }) as never;
@@ -728,7 +738,12 @@ describe("workflowEntry", () => {
     expect(resumeHook).toHaveBeenCalledWith("turn-inbox", {
       delivery: {
         kind: "deliver",
-        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }],
+        payloads: [
+          {
+            auth: null,
+            payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
+          },
+        ],
       },
       kind: "driver-delivery",
       requestId: "delivery-1",
@@ -767,7 +782,12 @@ describe("workflowEntry", () => {
       }
       return createMockHook({
         token,
-        values: [{ kind: "deliver", payloads: [{ message: "not for the child" }] }],
+        values: [
+          {
+            kind: "deliver",
+            payloads: [{ auth: null, payload: { message: "not for the child" } }],
+          },
+        ],
       }) as never;
     });
 
@@ -781,7 +801,7 @@ describe("workflowEntry", () => {
     expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
       auth: undefined,
       kind: "deliver",
-      payloads: [{ message: "not for the child" }],
+      payloads: [{ auth: null, payload: { message: "not for the child" } }],
       requestId: undefined,
     });
     expect(resumeHook).not.toHaveBeenCalled();
@@ -801,7 +821,9 @@ describe("workflowEntry", () => {
       deliveryHooks: [
         {
           token: "http:test",
-          values: [{ kind: "deliver", payloads: [{ message: "after cancel" }] }],
+          values: [
+            { kind: "deliver", payloads: [{ auth: null, payload: { message: "after cancel" } }] },
+          ],
         },
       ],
       turnControls: [
@@ -991,7 +1013,7 @@ describe("workflowEntry", () => {
           values: [
             {
               kind: "deliver",
-              payloads: [{ message: "follow up" }],
+              payloads: [{ auth: null, payload: { message: "follow up" } }],
             },
           ],
         },
@@ -1022,7 +1044,7 @@ describe("workflowEntry", () => {
     expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
       auth: undefined,
       kind: "deliver",
-      payloads: [{ message: "follow up" }],
+      payloads: [{ auth: null, payload: { message: "follow up" } }],
       requestId: undefined,
     });
     expect(oldReturn).not.toHaveBeenCalled();
@@ -1052,7 +1074,7 @@ describe("workflowEntry", () => {
           values: [
             {
               kind: "deliver",
-              payloads: [{ message: "follow up" }],
+              payloads: [{ auth: null, payload: { message: "follow up" } }],
             },
           ],
         },
