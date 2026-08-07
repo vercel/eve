@@ -42,7 +42,7 @@ function collectMessage(command: SessionInboxPayload, messages: string[]): void 
   if (command.kind === "send" && typeof command.payload.message === "string") {
     messages.push(command.payload.message);
   }
-  if (command.kind === "deliver" && typeof command.payloads[0]?.message === "string") {
-    messages.push(command.payloads[0].message);
+  if (command.kind === "deliver" && typeof command.payloads[0]?.payload.message === "string") {
+    messages.push(command.payloads[0].payload.message);
   }
 }

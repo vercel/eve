@@ -1,4 +1,4 @@
-import { asSchema } from "ai";
+import { asSchema, jsonSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
@@ -20,10 +20,12 @@ const {
   dispatchDynamicToolEvent,
   refreshDynamicSessionToolsForRuntimeRevision,
 } = await import("#context/dynamic-tool-lifecycle.js");
-const { buildDynamicTools } = await import("#context/build-dynamic-tools.js");
+const { buildDynamicTools, buildResponseAuthorizationTools } =
+  await import("#context/build-dynamic-tools.js");
 
 import { ContextContainer } from "#context/container.js";
 import {
+  LiveStepToolsKey,
   SessionIdKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
@@ -728,6 +730,24 @@ describe("dispatchDynamicToolEvent", () => {
     expect(getToken).toHaveBeenCalledOnce();
   });
 
+  it("restores cached step tools after virtual context is cleared", async () => {
+    const ctx = createCtx();
+    const resolver = createResolver("api", ["step.started"], () => ({
+      query: createReplayableTool("cached"),
+    }));
+    const event = {
+      type: "step.started",
+      data: { stepIndex: 1, turnId: "turn-1" },
+    } as UnstampedMessageStreamEvent;
+
+    await dispatchDynamicToolEvent({ ctx, event, messages: [], resolvers: [resolver] });
+    ctx.clearVirtualContext();
+    expect(buildDynamicTools(ctx)).toEqual([]);
+
+    await dispatchDynamicToolEvent({ ctx, event, messages: [], resolvers: [resolver] });
+    expect(buildDynamicTools(ctx)[0]?.description).toBe("cached");
+  });
+
   it("replaces tools from the same resolver slug (last write wins)", async () => {
     const ctx = createCtx();
     let callCount = 0;
@@ -1229,6 +1249,41 @@ describe("framework dynamic tools (no bundler transform)", () => {
     await expect(
       resolveApprovalPolicy(tool.approval)(createApprovalContext({ toolName: "guarded" })),
     ).resolves.toBe("user-approval");
+  });
+
+  it("uses the first dynamic definition for response authorization", () => {
+    const ctx = createCtx();
+    ctx.set(LiveStepToolsKey, [
+      {
+        approval: {
+          request: () => "user-approval",
+          response: async () => ({ status: "allowed" }) as const,
+        },
+        description: "step",
+        execute: () => null,
+        inputSchema: jsonSchema({ type: "object" }),
+        name: "guarded",
+      },
+    ]);
+    ctx.set(SessionDynamicToolMetadataKey, [
+      {
+        approvalResponseStepFnName: "session-authorizer",
+        approvalStepFnName: "session-policy",
+        description: "session",
+        entryKey: "session:guarded",
+        executeStepFnName: "session-execute",
+        inputSchema: { type: "object" },
+        name: "guarded",
+        resolverSlug: "session",
+      },
+    ]);
+
+    const tools = buildResponseAuthorizationTools({
+      authoredTools: new Map(),
+      context: ctx,
+    });
+
+    expect(tools.get("guarded")?.description).toBe("step");
   });
 
   it("replays response authorization from session-scoped dynamic tools", async () => {

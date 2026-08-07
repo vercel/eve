@@ -37,6 +37,8 @@ export type NextDriverAction =
       readonly sessionState: DurableSessionState;
       readonly serializedContext: Record<string, unknown>;
       readonly authorizationNames?: readonly string[];
+      /** Earliest active approval candidate deadline, as epoch milliseconds. */
+      readonly approvalCandidateExpiresAt?: number;
       /**
        * Set when the parked turn was cancelled: the driver runs
        * `settleCancelledTurnStep` before the normal park playbook. An

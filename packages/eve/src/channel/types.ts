@@ -194,20 +194,25 @@ export interface DispatchSessionInput<TCommand extends SessionCommand = SessionC
 // Hook payload
 // ---------------------------------------------------------------------------
 
-/**
- * Deliver payload sent through the workflow `resumeHook`.
- *
- * Wraps the raw {@link DeliverPayload} with optional auth and turn-caller
- * metadata so both cross the durable hook boundary outside adapter-owned data.
- */
+/** One delivery payload paired with the actor that originated it. */
+export interface AttributedDeliverPayload {
+  readonly auth: SessionAuthContext | null;
+  readonly payload: DeliverPayload;
+}
+
+/** Deliver payload sent through the workflow `resumeHook`. */
 export interface DeliverHookPayload {
-  readonly auth?: SessionAuthContext | null;
   /** Delegated caller waiting for this turn's settled result. */
   readonly caller?: TurnCaller;
   /** Inbound channel request id used only for workflow attributes. */
   readonly requestId?: string;
   readonly kind: "deliver";
-  readonly payloads: readonly DeliverPayload[];
+  readonly payloads: readonly AttributedDeliverPayload[];
+}
+
+/** Internal wake-up that asks the coordinator to expire due approval candidates. */
+export interface ApprovalCandidateExpiryHookPayload {
+  readonly kind: "approval-candidate-expiry";
 }
 
 /** Internal deadline signal sent through the stable session command inbox. */
@@ -290,6 +295,7 @@ export interface SubagentAuthorizationEventHookPayload {
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
+  | ApprovalCandidateExpiryHookPayload
   | ClearSessionHookPayload
   | CompactSessionHookPayload
   | DeliverHookPayload

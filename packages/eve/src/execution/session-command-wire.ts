@@ -25,11 +25,10 @@ export function sendCommandToDelivery(
   command: Extract<SessionCommand, { readonly kind: "send" }>,
 ): WireDeliverHookPayload {
   return {
-    auth: command.auth,
     caller: command.caller,
     kind: "deliver",
     payload: command.payload,
-    payloads: [command.payload],
+    payloads: [{ auth: command.auth ?? null, payload: command.payload }],
     requestId: command.requestId,
   };
 }

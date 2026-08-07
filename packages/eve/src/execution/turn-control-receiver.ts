@@ -80,6 +80,11 @@ export class TurnControlReceiver {
       this.bufferedDeliveries.push(sendCommandToDelivery(command));
       return undefined;
     }
+    if (command.kind === "runtime-action-result") {
+      // Active runtime-action results target the turn's private inbox directly.
+      // This compatibility arm is reachable only from a stale session alias.
+      return undefined;
+    }
     if (command.kind === "clear" || command.kind === "compact") {
       this.bufferedSessionControls.push(command.kind);
       return undefined;

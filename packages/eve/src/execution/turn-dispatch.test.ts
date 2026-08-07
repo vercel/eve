@@ -44,7 +44,7 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedSessionControls: [],
       commandInbox,
       controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      delivery: { kind: "deliver", payloads: [{ auth: null, payload: { message: "start" } }] },
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -78,7 +78,7 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedSessionControls: [],
       commandInbox,
       controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      delivery: { kind: "deliver", payloads: [{ auth: null, payload: { message: "start" } }] },
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -122,7 +122,12 @@ describe("dispatchAndAwaitTurn", () => {
           done: false,
           value: {
             action: { kind: "park", serializedContext: {}, sessionState: state },
-            bufferedDeliveries: [{ kind: "deliver", payloads: [{ message: "earlier remainder" }] }],
+            bufferedDeliveries: [
+              {
+                kind: "deliver",
+                payloads: [{ auth: null, payload: { message: "earlier remainder" } }],
+              },
+            ],
             kind: "turn-result",
           },
         };
@@ -140,14 +145,14 @@ describe("dispatchAndAwaitTurn", () => {
         }),
       }),
       controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      delivery: { kind: "deliver", payloads: [{ auth: null, payload: { message: "start" } }] },
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state,
     });
 
-    expect(bufferedDeliveries.map((item) => item.payloads[0]?.message)).toEqual([
+    expect(bufferedDeliveries.map((item) => item.payloads[0]?.payload.message)).toEqual([
       "earlier remainder",
       "later delivery",
     ]);
@@ -155,7 +160,10 @@ describe("dispatchAndAwaitTurn", () => {
 
   it("re-buffers a forwarded delivery when the turn inbox is already gone", async () => {
     const state = createState("http:test");
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "relayed" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ auth: null, payload: { message: "relayed" } }],
+    };
     vi.mocked(forwardTurnDeliveryStep).mockRejectedValue(
       Object.assign(new Error("inbox gone"), { name: "HookNotFoundError" }),
     );
@@ -178,7 +186,7 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedSessionControls: [],
       commandInbox: createCommandInbox(),
       controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      delivery: { kind: "deliver", payloads: [{ auth: null, payload: { message: "start" } }] },
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -204,7 +212,7 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedSessionControls: [],
       commandInbox: createCommandInbox(),
       controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      delivery: { kind: "deliver", payloads: [{ auth: null, payload: { message: "start" } }] },
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},

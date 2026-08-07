@@ -2,6 +2,7 @@ import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,
+  RuntimeActionResultHookPayload,
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
@@ -16,7 +17,11 @@ import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
  * sessions are bounded by the 30-day default timeout, so the decode can be
  * dropped once runs created on those versions have aged out.
  */
-export type SessionInboxPayload = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
+export type SessionInboxPayload =
+  | DeliverHookPayload
+  | RuntimeActionResultHookPayload
+  | SessionCommand
+  | SessionTimeoutHookPayload;
 
 interface HookRead {
   readonly order: number;

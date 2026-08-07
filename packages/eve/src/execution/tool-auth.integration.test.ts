@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { buildApprovalResponseAuth, createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import {
+  createApprovalCandidate,
+  getActiveApprovalCandidate,
+} from "#harness/approval-candidates.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
@@ -108,15 +112,89 @@ describe("approval response authorization", () => {
     expect(tokens).toEqual({ github: "github-token", linear: "linear-token" });
   });
 
-  it("resolves user tokens for the explicitly bound responder instead of ambient auth", async () => {
+  it("resolves user tokens for the durable responder instead of ambient auth", async () => {
     let resolvedPrincipal: ConnectionPrincipal | undefined;
     const provider: AuthorizationDefinition = {
       principalType: "user",
       async getToken({ principal }): Promise<TokenResult> {
         resolvedPrincipal = principal;
-        return { token: "bound-responder-token" };
+        return { token: "durable-responder-token" };
       },
     };
+    const created = createApprovalCandidate({
+      candidateIdPrefix: "candidate-1",
+      createdAt: 100,
+      expiresAt: 700,
+      requestId: "request-1",
+      responder: {
+        attributes: { environment: "production", role: ["approver"] },
+        authenticator: "test-idp",
+        issuer: "test-idp",
+        principalId: "durable-U1",
+        principalType: "user",
+        subject: "durable-subject-U1",
+      },
+      state: undefined,
+    });
+    const candidate = getActiveApprovalCandidate(created.state, "candidate-1");
+    if (candidate === undefined) throw new Error("Expected durable candidate.");
+    const runtime = createTestRuntime({ tools: [] });
+
+    const token = await runtime.runAsSession(undefined, async () => {
+      loadContext().set(AuthKey, {
+        attributes: {},
+        authenticator: "test-idp",
+        issuer: "test-idp",
+        principalId: "ambient-U2",
+        principalType: "user",
+      });
+      const auth = buildApprovalResponseAuth({
+        responder: candidate.responder,
+        scope: "candidate-1",
+      });
+      return await auth.getToken(provider);
+    });
+
+    expect(token.token).toBe("durable-responder-token");
+    expect(candidate.responder).toMatchObject({
+      attributes: { environment: "production", role: ["approver"] },
+      subject: "durable-subject-U1",
+    });
+    expect(resolvedPrincipal).toMatchObject({
+      attributes: { environment: "production", role: ["approver"] },
+      id: "durable-U1",
+      issuer: "test-idp",
+      type: "user",
+    });
+  });
+
+  it("preserves Vercel development subject projection through candidate state", async () => {
+    let resolvedPrincipal: ConnectionPrincipal | undefined;
+    const provider: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "oauth/github" },
+      async getToken({ principal }): Promise<TokenResult> {
+        resolvedPrincipal = principal;
+        return { token: "development-user-token" };
+      },
+    };
+    const created = createApprovalCandidate({
+      candidateIdPrefix: "candidate-vercel",
+      createdAt: 100,
+      expiresAt: 700,
+      requestId: "request-vercel",
+      responder: {
+        attributes: { environment: "development", user_id: "vercel-user-1" },
+        authenticator: "oidc",
+        issuer: "https://oidc.vercel.com/team",
+        principalId: "channel-user-1",
+        principalType: "user",
+        subject: "vercel-user-1",
+      },
+      state: undefined,
+    });
+    const candidate = getActiveApprovalCandidate(created.state, "candidate-vercel");
+    if (candidate === undefined) throw new Error("Expected durable candidate.");
     const runtime = createTestRuntime({ tools: [] });
 
     await runtime.runAsSession(undefined, async () => {
@@ -127,24 +205,17 @@ describe("approval response authorization", () => {
         principalType: "user",
       });
       return await buildApprovalResponseAuth({
-        responder: {
-          attributes: { role: ["approver"] },
-          authenticator: "test-idp",
-          issuer: "test-idp",
-          principalId: "bound-U1",
-          principalType: "user",
-          subject: "bound-subject-U1",
-        },
-        scope: "candidate-1",
+        responder: candidate.responder,
+        scope: "candidate-vercel",
       }).getToken(provider);
     });
 
     expect(resolvedPrincipal).toMatchObject({
-      attributes: { role: ["approver"] },
-      id: "bound-U1",
-      issuer: "test-idp",
+      attributes: { environment: "development", user_id: "vercel-user-1" },
+      id: "vercel-user-1",
       type: "user",
     });
+    expect(resolvedPrincipal).not.toHaveProperty("issuer");
   });
 });
 

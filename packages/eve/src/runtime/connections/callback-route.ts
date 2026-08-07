@@ -114,7 +114,12 @@ export async function handleConnectionCallbackRequest(
   try {
     await resumeHook(token, {
       kind: "deliver" as const,
-      payloads: [{ authorizationCallback: { connectionName: name, callback } }],
+      payloads: [
+        {
+          auth: null,
+          payload: { authorizationCallback: { connectionName: name, callback } },
+        },
+      ],
     });
   } catch {
     return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });

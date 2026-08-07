@@ -1,4 +1,5 @@
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { HarnessToolMap } from "#harness/types.js";
 import type { ContextKey } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
@@ -118,6 +119,20 @@ function buildReplayedApproval(
  * `LiveStepToolsKey`). Session/turn tools are replayed from durable
  * metadata via the bundler's registered step functions.
  */
+export function buildResponseAuthorizationTools(input: {
+  readonly authoredTools: HarnessToolMap;
+  readonly context?: { get<T>(key: ContextKey<T>): T | undefined };
+}): HarnessToolMap {
+  const tools = new Map<string, HarnessToolDefinition>();
+  for (const tool of input.context === undefined ? [] : buildDynamicTools(input.context)) {
+    if (!tools.has(tool.name)) tools.set(tool.name, tool);
+  }
+  for (const [name, tool] of input.authoredTools) {
+    if (!tools.has(name)) tools.set(name, tool);
+  }
+  return tools;
+}
+
 export function buildDynamicTools(ctx: {
   get<T>(key: ContextKey<T>): T | undefined;
 }): readonly HarnessToolDefinition[] {

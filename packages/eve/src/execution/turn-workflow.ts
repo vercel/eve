@@ -197,6 +197,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         await cursor.finish(
           result,
           {
+            approvalCandidateExpiresAt: result.approvalCandidateExpiresAt,
             authorizationNames: result.authorizationNames,
             kind: "park",
             settled: result.settled,
@@ -352,7 +353,6 @@ async function waitForRuntimeActionResults(input: {
       pendingDeliveryRequest = undefined;
 
       const routed = await routeDeliverToChildren({
-        auth: value.delivery.auth,
         parentWritable: input.cursor.parentWritable,
         payloads: value.delivery.payloads,
         sessionState: input.cursor.sessionState,
@@ -361,7 +361,7 @@ async function waitForRuntimeActionResults(input: {
         return routed.kind;
       }
       if (routed.remainder !== undefined) {
-        input.bufferedDeliveries.push({ ...value.delivery, payloads: [routed.remainder] });
+        input.bufferedDeliveries.push({ ...value.delivery, payloads: routed.remainder });
       }
     }
   }
@@ -432,6 +432,7 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
                 sessionState: result.sessionState,
               }
             : {
+                approvalCandidateExpiresAt: result.approvalCandidateExpiresAt,
                 kind: "park",
                 serializedContext: result.serializedContext,
                 sessionState: result.sessionState,

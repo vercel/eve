@@ -29,7 +29,10 @@ describe("TurnControlReceiver", () => {
   });
 
   it("forwards a buffered delivery and consumes it once the turn accepts", async () => {
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "hello" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ auth: null, payload: { message: "hello" } }],
+    };
     installControlHook([
       deliveryRequest("req-1"),
       { kind: "turn-delivery-accepted", requestId: "req-1" },
@@ -48,7 +51,10 @@ describe("TurnControlReceiver", () => {
   });
 
   it("re-buffers the outstanding delivery when the turn cancels its request", async () => {
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "hello" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ auth: null, payload: { message: "hello" } }],
+    };
     installControlHook([
       deliveryRequest("req-1"),
       { kind: "turn-delivery-cancelled", requestId: "req-1" },
@@ -66,11 +72,11 @@ describe("TurnControlReceiver", () => {
   it("keeps earlier remainders ahead of an unresolved delivery when the turn terminates", async () => {
     const outstanding: DeliverHookPayload = {
       kind: "deliver",
-      payloads: [{ message: "outstanding" }],
+      payloads: [{ auth: null, payload: { message: "outstanding" } }],
     };
     const earlierRemainder: DeliverHookPayload = {
       kind: "deliver",
-      payloads: [{ message: "earlier remainder" }],
+      payloads: [{ auth: null, payload: { message: "earlier remainder" } }],
     };
     installControlHook([
       deliveryRequest("req-1"),
@@ -89,14 +95,20 @@ describe("TurnControlReceiver", () => {
   });
 
   it("hands the turn's remainders back ahead of existing buffered deliveries", async () => {
-    const earlier: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "earlier" }] };
-    const handBack: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "from-turn" }] };
+    const earlier: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ auth: null, payload: { message: "earlier" } }],
+    };
+    const handBack: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ auth: null, payload: { message: "from-turn" } }],
+    };
     installControlHook([{ ...parkResult(), bufferedDeliveries: [handBack] }]);
     const bufferedDeliveries: DeliverHookPayload[] = [earlier];
 
     await runReceiver(bufferedDeliveries);
 
-    expect(bufferedDeliveries.map((item) => item.payloads[0]?.message)).toEqual([
+    expect(bufferedDeliveries.map((item) => item.payloads[0]?.payload.message)).toEqual([
       "from-turn",
       "earlier",
     ]);
@@ -117,7 +129,7 @@ describe("TurnControlReceiver", () => {
       bufferedSessionControls,
       commandInbox: createCommandInbox([
         { kind: "send", payload: { message: "follow up" } },
-        { kind: "deliver", payloads: [{ message: "legacy follow up" }] },
+        { kind: "deliver", payloads: [{ auth: null, payload: { message: "legacy follow up" } }] },
         { kind: "clear" },
         { kind: "compact" },
         { kind: "session-timeout" },
@@ -131,10 +143,10 @@ describe("TurnControlReceiver", () => {
         caller: undefined,
         kind: "deliver",
         payload: { message: "follow up" },
-        payloads: [{ message: "follow up" }],
+        payloads: [{ auth: null, payload: { message: "follow up" } }],
         requestId: undefined,
       },
-      { kind: "deliver", payloads: [{ message: "legacy follow up" }] },
+      { kind: "deliver", payloads: [{ auth: null, payload: { message: "legacy follow up" } }] },
     ]);
     expect(bufferedSessionControls).toEqual(["clear", "compact", "expired"]);
   });

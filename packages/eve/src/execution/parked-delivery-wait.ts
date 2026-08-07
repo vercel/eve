@@ -1,4 +1,4 @@
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import type { AttributedDeliverPayload, DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
@@ -26,7 +26,7 @@ export type NextTurnInstruction =
   | {
       readonly kind: "turn";
       readonly deliver: DeliverHookPayload;
-      readonly remainder: DeliverPayload;
+      readonly remainder: readonly AttributedDeliverPayload[];
     };
 
 /**
@@ -50,9 +50,7 @@ export async function nextTurnDelivery(input: {
       commandInbox: input.commandInbox,
     });
 
-    if (nextAction.kind !== "delivery") {
-      return { kind: nextAction.kind };
-    }
+    if (nextAction.kind !== "delivery") return nextAction;
 
     const deliver = nextAction.delivery;
     if (deliver === null) {
@@ -60,7 +58,6 @@ export async function nextTurnDelivery(input: {
     }
 
     const routed = await routeDeliverToChildren({
-      auth: deliver.auth,
       parentWritable: input.driverWritable,
       payloads: deliver.payloads,
       sessionState: input.sessionState,
@@ -116,9 +113,7 @@ async function waitForNextSessionAction(input: {
       return { kind: first.value.kind };
     }
 
-    if (first.value.kind === "cancel") {
-      continue;
-    }
+    if (first.value.kind === "cancel" || first.value.kind === "runtime-action-result") continue;
 
     if (first.value.kind === "deliver") {
       return { delivery: first.value, kind: "delivery" };

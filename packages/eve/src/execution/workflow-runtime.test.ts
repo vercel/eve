@@ -101,7 +101,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       caller,
       kind: "deliver",
       payload: { message: "hello" },
-      payloads: [{ message: "hello" }],
+      payloads: [{ auth: null, payload: { message: "hello" } }],
       requestId: "req_deliver",
     });
     expect(getHookByTokenMock).not.toHaveBeenCalled();
@@ -138,7 +138,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       caller: undefined,
       kind: "deliver",
       payload: { message: "hello" },
-      payloads: [{ message: "hello" }],
+      payloads: [{ auth: null, payload: { message: "hello" } }],
       requestId: undefined,
     });
   });

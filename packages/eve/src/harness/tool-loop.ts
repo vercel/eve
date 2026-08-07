@@ -38,7 +38,10 @@ import {
 } from "#context/keys.js";
 import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
 import { getActiveDynamicModelSelection } from "#context/dynamic-model-lifecycle.js";
-import { buildDynamicTools } from "#context/build-dynamic-tools.js";
+import {
+  buildDynamicTools,
+  buildResponseAuthorizationTools,
+} from "#context/build-dynamic-tools.js";
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -48,6 +51,7 @@ import {
   createCompactionRequestedEvent,
   createContextClearedEvent,
   createInputRequestedEvent,
+  createMessageCompletedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
   createStepStartedEvent,
@@ -113,6 +117,10 @@ import {
 } from "#harness/input-extraction.js";
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
+import {
+  coordinateApprovalDelivery,
+  shouldPrepareApprovalPolicyTools,
+} from "#harness/approval-delivery-coordinator.js";
 import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-context.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
@@ -125,6 +133,8 @@ import {
   getPendingInputRequestIds,
   hasDeferredStepInput,
   hasStepInput,
+  normalizePendingInputResponses,
+  queueDeferredStepInput,
   resolvePendingInput,
   setPendingInputBatch,
 } from "#harness/input-requests.js";
@@ -673,17 +683,99 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         stepInput: stepInput.input,
       }),
     });
-    const effectiveStepInput = staleConversion.stepInput;
+    const effectiveStepInput = normalizePendingInputResponses({
+      state: session.state,
+      stepInput: staleConversion.stepInput,
+    });
     const preambleStepInput =
       staleConversion.kind === "converted"
         ? { ...effectiveStepInput, message: staleConversion.displayMessage }
         : effectiveStepInput;
 
+    const approvalContext = contextStorage.getStore();
+    if (
+      approvalContext !== undefined &&
+      config.resolveStepDynamicTools !== undefined &&
+      shouldPrepareApprovalPolicyTools({ session, stepInput: effectiveStepInput })
+    ) {
+      await config.resolveStepDynamicTools({
+        ctx: approvalContext,
+        event: createStepStartedEvent({
+          sequence: emissionState.sequence,
+          stepIndex: emissionState.stepIndex,
+          turnId: emissionState.turnId,
+        }),
+        messages: resolvedRuntimeActions.messages,
+      });
+    }
+    const coordinated = await coordinateApprovalDelivery({
+      session,
+      stepInput: effectiveStepInput,
+      tools: buildResponseAuthorizationTools({
+        authoredTools: config.tools,
+        context: approvalContext,
+      }),
+    });
+    session = coordinated.session;
+    if (emit !== undefined) {
+      for (const message of coordinated.feedback) {
+        await emit(
+          createMessageCompletedEvent({
+            message,
+            sequence: emissionState.sequence,
+            stepIndex: emissionState.stepIndex,
+            turnId: emissionState.turnId,
+          }),
+        );
+      }
+    }
+    if (coordinated.kind === "park") {
+      return { next: null, session };
+    }
+    if (coordinated.kind === "continue-coordination") {
+      const continuedSession =
+        coordinated.stepInput === undefined
+          ? session
+          : queueDeferredStepInput(session, coordinated.stepInput);
+      return { next: runStep, session: continuedSession };
+    }
+    if (coordinated.challenges.length > 0) {
+      if (emit) {
+        for (const challenge of coordinated.challenges) {
+          await emit(
+            createAuthorizationRequiredEvent({
+              authorization: challenge.challenge,
+              description:
+                challenge.challenge.instructions ?? `Authorization required for ${challenge.name}`,
+              name: challenge.name,
+              sequence: emissionState.sequence,
+              stepIndex: emissionState.stepIndex,
+              turnId: emissionState.turnId,
+              webhookUrl: challenge.hookUrl,
+            }),
+          );
+        }
+      }
+      const parkedSession =
+        coordinated.stepInput === undefined
+          ? session
+          : queueDeferredStepInput(session, coordinated.stepInput);
+      return {
+        next: null,
+        session: {
+          ...parkedSession,
+          state: setPendingAuthorization(parkedSession.state, {
+            challenges: coordinated.challenges,
+          }),
+        },
+      };
+    }
+
     const pending = resolvePendingInput({
       history: resolvedRuntimeActions.messages,
       resolveApprovalKey: resolveApprovalKeyFromTools(config.tools),
       session,
-      stepInput: effectiveStepInput,
+      stepInput: coordinated.stepInput,
     });
     if (pending.outcome === "unresolved") {
       if (emit && pending.deferredMessage === true && hasStepInput(input)) {
@@ -2136,6 +2228,10 @@ async function handleStepResult(input: {
   // --- Park on input requests -----------------------------------------------
 
   if (inputRequests.length > 0) {
+    const responseAuthorizationTools = buildResponseAuthorizationTools({
+      authoredTools: config.tools,
+      context: contextStorage.getStore(),
+    });
     let parkedSession = setPendingInputBatch({
       event: {
         sequence: emissionState.sequence,
@@ -2143,6 +2239,16 @@ async function handleStepResult(input: {
         turnId: emissionState.turnId,
       },
       requests: inputRequests,
+      responseAuthRequiredRequestIds: approvalRequests
+        .filter((request) => {
+          const approval = responseAuthorizationTools.get(request.action.toolName)?.approval;
+          return (
+            approval !== undefined &&
+            typeof approval !== "function" &&
+            approval.response !== undefined
+          );
+        })
+        .map((request) => request.requestId),
       responseMessages,
       session: { ...baseSession, history: [...promptMessages] },
     });

@@ -4,6 +4,7 @@ import { signalSessionTimeoutStep } from "#execution/session-timeout-steps.js";
 
 export interface SessionTimeoutWorkflowInput {
   readonly deadline: Date;
+  readonly signalKind?: "approval-candidate-expiry" | "session-timeout";
   readonly token: string;
 }
 
@@ -12,5 +13,5 @@ export async function sessionTimeoutWorkflow(input: SessionTimeoutWorkflowInput)
   "use workflow";
 
   await sleep(input.deadline);
-  await signalSessionTimeoutStep({ token: input.token });
+  await signalSessionTimeoutStep({ kind: input.signalKind, token: input.token });
 }

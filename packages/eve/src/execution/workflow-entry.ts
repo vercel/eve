@@ -2,9 +2,9 @@ import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflo
 
 import type {
   DeliverHookPayload,
-  DeliverPayload,
   HookPayload,
   RunInput,
+  SessionAuthContext,
   SessionCapabilities,
   TurnCaller,
 } from "#channel/types.js";
@@ -186,9 +186,12 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         kind: "deliver",
         payloads: [
           {
-            message: input.input.message,
-            context: input.input.context,
-            outputSchema: input.input.outputSchema,
+            auth: (input.serializedContext["eve.auth"] as SessionAuthContext | null) ?? null,
+            payload: {
+              message: input.input.message,
+              context: input.input.context,
+              outputSchema: input.input.outputSchema,
+            },
           },
         ],
         requestId: readChannelRequestId(input.serializedContext),
@@ -396,7 +399,7 @@ async function runDriverLoop(input: {
 
       if (action.authorizationNames && action.authorizationNames.length > 0) {
         const expected = action.authorizationNames.length;
-        const allPayloads: DeliverPayload[] = [];
+        const allPayloads: DeliverHookPayload["payloads"][number][] = [];
 
         while (allPayloads.length < expected) {
           const next = await authIterator.next();
@@ -497,9 +500,8 @@ async function runDriverLoop(input: {
       }
       action = await runTurn({
         delivery: {
-          auth: next.deliver.auth,
           kind: "deliver",
-          payloads: [next.remainder],
+          payloads: next.remainder,
           requestId: next.deliver.requestId,
         },
         serializedContext: action.serializedContext,

@@ -70,7 +70,7 @@ describe("session command inbox integration", () => {
       await resumeHook(stableToken, { kind: "send", payload: { message: "by id" } });
       await resumeHook(channelToken, {
         kind: "deliver",
-        payloads: [{ message: "by channel" }],
+        payloads: [{ auth: null, payload: { message: "by channel" } }],
       });
 
       await expect(run.returnValue).resolves.toEqual(["by id", "by channel"]);

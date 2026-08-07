@@ -11,7 +11,7 @@ export async function legacySessionDeliveryWorkflow(input: {
   const deliveries = createHook<DeliverHookPayload>({ token: input.token });
   for await (const delivery of deliveries) {
     if (delivery.kind !== "deliver") continue;
-    const message = delivery.payloads[0]?.message;
+    const message = delivery.payloads[0]?.payload.message;
     return typeof message === "string" ? message : "";
   }
   return "";

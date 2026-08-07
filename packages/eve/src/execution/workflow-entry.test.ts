@@ -60,7 +60,7 @@ vi.mock("./create-session-step.js", () => ({
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads }) => ({
     kind: "continue",
-    remainder: payloads[0],
+    remainder: payloads,
   })),
 }));
 
@@ -144,6 +144,31 @@ describe("workflowEntry", () => {
     vi.unstubAllEnvs();
   });
 
+  it("preserves authenticated run identity on the initial delivery", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      deliveryHooks: [{ token: "http:test" }],
+      turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
+    });
+    const auth = {
+      attributes: { user_id: "U1" },
+      authenticator: "slack-webhook",
+      principalId: "slack:T1:U1",
+      principalType: "user",
+    };
+
+    await workflowEntry({
+      input: { message: "hello" },
+      serializedContext: createSerializedContext({ "eve.auth": auth }),
+    });
+
+    expect(vi.mocked(dispatchTurnStep).mock.calls[0]?.[0].delivery).toEqual({
+      kind: "deliver",
+      payloads: [{ auth, payload: { message: "hello", context: undefined } }],
+    });
+  });
+
   it("injects the workflow run id as the canonical session id before the first turn", async () => {
     const sessionState = createBaseSessionState();
     const getConflict = vi.fn(async () => null);
@@ -181,7 +206,7 @@ describe("workflowEntry", () => {
         completionToken: expect.any(String),
         delivery: {
           kind: "deliver",
-          payloads: [{ message: "hello there", context: undefined }],
+          payloads: [{ auth: null, payload: { message: "hello there", context: undefined } }],
         },
         serializedContext: expect.objectContaining({
           "eve.continuationToken": "http:test",
@@ -297,7 +322,7 @@ describe("workflowEntry", () => {
     expect(vi.mocked(dispatchTurnStep).mock.calls[0]?.[0].delivery).toEqual({
       requestId: "req_initial",
       kind: "deliver",
-      payloads: [{ message: "hello there", context: undefined }],
+      payloads: [{ auth: null, payload: { message: "hello there", context: undefined } }],
     });
   });
 
@@ -843,10 +868,9 @@ describe("workflowEntry", () => {
     });
 
     expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
-      auth: undefined,
       requestId: "req_followup",
       kind: "deliver",
-      payloads: [{ message: "follow up" }],
+      payloads: [{ auth: null, payload: { message: "follow up" } }],
     });
   });
 
@@ -920,11 +944,15 @@ describe("workflowEntry", () => {
     expect(dispatchTurnStep).toHaveBeenCalledTimes(1);
     expect(resumeHook).toHaveBeenCalledWith("turn-inbox", {
       delivery: {
-        auth: undefined,
         caller: undefined,
         kind: "deliver",
         payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
-        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }],
+        payloads: [
+          {
+            auth: null,
+            payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
+          },
+        ],
         requestId: undefined,
       },
       kind: "driver-delivery",
@@ -976,9 +1004,8 @@ describe("workflowEntry", () => {
     expect(result).toEqual({ output: "after delivery" });
     expect(dispatchTurnStep).toHaveBeenCalledTimes(2);
     expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
-      auth: undefined,
       kind: "deliver",
-      payloads: [{ message: "not for the child" }],
+      payloads: [{ auth: null, payload: { message: "not for the child" } }],
       requestId: undefined,
     });
     expect(resumeHook).not.toHaveBeenCalled();
@@ -1162,12 +1189,12 @@ describe("workflowEntry", () => {
             {
               caller: firstCaller,
               kind: "deliver",
-              payloads: [{ message: "first question" }],
+              payloads: [{ auth: null, payload: { message: "first question" } }],
             },
             {
               caller: secondCaller,
               kind: "deliver",
-              payloads: [{ message: "second question" }],
+              payloads: [{ auth: null, payload: { message: "second question" } }],
             },
           ],
           kind: "turn-result",
@@ -1376,7 +1403,7 @@ describe("workflowEntry", () => {
     expect(nonTurnHookTokens()).toEqual(["slack:C01:", "slack:C01:1800000000.123456"]);
     expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
       kind: "deliver",
-      payloads: [{ message: "follow up" }],
+      payloads: [{ auth: null, payload: { message: "follow up" } }],
     });
     expect(oldReturn).not.toHaveBeenCalled();
     expect(oldDispose).toHaveBeenCalledTimes(1);

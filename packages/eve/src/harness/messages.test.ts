@@ -30,24 +30,27 @@ describe("coalesceDeliveries", () => {
   it("preserves the only caller in a delivery batch", () => {
     expect(
       coalesceDeliveries([
-        { kind: "deliver", payloads: [{ context: ["background"] }] },
-        { caller, kind: "deliver", payloads: [{ message: "question" }] },
+        { kind: "deliver", payloads: [{ auth: null, payload: { context: ["background"] } }] },
+        { caller, kind: "deliver", payloads: [{ auth: null, payload: { message: "question" } }] },
       ]),
     ).toEqual({
       caller,
       kind: "deliver",
-      payloads: [{ context: ["background"] }, { message: "question" }],
+      payloads: [
+        { auth: null, payload: { context: ["background"] } },
+        { auth: null, payload: { message: "question" } },
+      ],
     });
   });
 
   it("rejects a batch with more than one turn caller", () => {
     expect(() =>
       coalesceDeliveries([
-        { caller, kind: "deliver", payloads: [{ message: "first" }] },
+        { caller, kind: "deliver", payloads: [{ auth: null, payload: { message: "first" } }] },
         {
           caller: { ...caller, callId: "call-2" },
           kind: "deliver",
-          payloads: [{ message: "second" }],
+          payloads: [{ auth: null, payload: { message: "second" } }],
         },
       ]),
     ).toThrow("Cannot coalesce deliveries from different turns.");

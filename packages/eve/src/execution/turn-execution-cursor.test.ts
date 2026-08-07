@@ -54,7 +54,7 @@ describe("TurnExecutionCursor", () => {
     await cursor.finish(
       { serializedContext: { revision: 2 }, sessionState: finalState },
       { kind: "done", output: "ok" },
-      [{ kind: "deliver", payloads: [{ message: "queued" }] }],
+      [{ kind: "deliver", payloads: [{ auth: null, payload: { message: "queued" } }] }],
     );
 
     expect(sendTurnControlStep).toHaveBeenCalledOnce();
@@ -67,7 +67,9 @@ describe("TurnExecutionCursor", () => {
           serializedContext: { revision: 2 },
           sessionState: finalState,
         },
-        bufferedDeliveries: [{ kind: "deliver", payloads: [{ message: "queued" }] }],
+        bufferedDeliveries: [
+          { kind: "deliver", payloads: [{ auth: null, payload: { message: "queued" } }] },
+        ],
         kind: "turn-result",
       },
     });

@@ -7211,13 +7211,13 @@ describe("createToolLoopHarness", () => {
 
     expect(firstResult.next).toBeNull();
     expect(generateCalls).toEqual([]);
-    expect(hasDeferredStepInput(firstResult.session)).toBe(true);
+    expect(hasDeferredStepInput(firstResult.session)).toBe(false);
 
     const deniedResult = await createToolLoopHarness(config)(firstResult.session, {
       inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
     });
 
-    expect(typeof deniedResult.next).toBe("function");
+    expect(deniedResult.next).toBeNull();
     expect(generateCalls[0]).toEqual([
       {
         content: [
@@ -7257,66 +7257,15 @@ describe("createToolLoopHarness", () => {
       },
     ]);
 
-    const secondResult = await createToolLoopHarness(config)(deniedResult.session);
-
-    expect(secondResult.next).toBeNull();
-    expect((generateCalls[1] as { role: string; content: unknown }[]).at(-1)).toEqual({
-      content: "Hi instead.",
-      role: "user",
-    });
-    expect(secondResult.session.history.at(-2)).toEqual({
-      content: "Hi instead.",
-      role: "user",
-    });
-    expect(secondResult.session.history.at(-1)).toEqual({
-      content: "Hello!",
-      role: "assistant",
-    });
+    expect(deniedResult.session.history.some((message) => message.role === "user")).toBe(false);
   });
 
-  it("consumes text approval shortcuts without appending them as user messages", async () => {
-    const generateCalls: unknown[] = [];
-
-    vi.mocked(ToolLoopAgent).mockImplementation(function (
-      this: Record<string, unknown>,
-      settings: MockAgentSettings,
-    ) {
-      const { onStepFinish, prepareStep } = settings;
-      this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
-        if (prepareStep) {
-          await prepareStep({
-            messages: input.messages,
-            steps: [],
-            stepNumber: 0,
-            model: {},
-            context: undefined,
-          });
-        }
-        generateCalls.push(input.messages);
-        const result = {
-          finishReason: "stop",
-          response: { messages: [{ content: "Approved.", role: "assistant" }] },
-          text: "Approved.",
-          toolCalls: [],
-          toolResults: [],
-        };
-        if (onStepFinish) await onStepFinish(result);
-        return createMockGenerateResult(result);
-      });
-      return this as unknown as ToolLoopAgent;
-    } as unknown as ConstructorParameters<typeof ToolLoopAgent> extends [infer S]
-      ? (settings: S) => ToolLoopAgent
-      : never);
-
+  it("guides text replies while keeping approval pending", async () => {
+    const { emit, events } = createEventCollector();
     const session = setPendingInputBatch({
       requests: [
         {
-          action: {
-            callId: "call-1",
-            input: { note: "text approval" },
-            kind: "tool-call",
-            toolName: "guarded_echo",
-          },
+          action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "guarded_echo" },
           allowFreeform: false,
           display: "confirmation",
           kind: "tool-approval",
@@ -7328,84 +7277,24 @@ describe("createToolLoopHarness", () => {
           requestId: "approval-1",
         },
       ],
-      responseMessages: [
-        {
-          content: [
-            {
-              input: { note: "text approval" },
-              toolCallId: "call-1",
-              toolName: "guarded_echo",
-              type: "tool-call",
-            },
-            {
-              approvalId: "approval-1",
-              toolCallId: "call-1",
-              type: "tool-approval-request",
-            },
-          ],
-          role: "assistant",
-        },
-      ],
-      session: createTestSession({
-        agent: {
-          modelReference: { id: "test-model" },
-          system: "You are a test assistant.",
-          tools: [
-            {
-              description: "Echo a note",
-              name: "guarded_echo",
-              inputSchema: { type: "object" },
-            },
-          ],
-        },
+      responseMessages: [],
+      session: createTestSession(),
+    });
+
+    const result = await createToolLoopHarness(createTestConfig("conversation", emit))(session, {
+      message: "approve",
+    });
+
+    expect(result.next).toBeNull();
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          message: "Please use the Approve or Cancel buttons to respond to this approval.",
+        }),
+        type: "message.completed",
       }),
-    });
-
-    const config = createTestConfig("conversation", undefined, {
-      tools: new Map([
-        [
-          "guarded_echo",
-          {
-            description: "Echo a note",
-            execute: vi.fn().mockResolvedValue("ok"),
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "guarded_echo",
-          },
-        ],
-      ]),
-    });
-
-    await createToolLoopHarness(config)(session, { message: "approve" });
-
-    expect(generateCalls[0]).toEqual([
-      {
-        content: [
-          {
-            input: { note: "text approval" },
-            toolCallId: "call-1",
-            toolName: "guarded_echo",
-            type: "tool-call",
-          },
-          {
-            approvalId: "approval-1",
-            toolCallId: "call-1",
-            type: "tool-approval-request",
-          },
-        ],
-        role: "assistant",
-      },
-      {
-        content: [
-          {
-            approvalId: "approval-1",
-            approved: true,
-            reason: undefined,
-            type: "tool-approval-response",
-          },
-        ],
-        role: "tool",
-      },
-    ]);
+    );
   });
 
   it("keeps channel context after the approval-response model call", async () => {
@@ -7501,70 +7390,11 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("deferred message lands as last non-system message after explicit approval denial", async () => {
-    // Step 1: pending approval + user sends a follow-up message. The approval
-    // remains pending and the message is deferred. Step 2: the user denies the
-    // approval. Step 3: the deferred message is consumed and appears as the
-    // last message the model sees.
-    const generateCalls: Array<Array<{ role: string; content: unknown }>> = [];
-    const agentResults = [
-      {
-        finishReason: "stop",
-        response: {
-          messages: [{ content: "I will not run that command.", role: "assistant" }],
-        },
-        text: "I will not run that command.",
-        toolCalls: [],
-        toolResults: [],
-      },
-      {
-        finishReason: "stop",
-        response: { messages: [{ content: "Sure, here you go.", role: "assistant" }] },
-        text: "Sure, here you go.",
-        toolCalls: [],
-        toolResults: [],
-      },
-    ] satisfies Record<string, unknown>[];
-    let instanceIndex = 0;
-
-    vi.mocked(ToolLoopAgent).mockImplementation(function (
-      this: Record<string, unknown>,
-      settings: MockAgentSettings,
-    ) {
-      const result = agentResults[instanceIndex];
-      instanceIndex += 1;
-      if (result === undefined) {
-        throw new Error("ToolLoopAgent mock exhausted its scripted results.");
-      }
-      const { onStepFinish, prepareStep } = settings;
-      this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
-        if (prepareStep) {
-          await prepareStep({
-            messages: input.messages,
-            steps: [],
-            stepNumber: 0,
-            model: {},
-            context: undefined,
-          });
-        }
-        generateCalls.push(input.messages as Array<{ role: string; content: unknown }>);
-        if (onStepFinish) await onStepFinish(result);
-        return createMockGenerateResult(result);
-      });
-      return this as unknown as ToolLoopAgent;
-    } as unknown as ConstructorParameters<typeof ToolLoopAgent> extends [infer S]
-      ? (settings: S) => ToolLoopAgent
-      : never);
-
+  it("does not replay unmatched approval text after a later button response", async () => {
     const session = setPendingInputBatch({
       requests: [
         {
-          action: {
-            callId: "call-1",
-            input: { command: "deploy --force" },
-            kind: "tool-call",
-            toolName: "bash",
-          },
+          action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "bash" },
           allowFreeform: false,
           display: "confirmation",
           kind: "tool-approval",
@@ -7576,78 +7406,18 @@ describe("createToolLoopHarness", () => {
           requestId: "approval-1",
         },
       ],
-      responseMessages: [
-        {
-          content: [
-            {
-              input: { command: "deploy --force" },
-              toolCallId: "call-1",
-              toolName: "bash",
-              type: "tool-call",
-            },
-            {
-              approvalId: "approval-1",
-              toolCallId: "call-1",
-              type: "tool-approval-request",
-            },
-          ],
-          role: "assistant",
-        },
-      ],
-      session: createTestSession({
-        agent: {
-          modelReference: { id: "test-model" },
-          system: "You are a test assistant.",
-          tools: [
-            { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
-          ],
-        },
-      }),
+      responseMessages: [],
+      session: createTestSession(),
     });
+    const config = createTestConfig("conversation");
 
-    const config = createTestConfig("conversation", undefined, {
-      tools: new Map([
-        [
-          "bash",
-          {
-            description: "Run shell commands",
-            execute: vi.fn().mockResolvedValue("ok"),
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "bash",
-          },
-        ],
-      ]),
-    });
+    const guided = await createToolLoopHarness(config)(session, { message: "Do something else" });
+    expect(hasDeferredStepInput(guided.session)).toBe(false);
 
-    // Step 1: user sends "Do something else" while approval is pending.
-    // Approval remains pending; message is deferred.
-    const firstResult = await createToolLoopHarness(config)(session, {
-      message: "Do something else",
-    });
-    expect(firstResult.next).toBeNull();
-    expect(generateCalls).toEqual([]);
-
-    // Step 2: user denies the approval; the deferred message is NOT in this call.
-    const deniedResult = await createToolLoopHarness(config)(firstResult.session, {
+    const denied = await createToolLoopHarness(config)(guided.session, {
       inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
     });
-    expect(typeof deniedResult.next).toBe("function");
-    const step2Last = generateCalls[0]?.at(-1);
-    expect(step2Last?.role).toBe("tool");
-
-    // Step 3: harness consumes the deferred message.
-    const secondResult = await createToolLoopHarness(config)(deniedResult.session);
-    expect(secondResult.next).toBeNull();
-
-    // The deferred user message is the last message the model sees.
-    const step3Last = generateCalls[1]?.at(-1);
-    expect(step3Last).toEqual({ content: "Do something else", role: "user" });
-
-    // History reflects the full conversation.
-    expect(secondResult.session.history.at(-1)).toEqual({
-      content: "Sure, here you go.",
-      role: "assistant",
-    });
+    expect(denied.session.history.some((message) => message.role === "user")).toBe(false);
   });
 
   it("emits input.requested for ask_question and does not emit actions.requested", async () => {

@@ -171,12 +171,15 @@ describe("workflowEntry integration", () => {
           kind: "deliver",
           payloads: [
             {
-              authorizationCallback: {
-                callback: {
-                  method: "GET",
-                  params: { code: "oauth-code" },
+              auth: null,
+              payload: {
+                authorizationCallback: {
+                  callback: {
+                    method: "GET",
+                    params: { code: "oauth-code" },
+                  },
+                  connectionName: "weather",
                 },
-                connectionName: "weather",
               },
             },
           ],

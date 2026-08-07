@@ -1,6 +1,6 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
-import type { SessionCapabilities } from "#channel/types.js";
+import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
 import type { UnstampedMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -122,9 +122,18 @@ export interface SessionLimits {
  * channels. The harness resolves any pending input batch at the start of
  * `runStep` before the model call.
  */
+export interface AttributedInputResponse {
+  readonly auth: SessionAuthContext | null;
+  readonly response: InputResponse;
+}
+
 export interface StepInput {
+  /** Internal responder-bound input produced at the delivery boundary. */
+  readonly attributedInputResponses?: readonly AttributedInputResponse[];
   readonly inputResponses?: readonly InputResponse[];
   readonly message?: string | UserContent;
+  /** Internal actor attribution for `message`. */
+  readonly messageAuth?: SessionAuthContext | null;
   /**
    * Context strings from the channel delivery. Each entry is appended
    * as a `role: "user"` message to `session.history` before the
@@ -292,6 +301,12 @@ export interface ToolLoopHarnessConfig {
    * listing appended after runtime-action batches resolve.
    */
   readonly persistentSubagentSessions?: boolean;
+  /** Resolves step-scoped dynamic tools once for approval policy and model work. */
+  readonly resolveStepDynamicTools?: (input: {
+    readonly ctx: AlsContext;
+    readonly event: UnstampedMessageStreamEvent;
+    readonly messages: readonly ModelMessage[];
+  }) => Promise<void>;
   readonly dispatchDynamicModelEvent?: (input: {
     readonly ctx: AlsContext;
     readonly event: UnstampedMessageStreamEvent;
