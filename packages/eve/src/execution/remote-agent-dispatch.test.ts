@@ -7,6 +7,7 @@ import {
   isRetryableRemoteAgentCancelError,
   isRetryableRemoteAgentContinueError,
   resolveRemoteAgentForAction,
+  resolveRemoteAgentStreamHeaders,
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
@@ -67,6 +68,96 @@ describe("resolveRemoteAgentForAction", () => {
     await expect(resolved.auth?.()).resolves.toEqual({
       headers: { authorization: "Bearer selected" },
     });
+  });
+});
+
+describe("resolveRemoteAgentStreamHeaders", () => {
+  it("resolves static and dynamic authored credentials without storing them in events", async () => {
+    const staticRemote = {
+      definition: {
+        auth: async () => ({ headers: { authorization: "Bearer static" } }),
+        description: "Research",
+        headers: { "x-static": "yes" },
+        kind: "remote",
+        logicalPath: "subagents/research.ts",
+        name: "research",
+        nodeId: "subagents/research",
+        path: "/eve/v1/session",
+        sourceId: "subagents/research.ts",
+        sourceKind: "module",
+        url: "https://static.example",
+      },
+    } as const;
+    const bundle = {
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          subagentRegistry: {
+            subagentsByNodeId: new Map([[staticRemote.definition.nodeId, staticRemote]]),
+          },
+        },
+      },
+    } as never;
+
+    await expect(
+      resolveRemoteAgentStreamHeaders({
+        bundle,
+        name: "research",
+        resolverId: staticRemote.definition.nodeId,
+        url: staticRemote.definition.url,
+      }),
+    ).resolves.toEqual({ authorization: "Bearer static", "x-static": "yes" });
+
+    const credentialsStepId = "eve:dynamic-remote-agent//stream-research";
+    const registryKey = Symbol.for("@workflow/core//registeredSteps");
+    const globalRecord = globalThis as Record<symbol, Map<string, Function> | undefined>;
+    const stepRegistry = globalRecord[registryKey] ?? new Map<string, Function>();
+    globalRecord[registryKey] = stepRegistry;
+    stepRegistry.set(credentialsStepId, () => ({
+      auth: async () => ({ headers: { authorization: "Bearer dynamic" } }),
+    }));
+
+    await expect(
+      resolveRemoteAgentStreamHeaders({
+        bundle,
+        name: "research",
+        resolverId: credentialsStepId,
+        url: "https://dynamic.example",
+      }),
+    ).resolves.toEqual({ authorization: "Bearer dynamic" });
+  });
+
+  it("rejects a static resolver whose authored URL does not match the event", async () => {
+    const definition = {
+      description: "Research",
+      kind: "remote",
+      logicalPath: "subagents/research.ts",
+      name: "research",
+      nodeId: "subagents/research",
+      path: "/eve/v1/session",
+      sourceId: "subagents/research.ts",
+      sourceKind: "module",
+      url: "https://static.example",
+    } as const;
+    const bundle = {
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          subagentRegistry: {
+            subagentsByNodeId: new Map([[definition.nodeId, { definition }]]),
+          },
+        },
+      },
+    } as never;
+
+    await expect(
+      resolveRemoteAgentStreamHeaders({
+        bundle,
+        name: "research",
+        resolverId: definition.nodeId,
+        url: "https://forged.example",
+      }),
+    ).rejects.toThrow(/does not match/);
   });
 });
 

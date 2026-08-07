@@ -7,6 +7,10 @@ import {
 } from "#internal/attachments/url-refs.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createEventId } from "#protocol/event-id.js";
+import {
+  createEveSessionStreamRoutePath,
+  createEveSubagentStreamRoutePath,
+} from "#protocol/routes.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type {
   RuntimeActionRequest,
@@ -308,10 +312,12 @@ export interface SubagentCalledStreamEvent {
   data: {
     callId: string;
     childSessionId: string;
+    childStreamPath: string;
     sessionId: string;
     sequence: number;
     name: string;
     remote?: {
+      resolverId?: string;
       url: string;
     };
     toolName: string;
@@ -1206,6 +1212,7 @@ export function createSubagentCalledEvent(input: {
   readonly sequence: number;
   readonly name: string;
   readonly remote?: {
+    readonly resolverId?: string;
     readonly url: string;
   };
   readonly toolName: string;
@@ -1216,6 +1223,14 @@ export function createSubagentCalledEvent(input: {
     data: {
       callId: input.callId,
       childSessionId: input.childSessionId,
+      childStreamPath:
+        input.remote === undefined
+          ? createEveSessionStreamRoutePath(input.childSessionId)
+          : createEveSubagentStreamRoutePath({
+              callId: input.callId,
+              childSessionId: input.childSessionId,
+              parentSessionId: input.sessionId,
+            }),
       sessionId: input.sessionId,
       sequence: input.sequence,
       name: input.name,

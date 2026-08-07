@@ -11,13 +11,21 @@ export type RouteSessionCreator = (
   input: Omit<RunInput, "adapter" | "channelName" | "requestId">,
 ) => Promise<RunHandle>;
 
+export type RemoteAgentStreamHeadersResolver = (input: {
+  readonly name: string;
+  readonly resolverId?: string;
+  readonly url: string;
+}) => Promise<Record<string, string>>;
+
 const agentInfoRouteResponseKey = "__eveAgentInfoRouteResponse";
 const routeChannelNameKey = "__eveRouteChannelName";
+const remoteAgentStreamHeadersResolverKey = "__eveRemoteAgentStreamHeadersResolver";
 const routeSessionCreatorKey = "__eveRouteSessionCreator";
 
 type InternalRouteArgs = RouteHandlerArgs & {
   [agentInfoRouteResponseKey]?: AgentInfoRouteResponse;
   [routeChannelNameKey]?: string;
+  [remoteAgentStreamHeadersResolverKey]?: RemoteAgentStreamHeadersResolver;
   [routeSessionCreatorKey]?: RouteSessionCreator;
 };
 
@@ -63,4 +71,20 @@ export function attachRouteSessionCreator<TArgs extends RouteHandlerArgs>(
 export function readRouteSessionCreator(args: RouteHandlerArgs): RouteSessionCreator | undefined {
   const routeArgs: InternalRouteArgs = args;
   return routeArgs[routeSessionCreatorKey];
+}
+
+export function attachRemoteAgentStreamHeadersResolver<TArgs extends RouteHandlerArgs>(
+  args: TArgs,
+  resolve: RemoteAgentStreamHeadersResolver,
+): TArgs {
+  const routeArgs: InternalRouteArgs = args;
+  routeArgs[remoteAgentStreamHeadersResolverKey] = resolve;
+  return args;
+}
+
+export function readRemoteAgentStreamHeadersResolver(
+  args: RouteHandlerArgs,
+): RemoteAgentStreamHeadersResolver | undefined {
+  const routeArgs: InternalRouteArgs = args;
+  return routeArgs[remoteAgentStreamHeadersResolverKey];
 }
