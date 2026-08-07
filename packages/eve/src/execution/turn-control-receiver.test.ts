@@ -130,6 +130,7 @@ describe("TurnControlReceiver", () => {
         auth: undefined,
         caller: undefined,
         kind: "deliver",
+        payload: { message: "follow up" },
         payloads: [{ message: "follow up" }],
         requestId: undefined,
       },
