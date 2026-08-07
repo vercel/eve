@@ -24,6 +24,7 @@ interface BaseChannelAddressDeliveryOptions {
   readonly callback?: SessionCallback;
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly mode?: RunMode;
+  readonly requestId?: string;
   readonly title?: string;
 }
 
@@ -85,7 +86,7 @@ export function createChannelAddress<TState = undefined>(input: {
           ...payload,
           message: serializeUrlFilePartsInMessage(payload.message),
         },
-        requestId: metadata.requestId,
+        requestId: options.requestId ?? metadata.requestId,
       };
       const command: Extract<SessionCommand, { readonly kind: "send" }> =
         caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };

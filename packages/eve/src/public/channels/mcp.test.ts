@@ -4,6 +4,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import {
   attachAgentInfoRouteResponse,
+  attachRouteChannelName,
   attachRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 import { MCP_LEGACY_PROTOCOL_VERSION } from "#internal/mcp/streamable-http-server.js";
@@ -87,6 +88,9 @@ describe("mcpChannel", () => {
       },
     });
     expect(body.result.tools[2]).toMatchObject({
+      annotations: {
+        idempotentHint: true,
+      },
       inputSchema: {
         properties: {
           responses: {
@@ -434,13 +438,16 @@ function routeArgs(createSession: () => Promise<never> = vi.fn()): RouteHandlerA
     to: unavailable,
     waitUntil: vi.fn(),
   };
-  return attachAgentInfoRouteResponse(attachRouteSessionCreator(args, createSession), async () =>
-    Response.json({
-      agent: {
-        description: "Investigates tasks.",
-        name: "compiled-agent",
-      },
-    }),
+  return attachRouteChannelName(
+    attachAgentInfoRouteResponse(attachRouteSessionCreator(args, createSession), async () =>
+      Response.json({
+        agent: {
+          description: "Investigates tasks.",
+          name: "compiled-agent",
+        },
+      }),
+    ),
+    "mcp",
   );
 }
 

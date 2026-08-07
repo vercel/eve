@@ -2,7 +2,11 @@ import type { UserContent } from "ai";
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import type { ChannelFrom } from "#channel/channel-operations.js";
+import {
+  INTERNAL_CHANNEL_DELIVER,
+  type ChannelFrom,
+  type InternalChannelSource,
+} from "#channel/channel-operations.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import type {
   AgentInvocation,
@@ -15,7 +19,12 @@ import {
   INVOCATION_OWNER_ATTRIBUTE,
   INVOCATION_TOKEN_ATTRIBUTE,
   invocationOwnerKey,
+  invocationUpdateRequestId,
 } from "#internal/invocation/metadata.js";
+import {
+  INVOCATION_UPDATE_RECEIPT_ATTRIBUTE,
+  invocationUpdateReceiptFromRequestId,
+} from "#internal/invocation/attributes.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
@@ -91,8 +100,16 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
     readonly invocationId: string;
     readonly responses: readonly InputResponse[];
   }): Promise<AgentInvocationMutationResult> {
+    const updateRequestId = invocationUpdateRequestId(input.responses);
+    const updateReceipt = invocationUpdateReceiptFromRequestId(updateRequestId);
+    if (updateReceipt === undefined) throw new Error("Invocation update receipt was unavailable.");
     const current = await this.read(input);
     if (current === undefined) return { type: "not_found" };
+    const run = await this.#readInvocationRun(input.invocationId, input.auth);
+    if (run === undefined) return { type: "not_found" };
+    if (run.attributes[INVOCATION_UPDATE_RECEIPT_ATTRIBUTE] === updateReceipt) {
+      return { invocation: current, type: "success" };
+    }
     if (current.status !== "input_required") {
       return conflict("Invocation is not waiting for input.");
     }
@@ -102,13 +119,23 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
       }
     }
 
-    const run = await this.#readInvocationRun(input.invocationId, input.auth);
-    const token = run?.attributes[INVOCATION_TOKEN_ATTRIBUTE];
+    const token = run.attributes[INVOCATION_TOKEN_ATTRIBUTE];
     if (token === undefined) return { type: "not_found" };
     try {
-      await this.#from(token).respond(input.responses, { auth: input.auth });
+      const source = this.#from(token) as InternalChannelSource;
+      await source[INTERNAL_CHANNEL_DELIVER](
+        { inputResponses: input.responses },
+        { auth: input.auth, requestId: updateRequestId },
+      );
     } catch (error) {
       if (RunExpiredError.is(error)) return { type: "not_found" };
+      const accepted = await this.#readInvocationRun(input.invocationId, input.auth);
+      if (accepted?.attributes[INVOCATION_UPDATE_RECEIPT_ATTRIBUTE] === updateReceipt) {
+        return {
+          invocation: workingInvocation(input.invocationId, current.createdAt, current.expiresAt),
+          type: "success",
+        };
+      }
       throw error;
     }
 

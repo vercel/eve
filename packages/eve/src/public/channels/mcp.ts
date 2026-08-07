@@ -36,6 +36,7 @@ import {
 } from "#public/channels/auth.js";
 import {
   readAgentInfoRouteResponse,
+  readRouteChannelName,
   readRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 export interface McpChannelInput {
@@ -328,8 +329,13 @@ async function handleMcpRequest(
   auth: import("#channel/types.js").SessionAuthContext,
 ): Promise<Response> {
   const createSession = readRouteSessionCreator(args);
+  const channelName = readRouteChannelName(args);
   const respondWithAgentInfo = readAgentInfoRouteResponse(args);
-  if (createSession === undefined || respondWithAgentInfo === undefined) {
+  if (
+    channelName === undefined ||
+    createSession === undefined ||
+    respondWithAgentInfo === undefined
+  ) {
     return Response.json({ error: "MCP requires agent route context." }, { status: 500 });
   }
   const agentInfoResponse = await respondWithAgentInfo();
@@ -344,7 +350,7 @@ async function handleMcpRequest(
     typeof agentInfo.agent.description === "string" ? agentInfo.agent.description : undefined;
   const service = new AgentInvocationService(
     new WorkflowAgentInvocationExecution({
-      channelName: "mcp",
+      channelName,
       createSession,
       from: args.from,
     }),
@@ -429,14 +435,14 @@ function createInvocationTools(
       definition: {
         annotations: {
           destructiveHint: true,
-          idempotentHint: false,
+          idempotentHint: true,
           openWorldHint: true,
           readOnlyHint: false,
         },
         description: "Answers a pending input request on a durable invocation.",
         inputSchema: z.strictObject({
           invocationId: z.string().min(1),
-          responses: z.array(inputResponseSchema),
+          responses: z.array(inputResponseSchema).min(1),
         }),
         name: "agent_update",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,

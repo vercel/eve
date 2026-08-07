@@ -428,6 +428,16 @@ describe("stateless MCP Streamable HTTP server", () => {
     expect(await jsonRpcResponse(response)).toMatchObject({ error: { code: -32000 } });
   });
 
+  it("bounds compatibility preflight parsing before the transport reads the body", async () => {
+    const { handle } = server();
+    const response = await handle(
+      request({ padding: "x".repeat(4 * 1024 * 1024), method: "tools/list" }),
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({ error: "Request body too large" });
+  });
+
   it("rejects duplicate tool names at construction", () => {
     const tool = {
       call: async () => ({ content: [] }),

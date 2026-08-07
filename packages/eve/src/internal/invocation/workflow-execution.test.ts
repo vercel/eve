@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunHandle, SessionAuthContext } from "#channel/types.js";
+import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
 import {
   buildInvocationAttributes,
   INVOCATION_OWNER_ATTRIBUTE,
   invocationOwnerKey,
+  invocationUpdateRequestId,
 } from "#internal/invocation/metadata.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
@@ -34,8 +36,8 @@ const auth: SessionAuthContext = {
 };
 
 const createSession = vi.fn<() => Promise<RunHandle>>();
-const respond = vi.fn();
-const from = vi.fn(() => ({ respond }) as never);
+const deliver = vi.fn();
+const from = vi.fn(() => ({ [INTERNAL_CHANNEL_DELIVER]: deliver }) as never);
 
 describe("WorkflowAgentInvocationExecution", () => {
   beforeEach(() => {
@@ -189,7 +191,7 @@ describe("WorkflowAgentInvocationExecution", () => {
         } as HandleMessageStreamEvent,
       ]),
     );
-    respond.mockResolvedValue({ sessionId: "wrun_invocation" });
+    deliver.mockResolvedValue({ sessionId: "wrun_invocation" });
 
     await expect(
       execution().update({
@@ -202,8 +204,66 @@ describe("WorkflowAgentInvocationExecution", () => {
       type: "success",
     });
     expect(from).toHaveBeenCalledWith("invocation:token");
-    expect(respond).toHaveBeenCalledWith([{ optionId: "yes", requestId: "question" }], { auth });
+    expect(deliver).toHaveBeenCalledWith(
+      { inputResponses: [{ optionId: "yes", requestId: "question" }] },
+      {
+        auth,
+        requestId: invocationUpdateRequestId([{ optionId: "yes", requestId: "question" }]),
+      },
+    );
     expect(getReadable).toHaveBeenCalledOnce();
+  });
+
+  it("returns the recorded result for a repeated accepted update", async () => {
+    const responses = [{ optionId: "yes", requestId: "question" }] as const;
+    const receipt = invocationUpdateRequestId(responses).slice("mcp-update:".length);
+    runsGet.mockResolvedValue(run({ receipt, status: "running" }));
+
+    await expect(
+      execution().update({ auth, invocationId: "wrun_invocation", responses }),
+    ).resolves.toMatchObject({ invocation: { status: "working" }, type: "success" });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("converges when a concurrent update accepts the same response first", async () => {
+    const responses = [{ optionId: "yes", requestId: "question" }] as const;
+    const receipt = invocationUpdateRequestId(responses).slice("mcp-update:".length);
+    const pendingRun = run({ status: "running" });
+    runsGet
+      .mockResolvedValueOnce(pendingRun)
+      .mockResolvedValueOnce(pendingRun)
+      .mockResolvedValueOnce(run({ receipt, status: "running" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        {
+          type: "input.requested",
+          data: {
+            requests: [
+              {
+                action: {
+                  callId: "call_1",
+                  input: {},
+                  kind: "tool-call",
+                  toolName: "ask_question",
+                },
+                kind: "question",
+                prompt: "Proceed?",
+                requestId: "question",
+              },
+            ],
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn_1",
+          },
+          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
+        } as HandleMessageStreamEvent,
+      ]),
+    );
+    deliver.mockRejectedValue(new Error("continuation was already consumed"));
+
+    await expect(
+      execution().update({ auth, invocationId: "wrun_invocation", responses }),
+    ).resolves.toMatchObject({ invocation: { status: "working" }, type: "success" });
   });
 
   it("projects and clears pending connection authorization", async () => {
@@ -345,12 +405,14 @@ function execution(): WorkflowAgentInvocationExecution {
   return new WorkflowAgentInvocationExecution({ channelName: "mcp", createSession, from });
 }
 
-function run(input: { ownerKey?: string; status: string }) {
+function run(input: { ownerKey?: string; receipt?: string; status: string }) {
+  const attributes: Record<string, string> = {
+    "$eve.invocation_owner": input.ownerKey ?? invocationOwnerKey(auth),
+    "$eve.invocation_token": "invocation:token",
+  };
+  if (input.receipt !== undefined) attributes["$eve.invocation_update"] = input.receipt;
   return {
-    attributes: {
-      "$eve.invocation_owner": input.ownerKey ?? invocationOwnerKey(auth),
-      "$eve.invocation_token": "invocation:token",
-    },
+    attributes,
     createdAt: new Date("2026-07-20T00:00:00.000Z"),
     input: [{ serializedContext: { "eve.initiatorAuth": auth } }],
     runId: "wrun_invocation",

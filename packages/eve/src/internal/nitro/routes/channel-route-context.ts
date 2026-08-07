@@ -7,12 +7,28 @@ export type RouteSessionCreator = (
 ) => Promise<RunHandle>;
 
 const agentInfoRouteResponseKey = "__eveAgentInfoRouteResponse";
+const routeChannelNameKey = "__eveRouteChannelName";
 const routeSessionCreatorKey = "__eveRouteSessionCreator";
 
 type InternalRouteArgs = RouteHandlerArgs & {
   [agentInfoRouteResponseKey]?: AgentInfoRouteResponse;
+  [routeChannelNameKey]?: string;
   [routeSessionCreatorKey]?: RouteSessionCreator;
 };
+
+export function attachRouteChannelName<TArgs extends RouteHandlerArgs>(
+  args: TArgs,
+  channelName: string,
+): TArgs {
+  const routeArgs: InternalRouteArgs = args;
+  routeArgs[routeChannelNameKey] = channelName;
+  return args;
+}
+
+export function readRouteChannelName(args: RouteHandlerArgs): string | undefined {
+  const routeArgs: InternalRouteArgs = args;
+  return routeArgs[routeChannelNameKey];
+}
 
 export function attachAgentInfoRouteResponse<TArgs extends RouteHandlerArgs>(
   args: TArgs,

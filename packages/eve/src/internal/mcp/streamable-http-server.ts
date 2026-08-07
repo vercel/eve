@@ -10,6 +10,7 @@ const MCP_LEGACY_PROTOCOL_VERSIONS = new Set([
   "2025-06-18",
   "2025-03-26",
 ]);
+const MCP_MAX_BODY_SIZE_BYTES = 4 * 1024 * 1024;
 
 export interface McpToolDefinition {
   readonly name: string;
@@ -94,10 +95,11 @@ async function preflightRequest(request: Request): Promise<McpRequestPreflight> 
     ["completion/", "prompts/", "resources/"].some((prefix) => method.startsWith(prefix))
   ) {
     const body = await readRequestBody(request);
-    if (readJsonRpcRequestMethod(body) === method) {
+    if (body.tooLarge) return { modern: true, response: requestBodyTooLargeResponse() };
+    if (readJsonRpcRequestMethod(body.value) === method) {
       return {
         modern: true,
-        response: jsonRpcError(readJsonRpcRequestId(body), -32_601, "Method not found", 404),
+        response: jsonRpcError(readJsonRpcRequestId(body.value), -32_601, "Method not found", 404),
       };
     }
   }
@@ -105,14 +107,15 @@ async function preflightRequest(request: Request): Promise<McpRequestPreflight> 
   if (protocolHeader !== null) return { modern: modernHeader };
 
   const body = await readRequestBody(request);
-  const version = readBodyProtocolVersion(body);
+  if (body.tooLarge) return { modern: false, response: requestBodyTooLargeResponse() };
+  const version = readBodyProtocolVersion(body.value);
   if (version === undefined) return { modern: false };
   if (version === MCP_PROTOCOL_VERSION) return { modern: true };
 
   return {
     modern: true,
     response: jsonRpcError(
-      readJsonRpcRequestId(body),
+      readJsonRpcRequestId(body.value),
       -32_022,
       "Unsupported protocol version",
       400,
@@ -124,12 +127,44 @@ async function preflightRequest(request: Request): Promise<McpRequestPreflight> 
   };
 }
 
-async function readRequestBody(request: Request): Promise<unknown> {
+async function readRequestBody(
+  request: Request,
+): Promise<{ readonly tooLarge: boolean; readonly value?: unknown }> {
+  const cloned = request.clone();
+  if (cloned.body === null) return { tooLarge: false };
+
+  const reader = cloned.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
   try {
-    return await request.clone().json();
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      size += chunk.value.byteLength;
+      if (size > MCP_MAX_BODY_SIZE_BYTES) {
+        void reader.cancel();
+        return { tooLarge: true };
+      }
+      chunks.push(chunk.value);
+    }
+
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { tooLarge: false, value: JSON.parse(new TextDecoder().decode(bytes)) };
   } catch {
-    return undefined;
+    return { tooLarge: false };
   }
+}
+
+function requestBodyTooLargeResponse(): Response {
+  return Response.json(
+    { error: "Request body too large" },
+    { status: 413, statusText: "Request Entity Too Large" },
+  );
 }
 
 function readBodyProtocolVersion(body: unknown): string | undefined {

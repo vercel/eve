@@ -41,6 +41,11 @@ import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import { setEveAttributes } from "#runtime/attributes/emit.js";
+import {
+  INVOCATION_UPDATE_RECEIPT_ATTRIBUTE,
+  invocationUpdateReceiptFromRequestId,
+} from "#internal/invocation/attributes.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -494,6 +499,12 @@ async function runDriverLoop(input: {
 
       if (next.deliver.caller !== undefined) {
         input.crashCleanupState.caller = next.deliver.caller;
+      }
+      const invocationUpdateReceipt = invocationUpdateReceiptFromRequestId(next.deliver.requestId);
+      if (invocationUpdateReceipt !== undefined) {
+        await setEveAttributes({
+          [INVOCATION_UPDATE_RECEIPT_ATTRIBUTE]: invocationUpdateReceipt,
+        });
       }
       action = await runTurn({
         delivery: {

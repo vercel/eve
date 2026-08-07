@@ -25,6 +25,7 @@
  * - `$eve.channel_request_id` — inbound channel request id
  * - `$eve.invocation_token` — channel-local continuation token for an external invocation
  * - `$eve.invocation_owner` — SHA-256 fingerprint of the invocation's initiating principal
+ * - `$eve.invocation_update` — receipt fingerprint for the last accepted external input update
  */
 
 import { ChannelRequestIdKey } from "#context/keys.js";
