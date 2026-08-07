@@ -37,7 +37,7 @@ Tasks must not build a second addressing mechanism. The task record composes wit
 - the **handle** identifies the reusable child session (agent-messaging owns it);
 - the **task** identifies one unit of work against that handle and adds what handles lack:
   a durable record that survives terminal settlement, `working` / `input_required` status,
-  progress messages, receipts instead of turn-blocking, and `task_await`.
+  progress messages, and receipts instead of turn-blocking.
 
 Task identity reuses the operation-id derivation, `hash(parentSessionId, parentTurnId, callId)`,
 so replayed creation for the same originating call yields the same task without new machinery.
@@ -86,14 +86,14 @@ New `packages/eve/src/tasks/` module cluster:
 
 - `TaskStatus`, `TaskView`, `TaskMetadata`, `TaskOutput`, and a pure transition function
   enforcing the lifecycle rules (terminal is final; `working <-> input_required`). This stage
-  also settles the design doc's open API questions that block types: the discriminated
-  `task_send` input and how `input_required` exposes its outstanding `InputRequest[]`.
+  also settles how `input_required` exposes its outstanding `InputRequest[]`; `task_send`
+  accepts only a message follow-up for a terminal task.
 - The **durable task run**: a dedicated small workflow per task (precedent: the session-timeout
   run). It is the single writer for transitions, consumes commands over its own hook, and
   appends a full `TaskView` snapshot per accepted command. Competing completion, cancellation,
   and input-response commands serialize here.
 - The **session task index**: one new namespaced session-state key holding
-  `{ taskId, taskRunId }` entries. Adding a key to `SessionStateMap` needs no session-version
+  `{ taskId, taskRunId, metadata }` entries. Adding a key to `SessionStateMap` needs no session-version
   migration.
 
 Verification: exhaustive unit tests on transitions (late completion after `cancelled`,
@@ -102,20 +102,13 @@ lifecycle path.
 
 ### Stage 2 — task tools, undiscoverable
 
-Register the parent tools (`task_peek`, `task_await`, `task_send`, `task_cancel`, `task_sleep`)
-as framework tools, filtered out of the tool set unless the flag is on, plus the child
-`task_message` tool advertised only when a task binding is present (the same capability-gating
-pattern as `ask_question`).
+Register the parent tools (`task_peek`, `task_send`, `task_cancel`, `task_sleep`)
+as framework tools, filtered out of the tool set unless the flag is on. The first implementation
+has no child-facing task tool.
 
 - `task_sleep` reuses the existing durable turn-sleep request.
-- `task_peek`, `task_cancel`, and `task_send` read the session task index and command the task
-  run; `task_send` resolves the child address through the agent handle store and the existing
-  continuation dispatch.
-- `task_await` introduces the one new turn-workflow wait: a new optional wait arm on the durable
-  step result that subscribes to selected task runs and returns when every selected task is
-  terminal or `input_required` (already-ready tasks return immediately). This is the only piece
-  of stage 2 that touches the turn workflow, and it rides an optional field nothing produces
-  when the flag is off.
+- `task_peek`, `task_cancel`, and `task_send` read the session task index; `task_send` resolves a
+  terminal task's child address through the agent handle store and starts a new task.
 
 Verification: unit tests per tool; a scenario test that the tools are absent from advertised
 tool sets and `/agent-info` when the flag is off.
@@ -134,8 +127,8 @@ In the runtime-action dispatch step, add a delegated mode alongside the existing
 
 Step 4 is what keeps the parent turn moving and history provider-valid: the receipt is the one
 result the existing key-based batch matching consumes, so the turn continues without a second
-result path. The eventual outcome reaches the model only through `task_await`, `task_peek`, or a
-task notification. Nothing selects this mode yet.
+result path. A task notification starts or nudges a parent turn, and the model can read additional
+current state through `task_peek`. Nothing selects this mode yet.
 
 Verification: integration tests invoking the mode directly; replay tests proving the same
 originating call returns the same task and never dispatches twice.
@@ -150,9 +143,8 @@ Carry the six flows over the task contract for local and remote children alike, 
 | Terminal result or failure | `task.update` command to the task run, terminal snapshot          |
 | Input request / approval   | `task.update` with `input_required` plus the outstanding batch    |
 | Authorization event        | `task.authorization` through the task binding                     |
-| Input response             | `task_send`, routed via the handle address                        |
+| Input response             | Parent-session HITL proxy, routed directly to the blocked child   |
 | Cancellation               | `task_cancel`: commit `cancelled`, then propagate executor abort  |
-| Progress                   | `task_message` from the child, recorded as latest `statusMessage` |
 
 Concretely:
 
@@ -160,9 +152,9 @@ Concretely:
   the parent turn hook; the existing adapter is untouched;
 - the remote callback route gains task payload kinds alongside the existing session and turn
   kinds; old payloads are unchanged and old deployments never receive the new kinds;
-- routing policy: terminal and `input_required` snapshots wake a parked parent through the
-  session delivery path; progress updates task state and client-visible events only. During an
-  active turn, inbound task events wait for the next safe step boundary;
+- routing policy: a local `input_required` snapshot commits task-owned proxy routes and emits the
+  exact request on the parent session; a fully routed response starts no parent model turn.
+  Terminal snapshots still wake the parent through the session delivery path;
 - parent-session finalization extends the existing end-of-session child termination to
   cooperatively cancel live tasks first.
 
@@ -178,25 +170,26 @@ deliberately; they get their own plans if anything nontrivial surfaces.
 
 ## Settled decisions
 
-1. **Wake policy.** Terminal and `input_required` transitions wake a parked parent through the
-   session delivery path; they are the only wake triggers. Progress never wakes on its own.
-2. **`task_send` to a busy child.** A send to a `working` task surfaces `AGENT_BUSY` as a tool
+1. **Lifecycle ownership.** In tasks mode, the task run is the sole execution-lifecycle writer.
+   Agent records retain stable identity and private address only. Availability is derived from
+   nonterminal tasks, with at most one such task per child session; busy agents remain visible in
+   `<agents>` with their active task id and status.
+2. **Wake policy.** Terminal and `input_required` transitions wake a parked parent through the
+   session delivery path; they are the only wake triggers.
+3. **`task_send` to a busy child.** A send to a `working` task surfaces `AGENT_BUSY` as a tool
    error, matching handle-continuation semantics. Queuing on the task run is deferred; it is
    the reversible follow-up if busy errors prove noisy in practice.
-3. **Failure taxonomy.** Child failure maps to the `failed` status, and as a consequence of
+   The same agent is reserved for the whole dispatch batch even if its first task settles quickly.
+4. **Failure taxonomy.** Child failure maps to the `failed` status, and as a consequence of
    that transition the task's output carries the error (`TaskOutput.error`). Failure is the
    state; the error output is its consequence. This intentionally diverges from MCP, which
    reserves `failed` for protocol-level errors.
-4. **Progress is deferred.** The child-facing `task_message` tool and the progress flow are cut
-   from the first implementation; the stage 4 table's progress row lands in a follow-up. The
-   five remaining flows ship first.
+5. **Progress is deferred.** The first implementation has no child-facing progress contract.
 
 ## Known gaps to resolve in flight
 
-1. **Remote children outlive the parent.** Agent-messaging documents that remote children are
-   not terminated with the parent. The tasks acceptance criterion "completing the parent
-   session cancels its live tasks" needs the remote cancel path wired into parent finalization
-   in stage 4, or an explicit scope cut.
+1. **Remote parity is release-blocking.** Remote task children must support the same HITL,
+   authorization, cancellation, and terminal lifecycle as local children before the flag ships.
 2. **Blocked vs computing children.** Today a child parked on input or authorization looks like
    any running child. The `input_required` transition in stage 4 is what makes the difference
    observable; until then `task_peek` reports `working` for both, which is acceptable for the
