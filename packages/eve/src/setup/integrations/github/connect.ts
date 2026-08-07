@@ -1,7 +1,6 @@
 import { createPromptCommandOutput, withPhase, type ChannelSetupLog } from "#setup/cli/index.js";
-import { replaceConnectTrigger } from "#setup/connect-provisioning.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
-import { runVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
+import { runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
 import { z } from "zod";
 
 export const GITHUB_TRIGGER_PATH = "/eve/v1/github";
@@ -16,7 +15,6 @@ export interface GitHubConnectorRef {
 
 /** Effects used to provision a GitHub Connect connector. */
 export interface ProvisionGitHubConnectorDeps {
-  runVercel: typeof runVercel;
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
 }
 
@@ -72,7 +70,7 @@ export async function provisionGitHubConnector(input: {
   signal?: AbortSignal;
   deps?: ProvisionGitHubConnectorDeps;
 }): Promise<GitHubConnectorRef> {
-  const deps = input.deps ?? { runVercel, runVercelCaptureStdout };
+  const deps = input.deps ?? { runVercelCaptureStdout };
   const onOutput = createPromptCommandOutput(input.log);
   const result = await withPhase(input.log, "Creating GitHub connector...", () =>
     deps.runVercelCaptureStdout(
@@ -83,6 +81,8 @@ export async function provisionGitHubConnector(input: {
         "--name",
         input.slug,
         "--triggers",
+        "--trigger-path",
+        GITHUB_TRIGGER_PATH,
         ...input.events.flatMap((event) => ["--trigger-event", event]),
         "-F",
         "json",
@@ -132,24 +132,5 @@ export async function provisionGitHubConnector(input: {
   if (connector === undefined)
     throw new Error("Vercel returned invalid details for the GitHub connector.");
 
-  const attachment = await withPhase(input.log, "Connecting GitHub webhooks...", () =>
-    replaceConnectTrigger({
-      connectorUid: connector.uid,
-      projectRoot: input.projectRoot,
-      projectId: input.project.projectId,
-      orgId: input.project.orgId,
-      environment: "production",
-      triggerPath: GITHUB_TRIGGER_PATH,
-      onOutput,
-      signal: input.signal,
-      deps,
-    }),
-  );
-  input.signal?.throwIfAborted();
-  if (attachment.state !== "attached") {
-    throw new Error(
-      `GitHub connector was created, but its trigger could not be attached. Run \`vercel connect attach ${connector.uid} --project ${input.project.projectId} --environment production --triggers --trigger-path ${GITHUB_TRIGGER_PATH} --yes --scope ${input.project.orgId}\`.`,
-    );
-  }
   return connector;
 }

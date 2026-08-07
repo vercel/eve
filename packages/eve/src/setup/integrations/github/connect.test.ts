@@ -27,7 +27,7 @@ describe("GitHub Connect provisioning", () => {
     ).toEqual({ id: "scl_github", uid: "github/agent" });
   });
 
-  it("creates the connector and replaces its trigger", async () => {
+  it("creates the connector with the eve trigger path", async () => {
     const runVercelCaptureStdout = vi
       .fn()
       .mockResolvedValueOnce({
@@ -49,8 +49,6 @@ describe("GitHub Connect provisioning", () => {
         }),
         stderr: "",
       });
-    const runVercel = vi.fn(async () => true);
-
     await expect(
       provisionGitHubConnector({
         events: ["issue_comment", "pull_request_review_comment"],
@@ -58,7 +56,7 @@ describe("GitHub Connect provisioning", () => {
         project: { orgId: "team_123", projectId: "prj_123" },
         projectRoot: "/project",
         slug: "agent",
-        deps: { runVercel, runVercelCaptureStdout },
+        deps: { runVercelCaptureStdout },
       }),
     ).resolves.toEqual({ appSlug: "agent", id: "scl_github", uid: "github/agent" });
 
@@ -70,6 +68,8 @@ describe("GitHub Connect provisioning", () => {
         "--name",
         "agent",
         "--triggers",
+        "--trigger-path",
+        "/eve/v1/github",
         "--trigger-event",
         "issue_comment",
         "--trigger-event",
@@ -86,29 +86,6 @@ describe("GitHub Connect provisioning", () => {
       ["api", "/v1/connect/connectors/scl_github", "--scope", "team_123", "--raw"],
       expect.objectContaining({ cwd: "/project", nonInteractive: true }),
     );
-    expect(runVercel).toHaveBeenNthCalledWith(
-      1,
-      ["connect", "detach", "github/agent", "--project", "prj_123", "--yes", "--scope", "team_123"],
-      expect.objectContaining({ cwd: "/project", nonInteractive: true }),
-    );
-    expect(runVercel).toHaveBeenNthCalledWith(
-      2,
-      [
-        "connect",
-        "attach",
-        "github/agent",
-        "--project",
-        "prj_123",
-        "--environment",
-        "production",
-        "--triggers",
-        "--trigger-path",
-        "/eve/v1/github",
-        "--yes",
-        "--scope",
-        "team_123",
-      ],
-      expect.objectContaining({ cwd: "/project", nonInteractive: true }),
-    );
+    expect(runVercelCaptureStdout).toHaveBeenCalledTimes(2);
   });
 });
