@@ -52,12 +52,20 @@ const OVERRIDE_AUTH: SessionAuthContext = {
  * Returns a `fetch(req)` function and a `send` mock so tests can inspect
  * what the handler passed through.
  */
-function createEveCreateHandler(input: EveChannelInput) {
+function createEveCreateHandler(
+  input: EveChannelInput,
+  options: { readonly activeSessionId?: string } = {},
+) {
   const channel = eveChannel(input);
   const createRoute = channel.routes.find(
     (r) => r.method === "POST" && r.path === "/eve/v1/session",
   );
   if (!createRoute) throw new Error("No create POST route found");
+  const resolveActiveSession = vi
+    .fn<RouteHandlerArgs["resolveActiveSession"]>()
+    .mockResolvedValue(
+      options.activeSessionId === undefined ? undefined : { sessionId: options.activeSessionId },
+    );
 
   const mockSend = vi.fn<SendFn>().mockResolvedValue({
     id: "test-session-id",
@@ -74,11 +82,12 @@ function createEveCreateHandler(input: EveChannelInput) {
   } satisfies ChannelSession);
 
   return {
+    resolveActiveSession,
     send: mockSend,
     async fetch(req: Request) {
       const args: RouteHandlerArgs = {
         send: mockSend,
-        resolveActiveSession: async () => undefined,
+        resolveActiveSession,
         cancel: vi.fn(),
         clear: vi.fn(),
         compact: vi.fn(),
@@ -812,6 +821,106 @@ describe("eveChannel — onMessage", () => {
       error: "Session is not active and cannot be resumed.",
       ok: false,
     });
+  });
+});
+
+describe("eveChannel — create session idempotency", () => {
+  it("creates once for an operation id and reuses its continuation token", async () => {
+    const handler = createEveCreateHandler({ auth: () => ACCEPTED_AUTH });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ message: "hi", operationId: "operation-1" }),
+    );
+
+    expect(response.status).toBe(202);
+    const token = handler.send.mock.calls[0]?.[1]?.continuationToken;
+    expect(token).toMatch(/^eve:op:[0-9a-f]{32}$/);
+    expect(handler.send.mock.calls[0]?.[1]?.intent).toBe("create-once");
+    expect(handler.resolveActiveSession).toHaveBeenCalledWith({ continuationToken: token });
+  });
+
+  it("returns the existing child for a replayed operation without dispatching again", async () => {
+    const handler = createEveCreateHandler(
+      { auth: () => ACCEPTED_AUTH },
+      { activeSessionId: "child-1" },
+    );
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ message: "hi", operationId: "operation-1" }),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, sessionId: "child-1" });
+    expect(handler.send).not.toHaveBeenCalled();
+  });
+
+  it("scopes the operation token to the complete authenticated principal", async () => {
+    const tokenFor = async (identity: {
+      issuer?: string;
+      principalId?: string;
+      principalType?: string;
+      subject?: string;
+    }): Promise<unknown> => {
+      const handler = createEveCreateHandler({
+        auth: () => {
+          const context: {
+            attributes: Record<string, string>;
+            authenticator: string;
+            issuer?: string;
+            principalId: string;
+            principalType: string;
+            subject?: string;
+          } = {
+            attributes: {},
+            authenticator: "test",
+            principalId: identity.principalId ?? "caller",
+            principalType: identity.principalType ?? "service",
+          };
+          if (identity.issuer !== undefined) context.issuer = identity.issuer;
+          if (identity.subject !== undefined) context.subject = identity.subject;
+          return context;
+        },
+      });
+      await handler.fetch(createJsonMessageRequest({ message: "hi", operationId: "operation-1" }));
+      return handler.send.mock.calls[0]?.[1]?.continuationToken;
+    };
+
+    const original = await tokenFor({ issuer: "issuer-a" });
+    expect(await tokenFor({ issuer: "issuer-b" })).not.toBe(original);
+    expect(await tokenFor({ issuer: "issuer-a", principalType: "user" })).not.toBe(original);
+    expect(await tokenFor({ issuer: "issuer-a", principalId: "other" })).not.toBe(original);
+    expect(await tokenFor({ issuer: "issuer-a", subject: "different-provenance" })).toBe(original);
+  });
+
+  it("rejects operation ids for anonymous callers", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ message: "hi", operationId: "operation-1" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-string operation id", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ message: "hi", operationId: 42 }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.send).not.toHaveBeenCalled();
+  });
+
+  it("mints a random continuation token when no operation id is supplied", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(handler.send.mock.calls[0]?.[1]?.continuationToken).toMatch(/^eve:(?!op:)/);
+    expect(handler.resolveActiveSession).not.toHaveBeenCalled();
   });
 });
 

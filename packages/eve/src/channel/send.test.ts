@@ -144,6 +144,50 @@ describe("createSendFn", () => {
     expect(runtime.dispatchContinuation).toHaveBeenCalledTimes(2);
   });
 
+  it("adopts a concurrent create-once winner without delivering duplicate input", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.createSession).mockRejectedValue(
+      new RuntimeSessionOwnershipConflictError({
+        continuationToken: "test:token",
+        ownerSessionId: "winner",
+        sessionId: "loser",
+      }),
+    );
+    vi.mocked(runtime.resolveContinuation).mockResolvedValue(undefined);
+
+    await expect(
+      createSendFn(
+        runtime,
+        ADAPTER,
+        "test",
+      )("hello", {
+        auth: null,
+        continuationToken: "token",
+        intent: "create-once",
+      }),
+    ).resolves.toMatchObject({ id: "winner" });
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+  });
+
+  it("adopts an existing create-once owner without delivering duplicate input", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.resolveContinuation).mockResolvedValue({ sessionId: "winner" });
+
+    await expect(
+      createSendFn(
+        runtime,
+        ADAPTER,
+        "test",
+      )("hello", {
+        auth: null,
+        continuationToken: "token",
+        intent: "create-once",
+      }),
+    ).resolves.toMatchObject({ id: "winner" });
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    expect(runtime.createSession).not.toHaveBeenCalled();
+  });
+
   it("forwards the turn caller on the session command", async () => {
     const runtime = createRuntime({ sessionId: "existing-session-id", status: "accepted" });
     const caller = {

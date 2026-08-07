@@ -55,7 +55,11 @@ export function createSendFn<TState = undefined>(
         : undefined;
     };
 
-    const existing = await dispatch();
+    const existingOwner = async (): Promise<Session | undefined> => {
+      const owner = await runtime.resolveContinuation(continuationToken);
+      return owner === undefined ? undefined : createSession(owner.sessionId, rawToken, runtime);
+    };
+    const existing = intent === "create-once" ? await existingOwner() : await dispatch();
     if (existing !== undefined) return existing;
     if (intent === "resume") throw new RuntimeNoActiveSessionError(continuationToken);
 
@@ -91,6 +95,9 @@ export function createSendFn<TState = undefined>(
       return createSession(handle.sessionId, rawToken, runtime);
     } catch (error) {
       if (!isRuntimeSessionOwnershipConflictError(error)) throw error;
+      if (intent === "create-once") {
+        return createSession(error.ownerSessionId, rawToken, runtime);
+      }
       const winner = await dispatch();
       if (winner !== undefined) return winner;
       throw error;

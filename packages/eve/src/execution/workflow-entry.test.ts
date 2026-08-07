@@ -198,7 +198,7 @@ describe("workflowEntry", () => {
     expect(terminateChildSessionsStep).toHaveBeenCalledWith({ sessionState });
   });
 
-  it("fails a conflicting delivery hook before dispatching the first turn", async () => {
+  it("exits a conflicting initial continuation before dispatching the first turn", async () => {
     const sessionState = createBaseSessionState();
     const dispose = vi.fn();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
@@ -218,25 +218,14 @@ describe("workflowEntry", () => {
         input: { message: "duplicate" },
         serializedContext: createSerializedContext(),
       }),
-    ).rejects.toMatchObject({
-      message: "Agent workflow failed. Inspect the private session trace for details.",
-      name: "EveWorkflowFailure",
-    });
+    ).resolves.toEqual({ output: "" });
 
-    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: expect.objectContaining({
-          conflictingRunId: "wrun_owner",
-          name: "HookConflictError",
-          token: "http:test",
-        }),
-      }),
-    );
+    expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
     expect(dispatchTurnStep).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
   });
 
-  it("normalizes the getConflict fallback error before dispatching the first turn", async () => {
+  it("also exits when a legacy world reports the initial continuation conflict", async () => {
     const sessionState = createBaseSessionState();
     const dispose = vi.fn();
     const fallbackError = Object.assign(new Error("legacy hook conflict"), {
@@ -262,20 +251,9 @@ describe("workflowEntry", () => {
         input: { message: "duplicate" },
         serializedContext: createSerializedContext(),
       }),
-    ).rejects.toMatchObject({
-      message: "Agent workflow failed. Inspect the private session trace for details.",
-      name: "EveWorkflowFailure",
-    });
+    ).resolves.toEqual({ output: "" });
 
-    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: expect.objectContaining({
-          message: 'Hook token "http:test" is already in use',
-          name: "HookConflictError",
-          token: "http:test",
-        }),
-      }),
-    );
+    expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
     expect(dispatchTurnStep).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
   });

@@ -41,6 +41,19 @@ curl -X POST https://<deployment>/eve/v1/session \
 # {"continuationToken":"eve:7f3c...","ok":true,"sessionId":"ses_01h..."}
 ```
 
+Authenticated callers that may retry a create request can pass their own `operationId` for
+create-once semantics. The same operation under the same authenticated principal returns the
+active session it already created instead of dispatching the input again. The first accepted
+payload wins; retries with different input still return that first session. Anonymous callers
+cannot use `operationId`, and operation ownership expires when the session is no longer resumable.
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"What is the weather in Paris?","operationId":"order-4213-research"}'
+```
+
 Stream that session's events as newline-delimited JSON (`application/x-ndjson; charset=utf-8`), one event object per line:
 
 ```bash

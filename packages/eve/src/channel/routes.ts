@@ -95,9 +95,11 @@ type BaseSendOptions = {
   continuationToken: string;
   /**
    * `"resume"` requires an active session and propagates a typed no-active-session
-   * error. `"resume-or-start"` preserves the default channel behavior.
+   * error. `"create-once"` adopts an existing or concurrently-created owner
+   * without delivering the duplicate input. `"resume-or-start"` preserves the
+   * default channel behavior.
    */
-  intent?: "resume" | "resume-or-start";
+  intent?: "create-once" | "resume" | "resume-or-start";
   /**
    * The original (top-level) caller's auth for a newly started session,
    * becoming `session.auth.initiator`. Defaults to {@link auth} when omitted

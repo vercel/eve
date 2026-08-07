@@ -31,7 +31,7 @@ import { createSessionStep } from "#execution/create-session-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
-import { disposeHook } from "#execution/hook-ownership.js";
+import { disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
@@ -344,7 +344,14 @@ async function runDriverLoop(input: {
 
   try {
     if (input.sessionState.continuationToken) {
-      await commandInbox.rekeyContinuation(input.sessionState.continuationToken);
+      try {
+        await commandInbox.rekeyContinuation(input.sessionState.continuationToken);
+      } catch (error) {
+        // A concurrent create may start multiple candidates before one owns
+        // the shared alias. The loser exits before dispatching its first turn.
+        if (!isHookConflictError(error)) throw error;
+        return { kind: "result", result: { output: "" } };
+      }
     }
     await sessionTimeout?.start();
 

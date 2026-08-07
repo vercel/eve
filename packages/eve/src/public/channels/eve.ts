@@ -223,7 +223,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         return await respond();
       }),
 
-      POST("/eve/v1/session", async (req, { send }) => {
+      POST("/eve/v1/session", async (req, { resolveActiveSession, send }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
         const sessionAuth = authResult;
@@ -252,6 +252,35 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
 
+        if (body.operationId !== undefined && sessionAuth.principalType === "anonymous") {
+          return Response.json(
+            { error: "operationId requires an authenticated principal.", ok: false },
+            { status: 400 },
+          );
+        }
+        const operationToken =
+          body.operationId === undefined
+            ? undefined
+            : await deriveOperationContinuationToken({
+                auth: sessionAuth,
+                operationId: body.operationId,
+              });
+        if (operationToken !== undefined) {
+          const owner = await resolveActiveSession({ continuationToken: operationToken });
+          if (owner !== undefined) {
+            return Response.json(
+              { continuationToken: operationToken, ok: true, sessionId: owner.sessionId },
+              {
+                headers: {
+                  "cache-control": "no-store",
+                  [EVE_SESSION_ID_HEADER]: owner.sessionId,
+                },
+                status: 202,
+              },
+            );
+          }
+        }
+
         const messageResult = await resolveOnMessage({
           auth: forwarded.auth,
           config: input,
@@ -261,7 +290,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (messageResult instanceof Response) return messageResult;
         if (!messageResult.dispatch) return droppedMessageResponse();
 
-        const token = `eve:${crypto.randomUUID()}`;
+        const token = operationToken ?? `eve:${crypto.randomUUID()}`;
         const context = mergeContext(body.context, messageResult.context);
 
         const sendOptions: SendOptions = {
@@ -271,6 +300,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           continuationToken: token,
           mode: body.mode,
         };
+        if (operationToken !== undefined) sendOptions.intent = "create-once";
         if (forwarded.accepted) {
           sendOptions.initiatorAuth = forwarded.initiatorAuth;
         }
@@ -683,7 +713,28 @@ interface ParsedCreateBody {
   message: string | UserContent;
   mode?: RunMode;
   context?: readonly string[];
+  operationId?: string;
   outputSchema?: JsonObject;
+}
+
+/** Replay-stable identity for one authenticated create operation. */
+async function deriveOperationContinuationToken(input: {
+  readonly auth: SessionAuthContext;
+  readonly operationId: string;
+}): Promise<string> {
+  const identity = JSON.stringify([
+    "eve:create-session:v1",
+    input.auth.authenticator,
+    input.auth.issuer ?? null,
+    input.auth.principalType,
+    input.auth.principalId,
+    input.operationId,
+  ]);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity));
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+  return `eve:op:${hex.slice(0, 32)}`;
 }
 
 function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | Response {
@@ -712,7 +763,24 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
     );
   }
 
-  return { callback, capabilities, message, mode, context, outputSchema };
+  const rawOperationId = payload.operationId;
+  if (rawOperationId !== undefined && (typeof rawOperationId !== "string" || !rawOperationId)) {
+    return Response.json(
+      { error: "Expected 'operationId' to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  const result: ParsedCreateBody = {
+    callback,
+    capabilities,
+    message,
+    mode,
+    context,
+    outputSchema,
+  };
+  if (typeof rawOperationId === "string") result.operationId = rawOperationId;
+  return result;
 }
 
 interface ParsedContinueBody {
