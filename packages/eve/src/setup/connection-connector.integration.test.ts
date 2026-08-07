@@ -70,15 +70,32 @@ describe("setupConnectionConnector", () => {
     };
   }
 
-  it("attaches the canonical connector only after confirming user authorization", async () => {
+  it("offers the canonical connector first instead of attaching it silently", async () => {
+    const selectOptions: SingleSelectOptions<PrompterValue>[] = [];
+    const fake = createFakePrompter({
+      single: (input) => {
+        selectOptions.push(input);
+        return CANONICAL_UID;
+      },
+    });
     capture
       .mockResolvedValueOnce(
-        jsonResult({ connectors: [{ uid: CANONICAL_UID, id: "scl_canonical" }] }),
+        jsonResult({
+          connectors: [
+            {
+              uid: "linear/shared",
+              id: "scl_shared",
+              projects: [{ id: "prj_1" }],
+            },
+            { uid: CANONICAL_UID, id: "scl_canonical" },
+          ],
+        }),
       )
+      .mockResolvedValueOnce(connectorResult("linear/shared", "scl_shared", "user"))
       .mockResolvedValueOnce(connectorResult(CANONICAL_UID, "scl_canonical", "user"));
     run.mockResolvedValue(true);
 
-    await expect(setupConnectionConnector(options())).resolves.toEqual({
+    await expect(setupConnectionConnector(options(fake.prompter))).resolves.toEqual({
       kind: "existing",
       connectorUid: CANONICAL_UID,
     });
@@ -91,6 +108,26 @@ describe("setupConnectionConnector", () => {
       expect.any(Object),
     );
     expect(create).not.toHaveBeenCalled();
+    expect(fake.selectMessages).toEqual(["Which connector should linear use?"]);
+    expect(selectOptions[0]).toMatchObject({
+      initialValue: CANONICAL_UID,
+      options: [
+        {
+          value: CANONICAL_UID,
+          label: CANONICAL_UID,
+          hint: "Existing connector · recommended",
+        },
+        {
+          value: "linear/shared",
+          label: "linear/shared",
+          hint: "Existing connector · already linked to this project",
+        },
+        {
+          label: "Create a new connector",
+          hint: "Opens your browser to configure another connector",
+        },
+      ],
+    });
     expect(run).toHaveBeenCalledWith(
       ["connect", "attach", CANONICAL_UID, "--yes", "--scope", "org_1"],
       expect.any(Object),
@@ -100,6 +137,7 @@ describe("setupConnectionConnector", () => {
   it("finds a canonical connector by name instead of assuming its UID namespace", async () => {
     const canonicalName = "linear";
     const actualUid = "linear/default";
+    const fake = createFakePrompter({ single: () => actualUid });
     capture
       .mockResolvedValueOnce(
         jsonResult({ connectors: [{ uid: actualUid, id: "scl_canonical", name: canonicalName }] }),
@@ -108,7 +146,10 @@ describe("setupConnectionConnector", () => {
     run.mockResolvedValue(true);
 
     await expect(
-      setupConnectionConnector({ ...options(), canonicalConnectorName: canonicalName }),
+      setupConnectionConnector({
+        ...options(fake.prompter),
+        canonicalConnectorName: canonicalName,
+      }),
     ).resolves.toEqual({
       kind: "existing",
       connectorUid: actualUid,
@@ -155,12 +196,11 @@ describe("setupConnectionConnector", () => {
       .mockResolvedValueOnce(jsonResult({ connectors: [{ uid: "linear/user", id: "scl_user" }] }))
       .mockResolvedValueOnce(connectorResult("linear/app", "scl_app", "app"))
       .mockResolvedValueOnce(connectorResult("linear/user", "scl_user", "user"));
-    const answers = ["find", "linear/user"];
     const selectOptions: SingleSelectOptions<PrompterValue>[] = [];
     const fake = createFakePrompter({
       single: (input) => {
         selectOptions.push(input);
-        return answers.shift()!;
+        return "linear/user";
       },
     });
 
@@ -176,23 +216,23 @@ describe("setupConnectionConnector", () => {
       expect.arrayContaining(["--scope", "org_1"]),
       expect.any(Object),
     );
-    expect(fake.selectMessages).toEqual([
-      "Which connector should linear use?",
-      "Select a connector for linear",
-    ]);
+    expect(fake.selectMessages).toEqual(["Which connector should linear use?"]);
     expect(selectOptions[0]).toMatchObject({
+      initialValue: "linear/user",
       hintLayout: "inline",
-      notices: [{ tone: "warning", text: `Could not find a connector named ${CANONICAL_NAME}.` }],
-    });
-    expect(selectOptions[1]).toMatchObject({
-      hintLayout: "inline",
-      placeholder: "type to search connectors",
-      search: true,
+      options: [
+        {
+          value: "linear/user",
+          label: "linear/user",
+          hint: "Existing connector",
+        },
+        { label: "Create a new connector" },
+      ],
     });
   });
 
   it("removes a created connector when attach fails", async () => {
-    run.mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    run.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     capture
       .mockResolvedValueOnce(
         jsonResult({ connectors: [{ uid: CANONICAL_UID, id: "scl_existing", name: "Linear" }] }),
@@ -218,7 +258,7 @@ describe("setupConnectionConnector", () => {
   });
 
   it("recovers a partially created connector id from CLI progress and removes it", async () => {
-    run.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    run.mockResolvedValue(true);
     capture.mockResolvedValue(jsonResult({ connectors: [] }));
     create.mockImplementation(async (_args, createOptions) => {
       createOptions.onOutput?.({ stream: "stderr", text: "Connector created: scl_partial" });

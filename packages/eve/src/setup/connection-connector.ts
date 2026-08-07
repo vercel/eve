@@ -21,6 +21,7 @@ export interface ConnectConnectorRef {
   uid: string;
   id: string;
   name?: string;
+  projectIds?: readonly string[];
 }
 
 export type SetupConnectionConnectorResult =
@@ -32,6 +33,7 @@ type ConnectorResolution =
   | { kind: "created"; connector: ConnectConnectorRef };
 
 const CREATED_CONNECTOR = /\bConnector created:\s*(scl_[A-Za-z0-9_-]+)\b/u;
+const CREATE_NEW_CONNECTOR = "create";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -51,6 +53,11 @@ function parseConnectorRef(value: unknown): ConnectConnectorRef | undefined {
   }
   const connector: ConnectConnectorRef = { uid: value["uid"], id: value["id"] };
   if (typeof value["name"] === "string") connector.name = value["name"];
+  if (Array.isArray(value["projects"])) {
+    connector.projectIds = value["projects"]
+      .map((project) => (isRecord(project) ? project["id"] : undefined))
+      .filter((id): id is string => typeof id === "string");
+  }
   return connector;
 }
 
@@ -181,6 +188,39 @@ function nextConnectorName(slug: string, names: ReadonlySet<string>): string {
   return `${slug}-${suffix}`;
 }
 
+function rankConnectors(
+  connectors: readonly ConnectConnectorRef[],
+  canonicalName: string,
+  projectId: string,
+): ConnectConnectorRef[] {
+  return connectors
+    .map((connector, index) => ({
+      connector,
+      index,
+      rank: connectorMatchesCanonicalName(connector, canonicalName)
+        ? 0
+        : connector.projectIds?.includes(projectId)
+          ? 1
+          : 2,
+    }))
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .map(({ connector }) => connector);
+}
+
+function existingConnectorHint(
+  connector: ConnectConnectorRef,
+  canonicalName: string,
+  projectId: string,
+): string {
+  if (connector.projectIds?.includes(projectId)) {
+    return "Existing connector · already linked to this project";
+  }
+  if (connectorMatchesCanonicalName(connector, canonicalName)) {
+    return "Existing connector · recommended";
+  }
+  return "Existing connector";
+}
+
 /** Removes a connector created by this setup attempt. */
 export async function cleanupCreatedConnectionConnector(input: {
   log: ChannelSetupLog;
@@ -216,140 +256,123 @@ async function attach(
   });
 }
 
-async function resolveFallbackConnector(
+async function createConnector(
   options: SetupConnectionConnectorOptions,
   project: VercelProjectReference,
   onOutput: ProcessOutputHandler,
   connectors: readonly ConnectConnectorRef[],
-  initialNotice: string,
 ): Promise<ConnectorResolution> {
-  let notice = initialNotice;
-  while (true) {
-    const choice = await options.prompter.select<"find" | "create">({
-      message: `Which connector should ${options.slug} use?`,
-      hintLayout: "inline",
-      notices: [{ tone: "warning", text: notice }],
-      options: [
-        { value: "find", label: "Find a new one", hint: "Browse existing connectors" },
-        { value: "create", label: "Create a new one", hint: "Register another connector" },
-      ],
-    });
-    if (choice === "find") {
-      const supported: ConnectConnectorRef[] = [];
-      for (const connector of connectors) {
-        if (await supportsUserAuthorization(options, project, connector, onOutput)) {
-          supported.push(connector);
-        }
-      }
-      if (supported.length === 0) {
-        notice = `No existing ${options.service} connectors support user authorization.`;
-        continue;
-      }
-      const byUid = new Map(supported.map((connector) => [connector.uid, connector]));
-      const uid = await options.prompter.select<string>({
-        message: `Select a connector for ${options.slug}`,
-        hintLayout: "inline",
-        search: true,
-        placeholder: "type to search connectors",
-        options: supported.map((connector) => ({
-          value: connector.uid,
-          label: connector.uid,
-          hint: connector.name ?? connector.id,
-        })),
+  const names = connectorNames(connectors);
+  const name = (
+    await options.prompter.text({
+      message: "New connector name",
+      defaultValue: nextConnectorName(options.slug, names),
+      validate: (value) => {
+        const normalized = value.trim().toLowerCase();
+        if (normalized.length === 0) return "A name is required.";
+        return names.has(normalized) ? "A connector with this name already exists." : undefined;
+      },
+    })
+  ).trim();
+  const transcript: string[] = [];
+  const createOutput: ProcessOutputHandler = (line) => {
+    transcript.push(line.text);
+    onOutput(line);
+  };
+  const created = await withPhase(
+    options.log,
+    "Waiting for you to complete setup in the browser…",
+    () =>
+      runVercelCaptureStdout(
+        [
+          "connect",
+          "create",
+          options.service,
+          "--name",
+          name,
+          "-F",
+          "json",
+          "--scope",
+          project.orgId,
+        ],
+        { cwd: options.projectRoot, onOutput: createOutput, signal: options.signal },
+      ),
+    { kind: "external-action", emphasis: "browser" },
+  );
+  const raw = parseConnectorRef(parseJson(created.stdout));
+  const ownedId = raw?.id ?? CREATED_CONNECTOR.exec(transcript.join("\n"))?.[1];
+  const connector = created.ok ? parseCreatedConnector(created.stdout) : undefined;
+  if (connector !== undefined) return { kind: "created", connector };
+  const message = created.ok
+    ? `The ${options.service} connector does not support user authorization.`
+    : `Could not create the ${options.service} connector.`;
+  if (ownedId !== undefined) {
+    try {
+      await cleanupCreatedConnectionConnector({
+        log: options.log,
+        projectRoot: options.projectRoot,
+        connectorId: ownedId,
+        orgId: project.orgId,
       });
-      const connector = byUid.get(uid);
-      if (connector === undefined) throw new Error(`Connector ${uid} is no longer available.`);
-      return { kind: "existing", connector };
+    } catch (error) {
+      const cleanup = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message} ${cleanup}`);
     }
-
-    const names = connectorNames(connectors);
-    const name = (
-      await options.prompter.text({
-        message: "New connector name",
-        defaultValue: nextConnectorName(options.slug, names),
-        validate: (value) => {
-          const normalized = value.trim().toLowerCase();
-          if (normalized.length === 0) return "A name is required.";
-          return names.has(normalized) ? "A connector with this name already exists." : undefined;
-        },
-      })
-    ).trim();
-    const transcript: string[] = [];
-    const createOutput: ProcessOutputHandler = (line) => {
-      transcript.push(line.text);
-      onOutput(line);
-    };
-    const created = await withPhase(
-      options.log,
-      "Waiting for you to complete setup in the browser…",
-      () =>
-        runVercelCaptureStdout(
-          [
-            "connect",
-            "create",
-            options.service,
-            "--name",
-            name,
-            "-F",
-            "json",
-            "--scope",
-            project.orgId,
-          ],
-          { cwd: options.projectRoot, onOutput: createOutput, signal: options.signal },
-        ),
-      { kind: "external-action", emphasis: "browser" },
-    );
-    const raw = parseConnectorRef(parseJson(created.stdout));
-    const ownedId = raw?.id ?? CREATED_CONNECTOR.exec(transcript.join("\n"))?.[1];
-    const connector = created.ok ? parseCreatedConnector(created.stdout) : undefined;
-    if (connector !== undefined) return { kind: "created", connector };
-    const message = created.ok
-      ? `The ${options.service} connector does not support user authorization.`
-      : `Could not create the ${options.service} connector.`;
-    if (ownedId !== undefined) {
-      try {
-        await cleanupCreatedConnectionConnector({
-          log: options.log,
-          projectRoot: options.projectRoot,
-          connectorId: ownedId,
-          orgId: project.orgId,
-        });
-      } catch (error) {
-        const cleanup = error instanceof Error ? error.message : String(error);
-        throw new Error(`${message} ${cleanup}`);
-      }
-      options.signal?.throwIfAborted();
-    }
-    throw new Error(message);
+    options.signal?.throwIfAborted();
   }
+  throw new Error(message);
 }
 
-/** Attaches the canonical connector by name first, then offers explicit Find/Create fallbacks. */
+async function resolveConnector(
+  options: SetupConnectionConnectorOptions,
+  project: VercelProjectReference,
+  onOutput: ProcessOutputHandler,
+  connectors: readonly ConnectConnectorRef[],
+): Promise<ConnectorResolution> {
+  const supported: ConnectConnectorRef[] = [];
+  for (const connector of connectors) {
+    if (await supportsUserAuthorization(options, project, connector, onOutput)) {
+      supported.push(connector);
+    }
+  }
+  const ranked = rankConnectors(supported, options.canonicalConnectorName, project.projectId);
+  const byUid = new Map(ranked.map((connector) => [connector.uid, connector]));
+  const searchOptions =
+    ranked.length > 5 ? { search: true as const, placeholder: "type to search connectors" } : {};
+  const choice = await options.prompter.select<string>({
+    message: `Which connector should ${options.slug} use?`,
+    hintLayout: "inline",
+    initialValue: ranked[0]?.uid ?? CREATE_NEW_CONNECTOR,
+    ...searchOptions,
+    options: [
+      ...ranked.map((connector) => ({
+        value: connector.uid,
+        label: connector.uid,
+        hint: existingConnectorHint(connector, options.canonicalConnectorName, project.projectId),
+      })),
+      {
+        value: CREATE_NEW_CONNECTOR,
+        label: "Create a new connector",
+        hint: "Opens your browser to configure another connector",
+      },
+    ],
+  });
+  if (choice === CREATE_NEW_CONNECTOR) {
+    return createConnector(options, project, onOutput, connectors);
+  }
+  const connector = byUid.get(choice);
+  if (connector === undefined) throw new Error(`Connector ${choice} is no longer available.`);
+  return { kind: "existing", connector };
+}
+
+/** Lets the user choose a compatible existing connector or create a new one, then attaches it. */
 export async function setupConnectionConnector(
   options: SetupConnectionConnectorOptions,
 ): Promise<SetupConnectionConnectorResult> {
   const onOutput = createPromptCommandOutput(options.log);
   const project = options.project;
   const connectors = await listConnectors(options, project, onOutput);
-  const canonical = connectors.find((connector) =>
-    connectorMatchesCanonicalName(connector, options.canonicalConnectorName),
-  );
-  let notice = `Could not find a connector named ${options.canonicalConnectorName}.`;
-
-  if (canonical !== undefined) {
-    if (await supportsUserAuthorization(options, project, canonical, onOutput)) {
-      if (await attach(options, project, canonical.uid, onOutput)) {
-        options.log.success(`Attached ${canonical.uid} connector`);
-        return { kind: "existing", connectorUid: canonical.uid };
-      }
-      options.signal?.throwIfAborted();
-      notice = `Could not attach ${canonical.uid}.`;
-    } else {
-      notice = `${canonical.uid} does not support user authorization.`;
-    }
-  }
-
-  const resolution = await resolveFallbackConnector(options, project, onOutput, connectors, notice);
+  const resolution = await resolveConnector(options, project, onOutput, connectors);
   if (!(await attach(options, project, resolution.connector.uid, onOutput))) {
     if (resolution.kind === "created") {
       const message = `Could not attach ${resolution.connector.uid} to the linked project.`;
