@@ -19,11 +19,13 @@ import {
   INVOCATION_OWNER_ATTRIBUTE,
   INVOCATION_TOKEN_ATTRIBUTE,
   invocationOwnerKey,
+  invocationUpdateFingerprint,
   invocationUpdateRequestId,
 } from "#internal/invocation/metadata.js";
 import {
+  INVOCATION_UPDATE_RECEIPT_ATTRIBUTE,
   invocationUpdateIdentityFromRequestId,
-  invocationUpdateIdentityFromTurnStartedEvent,
+  parseInvocationUpdateIdentity,
 } from "#internal/invocation/attributes.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
@@ -100,26 +102,40 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
     readonly invocationId: string;
     readonly responses: readonly InputResponse[];
   }): Promise<AgentInvocationMutationResult> {
-    const updateRequestId = invocationUpdateRequestId(input.responses);
-    const update = invocationUpdateIdentityFromRequestId(updateRequestId);
-    if (update === undefined) throw new Error("Invocation update identity was unavailable.");
     const current = await this.read(input);
     if (current === undefined) return { type: "not_found" };
     const run = await this.#readInvocationRun(input.invocationId, input.auth);
     if (run === undefined) return { type: "not_found" };
-    const recorded = (await readInvocationUpdateReceipts(input.invocationId))[update.claim];
-    if (recorded !== undefined) {
-      return recorded === update.receipt
-        ? { invocation: current, type: "success" }
-        : conflict("Input was already answered with a different response.");
-    }
+    const fingerprint = invocationUpdateFingerprint(input.responses);
+    const recorded = parseInvocationUpdateIdentity(
+      run.attributes[INVOCATION_UPDATE_RECEIPT_ATTRIBUTE],
+    );
     if (current.status !== "input_required") {
+      if (recorded?.requestSet === fingerprint.requestSet) {
+        return recorded.receipt === fingerprint.receipt
+          ? { invocation: current, type: "success" }
+          : conflict("Input was already answered with a different response.");
+      }
       return conflict("Invocation is not waiting for input.");
     }
     for (const response of input.responses) {
       if (current.inputRequests?.[response.requestId] === undefined) {
         return conflict(`Unknown input request: ${response.requestId}`);
       }
+    }
+    const pendingBatchId = latestPendingInputBatchId(
+      await readRecentPersistedEvents(input.invocationId),
+    );
+    if (pendingBatchId === undefined) {
+      return conflict("Invocation input changed before the update could be applied.");
+    }
+    const updateRequestId = invocationUpdateRequestId(input.responses, pendingBatchId);
+    const update = invocationUpdateIdentityFromRequestId(updateRequestId);
+    if (update === undefined) throw new Error("Invocation update identity was unavailable.");
+    if (recorded?.claim === update.claim) {
+      return recorded.receipt === update.receipt
+        ? { invocation: current, type: "success" }
+        : conflict("Input was already answered with a different response.");
     }
 
     const token = run.attributes[INVOCATION_TOKEN_ATTRIBUTE];
@@ -136,12 +152,16 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
       deliveryError = error;
     }
 
-    const acceptedReceipt = await waitForInvocationUpdateReceipt(input.invocationId, update.claim);
-    if (acceptedReceipt === undefined) {
+    const accepted = await this.#waitForInvocationUpdateReceipt(
+      input.invocationId,
+      input.auth,
+      update.claim,
+    );
+    if (accepted === undefined) {
       if (deliveryError !== undefined) throw deliveryError;
       throw new Error("Timed out waiting for the durable invocation update receipt.");
     }
-    if (acceptedReceipt !== update.receipt) {
+    if (accepted.receipt !== update.receipt) {
       return conflict("Input was already answered with a different response.");
     }
 
@@ -179,53 +199,27 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
       throw error;
     }
   }
+
+  async #waitForInvocationUpdateReceipt(
+    invocationId: string,
+    auth: SessionAuthContext | null,
+    claim: string,
+  ) {
+    const deadline = Date.now() + INVOCATION_UPDATE_RECEIPT_TIMEOUT_MS;
+    while (true) {
+      const run = await this.#readInvocationRun(invocationId, auth);
+      const receipt = parseInvocationUpdateIdentity(
+        run?.attributes[INVOCATION_UPDATE_RECEIPT_ATTRIBUTE],
+      );
+      if (receipt?.claim === claim) return receipt;
+      if (Date.now() >= deadline) return undefined;
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+  }
 }
 
 const INVOCATION_EVENT_WINDOW_SIZE = 64;
 const INVOCATION_UPDATE_RECEIPT_TIMEOUT_MS = 10_000;
-
-async function waitForInvocationUpdateReceipt(
-  invocationId: string,
-  claim: string,
-): Promise<string | undefined> {
-  const deadline = Date.now() + INVOCATION_UPDATE_RECEIPT_TIMEOUT_MS;
-  while (true) {
-    const receipt = (await readInvocationUpdateReceipts(invocationId))[claim];
-    if (receipt !== undefined) return receipt;
-    if (Date.now() >= deadline) return undefined;
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-  }
-}
-
-async function readInvocationUpdateReceipts(
-  invocationId: string,
-): Promise<Readonly<Record<string, string>>> {
-  const readable = getRun(invocationId).getReadable<Uint8Array>({
-    startIndex: 0,
-  });
-  const tailIndex = await readable.getTailIndex();
-  if (tailIndex < 0) {
-    await readable.cancel("invocation event stream is empty").catch(() => {});
-    return {};
-  }
-  const expectedEvents = tailIndex + 1;
-  const reader = parseNdjsonStream<HandleMessageStreamEvent>(() => readable).getReader();
-  const receipts: Record<string, string> = {};
-  try {
-    for (let index = 0; index < expectedEvents; index += 1) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value.type === "turn.started") {
-        const update = invocationUpdateIdentityFromTurnStartedEvent(value);
-        if (update !== undefined) receipts[update.claim] = update.receipt;
-      }
-    }
-    return receipts;
-  } finally {
-    await reader.cancel("invocation update receipt read complete").catch(() => {});
-    reader.releaseLock();
-  }
-}
 
 async function readRecentPersistedEvents(
   invocationId: string,
@@ -253,6 +247,17 @@ async function readRecentPersistedEvents(
     reader.releaseLock();
   }
   return events;
+}
+
+function latestPendingInputBatchId(
+  events: readonly HandleMessageStreamEvent[],
+): string | undefined {
+  let batchId: string | undefined;
+  for (const event of events) {
+    if (event.type === "input.requested") batchId = event.meta.id;
+    else if (event.type === "turn.started") batchId = undefined;
+  }
+  return batchId;
 }
 
 function projectNonterminal(

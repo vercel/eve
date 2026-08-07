@@ -55,7 +55,13 @@ export interface SessionCommandInboxHandle extends SessionCommandInbox {
  * only the channel alias. Reads already committed to a retired alias remain in
  * the multiplexed queue and are consumed exactly once.
  */
-export function createSessionCommandInbox(): SessionCommandInboxHandle {
+export function createSessionCommandInbox(
+  options: {
+    readonly onInvocationUpdateClaim?: (
+      identity: import("#internal/invocation/attributes.js").InvocationUpdateIdentity,
+    ) => Promise<void> | void;
+  } = {},
+): SessionCommandInboxHandle {
   let stable: SessionCommandHookState | undefined;
   let continuation: SessionCommandHookState | undefined;
   const retired: SessionCommandHookState[] = [];
@@ -194,7 +200,10 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
             arm(read.state);
             continue;
           }
-          if (update !== undefined) claimedInvocationUpdates.add(update.claim);
+          if (update !== undefined) {
+            await options.onInvocationUpdateClaim?.(update);
+            claimedInvocationUpdates.add(update.claim);
+          }
           offeredRead = read;
           return read.result;
         }

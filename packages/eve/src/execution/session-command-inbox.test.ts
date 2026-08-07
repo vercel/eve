@@ -85,18 +85,21 @@ describe("createSessionCommandInbox", () => {
   });
 
   it("durably claims one invocation update per pending input set", async () => {
-    const first = invocationUpdate("mcp-update:question-set:answer-a");
+    const first = invocationUpdate("mcp-update:question-set:request-set:answer-a");
+    const onInvocationUpdateClaim = vi.fn();
     installHooks(
       createMockHook({
         reads: [
           Promise.resolve(resolved(first)),
-          Promise.resolve(resolved(invocationUpdate("mcp-update:question-set:answer-b"))),
+          Promise.resolve(
+            resolved(invocationUpdate("mcp-update:question-set:request-set:answer-b")),
+          ),
           Promise.resolve(resolved({ kind: "clear" })),
         ],
         token: "stable",
       }),
     );
-    const inbox = createSessionCommandInbox();
+    const inbox = createSessionCommandInbox({ onInvocationUpdateClaim });
 
     await inbox.claimStable("stable");
     await expect(inbox.next()).resolves.toEqual(resolved(first));
@@ -104,6 +107,11 @@ describe("createSessionCommandInbox", () => {
     await expect(inbox.next()).resolves.toEqual(resolved({ kind: "clear" }));
     inbox.consumeNext();
     await inbox.dispose();
+    expect(onInvocationUpdateClaim).toHaveBeenCalledExactlyOnceWith({
+      claim: "question-set",
+      receipt: "answer-a",
+      requestSet: "request-set",
+    });
   });
 
   it("disposes a conflicting continuation candidate without releasing current ownership", async () => {

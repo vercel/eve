@@ -27,8 +27,10 @@ export function invocationOwnerKey(auth: SessionAuthContext | null): string {
   return createHash("sha256").update(JSON.stringify(identity), "utf8").digest("hex");
 }
 
-/** Stable receipt key shared by retries of the same input-response set. */
-export function invocationUpdateRequestId(responses: readonly InputResponse[]): string {
+export function invocationUpdateFingerprint(responses: readonly InputResponse[]): {
+  readonly receipt: string;
+  readonly requestSet: string;
+} {
   const canonical = responses
     .map((response) => ({
       optionId: response.optionId ?? null,
@@ -36,11 +38,23 @@ export function invocationUpdateRequestId(responses: readonly InputResponse[]): 
       text: response.text ?? null,
     }))
     .toSorted((left, right) => left.requestId.localeCompare(right.requestId));
-  const claim = createHash("sha256")
+  const requestSet = createHash("sha256")
     .update(JSON.stringify(canonical.map((response) => response.requestId)), "utf8")
     .digest("hex");
   const receipt = createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
-  return `${INVOCATION_UPDATE_REQUEST_ID_PREFIX}${claim}:${receipt}`;
+  return { receipt, requestSet };
+}
+
+/** Stable receipt key shared by retries against one durable pending-input batch. */
+export function invocationUpdateRequestId(
+  responses: readonly InputResponse[],
+  pendingBatchId = "legacy",
+): string {
+  const { receipt, requestSet } = invocationUpdateFingerprint(responses);
+  const claim = createHash("sha256")
+    .update(JSON.stringify([pendingBatchId, requestSet]), "utf8")
+    .digest("hex");
+  return `${INVOCATION_UPDATE_REQUEST_ID_PREFIX}${claim}:${requestSet}:${receipt}`;
 }
 
 export function buildInvocationAttributes(

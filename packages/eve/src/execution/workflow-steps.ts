@@ -86,7 +86,6 @@ import {
   turnWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import { invocationUpdateIdentityFromRequestId } from "#internal/invocation/attributes.js";
 
 /**
  * Result of one durable harness step, consumed by the turn workflow.
@@ -255,10 +254,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       }
     }
     resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
-    const invocationUpdate = invocationUpdateIdentityFromRequestId(input.input.requestId);
-    if (resolved !== undefined && invocationUpdate !== undefined) {
-      resolved = { ...resolved, invocationUpdate };
-    }
   } else if (input.input?.kind === "runtime-action-result") {
     recordSubagentUsageSpans(input.input.results);
     resolved = { runtimeActionResults: input.input.results };

@@ -55,7 +55,6 @@ import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
-import { stampInvocationUpdateIdentity } from "#internal/invocation/attributes.js";
 
 export {
   getHarnessEmissionState,
@@ -84,11 +83,7 @@ export async function emitTurnPreamble(
     await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity }));
   }
 
-  const turnStarted = createTurnStartedEvent({ sequence: state.sequence, turnId });
-  if (input.invocationUpdate !== undefined) {
-    stampInvocationUpdateIdentity(turnStarted, input.invocationUpdate);
-  }
-  await emitFn(turnStarted);
+  await emitFn(createTurnStartedEvent({ sequence: state.sequence, turnId }));
 
   if (input.message !== undefined) {
     await emitFn(
