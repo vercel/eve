@@ -56,6 +56,16 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message === "TASK-INPUT-BATCH-ORDERING") {
     return startApprovalWorker(request, "task-input-batch-worker", "TASK-INPUT-BATCH-STARTED");
   }
+  if (message === "TASK-CONTINUATION-HITL-SETUP") {
+    return startApprovalWorker(
+      request,
+      "task-continuation-hitl-worker",
+      "TASK-CONTINUATION-HITL-READY",
+    );
+  }
+  if (message.startsWith("TASK-CONTINUATION-HITL-SEND ")) {
+    return continueApprovalWorker(request, message);
+  }
   if (message === "CHILD-TASK-EXCLUSIVITY-SETUP") return setupBusyWorker(request);
 
   return `Mock reply: ${message}`;
@@ -252,6 +262,29 @@ function laterBusyWorker(request: MockModelRequest, message: string): MockModelR
     };
   }
   return "CHILD-TASK-EXCLUSIVITY-LATER-DONE";
+}
+
+function continueApprovalWorker(request: MockModelRequest, message: string): MockModelResponse | string {
+  const callId = "task-continuation-hitl-send";
+  const result = resultById(request, callId);
+  if (result === undefined) {
+    const taskId = findTaskId(message);
+    if (taskId === undefined) throw new Error("Continuation HITL send has no task id.");
+    return {
+      toolCalls: [
+        {
+          id: callId,
+          input: {
+            message:
+              "Run four continuation approval gates in order, then return CHILD-GATES-COMPLETE.",
+            taskId,
+          },
+          name: "task_send",
+        },
+      ],
+    };
+  }
+  return "TASK-CONTINUATION-HITL-STARTED";
 }
 
 function resultById(request: MockModelRequest, id: string): MockModelToolResult | undefined {
