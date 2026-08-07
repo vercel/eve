@@ -11,6 +11,7 @@ import {
   type ConnectionAuthorizationOutcome,
 } from "#public/channels/slack/connections.js";
 import {
+  buildAnsweredBlocks,
   formatInputRequestFallbackText,
   renderInputRequestBlocks,
 } from "#public/channels/slack/hitl.js";
@@ -31,6 +32,21 @@ import type { InputRequest } from "#runtime/input/types.js";
 const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
 const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
+
+function blockContainsRequestAction(block: unknown, requestId: string): boolean {
+  if (typeof block !== "object" || block === null) return false;
+  const candidate = block as { actions?: unknown; elements?: unknown };
+  const requestActionPrefix = `eve_input:${requestId}`;
+  return [candidate.actions, candidate.elements].some(
+    (entries) =>
+      Array.isArray(entries) &&
+      entries.some((entry) => {
+        if (typeof entry !== "object" || entry === null) return false;
+        const actionId = (entry as { action_id?: unknown }).action_id;
+        return typeof actionId === "string" && actionId.startsWith(requestActionPrefix);
+      }),
+  );
+}
 
 /**
  * Workspace-scoped projection of the Slack actor that produced
@@ -107,7 +123,18 @@ function firstNonEmptyLine(text: string): string | undefined {
 export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["input.requested"]> {
   return async (data, channel, _ctx) => {
     for (const post of buildInputRequestPosts(data.requests)) {
-      await channel.thread.post(post);
+      const message = await channel.thread.post({ blocks: post.blocks, text: post.text });
+      if (!message.id) continue;
+      const cards = { ...channel.state.pendingApprovalCards };
+      for (const request of post.requests) {
+        if (request.kind === "tool-approval") {
+          cards[request.requestId] = {
+            messageBlocks: post.blocks,
+            messageTs: message.id,
+          };
+        }
+      }
+      channel.state.pendingApprovalCards = cards;
     }
   };
 }
@@ -119,20 +146,26 @@ export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["
  */
 function buildInputRequestPosts(
   requests: readonly InputRequest[],
-): Array<{ blocks: unknown[]; text: string }> {
-  const groups: Array<{ blocks: unknown[]; fallbacks: string[] }> = [];
+): Array<{ blocks: unknown[]; requests: InputRequest[]; text: string }> {
+  const groups: Array<{ blocks: unknown[]; fallbacks: string[]; requests: InputRequest[] }> = [];
   for (const request of requests) {
     const blocks = renderInputRequestBlocks(request);
     const current = groups.at(-1);
     if (current && current.blocks.length + blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE) {
       current.blocks.push(...blocks);
       current.fallbacks.push(formatInputRequestFallbackText(request));
+      current.requests.push(request);
     } else {
-      groups.push({ blocks, fallbacks: [formatInputRequestFallbackText(request)] });
+      groups.push({
+        blocks,
+        fallbacks: [formatInputRequestFallbackText(request)],
+        requests: [request],
+      });
     }
   }
   return groups.map((group) => ({
     blocks: group.blocks,
+    requests: group.requests,
     text: truncateMessageText(group.fallbacks.join("\n")),
   }));
 }
@@ -146,6 +179,51 @@ function buildInputRequestPosts(
  * which user overrides cannot express.
  */
 export const defaultEvents: SlackChannelInternalEvents = {
+  async "approval.candidate"(event, channel, _ctx) {
+    const userId = channel.state.pendingApprovalCandidateUsers?.[event.candidateId];
+    if (event.outcome === "pending" && userId !== undefined) {
+      await channel.thread.postEphemeral(userId, "Checking whether you can approve this action…");
+      return;
+    }
+    if (userId === undefined) return;
+    if (event.outcome === "rejected" || event.outcome === "failed") {
+      await channel.thread.postEphemeral(
+        userId,
+        event.safeReason ?? "We couldn’t verify your approval. Please try again.",
+      );
+    }
+  },
+
+  async "approval.settled"(event, channel, _ctx) {
+    const cards = channel.state.pendingApprovalCards ?? {};
+    const card = cards[event.requestId];
+    if (card === undefined || channel.state.channelId === null) return;
+    const answerLabel = event.outcome === "approved" ? "Approve" : "Cancel";
+    const blocks = card.messageBlocks.flatMap((block) => {
+      if (!blockContainsRequestAction(block, event.requestId)) return [block];
+      if (typeof block !== "object" || block === null) return [];
+      const candidate = block as Record<string, unknown>;
+      if (candidate.type !== "card") {
+        return buildAnsweredBlocks({ answerLabel, promptBlocks: [], userId: card.userId });
+      }
+      const { actions: _actions, ...withoutActions } = candidate;
+      return buildAnsweredBlocks({
+        answerLabel,
+        promptBlocks: [withoutActions],
+        userId: card.userId,
+      });
+    });
+    await channel.slack.request("chat.update", {
+      blocks,
+      channel: channel.state.channelId,
+      text: `Answered: ${answerLabel}`,
+      ts: card.messageTs,
+    });
+    const next = { ...cards };
+    delete next[event.requestId];
+    channel.state.pendingApprovalCards = next;
+  },
+
   async "turn.started"(_event, channel, _ctx) {
     channel.state.pendingToolCallMessage = null;
     channel.state.lastReasoningTypingAtMs = null;
@@ -230,16 +308,18 @@ export const defaultEvents: SlackChannelInternalEvents = {
   async "authorization.required"(event, channel, ctx) {
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
     const triggeringUserId =
-      slackUserIdFromAuthContext(ctx.session.auth.current) ??
-      channel.state.triggeringUserId ??
-      null;
+      event.candidateId === undefined
+        ? (slackUserIdFromAuthContext(ctx.session.auth.current) ??
+          channel.state.triggeringUserId ??
+          null)
+        : (channel.state.pendingApprovalCandidateUsers?.[event.candidateId] ?? null);
     const challengeUrl = event.authorization?.url;
 
     // Post a public, link-free status so everyone in the thread can see
     // the session is blocked and later see it complete. The challenge
     // itself remains private.
     const pending = channel.state.pendingAuthMessageTs ?? {};
-    if (pending[event.name] === undefined) {
+    if (event.candidateId === undefined && pending[event.name] === undefined) {
       const publicText = buildAuthRequiredPublicText({
         displayName,
         hasUser: triggeringUserId !== null,
@@ -289,7 +369,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
 
   async "authorization.completed"(event, channel, _ctx) {
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    if (event.outcome === "authorized") {
+    if (event.outcome === "authorized" && event.candidateId === undefined) {
       await channel.thread.startTyping(`Connected to ${displayName}. Resuming...`);
     }
 

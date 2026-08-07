@@ -22,13 +22,13 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: { current: 10, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dropped: {} },
-  dynamicTool: { current: 11, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dropped: {} },
+  dynamicTool: { current: 12, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dropped: {} },
   connection: { current: 4, supported: [1, 2, 3, 4], dropped: {} },
-  hook: { current: 8, supported: [1, 2, 3, 4, 5, 6, 7, 8], dropped: {} },
+  hook: { current: 9, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9], dropped: {} },
   skill: { current: 1, supported: [1], dropped: {} },
-  dynamicSkill: { current: 7, supported: [1, 2, 3, 4, 5, 6, 7], dropped: {} },
+  dynamicSkill: { current: 8, supported: [1, 2, 3, 4, 5, 6, 7, 8], dropped: {} },
   instructions: { current: 1, supported: [1], dropped: {} },
-  dynamicInstructions: { current: 7, supported: [1, 2, 3, 4, 5, 6, 7], dropped: {} },
+  dynamicInstructions: { current: 8, supported: [1, 2, 3, 4, 5, 6, 7, 8], dropped: {} },
   config: { current: 1, supported: [1], dropped: {} },
   state: { current: 2, supported: [1, 2], dropped: {} },
 } as const satisfies Record<string, ExtensionCapabilityContract>;

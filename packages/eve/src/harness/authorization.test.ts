@@ -1,38 +1,50 @@
 import { describe, expect, it } from "vitest";
 
-import { ContextContainer, contextStorage } from "#context/container.js";
 import {
-  consumeAuthorizationResult,
-  PendingAuthorizationResultKey,
+  getPendingAuthorization,
+  setPendingAuthorization,
+  type AuthorizationChallenge,
 } from "#harness/authorization.js";
 
-describe("authorization callback results", () => {
-  it("consumes each callback result once", () => {
-    const ctx = new ContextContainer();
-    ctx.set(PendingAuthorizationResultKey, [
-      {
-        callback: { method: "GET", params: { code: "notion-code" } },
-        hookUrl: "https://agent.example.com/notion",
-        name: "notion",
-      },
-      {
-        callback: { method: "GET", params: { code: "linear-code" } },
-        hookUrl: "https://agent.example.com/linear",
-        name: "linear",
-      },
-    ]);
+function challenge(name: string, candidateId: string): AuthorizationChallenge {
+  return {
+    candidateId,
+    challenge: { url: `https://example.com/${name}` },
+    hookUrl: `https://eve.example/${name}`,
+    name,
+  };
+}
 
-    contextStorage.run(ctx, () => {
-      expect(consumeAuthorizationResult("notion")).toMatchObject({
-        callback: { params: { code: "notion-code" } },
-      });
-      expect(ctx.get(PendingAuthorizationResultKey)).toMatchObject([{ name: "linear" }]);
-      expect(consumeAuthorizationResult("notion")).toBeUndefined();
-      expect(consumeAuthorizationResult("linear")).toMatchObject({
-        callback: { params: { code: "linear-code" } },
-      });
-      expect(ctx.has(PendingAuthorizationResultKey)).toBe(false);
-      expect(consumeAuthorizationResult("linear")).toBeUndefined();
+describe("pending authorization state", () => {
+  it("merges concurrent candidate challenges by authorization name", () => {
+    const first = setPendingAuthorization(undefined, {
+      challenges: [challenge("candidate-1:github", "candidate-1")],
     });
+    const second = setPendingAuthorization(first, {
+      challenges: [challenge("candidate-2:github", "candidate-2")],
+    });
+
+    expect(getPendingAuthorization(second)?.challenges).toEqual([
+      expect.objectContaining({ candidateId: "candidate-1", name: "candidate-1:github" }),
+      expect.objectContaining({ candidateId: "candidate-2", name: "candidate-2:github" }),
+    ]);
+  });
+
+  it("replaces a repeated challenge without duplicating it", () => {
+    const first = setPendingAuthorization(undefined, {
+      challenges: [challenge("candidate-1:github", "candidate-1")],
+    });
+    const second = setPendingAuthorization(first, {
+      challenges: [
+        {
+          ...challenge("candidate-1:github", "candidate-1"),
+          hookUrl: "https://eve.example/refreshed",
+        },
+      ],
+    });
+
+    expect(getPendingAuthorization(second)?.challenges).toEqual([
+      expect.objectContaining({ hookUrl: "https://eve.example/refreshed" }),
+    ]);
   });
 });

@@ -560,21 +560,18 @@ async function handleViewSubmission(
           userName: user?.username ?? user?.name,
         }),
       })
+      .then(() =>
+        updateAnsweredFreeformCard({
+          channelId: metadata.channelId,
+          messageTs: metadata.messageTs,
+          answerLabel: text,
+          userId: triggeringUserId ?? undefined,
+          deps: _deps,
+        }),
+      )
       .catch((error: unknown) => {
-        log.error("freeform answer delivery failed", { error });
+        log.error("freeform answer delivery or answered-card update failed", { error });
       }),
-  );
-
-  ctx.waitUntil(
-    updateAnsweredFreeformCard({
-      channelId: metadata.channelId,
-      messageTs: metadata.messageTs,
-      answerLabel: text,
-      userId: triggeringUserId ?? undefined,
-      deps: _deps,
-    }).catch((error: unknown) => {
-      log.error("freeform answered-card update failed", { error });
-    }),
   );
 
   return ack;

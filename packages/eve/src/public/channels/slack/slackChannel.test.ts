@@ -565,6 +565,12 @@ describe("slackChannel() default event handlers", () => {
         value: "approve",
       },
     ]);
+    expect(ctx.state.pendingApprovalCards).toEqual({
+      approval_abc123: {
+        messageBlocks: body.blocks,
+        messageTs: "1700000001.000001",
+      },
+    });
   });
 
   it("input.requested caps section and fallback text so Slack does not reject the post", async () => {

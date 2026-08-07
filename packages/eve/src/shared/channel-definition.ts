@@ -3,7 +3,8 @@ import type { UserContent } from "ai";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import type { StepInput } from "#harness/types.js";
 
 /**
  * Enriched return shape from a channel's {@link ChannelAdapter.fetchFile}
@@ -72,6 +73,7 @@ export interface GenericChannelDefinition<
   context?(state: NonNullable<TState>, session: SessionHandle): TCtx;
 
   readonly routes: readonly RouteDefinition<TState>[];
+  deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
   receive?(
     input: GenericReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
