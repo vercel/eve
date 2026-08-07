@@ -45,6 +45,12 @@
       "import": "./scaffold/sandbox.js",
       "default": "./scaffold/sandbox.js"
     },
+    "./replace-in-file": {
+      "eve-source": "./src/replace-in-file.ts",
+      "types": "./scaffold/replace-in-file.d.ts",
+      "import": "./scaffold/replace-in-file.js",
+      "default": "./scaffold/replace-in-file.js"
+    },
     "./extension": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.mjs"

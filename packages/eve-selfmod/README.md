@@ -15,8 +15,11 @@ agent/subagents/selfmod/
 ├── config.ts
 ├── agent.ts
 ├── sandbox.ts
-└── extensions/
-    └── selfmod.ts
+├── extensions/
+│   └── selfmod.ts
+└── tools/
+    ├── bash.ts
+    └── replace_in_file.ts
 ```
 
 ```ts
@@ -37,6 +40,13 @@ export default selfmod.sandbox;
 
 // agent/subagents/selfmod/extensions/selfmod.ts
 export { default } from "eve-selfmod";
+
+// agent/subagents/selfmod/tools/bash.ts
+import { disableTool } from "eve/tools";
+export default disableTool();
+
+// agent/subagents/selfmod/tools/replace_in_file.ts
+export { default } from "eve-selfmod/replace-in-file";
 ```
 
-`defineSelfmod` returns the coordinated subagent, sandbox, and extension definitions. Set `model` in the shared configuration to choose the selfmod subagent's model; it defaults to `anthropic/claude-sonnet-5`. The extension entrypoint remains a direct package mount so eve can discover its extension contributions statically. With no configuration it preserves the development-only behavior: the sandbox mounts the application's authored `agent/` directory read-write at `/source`, where the subagent can inspect and edit it with eve's default bash and filesystem tools.
+`defineSelfmod` returns the coordinated subagent, sandbox, and extension definitions. Set `model` in the shared configuration to choose the selfmod subagent's model; it defaults to `anthropic/claude-sonnet-5`. The extension entrypoint remains a direct package mount so eve can discover its extension contributions statically. With no configuration it preserves the development-only behavior: the sandbox mounts the application's authored `agent/` directory read-write at `/source` and the installed eve package's version-matched documentation read-only at `/eve-docs`. The extension contributes the official Eve authoring skill, adapted to use that documentation mount. The scaffold disables `bash`, directs independent `glob`, `grep`, and `read_file` calls to run concurrently, and provides `replace_in_file` for exact targeted edits without rewriting complete files.
