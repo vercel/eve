@@ -88,37 +88,9 @@ When you already hold a `Session` — returned by `send()` or `getSession(sessio
 
 ## Reset a session
 
-Identity-addressed channels can consume commands such as `/new` in their route, without sending the command to the model. Call `reset` with the same channel-local continuation token used by `send()`:
-
-```ts
-import { defineChannel, POST } from "eve/channels";
-
-export default defineChannel({
-  routes: [
-    POST("/messages", async (request, { reset, send }) => {
-      const body = await request.json();
-
-      if (body.message.trim().toLowerCase() === "/new") {
-        await reset({
-          continuationToken: body.conversationId,
-          reason: "User requested /new",
-        });
-        return Response.json({ message: "Started a new conversation." });
-      }
-
-      const session = await send(body.message, {
-        auth: null,
-        continuationToken: body.conversationId,
-      });
-      return Response.json({ sessionId: session.id });
-    }),
-  ],
-});
-```
-
-`reset` returns `{ status: "reset", previousSessionId }` when it observed an owner, or `{ status: "no_active_session" }` when the token was already free. Both outcomes are successful. It terminally cancels the observed workflow run and waits until its non-retained continuation hook no longer blocks reuse, so the next `send()` using the same token creates a new session with fresh history and state.
-
-The replacement session owns a new session-scoped sandbox. eve initializes it lazily on that session's first sandbox use, so it never reuses the prior session's workspace or sandbox state. Resetting does not clear history in place, roll back tool calls, or delete the previous run or its sandbox; normal retention and backend cleanup policies still apply. Side effects or partial output that were already committed remain committed. Authenticate and deduplicate inbound command webhooks before calling this helper: a delayed duplicate `/new` can otherwise reset a newer session that has already reclaimed the same token.
+Control operations never create a session. Unknown or inactive targets return a
+benign no-active status. Authenticate and deduplicate command webhooks before
+calling `reset`, because a delayed duplicate can retire a newer address owner.
 Use a channel event handler, rather than an agent hook, when the reaction needs native platform context. For example, a GitHub or Slack channel can handle `"subagent.called"` and `"subagent.completed"` to correlate child work by `callId` and update the same issue, pull request, or thread when a reviewer subagent finishes.
 
 ## CORS
