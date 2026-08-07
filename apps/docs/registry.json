@@ -1635,19 +1635,19 @@
       ]
     },
     {
-      "name": "channel/chat-sdk-sendblue",
+      "name": "channel/sendblue",
       "type": "registry:item",
       "title": "Sendblue",
       "description": "Send and receive iMessage, SMS, and RCS through Sendblue.",
-      "dependencies": ["chat", "chat-adapter-sendblue", "@chat-adapter/state-memory"],
       "envVars": {
         "SENDBLUE_API_KEY": "",
         "SENDBLUE_API_SECRET": "",
-        "SENDBLUE_FROM_NUMBER": ""
+        "SENDBLUE_FROM_NUMBER": "",
+        "SENDBLUE_WEBHOOK_SECRET": ""
       },
       "files": [
         {
-          "path": "registry/channels/chat-sdk-sendblue.ts",
+          "path": "registry/channels/sendblue.ts",
           "type": "registry:file",
           "target": "agent/channels/sendblue.ts"
         }

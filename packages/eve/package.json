@@ -241,6 +241,11 @@
       "import": "./dist/src/public/channels/photon/index.js",
       "default": "./dist/src/public/channels/photon/index.js"
     },
+    "./channels/sendblue": {
+      "types": "./dist/src/public/channels/sendblue/index.d.ts",
+      "import": "./dist/src/public/channels/sendblue/index.js",
+      "default": "./dist/src/public/channels/sendblue/index.js"
+    },
     "./channels/github": {
       "types": "./dist/src/public/channels/github/index.d.ts",
       "import": "./dist/src/public/channels/github/index.js",
@@ -351,6 +356,7 @@
     "ai": "catalog:",
     "autoevals": "0.0.132",
     "chat": "4.34.0",
+    "chat-adapter-sendblue": "0.2.0",
     "chokidar": "5.0.0",
     "commander": "14.0.3",
     "emulate": "0.6.0",

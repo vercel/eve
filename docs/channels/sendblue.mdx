@@ -1,0 +1,51 @@
+---
+title: Sendblue
+description: Connect an eve agent to iMessage, SMS, and RCS through Sendblue.
+---
+
+Use `sendblueChannel` to receive and reply to Sendblue conversations. The
+channel continues the same eve session for each Sendblue conversation. A new
+accepted message cooperatively cancels an active turn and steers its
+replacement turn.
+
+```ts title="agent/channels/sendblue.ts"
+import { sendblueChannel } from "eve/channels/sendblue";
+
+export default sendblueChannel({
+  allowedServices: ["iMessage", "SMS", "RCS"],
+});
+```
+
+Run `eve add channel/sendblue` to scaffold the channel, or configure it by
+hand. The adapter reads these environment variables by default:
+
+```bash
+SENDBLUE_API_KEY=...
+SENDBLUE_API_SECRET=...
+SENDBLUE_FROM_NUMBER=+15551234567
+SENDBLUE_WEBHOOK_SECRET=... # optional, but recommended
+```
+
+Set Sendblue's inbound message, outbound status, and typing webhooks to your
+public `/eve/v1/sendblue` URL. The channel accepts iMessage by default; set
+`allowedServices` to also accept SMS or RCS. Sendblue verifies each webhook
+when `SENDBLUE_WEBHOOK_SECRET` or `webhookSecret` is configured.
+
+Customize inbound dispatch with `onMessage`. Return `null` to ignore a
+message:
+
+```ts
+export default sendblueChannel({
+  onMessage(_ctx, message) {
+    if (message.author.isBot) return null;
+    return {
+      auth: null,
+      context: [`The sender is ${message.author.fullName}.`],
+    };
+  },
+});
+```
+
+Set `route` to override the webhook path. The underlying Sendblue adapter also
+supports media, typing indicators, read receipts, tapbacks, and direct SDK
+access through the Chat SDK thread.

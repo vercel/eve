@@ -1342,6 +1342,9 @@ importers:
       chat:
         specifier: 4.34.0
         version: 4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
+      chat-adapter-sendblue:
+        specifier: 0.2.0
+        version: 0.2.0(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))
       chokidar:
         specifier: 5.0.0
         version: 5.0.0
