@@ -1,11 +1,11 @@
 import type { Asker } from "../../ask.js";
 import type { Prompter } from "../../prompter.js";
-import type { SetupApplyContext, SetupPrepareContext, SetupPresentation } from "../types.js";
+import type { SetupApplyContext, SetupPrepareContext, SetupPresenter } from "../types.js";
 
-export function createSetupPresentation(
+export function createSetupPresenter(
   prompter: Prompter,
   onExternalAction?: (input: { url: string; userCode?: string; message: string }) => void,
-): SetupPresentation {
+): SetupPresenter {
   return {
     log: prompter.log,
     note: prompter.note.bind(prompter),
@@ -33,8 +33,8 @@ export function createSetupContexts(input: {
   force?: boolean;
   onExternalAction?: (input: { url: string; userCode?: string; message: string }) => void;
 }): { prepare: SetupPrepareContext; apply: SetupApplyContext } {
-  const presentation = createSetupPresentation(input.prompter, input.onExternalAction);
-  const apply: SetupApplyContext = { appRoot: input.appRoot, presentation };
+  const presenter = createSetupPresenter(input.prompter, input.onExternalAction);
+  const apply: SetupApplyContext = { appRoot: input.appRoot, presenter };
   if (input.signal !== undefined) apply.signal = input.signal;
   if (input.force !== undefined) apply.force = input.force;
   return {

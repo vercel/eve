@@ -51,11 +51,16 @@ const GITHUB_EVENT_OPTIONS = [
 
 type GitHubWebhookEvent = (typeof GITHUB_EVENT_OPTIONS)[number]["value"];
 
+const DEFAULT_GITHUB_EVENTS: readonly GitHubWebhookEvent[] = [
+  "issue_comment",
+  "pull_request_review_comment",
+];
+
 const githubEventsQuestion: MultiSelectQuestion<GitHubWebhookEvent> = {
   key: "github-events",
   message: "What should this GitHub App respond to?",
   options: GITHUB_EVENT_OPTIONS,
-  recommended: ["issue_comment", "pull_request_review_comment"],
+  recommended: DEFAULT_GITHUB_EVENTS,
   required: true,
   requireSelection: true,
 };
@@ -67,15 +72,28 @@ function connectTemplate(
 ): string {
   const handlers = [
     events.includes("issues")
-      ? `  onIssue(ctx, issue) {\n    if (issue.action !== "opened") return null;\n    return { auth: defaultGitHubAuth(ctx) };\n  },`
+      ? `  onIssue(ctx, issue) {
+    if (issue.action !== "opened") return null;
+    return { auth: defaultGitHubAuth(ctx) };
+  },`
       : undefined,
     events.includes("pull_request")
-      ? `  onPullRequest(ctx, pullRequest) {\n    if (pullRequest.action !== "opened") return null;\n    return { auth: defaultGitHubAuth(ctx) };\n  },`
+      ? `  onPullRequest(ctx, pullRequest) {
+    if (pullRequest.action !== "opened") return null;
+    return { auth: defaultGitHubAuth(ctx) };
+  },`
       : undefined,
   ].filter((handler): handler is string => handler !== undefined);
   const defaultAuthImport = handlers.length > 0 ? ", defaultGitHubAuth" : "";
   const handlerBlock = handlers.length > 0 ? `\n${handlers.join("\n")}` : "";
-  return `import { connectGitHubCredentials } from "@vercel/connect/eve";\nimport { githubChannel${defaultAuthImport} } from "eve/channels/github";\n\nexport default githubChannel({\n  botName: ${JSON.stringify(appSlug)},\n  credentials: connectGitHubCredentials(${JSON.stringify(uid)}),${handlerBlock}\n});\n`;
+  return `import { connectGitHubCredentials } from "@vercel/connect/eve";
+import { githubChannel${defaultAuthImport} } from "eve/channels/github";
+
+export default githubChannel({
+  botName: ${JSON.stringify(appSlug)},
+  credentials: connectGitHubCredentials(${JSON.stringify(uid)}),${handlerBlock}
+});
+`;
 }
 
 export interface GitHubSetupPlan {
@@ -108,12 +126,12 @@ export async function applyGitHubSetup(
   context: SetupApplyContext,
   deps: GitHubSetupDeps = defaultDeps,
 ) {
-  context.presentation.log.info("GitHub App");
-  context.presentation.log.info(
+  context.presenter.log.info("GitHub App");
+  context.presenter.log.info(
     "Vercel Connect creates a GitHub App and routes verified webhooks to your deployed agent.",
   );
   const connector = await deps.provisionConnector({
-    log: context.presentation.log,
+    log: context.presenter.log,
     events: plan.events,
     project: plan.project,
     projectRoot: context.appRoot,
@@ -126,7 +144,7 @@ export async function applyGitHubSetup(
     { force: context.force },
   );
   const dashboardUrl = "https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Open+Vercel+Connect";
-  context.presentation.nextSteps([
+  context.presenter.nextSteps([
     "Deploy the agent, then open the GitHub App in Vercel Connect and install it in the organization or account where you want to use it.",
     `Add @${connector.appSlug} to a new issue, pull request, or review comment to invoke the agent. GitHub may not autocomplete or render the token as a linked mention.`,
   ]);

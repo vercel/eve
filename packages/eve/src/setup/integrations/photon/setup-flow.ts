@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { select, text } from "../../ask.js";
 import { appendEnv } from "../../append-env.js";
@@ -51,17 +51,36 @@ const defaultDeps: PhotonSetupDeps = {
   writeTextFile,
 };
 
-const PORTABLE_TEMPLATE = `import { photonIMessageChannel } from "eve/channels/photon";\n\nasync function photonCredentials() {\n  const projectId = process.env.IMESSAGE_PROJECT_ID;\n  const projectSecret = process.env.IMESSAGE_PROJECT_SECRET;\n  if (!projectId || !projectSecret) throw new Error("Photon project credentials are required.");\n  return { projectId, projectSecret };\n}\n\nexport default photonIMessageChannel({\n  credentials: photonCredentials,\n  webhookSecret: process.env.IMESSAGE_WEBHOOK_SECRET,\n});\n`;
+const PORTABLE_TEMPLATE = `import { photonIMessageChannel } from "eve/channels/photon";
+
+async function photonCredentials() {
+  const projectId = process.env.IMESSAGE_PROJECT_ID;
+  const projectSecret = process.env.IMESSAGE_PROJECT_SECRET;
+  if (!projectId || !projectSecret) throw new Error("Photon project credentials are required.");
+  return { projectId, projectSecret };
+}
+
+export default photonIMessageChannel({
+  credentials: photonCredentials,
+  webhookSecret: process.env.IMESSAGE_WEBHOOK_SECRET,
+});
+`;
 
 function connectTemplate(connectorUid: string): string {
-  return `import { connectPhotonCredentials } from "@vercel/connect/eve";\nimport { photonIMessageChannel } from "eve/channels/photon";\n\nexport default photonIMessageChannel({\n  credentials: connectPhotonCredentials(${JSON.stringify(connectorUid)}),\n});\n`;
+  return `import { connectPhotonCredentials } from "@vercel/connect/eve";
+import { photonIMessageChannel } from "eve/channels/photon";
+
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials(${JSON.stringify(connectorUid)}),
+});
+`;
 }
 
 export async function preparePhotonSetup(
   context: SetupPrepareContext,
-  agentName: string,
   deps: PhotonSetupDeps = defaultDeps,
 ): Promise<PhotonSetupPlan> {
+  const agentName = basename(context.appRoot);
   const credentials = await context.asker.ask(
     select({
       key: "photon-credentials",
@@ -183,7 +202,7 @@ async function resolvePhotonProject(
       phoneNumber: plan.phoneNumber,
     });
   if (plan.phoneNumber === undefined) throw new Error("Photon phone number is required.");
-  const spinner = context.presentation.log.spinner?.("Waiting for Photon approval…", {
+  const spinner = context.presenter.log.spinner?.("Waiting for Photon approval…", {
     kind: "external-action",
     emphasis: "browser",
   });
@@ -193,7 +212,7 @@ async function resolvePhotonProject(
       phoneNumber: plan.phoneNumber,
       signal: context.signal,
       onAuthorization(authorization) {
-        context.presentation.externalAction({
+        context.presenter.externalAction({
           message: "Authorize Photon",
           url: authorization.verificationUrl,
           userCode: authorization.userCode,
@@ -218,7 +237,7 @@ export async function applyPhotonSetup(
       const slug = await deps.deriveConnectorSlug(context.appRoot, plan.agentName);
       const connector = await deps.provisionConnector({
         credentials: managedProject,
-        log: context.presentation.log,
+        log: context.presenter.log,
         project: plan.vercelProject!,
         projectRoot: context.appRoot,
         slug,
@@ -233,18 +252,18 @@ export async function applyPhotonSetup(
         IMESSAGE_PROJECT_SECRET: managedProject.projectSecret,
       });
       await deps.writeTextFile(channelPath, PORTABLE_TEMPLATE, { force: context.force });
-      context.presentation.nextSteps([
+      context.presenter.nextSteps([
         "Deploy the agent, then create a Photon webhook pointing to https://<your-host>/eve/v1/photon.",
         "Copy the webhook signing secret into IMESSAGE_WEBHOOK_SECRET, alongside IMESSAGE_PROJECT_ID and IMESSAGE_PROJECT_SECRET, in your host's encrypted environment variables.",
       ]);
     }
-    context.presentation.log.success("Scaffolded channel: photon");
+    context.presenter.log.success("Scaffolded channel: photon");
     if (managedProject.assignedPhoneNumber !== undefined)
-      context.presentation.note(managedProject.assignedPhoneNumber, "Text your agent", {
+      context.presenter.note(managedProject.assignedPhoneNumber, "Text your agent", {
         tone: "success",
       });
     const dashboardUrl = `https://app.photon.codes/dashboard/${managedProject.projectId}`;
-    context.presentation.note(dashboardUrl, "Photon project", { tone: "success" });
+    context.presenter.note(dashboardUrl, "Photon project", { tone: "success" });
     return {
       facts: [
         { label: "Photon project", value: dashboardUrl, kind: "url" as const },

@@ -52,7 +52,7 @@ export async function applyWebSetup(
   context: SetupApplyContext,
   deps: WebSetupDeps = defaultDeps,
 ) {
-  context.presentation.log.message("Scaffolding Web Chat channel files...");
+  context.presenter.log.message("Scaffolding Web Chat channel files...");
   const options: EnsureChannelOptions = {
     projectRoot: context.appRoot,
     kind: "web",
@@ -62,26 +62,26 @@ export async function applyWebSetup(
     skipDependencyMutation: true,
   };
   const result = await deps.ensureChannel(options);
-  reportOverwrittenFiles(context.presentation.log, result.filesOverwritten);
+  reportOverwrittenFiles(context.presenter.log, result.filesOverwritten);
   if (
     result.kind === "web" &&
     result.action !== "skipped" &&
     result.nodeEngineOverride !== undefined
   ) {
-    context.presentation.log.warning(formatNodeEngineOverrideWarning(result.nodeEngineOverride));
+    context.presenter.log.warning(formatNodeEngineOverrideWarning(result.nodeEngineOverride));
   }
   reportCompetingNextConfigFiles(
-    context.presentation.log,
+    context.presenter.log,
     "competingNextConfigFiles" in result ? result.competingNextConfigFiles : undefined,
   );
   if (result.action === "skipped") {
-    context.presentation.log.info("Next.js project detected. Skipping Web Chat scaffolding.");
+    context.presenter.log.info("Next.js project detected. Skipping Web Chat scaffolding.");
     return { facts: [] };
   }
-  context.presentation.log.success("Scaffolded channel: web");
+  context.presenter.log.success("Scaffolded channel: web");
   await deps.installScaffoldDependencies({
     changed: result.packageJsonUpdated.length > 0,
-    log: context.presentation.log,
+    log: context.presenter.log,
     projectPath: context.appRoot,
     signal: context.signal,
   });

@@ -44,7 +44,6 @@ export async function runIntegrationSetupCommand(
         appRoot,
         prompter,
         signal: client?.signal ?? options.signal,
-        yes: options.yes,
       },
       dependencies.runnerDeps,
     );

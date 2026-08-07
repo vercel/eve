@@ -46,7 +46,6 @@ describe("Photon setup", () => {
     await expect(
       preparePhotonSetup(
         contexts({ "photon-credentials": "portable", "photon-project-source": "create" }).prepare,
-        "agent",
         effects,
       ),
     ).rejects.toBeInstanceOf(InteractionRequired);
@@ -56,7 +55,7 @@ describe("Photon setup", () => {
   it("applies a portable plan", async () => {
     const effects = deps();
     const ctx = contexts(ANSWERS, "cli-missing");
-    const plan = await preparePhotonSetup(ctx.prepare, "agent", effects);
+    const plan = await preparePhotonSetup(ctx.prepare, effects);
     expect(effects.provisionProject).not.toHaveBeenCalled();
     await applyPhotonSetup(plan, ctx.apply, effects);
     expect(effects.provisionProject).toHaveBeenCalledWith(
@@ -98,11 +97,7 @@ describe("Photon setup", () => {
     const effects = deps();
     vi.mocked(effects.readProjectLink).mockResolvedValue(undefined);
     await expect(
-      preparePhotonSetup(
-        contexts({ ...ANSWERS, "photon-credentials": "vercel" }).prepare,
-        "agent",
-        effects,
-      ),
+      preparePhotonSetup(contexts({ ...ANSWERS, "photon-credentials": "vercel" }).prepare, effects),
     ).rejects.toThrow("eve link");
     expect(effects.provisionProject).not.toHaveBeenCalled();
   });

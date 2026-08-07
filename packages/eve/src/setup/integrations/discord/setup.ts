@@ -48,7 +48,13 @@ function validateCommandName(value: string): string | null {
 }
 
 function connectTemplate(uid: string): string {
-  return `import { connectDiscordCredentials } from "@vercel/connect/eve";\nimport { discordChannel } from "eve/channels/discord";\n\nexport default discordChannel({\n  credentials: connectDiscordCredentials(${JSON.stringify(uid)}),\n});\n`;
+  return `import { connectDiscordCredentials } from "@vercel/connect/eve";
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  credentials: connectDiscordCredentials(${JSON.stringify(uid)}),
+});
+`;
 }
 
 export interface DiscordSetupPlan {
@@ -68,7 +74,7 @@ export async function prepareDiscordSetup(
       "Discord setup requires an authenticated Vercel CLI. Run `vercel login`, then retry.",
     );
   }
-  context.presentation.log.info(
+  context.presenter.log.info(
     "Create a Discord application or open an existing one, then go to Bot → Reset Token and copy the new bot token.\nCreate: https://discord.com/developers/applications?new_application=true\nExisting applications: https://discord.com/developers/applications",
   );
   const botToken = (
@@ -128,7 +134,7 @@ export async function applyDiscordSetup(
   const application = await deps.resolveApplication(plan.botToken);
   const connector = await deps.provisionConnector({
     botToken: plan.botToken,
-    log: context.presentation.log,
+    log: context.presenter.log,
     project: plan.project,
     projectRoot: context.appRoot,
     slug: plan.slug,
@@ -145,7 +151,7 @@ export async function applyDiscordSetup(
     { force: context.force },
   );
   const installUrl = `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(application.id)}&scope=${encodeURIComponent("bot applications.commands")}&permissions=3072`;
-  context.presentation.nextSteps([
+  context.presenter.nextSteps([
     `Install the Discord application, then try /${plan.commandName}: ${installUrl}`,
   ]);
   return {

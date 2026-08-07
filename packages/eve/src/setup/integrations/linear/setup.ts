@@ -43,7 +43,13 @@ export function linearSafeConnectorSlug(slug: string): string {
 }
 
 function connectTemplate(uid: string): string {
-  return `import { connectLinearCredentials } from "@vercel/connect/eve";\nimport { linearChannel } from "eve/channels/linear";\n\nexport default linearChannel({\n  credentials: connectLinearCredentials(${JSON.stringify(uid)}),\n});\n`;
+  return `import { connectLinearCredentials } from "@vercel/connect/eve";
+import { linearChannel } from "eve/channels/linear";
+
+export default linearChannel({
+  credentials: connectLinearCredentials(${JSON.stringify(uid)}),
+});
+`;
 }
 
 type ConnectorPlan =
@@ -126,14 +132,14 @@ export async function applyLinearSetup(
     plan.connector.kind === "reuse"
       ? (await deps.attachConnector({
           connector: plan.connector.connector,
-          log: context.presentation.log,
+          log: context.presenter.log,
           project: plan.project,
           projectRoot: context.appRoot,
           signal: context.signal,
         }),
         plan.connector.connector)
       : await deps.provisionConnector({
-          log: context.presentation.log,
+          log: context.presenter.log,
           project: plan.project,
           projectRoot: context.appRoot,
           slug: plan.connector.slug,

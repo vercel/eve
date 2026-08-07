@@ -171,7 +171,7 @@ export async function prepareSlackSetup(
   });
   if (project.projectId.length === 0) throw new Error(SLACK_REQUIRES_VERCEL);
   const lookup = await deps.inspectConnectors(
-    context.presentation.log,
+    context.presenter.log,
     context.appRoot,
     slug,
     context.signal,
@@ -197,16 +197,16 @@ export async function applySlackSetup(
       force: context.force,
       skipDependencyMutation: true,
     });
-    reportOverwrittenFiles(context.presentation.log, result.filesOverwritten);
-    context.presentation.log.success("Scaffolded channel: slack");
-    context.presentation.nextSteps([
+    reportOverwrittenFiles(context.presenter.log, result.filesOverwritten);
+    context.presenter.log.success("Scaffolded channel: slack");
+    context.presenter.nextSteps([
       "Set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET in .env.local (listed in .env.example).",
       "Configure your Slack app to send events to /eve/v1/slack on your public agent URL.",
     ]);
     return { facts: [], deploymentRequired: true as const };
   }
   const result = await deps.provisionSlackbot(
-    context.presentation.log,
+    context.presenter.log,
     context.appRoot,
     plan.slug,
     undefined,
@@ -229,20 +229,20 @@ export async function applySlackSetup(
     force: context.force,
     skipDependencyMutation: true,
   });
-  reportOverwrittenFiles(context.presentation.log, channel.filesOverwritten);
+  reportOverwrittenFiles(context.presenter.log, channel.filesOverwritten);
   if (channel.action === "skipped") {
     const ready = await deps.reconcileSlackUid(
-      context.presentation.log,
+      context.presenter.log,
       context.appRoot,
       result,
       `slack/${plan.slug}`,
     );
     if (!ready) throw new Error("Slack connector UID update is required before deployment.");
   }
-  context.presentation.log.success("Scaffolded channel: slack");
+  context.presenter.log.success("Scaffolded channel: slack");
   await installScaffoldDependencies({
     changed: channel.packageJsonUpdated.length > 0,
-    log: context.presentation.log,
+    log: context.presenter.log,
     projectPath: context.appRoot,
     signal: context.signal,
   });

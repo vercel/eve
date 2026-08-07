@@ -5,7 +5,7 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import type { IntegrationSetupEnvironment } from "./shared/environment.js";
 
-export type SetupPresentation = Pick<Prompter, "log" | "note"> & {
+export type SetupPresenter = Pick<Prompter, "log" | "note"> & {
   nextSteps(lines: readonly string[]): void;
   externalAction(input: { url: string; userCode?: string; message: string }): void;
 };
@@ -14,14 +14,14 @@ export interface SetupPrepareContext {
   readonly appRoot: string;
   readonly asker: Asker;
   readonly environment: IntegrationSetupEnvironment;
-  readonly presentation: SetupPresentation;
+  readonly presenter: SetupPresenter;
   signal?: AbortSignal;
   force?: boolean;
 }
 
 export interface SetupApplyContext {
   readonly appRoot: string;
-  readonly presentation: SetupPresentation;
+  readonly presenter: SetupPresenter;
   signal?: AbortSignal;
   force?: boolean;
 }
