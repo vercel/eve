@@ -7,6 +7,7 @@ import {
   type AuthorizationSignal,
   consumeAuthorizationResult,
   getHookUrl,
+  PendingAuthorizationResultKey,
   requestAuthorization,
 } from "#harness/authorization.js";
 import {
@@ -42,7 +43,9 @@ const logger = createLogger("framework.connection-search-dynamic");
 const CONNECTION_SEARCH_INPUT_SCHEMA = z.strictObject({
   connection: z
     .string()
-    .describe("Optional: limit search to a specific connection name.")
+    .describe(
+      "Connection to search. Required when multiple connections are available; use the connection summaries returned by an untargeted search to choose one.",
+    )
     .optional(),
   keywords: z
     .string()
@@ -187,15 +190,34 @@ async function executeConnectionSearch(
   const queryTokens = tokenize(input.keywords);
   const results: Array<{ item: ConnectionSearchResultItem; score: number }> = [];
   const failedConnections: ConnectionSearchResultItem[] = [];
+  const connections = registry.getConnections();
+  const requestedConnection = input.connection?.trim();
+  const resumedConnections = new Set(
+    (ctx.get(PendingAuthorizationResultKey) ?? []).map((result) => result.name),
+  );
+
+  // Listing tools can itself require authorization. Avoid probing every
+  // connection for an untargeted search: return the local catalog so the
+  // model can select one, then discover tools only from that connection. An
+  // authorization callback from an in-flight older search still takes priority
+  // so sessions created before this behavior change can resume normally.
+  if (!requestedConnection && resumedConnections.size === 0 && connections.length > 1) {
+    return connections.map((connection) => ({
+      connection: connection.connectionName,
+      description: connection.description,
+    }));
+  }
 
   const targetConnections =
-    input.connection !== undefined && input.connection !== ""
-      ? registry.getConnections().filter((c) => c.connectionName === input.connection)
-      : registry.getConnections();
+    requestedConnection !== undefined && requestedConnection !== ""
+      ? connections.filter((connection) => connection.connectionName === requestedConnection)
+      : resumedConnections.size > 0
+        ? connections.filter((connection) => resumedConnections.has(connection.connectionName))
+        : connections;
 
-  if (input.connection && targetConnections.length === 0) {
+  if (requestedConnection && targetConnections.length === 0) {
     throw new Error(
-      `Connection "${input.connection}" is not registered. Available connections: ${registry.getConnectionNames().join(", ")}.`,
+      `Connection "${requestedConnection}" is not registered. Available connections: ${registry.getConnectionNames().join(", ")}.`,
     );
   }
 
@@ -418,6 +440,8 @@ const connectionSearchDynamicDefinition = defineDynamic({
       tools["connection_search"] = defineTool({
         description:
           "Search for tools across your connections. " +
+          "When multiple connections are available, specify one with `connection`; " +
+          "an untargeted search returns connection summaries without contacting them. " +
           "Discovered tools become directly callable by their qualified name " +
           "(e.g. `linear__list_issues`) in your next response. " +
           `Available connections: ${connectionNames.join(", ")}.`,

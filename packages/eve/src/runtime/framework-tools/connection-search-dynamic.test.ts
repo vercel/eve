@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -250,22 +250,24 @@ describe("connection_search", () => {
     ]);
   });
 
-  it("returns matches and errors when at least one connection loads", async () => {
+  it("returns local summaries without loading tools when multiple connections are untargeted", async () => {
     const incident = connection("incident");
     const linear = connection("linear");
+    const loadIncidentTools = vi.fn(async () => {
+      throw new ConnectionAuthorizationRequiredError("incident");
+    });
+    const loadLinearTools = vi.fn(async () => [
+      {
+        description: "List issues",
+        inputSchema: { type: "object" },
+        name: "list_issues",
+      },
+    ]);
     const connectionRegistry = registry({
       connections: [incident, linear],
       loadTools: {
-        incident: async () => {
-          throw new Error("MCP SSE Transport Error: 400 Bad Request");
-        },
-        linear: async () => [
-          {
-            description: "List issues",
-            inputSchema: { type: "object" },
-            name: "list_issues",
-          },
-        ],
+        incident: loadIncidentTools,
+        linear: loadLinearTools,
       },
     });
 
@@ -273,19 +275,77 @@ describe("connection_search", () => {
       executeConnectionSearch(connectionRegistry, { keywords: "list issues" }),
     ).resolves.toEqual([
       {
-        connection: "linear",
-        description: "List issues",
-        inputSchema: { type: "object" },
-        outputSchema: undefined,
-        qualifiedName: "linear__list_issues",
-        tool: "list_issues",
-      },
-      {
         connection: "incident",
         description: "incident connection",
-        error: 'Failed to load tools for "incident": MCP SSE Transport Error: 400 Bad Request',
+      },
+      {
+        connection: "linear",
+        description: "linear connection",
       },
     ]);
+    expect(loadIncidentTools).not.toHaveBeenCalled();
+    expect(loadLinearTools).not.toHaveBeenCalled();
+  });
+
+  it("resumes an authorization callback from an older untargeted search", async () => {
+    const notion = connection("notion");
+    let linearCompletions = 0;
+    const linear: ResolvedConnectionDefinition = {
+      ...connection("linear"),
+      authorization: {
+        completeAuthorization: async () => {
+          linearCompletions += 1;
+          return { token: "linear-token" };
+        },
+        getToken: async () => ({ token: "linear-token" }),
+        principalType: "user",
+        startAuthorization: async () => ({
+          challenge: { url: "https://idp.example.com/authorize" },
+        }),
+      },
+    };
+    const loadNotionTools = vi.fn(async () => []);
+    const loadLinearTools = vi.fn(async () => [
+      {
+        description: "List issues",
+        inputSchema: { type: "object" },
+        name: "list_issues",
+      },
+    ]);
+    const connectionRegistry = registry({
+      connections: [notion, linear],
+      loadTools: {
+        notion: loadNotionTools,
+        linear: loadLinearTools,
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(connectionRegistry, { keywords: "list issues" }, (ctx) => {
+        ctx.set(AuthKey, {
+          attributes: {},
+          authenticator: "test-idp",
+          issuer: "test-idp",
+          principalId: "user-1",
+          principalType: "user",
+        });
+        ctx.set(PendingAuthorizationResultKey, [
+          {
+            callback: { method: "GET", params: { code: "oauth-code" } },
+            hookUrl: "https://agent.example.com/eve/v1/connections/linear/callback/auth",
+            name: "linear",
+          },
+        ]);
+      }),
+    ).resolves.toMatchObject([
+      {
+        connection: "linear",
+        qualifiedName: "linear__list_issues",
+      },
+    ]);
+    expect(linearCompletions).toBe(1);
+    expect(loadLinearTools).toHaveBeenCalledOnce();
+    expect(loadNotionTools).not.toHaveBeenCalled();
   });
 
   it("does not complete an unrelated connection authorization", async () => {

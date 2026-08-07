@@ -21,6 +21,6 @@ export function formatConnectionsSection(
     "Available connections:",
     ...connectionList,
     "",
-    "Use connection_search to discover specific tools within a connection. Discovered tools become directly callable by their qualified name (e.g. linear__list_issues) in your next response.",
+    "Use connection_search to discover specific tools within a connection. When multiple connections are available, choose the relevant connection from the list above and pass its name as `connection`. Discovered tools become directly callable by their qualified name (e.g. linear__list_issues) in your next response.",
   ].join("\n");
 }

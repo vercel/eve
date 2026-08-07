@@ -8,6 +8,8 @@ A connection wires an agent into an external server you don't author, either an 
 
 Connections live under `agent/connections/`. The runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. The model never sees a connection's URL or credentials. It discovers tools through the built-in `connection_search` and calls them by their qualified name, `<connection>__<tool>` (e.g. `linear__list_issues`).
 
+When an agent has multiple connections, `connection_search` targets one connection at a time. An untargeted search returns the locally available connection names and descriptions without contacting their servers; the model then searches the relevant connection for its tools. This avoids prompting for authorization to an unrelated connection.
+
 ## MCP connections
 
 Use an MCP connection when the external service already exposes an MCP server. The server publishes its tools and schemas, and eve makes the matched tools callable by the model.
