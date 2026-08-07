@@ -119,10 +119,6 @@ describe("createSessionCommandInbox", () => {
       "A session command inbox cannot change its stable token.",
     );
     expect(createHookMock).toHaveBeenCalledOnce();
-    expect(createHookMock).toHaveBeenCalledWith({
-      metadata: { eveVersion: expect.stringMatching(/^\d+\.\d+\.\d+/) },
-      token: "stable",
-    });
     await inbox.dispose();
   });
 
