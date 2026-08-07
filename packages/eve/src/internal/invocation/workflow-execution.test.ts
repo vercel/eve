@@ -5,6 +5,7 @@ import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
 import {
   buildInvocationAttributes,
   INVOCATION_OWNER_ATTRIBUTE,
+  invocationInputRequestId,
   invocationOwnerKey,
   invocationUpdateRequestId,
 } from "#internal/invocation/metadata.js";
@@ -159,16 +160,19 @@ describe("WorkflowAgentInvocationExecution", () => {
       ]),
     );
 
+    const requestId = invocationInputRequestId("event_2", "question");
     await expect(
       execution().read({ auth, invocationId: "wrun_invocation" }),
     ).resolves.toMatchObject({
-      inputRequests: { question: { prompt: "Proceed?" } },
+      inputRequests: { [requestId]: { prompt: "Proceed?", requestId } },
       status: "input_required",
     });
     expect(getReadable).toHaveBeenCalledWith({ startIndex: -64 });
   });
 
   it("returns working immediately after accepting pending input", async () => {
+    const requestId = invocationInputRequestId("event_1", "question");
+    const responses = [{ optionId: "yes", requestId }] as const;
     const pendingRun = run({ status: "running" });
     runsGet.mockResolvedValue(pendingRun);
     let events: HandleMessageStreamEvent[] = [
@@ -199,7 +203,7 @@ describe("WorkflowAgentInvocationExecution", () => {
     getReadable.mockImplementation(() => eventStream(events));
     deliver.mockImplementation(async () => {
       const update = invocationUpdateIdentityFromRequestId(
-        invocationUpdateRequestId([{ optionId: "yes", requestId: "question" }], "event_1"),
+        invocationUpdateRequestId(responses, "event_1"),
       )!;
       pendingRun.attributes[INVOCATION_UPDATE_RECEIPT_ATTRIBUTE] =
         serializeInvocationUpdateIdentity(update);
@@ -210,7 +214,7 @@ describe("WorkflowAgentInvocationExecution", () => {
       execution().update({
         auth,
         invocationId: "wrun_invocation",
-        responses: [{ optionId: "yes", requestId: "question" }],
+        responses,
       }),
     ).resolves.toMatchObject({
       invocation: { pollAfterMs: 1_000, status: "working" },
@@ -221,10 +225,7 @@ describe("WorkflowAgentInvocationExecution", () => {
       { inputResponses: [{ optionId: "yes", requestId: "question" }] },
       {
         auth,
-        requestId: invocationUpdateRequestId(
-          [{ optionId: "yes", requestId: "question" }],
-          "event_1",
-        ),
+        requestId: invocationUpdateRequestId(responses, "event_1"),
       },
     );
     expect(getReadable).toHaveBeenCalledWith({ startIndex: -64 });
@@ -263,7 +264,9 @@ describe("WorkflowAgentInvocationExecution", () => {
   });
 
   it("converges when a concurrent update accepts the same response first", async () => {
-    const responses = [{ optionId: "yes", requestId: "question" }] as const;
+    const responses = [
+      { optionId: "yes", requestId: invocationInputRequestId("event_1", "question") },
+    ] as const;
     const update = invocationUpdateIdentityFromRequestId(
       invocationUpdateRequestId(responses, "event_1"),
     )!;
@@ -305,7 +308,7 @@ describe("WorkflowAgentInvocationExecution", () => {
     ).resolves.toMatchObject({ invocation: { status: "working" }, type: "success" });
   });
 
-  it("receipts split updates before a required input batch can start a turn", async () => {
+  it("requires one update to answer the complete pending input batch", async () => {
     const pendingRun = run({ status: "running" });
     runsGet.mockResolvedValue(pendingRun);
     getReadable.mockImplementation(() =>
@@ -318,19 +321,40 @@ describe("WorkflowAgentInvocationExecution", () => {
       return { sessionId: "wrun_invocation" };
     });
 
-    for (const requestId of ["one", "two"]) {
-      await expect(
-        execution().update({
-          auth,
-          invocationId: "wrun_invocation",
-          responses: [{ optionId: "yes", requestId }],
-        }),
-      ).resolves.toMatchObject({ type: "success" });
-    }
-    expect(deliver).toHaveBeenCalledTimes(2);
+    const one = invocationInputRequestId("event_split", "one");
+    const two = invocationInputRequestId("event_split", "two");
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [{ optionId: "yes", requestId: one }],
+      }),
+    ).resolves.toEqual({
+      message: "Responses must answer the complete pending input batch exactly once.",
+      type: "conflict",
+    });
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [
+          { optionId: "yes", requestId: one },
+          { optionId: "yes", requestId: two },
+        ],
+      }),
+    ).resolves.toMatchObject({ type: "success" });
+    expect(deliver).toHaveBeenCalledExactlyOnceWith(
+      {
+        inputResponses: [
+          { optionId: "yes", requestId: "one" },
+          { optionId: "yes", requestId: "two" },
+        ],
+      },
+      expect.objectContaining({ auth }),
+    );
   });
 
-  it("scopes reused request ids to the durable pending-input batch", async () => {
+  it("rejects delayed retries when a later batch reuses an internal request id", async () => {
     const pendingRun = run({ status: "running" });
     runsGet.mockResolvedValue(pendingRun);
     let events: HandleMessageStreamEvent[] = [inputRequestedEvent("event_first", ["question"])];
@@ -342,10 +366,11 @@ describe("WorkflowAgentInvocationExecution", () => {
       return { sessionId: "wrun_invocation" };
     });
 
+    const firstRequestId = invocationInputRequestId("event_first", "question");
     await execution().update({
       auth,
       invocationId: "wrun_invocation",
-      responses: [{ optionId: "yes", requestId: "question" }],
+      responses: [{ optionId: "yes", requestId: firstRequestId }],
     });
     events = [
       {
@@ -359,7 +384,19 @@ describe("WorkflowAgentInvocationExecution", () => {
       execution().update({
         auth,
         invocationId: "wrun_invocation",
-        responses: [{ optionId: "no", requestId: "question" }],
+        responses: [{ optionId: "yes", requestId: firstRequestId }],
+      }),
+    ).resolves.toEqual({
+      message: `Unknown input request: ${firstRequestId}`,
+      type: "conflict",
+    });
+
+    const secondRequestId = invocationInputRequestId("event_second", "question");
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [{ optionId: "no", requestId: secondRequestId }],
       }),
     ).resolves.toMatchObject({ type: "success" });
 

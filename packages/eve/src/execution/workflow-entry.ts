@@ -1,9 +1,4 @@
-import {
-  createHook,
-  getWorkflowMetadata,
-  getWritable,
-  setAttributes,
-} from "#compiled/@workflow/core/index.js";
+import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,
@@ -48,6 +43,7 @@ import {
   INVOCATION_UPDATE_RECEIPT_ATTRIBUTE,
   serializeInvocationUpdateIdentity,
 } from "#internal/invocation/attributes.js";
+import { setStrictWorkflowAttributes } from "#internal/workflow/set-strict-attributes.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
@@ -318,10 +314,9 @@ async function runDriverLoop(input: {
   const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
   const commandInbox = createSessionCommandInbox({
     onInvocationUpdateClaim: async (identity) => {
-      await setAttributes(
-        { [INVOCATION_UPDATE_RECEIPT_ATTRIBUTE]: serializeInvocationUpdateIdentity(identity) },
-        { allowReservedAttributes: true },
-      );
+      await setStrictWorkflowAttributes({
+        [INVOCATION_UPDATE_RECEIPT_ATTRIBUTE]: serializeInvocationUpdateIdentity(identity),
+      });
     },
   });
   const stableCommandToken = sessionCommandHookToken(input.sessionState.sessionId);

@@ -114,6 +114,23 @@ describe("createSessionCommandInbox", () => {
     });
   });
 
+  it("does not expose or consume an invocation update when its durable claim fails", async () => {
+    const update = invocationUpdate("mcp-update:question-set:request-set:answer-a");
+    const persistenceError = new Error("receipt storage unavailable");
+    installHooks(createMockHook({ reads: [Promise.resolve(resolved(update))], token: "stable" }));
+    const inbox = createSessionCommandInbox({
+      onInvocationUpdateClaim: vi.fn().mockRejectedValue(persistenceError),
+    });
+
+    await inbox.claimStable("stable");
+    await expect(inbox.next()).rejects.toBe(persistenceError);
+    expect(() => inbox.consumeNext()).toThrow(
+      "Cannot consume a session command before it resolves.",
+    );
+    await expect(inbox.next()).rejects.toBe(persistenceError);
+    await inbox.dispose();
+  });
+
   it("disposes a conflicting continuation candidate without releasing current ownership", async () => {
     const stable = createMockHook({ token: "stable" });
     const current = createMockHook({ token: "current" });

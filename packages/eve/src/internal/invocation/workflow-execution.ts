@@ -18,6 +18,7 @@ import type {
 import {
   INVOCATION_OWNER_ATTRIBUTE,
   INVOCATION_TOKEN_ATTRIBUTE,
+  invocationInputRequestId,
   invocationOwnerKey,
   invocationUpdateFingerprint,
   invocationUpdateRequestId,
@@ -118,18 +119,29 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
       }
       return conflict("Invocation is not waiting for input.");
     }
-    for (const response of input.responses) {
-      if (current.inputRequests?.[response.requestId] === undefined) {
-        return conflict(`Unknown input request: ${response.requestId}`);
-      }
-    }
-    const pendingBatchId = latestPendingInputBatchId(
+    const pendingBatch = latestPendingInputBatch(
       await readRecentPersistedEvents(input.invocationId),
     );
-    if (pendingBatchId === undefined) {
+    if (pendingBatch === undefined) {
       return conflict("Invocation input changed before the update could be applied.");
     }
-    const updateRequestId = invocationUpdateRequestId(input.responses, pendingBatchId);
+    const responseIds = new Set<string>();
+    const deliveredResponses: InputResponse[] = [];
+    for (const response of input.responses) {
+      const rawRequestId = pendingBatch.rawRequestIds[response.requestId];
+      if (rawRequestId === undefined) {
+        return conflict(`Unknown input request: ${response.requestId}`);
+      }
+      responseIds.add(response.requestId);
+      deliveredResponses.push({ ...response, requestId: rawRequestId });
+    }
+    if (
+      responseIds.size !== input.responses.length ||
+      responseIds.size !== Object.keys(pendingBatch.requests).length
+    ) {
+      return conflict("Responses must answer the complete pending input batch exactly once.");
+    }
+    const updateRequestId = invocationUpdateRequestId(input.responses, pendingBatch.id);
     const update = invocationUpdateIdentityFromRequestId(updateRequestId);
     if (update === undefined) throw new Error("Invocation update identity was unavailable.");
     if (recorded?.claim === update.claim) {
@@ -144,7 +156,7 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
     try {
       const source = this.#from(token) as InternalChannelSource;
       await source[INTERNAL_CHANNEL_DELIVER](
-        { inputResponses: input.responses },
+        { inputResponses: deliveredResponses },
         { auth: input.auth, requestId: updateRequestId },
       );
     } catch (error) {
@@ -249,15 +261,34 @@ async function readRecentPersistedEvents(
   return events;
 }
 
-function latestPendingInputBatchId(
-  events: readonly HandleMessageStreamEvent[],
-): string | undefined {
-  let batchId: string | undefined;
-  for (const event of events) {
-    if (event.type === "input.requested") batchId = event.meta.id;
-    else if (event.type === "turn.started") batchId = undefined;
+interface PendingInputBatch {
+  readonly id: string;
+  readonly rawRequestIds: Readonly<Record<string, string>>;
+  readonly requests: Readonly<Record<string, InputRequest>>;
+}
+
+function pendingInputBatch(
+  event: Extract<HandleMessageStreamEvent, { type: "input.requested" }>,
+): PendingInputBatch {
+  const rawRequestIds: Record<string, string> = {};
+  const requests: Record<string, InputRequest> = {};
+  for (const request of event.data.requests) {
+    const requestId = invocationInputRequestId(event.meta.id, request.requestId);
+    rawRequestIds[requestId] = request.requestId;
+    requests[requestId] = { ...request, requestId };
   }
-  return batchId;
+  return { id: event.meta.id, rawRequestIds, requests };
+}
+
+function latestPendingInputBatch(
+  events: readonly HandleMessageStreamEvent[],
+): PendingInputBatch | undefined {
+  let batch: PendingInputBatch | undefined;
+  for (const event of events) {
+    if (event.type === "input.requested") batch = pendingInputBatch(event);
+    else if (event.type === "turn.started") batch = undefined;
+  }
+  return batch;
 }
 
 function projectNonterminal(
@@ -267,16 +298,14 @@ function projectNonterminal(
   events: readonly HandleMessageStreamEvent[],
 ): AgentInvocation {
   const authorizations = new Map<string, AgentInvocationAuthorizationRequest>();
-  let inputRequests: Readonly<Record<string, InputRequest>> | undefined;
+  let inputBatch: PendingInputBatch | undefined;
   let result: JsonValue | undefined;
   for (const event of events) {
     if (event.type === "input.requested") {
-      inputRequests = Object.fromEntries(
-        event.data.requests.map((request) => [request.requestId, request]),
-      );
+      inputBatch = pendingInputBatch(event);
     } else if (event.type === "turn.started") {
       authorizations.clear();
-      inputRequests = undefined;
+      inputBatch = undefined;
       result = undefined;
     } else if (event.type === "authorization.required") {
       const authorization: {
@@ -309,14 +338,14 @@ function projectNonterminal(
   const status: "working" | "input_required" | "authorization_required" =
     pendingAuthorizations.length > 0
       ? "authorization_required"
-      : inputRequests === undefined
+      : inputBatch === undefined
         ? "working"
         : "input_required";
   return {
     authorizations: pendingAuthorizations.length > 0 ? pendingAuthorizations : undefined,
     createdAt,
     expiresAt,
-    inputRequests,
+    inputRequests: inputBatch?.requests,
     invocationId,
     pollAfterMs: status === "working" || status === "authorization_required" ? 1_000 : undefined,
     result,
