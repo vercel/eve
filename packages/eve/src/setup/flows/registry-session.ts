@@ -1,16 +1,8 @@
 import type { Prompter } from "#setup/prompter.js";
 import { openUrl } from "#setup/primitives/open-url.js";
 import { detectDeployment } from "#setup/project-resolution.js";
-import {
-  emptyRegistrySetupCompletion,
-  mergeRegistrySetupCompletions,
-  registrySetupCompletionFacts,
-} from "#setup/registry-setup-completion.js";
-import type {
-  RegistrySetupCompletion,
-  RegistrySetupDestination,
-  RegistrySetupFact,
-} from "#setup/registry-setup-protocol.js";
+import { mergeRegistrySetupCompletions } from "#setup/registry-setup-completion.js";
+import type { RegistrySetupCompletion, RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 
 import { runDeployFlow } from "./deploy.js";
 
@@ -42,13 +34,13 @@ export interface RegistrySession {
 export function createRegistrySession(deps: RegistrySessionDeps): RegistrySession {
   const addedItems: string[] = [];
   const output: string[] = [];
-  let completion = emptyRegistrySetupCompletion();
+  let completion: RegistrySetupCompletion = { facts: [] };
 
   function result(deployed?: "production" | "preview"): RegistrySessionResult {
     const session: RegistrySessionResult = {
       kind: "done",
       addedItems,
-      facts: registrySetupCompletionFacts(completion),
+      facts: completion.facts,
       output,
     };
     if (deployed !== undefined) session.deployed = deployed;
@@ -56,7 +48,7 @@ export function createRegistrySession(deps: RegistrySessionDeps): RegistrySessio
   }
 
   return {
-    add(item, itemOutput, setup = emptyRegistrySetupCompletion()) {
+    add(item, itemOutput, setup = { facts: [] }) {
       addedItems.push(item);
       output.push(...itemOutput);
       completion = mergeRegistrySetupCompletions(completion, setup);
@@ -65,7 +57,7 @@ export function createRegistrySession(deps: RegistrySessionDeps): RegistrySessio
     result,
 
     async continueAfterInstall(input) {
-      if (completion.deployment === undefined) return result();
+      if (completion.deploymentRequired !== true) return result();
 
       const deployment = await deps.detectDeployment(input.appRoot, { signal: input.signal });
       const canDeploy = deployment.state === "linked" || deployment.state === "deployed";
@@ -94,36 +86,33 @@ export function createRegistrySession(deps: RegistrySessionDeps): RegistrySessio
       });
       const deployed = deployResult.kind === "deployed" ? action : undefined;
       if (deployed === "production") {
-        await offerProductionDestination(
-          input.prompter,
-          deps.openUrl,
-          completion.deployment.productionDestinations ?? [],
-        );
+        await offerUrlFact(input.prompter, deps.openUrl, completion.facts);
       }
       return result(deployed);
     },
   };
 }
 
-async function offerProductionDestination(
+async function offerUrlFact(
   prompter: Prompter,
   open: typeof openUrl,
-  destinations: readonly RegistrySetupDestination[],
+  facts: readonly RegistrySetupFact[],
 ): Promise<void> {
-  if (destinations.length === 0) return;
-  const destination = await prompter.select<string>({
-    message: "Open a destination?",
+  const links = facts.filter((fact) => fact.kind === "url");
+  if (links.length === 0) return;
+  const selected = await prompter.select<string>({
+    message: "Open a link?",
     options: [
-      ...destinations.map((candidate, index) => ({
+      ...links.map((fact, index) => ({
         value: String(index),
-        label: candidate.label,
-        hint: candidate.url,
+        label: fact.label,
+        hint: fact.value,
       })),
       { value: "none", label: "Not now" },
     ],
     initialValue: "none",
   });
-  if (destination === "none") return;
-  const selected = destinations[Number(destination)];
-  if (selected !== undefined) open(selected.url);
+  if (selected === "none") return;
+  const fact = links[Number(selected)];
+  if (fact !== undefined) open(fact.value);
 }

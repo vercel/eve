@@ -311,11 +311,11 @@ describe("runRegistryFlow", () => {
       installRegistryItem: vi.fn(async () => ({
         output: [],
         setup: {
-          facts: [{ label: "Workspace", value: "Acme" }],
-          deployment: {
-            required: true as const,
-            productionDestinations: [{ label: "Open Slack", url: "https://slack.com/app" }],
-          },
+          facts: [
+            { label: "Workspace", value: "Acme" },
+            { label: "Open Slack", value: "https://slack.com/app", kind: "url" as const },
+          ],
+          deploymentRequired: true as const,
         },
       })),
     });
@@ -328,15 +328,17 @@ describe("runRegistryFlow", () => {
       deployed: "production",
       facts: [
         { label: "Workspace", value: "Acme" },
+        { label: "Open Slack", value: "https://slack.com/app", kind: "url" },
         { label: "Workspace", value: "Acme" },
         { label: "Open Slack", value: "https://slack.com/app", kind: "url" },
       ],
     });
     expect(flowDeps.runDeployFlow).toHaveBeenCalledTimes(1);
     expect(prompts.at(-1)).toMatchObject({
-      message: "Open a destination?",
+      message: "Open a link?",
       options: [
         { value: "0", label: "Open Slack", hint: "https://slack.com/app" },
+        { value: "1", label: "Open Slack", hint: "https://slack.com/app" },
         { value: "none", label: "Not now" },
       ],
     });

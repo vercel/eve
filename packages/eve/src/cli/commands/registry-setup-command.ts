@@ -282,7 +282,7 @@ export async function runRegistrySetupCommand(
           kind: "completed",
           facts: outcome.facts,
         };
-        if (outcome.deployment !== undefined) result.deployment = outcome.deployment;
+        if (outcome.deploymentRequired === true) result.deploymentRequired = true;
         resolveResult(result);
         return;
       }

@@ -1,8 +1,5 @@
 import { createPrompter, type Prompter } from "#setup/prompter.js";
-import {
-  emptyRegistrySetupCompletion,
-  mergeRegistrySetupCompletions,
-} from "#setup/registry-setup-completion.js";
+import { mergeRegistrySetupCompletions } from "#setup/registry-setup-completion.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 
 import type { RegistryCommandLogger, RegistrySetupDependencies } from "./registry.js";
@@ -26,7 +23,7 @@ export async function runDeclaredSetups(input: {
   cancelledReminder: string;
   resumeCommand: string;
 }): Promise<RegistrySetupCompletion | false> {
-  let completion = emptyRegistrySetupCompletion();
+  let completion: RegistrySetupCompletion = { facts: [] };
   if (input.setups === undefined) return completion;
   const runSetupCommand = await input.dependencies.loadSetupCommandRunner();
   const prompter = input.options.prompter ?? createPrompter();

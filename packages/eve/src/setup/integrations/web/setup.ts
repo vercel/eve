@@ -57,7 +57,7 @@ export const WEB_SETUP: SetupIntegration = {
     });
     return {
       kind: "done",
-      completion: { facts: [], deployment: { required: true } },
+      completion: { facts: [], deploymentRequired: true },
     };
   },
 };

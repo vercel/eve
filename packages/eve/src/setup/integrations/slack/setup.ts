@@ -194,7 +194,7 @@ export async function setupSlack(
     ]);
     return {
       kind: "done",
-      completion: { facts: [], deployment: { required: true } },
+      completion: { facts: [], deploymentRequired: true },
     };
   }
 
@@ -233,17 +233,17 @@ export async function setupSlack(
   return {
     kind: "done",
     completion: {
-      facts: [],
-      deployment: {
-        required: true,
-        ...(slackbot.chatUrl === undefined
-          ? {}
-          : {
-              productionDestinations: [
-                { label: "Open Slack DM", url: slackMessageDeepLink(slackbot.chatUrl) },
-              ],
-            }),
-      },
+      facts:
+        slackbot.chatUrl === undefined
+          ? []
+          : [
+              {
+                label: "Open Slack DM",
+                value: slackMessageDeepLink(slackbot.chatUrl),
+                kind: "url",
+              },
+            ],
+      deploymentRequired: true,
     },
   };
 }

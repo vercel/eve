@@ -5,10 +5,7 @@ import {
 } from "#compiled/shadcn-registry/index.js";
 import { z } from "#compiled/zod/index.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
-import {
-  emptyRegistrySetupCompletion,
-  mergeRegistrySetupCompletions,
-} from "#setup/registry-setup-completion.js";
+import { mergeRegistrySetupCompletions } from "#setup/registry-setup-completion.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 
 import { hasInteractiveTerminal } from "./preconditions.js";
@@ -112,7 +109,7 @@ export async function runRegistryPackage(input: {
       silent: options.silent,
     });
   }
-  let completion = emptyRegistrySetupCompletion();
+  let completion: RegistrySetupCompletion = { facts: [] };
   if (options.skipSetup === true) return completion;
 
   if (options.yes !== true && options.prompter === undefined && !interactive) {

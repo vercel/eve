@@ -22,7 +22,7 @@ export const PHOTON_SETUP: SetupIntegration = {
     return {
       kind: "done",
       completion: {
-        deployment: { required: true },
+        deploymentRequired: true,
         facts: [
           ...(result.assignedPhoneNumber === undefined
             ? []

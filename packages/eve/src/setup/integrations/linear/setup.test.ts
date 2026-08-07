@@ -62,6 +62,7 @@ describe("Linear setup", () => {
             value:
               "Delegate an issue or mention the agent in an Agent Session to start a conversation.",
           },
+          { label: "Open Linear", value: "https://linear.app", kind: "url" },
         ],
       },
     });

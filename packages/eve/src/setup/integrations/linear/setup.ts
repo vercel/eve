@@ -163,11 +163,9 @@ export async function setupLinear(
             value:
               "Delegate an issue or mention the agent in an Agent Session to start a conversation.",
           },
+          { label: "Open Linear", value: "https://linear.app", kind: "url" },
         ],
-        deployment: {
-          required: true,
-          productionDestinations: [{ label: "Open Linear", url: "https://linear.app" }],
-        },
+        deploymentRequired: true,
       },
     };
   } catch (error) {

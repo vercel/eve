@@ -163,11 +163,8 @@ describe("runRegistrySetupCommand", () => {
         type: "result",
         outcome: {
           kind: "completed",
-          facts: [],
-          deployment: {
-            required: true,
-            productionDestinations: [{ label: "Open Linear", url: "https://linear.app" }],
-          },
+          facts: [{ label: "Open Linear", value: "https://linear.app", kind: "url" }],
+          deploymentRequired: true,
         },
       });
     });
@@ -182,11 +179,8 @@ describe("runRegistrySetupCommand", () => {
       ),
     ).resolves.toEqual({
       kind: "completed",
-      facts: [],
-      deployment: {
-        required: true,
-        productionDestinations: [{ label: "Open Linear", url: "https://linear.app" }],
-      },
+      facts: [{ label: "Open Linear", value: "https://linear.app", kind: "url" }],
+      deploymentRequired: true,
     });
   });
 

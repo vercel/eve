@@ -49,7 +49,7 @@ describe("setupSlack", () => {
       ),
     ).resolves.toEqual({
       kind: "done",
-      completion: { facts: [], deployment: { required: true } },
+      completion: { facts: [], deploymentRequired: true },
     });
 
     expect(provisionSlackbot).toHaveBeenCalledOnce();

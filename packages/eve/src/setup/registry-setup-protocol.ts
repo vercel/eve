@@ -16,17 +16,9 @@ export type RegistrySetupFact = {
   kind?: "text" | "url" | "phone";
 };
 
-export type RegistrySetupDestination = {
-  label: string;
-  url: string;
-};
-
 export type RegistrySetupCompletion = {
   facts: readonly RegistrySetupFact[];
-  deployment?: {
-    required: true;
-    productionDestinations?: readonly RegistrySetupDestination[];
-  };
+  deploymentRequired?: true;
 };
 
 export type RegistrySetupError = {

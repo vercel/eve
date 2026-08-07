@@ -149,7 +149,7 @@ export async function setupDiscord(
     return {
       kind: "done",
       completion: {
-        deployment: { required: true },
+        deploymentRequired: true,
         facts: [
           {
             label: "Discord application",
