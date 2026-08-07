@@ -1,5 +1,14 @@
 # eve
 
+## 0.31.1
+
+### Patch Changes
+
+- 2a141f0: Keep sessions resumable across eve deployment upgrades: sends now cross durable session hooks as the established `deliver` envelope (with a transitional single-payload mirror for sessions pinned to 0.30.3–0.30.8), and consumers keep accepting payloads persisted by those versions.
+- 99982f7: Treat AI SDK `.devtools` like other generated directories: ignore it in `eve dev` watching, agent discovery, and source snapshots so generation writes do not recompile or warn.
+- a497e8d: Preserve each tool executor's concrete return type through `defineTool`, so non-streaming tools no longer appear to return an async iterable. Allow `ctx.to()` to infer closed receive-target interfaces such as Slack's without requiring an index signature.
+- fe9e7ef: Consume interactive authorization callback results once and keep targeted connection searches from replaying callbacks for unrelated connections.
+
 ## 0.31.0
 
 ### Minor Changes

@@ -920,8 +920,12 @@ describe("workflowEntry", () => {
     expect(dispatchTurnStep).toHaveBeenCalledTimes(1);
     expect(resumeHook).toHaveBeenCalledWith("turn-inbox", {
       delivery: {
+        auth: undefined,
+        caller: undefined,
         kind: "deliver",
+        payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
         payloads: [{ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }],
+        requestId: undefined,
       },
       kind: "driver-delivery",
       requestId: "delivery-1",

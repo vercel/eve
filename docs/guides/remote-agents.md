@@ -1,6 +1,6 @@
 ---
 title: "Remote Agents"
-description: "Call another eve deployment as a subagent with defineRemoteAgent: same lowered tool shape, outbound auth, durable callback dispatch."
+description: "Call another eve deployment as a subagent with defineRemoteAgent: same tool call as a local subagent, outbound auth, durable callback dispatch."
 ---
 
 `defineRemoteAgent` calls a separately deployed eve agent as if it were a local subagent. Reach for it when the specialist you delegate to is a separately owned agent behind its own URL rather than a directory in your repo.
@@ -28,7 +28,7 @@ export default defineRemoteAgent({
 | `forwardPrincipal` | `boolean`                                     | No       | `false`           | Forward the dispatching turn's session principal to the remote deployment (see [Forwarding the caller identity](#forwarding-the-caller-identity)).       |
 | `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                               |
 | `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                  |
-| `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type the caller requires. Lowered to JSON Schema at compile time and enforced by the remote like any task-mode output schema.          |
+| `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type the caller requires. Enforced by the remote agent like any task-mode output schema. Set it on the definition to apply to every call, or override it per call. |
 
 ## Dynamic remote agents
 
@@ -78,9 +78,11 @@ export default defineRemoteAgent({
 
 The function may be async and must return a non-empty string. `auth` and `headers` are resolved at runtime the same way.
 
-## The lowered tool
+## Calling a remote agent
 
-A remote agent lowers to the same `{ message, outputSchema? }` tool shape as a local subagent. The parent packs everything the remote needs into `message`. The remote never sees the parent's history. Set `outputSchema` (here or per call) and the remote runs in task mode (a single-shot delegation that returns one structured result instead of an open conversation; see [Subagents](../subagents)), returning structured output as the tool result.
+To the model, a remote agent is another subagent tool. You call it the same way you call a local subagent, with a `message` and an optional `outputSchema`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
+
+To get one structured result back instead of an open-ended reply, set an `outputSchema` on the agent definition or on an individual call. The remote agent then runs in task mode, a single-shot delegation that returns structured output as the tool result. See [Subagents](../subagents) for how task mode works.
 
 ## Outbound auth
 

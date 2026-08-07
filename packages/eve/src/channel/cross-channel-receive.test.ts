@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
-import { createCrossChannelToFn, type CrossChannelTarget } from "#channel/cross-channel-receive.js";
+import {
+  createCrossChannelToFn,
+  type CrossChannelTarget,
+  type CrossChannelToFn,
+} from "#channel/cross-channel-receive.js";
 import type { Session } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
+import type { SlackChannel, SlackReceiveTarget } from "#public/channels/slack/slackChannel.js";
 
 function makeRuntime(): Runtime {
   return {
@@ -71,6 +76,17 @@ function makeChannel(name: string): {
 }
 
 describe("createCrossChannelToFn", () => {
+  it("accepts a Slack channel whose receive target is a closed interface", () => {
+    const typeOnlyCalls = (to: CrossChannelToFn, slack: SlackChannel) => {
+      const target: SlackReceiveTarget = { channelId: "C1" };
+      to(slack, target);
+      // @ts-expect-error Slack receive targets require a channel id.
+      to(slack, {});
+    };
+
+    expect(typeOnlyCalls).toBeTypeOf("function");
+  });
+
   it("requires an eve channel reference at compile time", () => {
     const fn = createCrossChannelToFn(makeRuntime(), []);
     const invalidCalls = () => {
