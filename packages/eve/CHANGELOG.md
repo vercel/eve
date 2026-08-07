@@ -1,5 +1,11 @@
 # eve
 
+## 0.31.2
+
+### Patch Changes
+
+- 69244fe: Update eve's bundled Workflow SDK packages to the latest 5.0.0 beta releases, keeping the core runtime and workflow worlds aligned.
+
 ## 0.31.1
 
 ### Patch Changes
