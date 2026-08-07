@@ -15,6 +15,7 @@ import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
+import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
@@ -373,6 +374,40 @@ export function resolveRemoteAgentForAction(input: {
   return definition;
 }
 
+/** Resolves authored outbound headers for a server-authored remote child event. */
+export async function resolveRemoteAgentStreamHeaders(input: {
+  readonly bundle: CompiledRuntimeAgentBundle;
+  readonly name: string;
+  readonly resolverId?: string;
+  readonly url: string;
+}): Promise<Record<string, string>> {
+  if (input.resolverId === undefined) {
+    return {};
+  }
+
+  const nodes = new Set([input.bundle.graph.root, ...input.bundle.graph.nodesByNodeId.values()]);
+  for (const node of nodes) {
+    const definition = node.subagentRegistry.subagentsByNodeId.get(input.resolverId)?.definition;
+    if (definition === undefined) continue;
+    if (
+      definition.kind !== "remote" ||
+      definition.name !== input.name ||
+      definition.url !== input.url
+    ) {
+      throw new Error("Remote child stream resolver does not match the authored remote agent.");
+    }
+    return await resolveRemoteAgentRequestHeaders(definition);
+  }
+
+  const credentials = resolveDynamicRemoteAgentCredentials({
+    credentialsStepId: input.resolverId,
+    description: "",
+    path: "",
+    url: input.url,
+  });
+  return await resolveRemoteAgentRequestHeaders(credentials);
+}
+
 function resolveDynamicRemoteAgentCredentials(config: DynamicRemoteAgentConfig): {
   readonly auth?: ResolvedRuntimeRemoteAgentNode["auth"];
   readonly headers?: HeadersValue;
@@ -451,7 +486,7 @@ function isRetryableRemoteCancelStatus(status: number): boolean {
 }
 
 async function resolveRemoteAgentRequestHeaders(
-  remote: ResolvedRuntimeRemoteAgentNode,
+  remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers">,
 ): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};
   if (remote.headers !== undefined) {

@@ -795,6 +795,7 @@ function subagentCalled(
     data: {
       callId: "call_subagent",
       childSessionId,
+      childStreamPath: `/eve/v1/session/${encodeURIComponent(childSessionId)}/stream`,
       sessionId: "parent-session",
       sequence: 1,
       name,

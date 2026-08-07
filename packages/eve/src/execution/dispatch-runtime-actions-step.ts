@@ -326,6 +326,13 @@ export async function dispatchRuntimeActionsStep(input: {
       // escape the loop, because a durable-step retry would re-dispatch the
       // children that already started.
       try {
+        const action = entry.kind === "resume" ? entry.action : entry.target.action;
+        const dynamicRemoteAgent =
+          entry.kind === "resume"
+            ? entry.dynamicRemoteAgent
+            : entry.target.kind === "remote"
+              ? entry.target.dynamicRemoteAgent
+              : undefined;
         const parentEvent = await callAdapterEventHandler(
           adapter,
           createSubagentCalledEvent({
@@ -333,7 +340,15 @@ export async function dispatchRuntimeActionsStep(input: {
             childSessionId: outcome.address.sessionId,
             name: outcome.name,
             remote:
-              outcome.address.kind === "agent/remote" ? { url: outcome.address.url } : undefined,
+              outcome.address.kind === "agent/remote"
+                ? {
+                    resolverId:
+                      dynamicRemoteAgent === undefined
+                        ? action.nodeId
+                        : dynamicRemoteAgent.credentialsStepId,
+                    url: outcome.address.url,
+                  }
+                : undefined,
             sequence: batch.event.sequence,
             sessionId: session.sessionId,
             toolName: outcome.toolName,

@@ -322,6 +322,7 @@ describe("deriveRunFacts", () => {
         data: {
           callId: "c1",
           childSessionId: "s1",
+          childStreamPath: "/eve/v1/session/s0/subagents/c1/s1/stream",
           sessionId: "s0",
           sequence: 1,
           name: "weather",

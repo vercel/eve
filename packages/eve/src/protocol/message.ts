@@ -7,6 +7,10 @@ import {
 } from "#internal/attachments/url-refs.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createEventId } from "#protocol/event-id.js";
+import {
+  createEveMessageStreamRoutePath,
+  createEveSubagentStreamRoutePath,
+} from "#protocol/routes.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type {
   RuntimeActionRequest,
@@ -23,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "21";
+export const EVE_MESSAGE_STREAM_VERSION = "22";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -279,10 +283,12 @@ export interface SubagentCalledStreamEvent {
   data: {
     callId: string;
     childSessionId: string;
+    childStreamPath: string;
     sessionId: string;
     sequence: number;
     name: string;
     remote?: {
+      resolverId?: string;
       url: string;
     };
     toolName: string;
@@ -1138,6 +1144,7 @@ export function createSubagentCalledEvent(input: {
   readonly sequence: number;
   readonly name: string;
   readonly remote?: {
+    readonly resolverId?: string;
     readonly url: string;
   };
   readonly toolName: string;
@@ -1148,6 +1155,14 @@ export function createSubagentCalledEvent(input: {
     data: {
       callId: input.callId,
       childSessionId: input.childSessionId,
+      childStreamPath:
+        input.remote === undefined
+          ? createEveMessageStreamRoutePath(input.childSessionId)
+          : createEveSubagentStreamRoutePath({
+              callId: input.callId,
+              childSessionId: input.childSessionId,
+              parentSessionId: input.sessionId,
+            }),
       sessionId: input.sessionId,
       sequence: input.sequence,
       name: input.name,
