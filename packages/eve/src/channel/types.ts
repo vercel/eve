@@ -1,6 +1,6 @@
 import type { UserContent } from "ai";
 
-import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
@@ -274,10 +274,16 @@ export interface SubagentInputRequestHookPayload {
   readonly subagentName: string;
 }
 
-/** Authorization lifecycle event forwarded from a delegated child. */
+/** Responder-specific lifecycle event forwarded from a delegated child. */
 export type SubagentAuthorizationEvent = Extract<
   UnstampedMessageStreamEvent,
-  { type: "authorization.required" | "authorization.completed" }
+  {
+    type:
+      | "approval.candidate"
+      | "approval.settled"
+      | "authorization.required"
+      | "authorization.completed";
+  }
 >;
 
 /**
