@@ -50,24 +50,31 @@ function validateMcpHttpRequestBase(request: Request): Response | undefined {
     return securityError("MCP endpoints require HTTPS except on loopback.");
   }
 
-  const hostFailure = validateHostHeader(request, target.hostname);
+  const hostFailure = validateHostHeader(request, target);
   if (hostFailure !== undefined) return hostFailure;
   return undefined;
 }
 
-function validateHostHeader(request: Request, expectedHostname: string): Response | undefined {
+function validateHostHeader(request: Request, target: URL): Response | undefined {
   const hostHeader = request.headers.get("host");
   if (hostHeader === null || hostHeader.length === 0) {
     return securityError("Missing Host header");
   }
 
-  let hostname: string;
+  let authority: URL;
   try {
-    hostname = new URL(`http://${hostHeader}`).hostname;
+    authority = new URL(`${target.protocol}//${hostHeader}`);
   } catch {
     return securityError("Invalid Host header");
   }
-  if (hostname !== expectedHostname) {
+  if (
+    authority.username !== "" ||
+    authority.password !== "" ||
+    authority.pathname !== "/" ||
+    authority.search !== "" ||
+    authority.hash !== "" ||
+    authority.host !== target.host
+  ) {
     return securityError(`Invalid Host header: ${hostHeader}`);
   }
   return undefined;

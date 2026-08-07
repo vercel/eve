@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunHandle, SessionAuthContext } from "#channel/types.js";
+import {
+  buildInvocationAttributes,
+  INVOCATION_OWNER_ATTRIBUTE,
+  invocationOwnerKey,
+} from "#internal/invocation/metadata.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 
 const runsGet = vi.fn();
 const cancel = vi.fn();
@@ -68,6 +74,34 @@ describe("WorkflowAgentInvocationExecution", () => {
     await expect(
       execution().read({
         auth: { ...auth, principalId: "other" },
+        invocationId: "wrun_invocation",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("preserves principal ownership through workflow attribute normalization", async () => {
+    const longAuth: SessionAuthContext = {
+      attributes: {},
+      authenticator: "jwt-ecdsa",
+      issuer: `https://login.example/${"tenant".repeat(64)}`,
+      principalId: "principal".repeat(64),
+      principalType: "user",
+      subject: "subject".repeat(64),
+    };
+    const ownerKey = invocationOwnerKey(longAuth);
+    const attributes = normalizeEveAttributes(
+      buildInvocationAttributes({ continuationToken: "invocation:token", ownerKey }),
+    );
+    expect(ownerKey).toHaveLength(64);
+    expect(attributes[INVOCATION_OWNER_ATTRIBUTE]).toBe(ownerKey);
+    runsGet.mockResolvedValue(run({ ownerKey, status: "running" }));
+
+    await expect(
+      execution().read({ auth: longAuth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({ status: "working" });
+    await expect(
+      execution().read({
+        auth: { ...longAuth, subject: `${longAuth.subject}-other` },
         invocationId: "wrun_invocation",
       }),
     ).resolves.toBeUndefined();
@@ -311,10 +345,10 @@ function execution(): WorkflowAgentInvocationExecution {
   return new WorkflowAgentInvocationExecution({ channelName: "mcp", createSession, from });
 }
 
-function run(input: { status: string }) {
+function run(input: { ownerKey?: string; status: string }) {
   return {
     attributes: {
-      "$eve.invocation_owner": JSON.stringify(["test", "", "user", "alice", ""]),
+      "$eve.invocation_owner": input.ownerKey ?? invocationOwnerKey(auth),
       "$eve.invocation_token": "invocation:token",
     },
     createdAt: new Date("2026-07-20T00:00:00.000Z"),

@@ -25,6 +25,18 @@ describe("MCP HTTP security", () => {
       request("https://agent.example/mcp", { host: "attacker.example" }),
     );
     expect(mismatched?.status).toBe(403);
+
+    const mismatchedPort = validateMcpHttpRequest(
+      request("https://agent.example/mcp", { host: "agent.example:444" }),
+    );
+    expect(mismatchedPort?.status).toBe(403);
+    expect(
+      validateMcpHttpRequest(
+        request("https://agent.example/mcp", { host: "attacker.example@agent.example" }),
+      )?.status,
+    ).toBe(403);
+
+    expect(validateMcpHttpRequest(request("https://agent.example:444/mcp"))).toBeUndefined();
   });
 
   it("rejects cross-origin browser requests including port changes", () => {

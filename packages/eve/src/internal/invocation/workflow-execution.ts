@@ -14,6 +14,7 @@ import type {
 import {
   INVOCATION_OWNER_ATTRIBUTE,
   INVOCATION_TOKEN_ATTRIBUTE,
+  invocationOwnerKey,
 } from "#internal/invocation/metadata.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
@@ -145,17 +146,6 @@ export class WorkflowAgentInvocationExecution implements AgentInvocationExecutio
       throw error;
     }
   }
-}
-
-function invocationOwnerKey(auth: SessionAuthContext | null): string {
-  if (auth === null) return "anonymous";
-  return JSON.stringify([
-    auth.authenticator,
-    auth.issuer ?? "",
-    auth.principalType,
-    auth.principalId,
-    auth.subject ?? "",
-  ]);
 }
 
 const INVOCATION_EVENT_WINDOW_SIZE = 64;
