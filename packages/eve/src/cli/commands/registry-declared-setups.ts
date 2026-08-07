@@ -1,12 +1,16 @@
+import { createHeadlessPrompter } from "#setup/headless.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { mergeRegistrySetupCompletions } from "#setup/registry-setup-completion.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 
 import type { RegistryCommandLogger, RegistrySetupDependencies } from "./registry.js";
 import type { RegistrySetupCommand } from "./registry-setup-command.js";
+import { formatHeadlessSetupEvent, headlessSetupContinuation } from "./setup-headless.js";
 
 export interface DeclaredSetupOptions {
   yes?: boolean;
+  headless?: boolean;
+  answers?: Record<string, unknown>;
   silent?: boolean;
   prompter?: Prompter;
   signal?: AbortSignal;
@@ -26,12 +30,25 @@ export async function runDeclaredSetups(input: {
   let completion: RegistrySetupCompletion = { facts: [] };
   if (input.setups === undefined) return completion;
   const runSetupCommand = await input.dependencies.loadSetupCommandRunner();
-  const prompter = input.options.prompter ?? createPrompter();
+  const prompter =
+    input.options.prompter ??
+    (input.options.headless ? createHeadlessPrompter(input.logger.log) : createPrompter());
   try {
     for (const setup of input.setups) {
       const result = await runSetupCommand(
         input.appRoot,
-        { ...setup, args: [...setup.args, ...(input.options.yes ? ["--yes"] : [])] },
+        {
+          ...setup,
+          args: [
+            ...setup.args,
+            ...(input.options.yes ? ["--yes"] : []),
+            ...(input.options.headless ? ["--headless"] : []),
+            ...Object.entries(input.options.answers ?? {}).flatMap(([key, value]) => [
+              "--answer",
+              `${key}=${JSON.stringify(value)}`,
+            ]),
+          ],
+        },
         input.item,
         { prompter, signal: input.options.signal },
       );
@@ -39,14 +56,43 @@ export async function runDeclaredSetups(input: {
         input.logger.log(input.cancelledReminder);
         return false;
       }
-      if (input.options.silent !== true) {
-        for (const fact of result.facts) input.logger.log(`${fact.label}: ${fact.value}`);
+      if (result.kind === "refused") {
+        if (!input.options.headless) throw new Error("Setup requires more input.");
+        input.logger.error(
+          formatHeadlessSetupEvent({
+            version: 1,
+            type: "blocked",
+            item: input.item,
+            installed: true,
+            completedItems: [],
+            ...result.refusal,
+            next: { command: headlessSetupContinuation({ item: input.item, installed: true }) },
+          }),
+        );
+        process.exitCode = 2;
+        return false;
       }
+      if (input.options.silent !== true)
+        for (const fact of result.facts) input.logger.log(`${fact.label}: ${fact.value}`);
       completion = mergeRegistrySetupCompletions(completion, result);
     }
     return completion;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (input.options.headless) {
+      input.logger.error(
+        formatHeadlessSetupEvent({
+          version: 1,
+          type: "failed",
+          item: input.item,
+          completedItems: [],
+          message,
+          next: { command: headlessSetupContinuation({ item: input.item, installed: true }) },
+        }),
+      );
+      process.exitCode = 1;
+      return false;
+    }
     throw new Error(`${message} Try again with \`${input.resumeCommand}\`.`);
   }
 }

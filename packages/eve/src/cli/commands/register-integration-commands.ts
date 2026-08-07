@@ -1,5 +1,7 @@
 import type { Command } from "#compiled/commander/index.js";
 
+import { parseSetupAnswer } from "./setup-answers.js";
+
 interface IntegrationCommandLogger {
   error(message: string): void;
   log(message: string): void;
@@ -18,10 +20,25 @@ export function registerIntegrationCommands(input: {
   integration
     .command("setup <kind>")
     .option("-y, --yes")
-    .action(async (kind: string, options: { yes?: boolean }) => {
-      const { runIntegrationSetupCommand } = await import("./integration-setup.js");
-      await runIntegrationSetupCommand(logger, appRoot, kind, { yes: options.yes });
-    });
+    .option("--headless")
+    .option("--answer <key=value>", "Answer a setup question.", parseSetupAnswer, {})
+    .action(
+      async (
+        kind: string,
+        options: {
+          yes?: boolean;
+          headless?: boolean;
+          answer?: Record<string, unknown>;
+        },
+      ) => {
+        const { runIntegrationSetupCommand } = await import("./integration-setup.js");
+        await runIntegrationSetupCommand(logger, appRoot, kind, {
+          yes: options.yes,
+          headless: options.headless,
+          answers: options.answer,
+        });
+      },
+    );
 
   integration
     .command("connect <slug> <service> [canonical-name]")

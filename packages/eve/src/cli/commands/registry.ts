@@ -19,6 +19,7 @@ import { runDeclaredSetups } from "./registry-declared-setups.js";
 import { eveMetadataFromRegistryItem } from "./registry-metadata.js";
 import { runRegistryPackage } from "./registry-package.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
+import { formatHeadlessSetupEvent } from "./setup-headless.js";
 import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
 
 export interface RegistryCommandLogger {
@@ -31,6 +32,8 @@ export interface AddCommandOptions {
   overwrite?: boolean;
   skipSetup?: boolean;
   yes?: boolean;
+  headless?: boolean;
+  answers?: Record<string, unknown>;
   /** Suppresses the registry SDK's terminal-native progress output. */
   silent?: boolean;
 }
@@ -537,7 +540,13 @@ export async function runAddCommand(
               appRoot,
               item: packageItem,
               setups,
-              options: { yes: options.yes, prompter, signal: options.signal },
+              options: {
+                yes: options.yes,
+                headless: options.headless,
+                answers: options.answers,
+                prompter,
+                signal: options.signal,
+              },
               dependencies,
               cancelledReminder: setupReminder(packageItem, "cancelled"),
               resumeCommand: setupResumeCommand(packageItem),
@@ -576,15 +585,27 @@ export async function runAddCommand(
     const interactive =
       dependencies.hasInteractiveTerminal?.() ??
       defaultAddCommandDependencies.hasInteractiveTerminal!();
+    if (options.headless) {
+      logger.log(
+        formatHeadlessSetupEvent({
+          version: 1,
+          type: "progress",
+          message: options.skipInstall ? `Setup ${item}` : `Installed ${item}`,
+        }),
+      );
+    }
     if (
       options.skipSetup === true ||
-      (!options.yes && !interactive && options.setupAuthorized !== true)
+      (!options.headless &&
+        !options.yes &&
+        !interactive &&
+        options.setupAuthorized !== true)
     ) {
       logger.log(setupReminder(item, "skipped"));
       return;
     }
 
-    if (!options.yes && options.setupAuthorized !== true) {
+    if (!options.headless && !options.yes && options.setupAuthorized !== true) {
       try {
         const prompter =
           options.prompter ??
@@ -619,6 +640,16 @@ export async function runAddCommand(
       cancelledReminder: setupReminder(item, "cancelled"),
       resumeCommand: setupResumeCommand(item),
     });
+    if (completion !== false && options.headless) {
+      logger.log(
+        formatHeadlessSetupEvent({
+          version: 1,
+          type: "completed",
+          item,
+          completedItems: [item],
+        }),
+      );
+    }
     return completion === false ? undefined : completion;
   });
 }

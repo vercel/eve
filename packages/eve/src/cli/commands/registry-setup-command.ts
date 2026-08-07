@@ -13,6 +13,7 @@ import {
   type RegistrySetupChildMessage,
   type RegistrySetupCompletion,
   type RegistrySetupParentMessage,
+  type RegistrySetupRefusal,
 } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
 
@@ -24,7 +25,8 @@ export interface RegistrySetupCommand {
 
 export type RegistrySetupCommandResult =
   | ({ kind: "completed" } & RegistrySetupCompletion)
-  | { kind: "cancelled" };
+  | { kind: "cancelled" }
+  | { kind: "refused"; refusal: RegistrySetupRefusal };
 
 export interface RegistrySetupCommandOptions {
   prompter: Prompter;
@@ -297,6 +299,10 @@ export async function runRegistrySetupCommand(
       }
       if (outcome?.kind === "cancelled") {
         resolveResult({ kind: "cancelled" });
+        return;
+      }
+      if (outcome?.kind === "failed" && outcome.error.refusal !== undefined) {
+        resolveResult({ kind: "refused", refusal: outcome.error.refusal });
         return;
       }
       if (outcome?.kind === "failed") {

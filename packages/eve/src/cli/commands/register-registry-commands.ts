@@ -1,5 +1,7 @@
 import { InvalidArgumentError, type Command } from "#compiled/commander/index.js";
 
+import { parseSetupAnswer } from "./setup-answers.js";
+
 interface RegistryCommandLogger {
   error(message: string): void;
   log(message: string): void;
@@ -36,14 +38,31 @@ export function registerRegistryCommands(input: {
     .option("-o, --overwrite", "Overwrite existing files.")
     .option("--skip-install", "Run the item's setup flow without installing it.")
     .option("--skip-setup", "Skip the item's setup flow.")
+    .option("--headless", "Never prompt and emit NDJSON setup events.")
+    .option(
+      "--answer <key=value>",
+      "Answer a setup question; repeat for multiple answers.",
+      parseSetupAnswer,
+      {},
+    )
     .option("-y, --yes", "Run setup and accept its recommended defaults.")
     .action(
       async (
         item: string,
-        options: { skipInstall?: boolean; overwrite?: boolean; skipSetup?: boolean; yes?: boolean },
+        options: {
+          skipInstall?: boolean;
+          overwrite?: boolean;
+          skipSetup?: boolean;
+          headless?: boolean;
+          answer?: Record<string, unknown>;
+          yes?: boolean;
+        },
       ) => {
+        if (options.answer !== undefined && !options.headless) {
+          throw new InvalidArgumentError("--answer requires --headless.");
+        }
         const { runAddCommand } = await import("./registry.js");
-        await runAddCommand(logger, appRoot, item, options);
+        await runAddCommand(logger, appRoot, item, { ...options, answers: options.answer });
       },
     );
 

@@ -172,6 +172,71 @@ describe("registry commands", () => {
     },
   );
 
+  it("returns a structured component question before installing a package headlessly", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValueOnce([
+      {
+        meta: {
+          eve: {
+            components: [
+              { item: "channel/linear-agent", label: "Linear Channel", default: true },
+              { item: "connection/linear", label: "Linear MCP", default: true },
+            ],
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "linear",
+      { headless: true },
+      { loadSetupCommandRunner: vi.fn() },
+    );
+
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(JSON.parse(logger.errors[0]!)).toMatchObject({
+      status: "input_required",
+      item: "linear",
+      installed: false,
+      question: { key: "components" },
+      next: { command: "eve add linear --headless" },
+    });
+    expect(process.exitCode).toBe(2);
+  });
+
+  it("uses an answered component selection headlessly", async () => {
+    const logger = createLogger();
+    getRegistryItems
+      .mockResolvedValueOnce([
+        {
+          meta: {
+            eve: {
+              components: [
+                { item: "channel/linear-agent", label: "Linear Channel", default: true },
+                { item: "connection/linear", label: "Linear MCP", default: true },
+              ],
+            },
+          },
+        },
+      ])
+      .mockResolvedValueOnce([{ meta: { eve: {} } }]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "linear",
+      { headless: true, answers: { components: ["channel/linear-agent"] } },
+      { loadSetupCommandRunner: vi.fn() },
+    );
+
+    expect(addRegistryItems).toHaveBeenCalledWith(
+      ["https://eve.dev/r/channel/linear-agent.json"],
+      expect.objectContaining({ cwd: "/project" }),
+    );
+  });
+
   it("lets interactive users select components from an official registry package", async () => {
     const logger = createLogger();
     const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));

@@ -4,6 +4,7 @@ import {
   type RegistryConfig,
 } from "#compiled/shadcn-registry/index.js";
 import { z } from "#compiled/zod/index.js";
+import { headlessAsker, interactiveAsker, withAnswers, withPolicy } from "#setup/ask.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { mergeRegistrySetupCompletions } from "#setup/registry-setup-completion.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
@@ -11,6 +12,7 @@ import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js"
 import { hasInteractiveTerminal } from "./preconditions.js";
 import type { AddCommandOptions, RegistryCommandLogger } from "./registry.js";
 import type { RegistrySetupCommand } from "./registry-setup-command.js";
+import { formatHeadlessSetupEvent, headlessSetupContinuation } from "./setup-headless.js";
 
 export const RegistryPackageComponentSchema = z.object({
   item: z.string().min(1),
@@ -18,19 +20,15 @@ export const RegistryPackageComponentSchema = z.object({
   description: z.string().optional(),
   default: z.boolean().default(false),
 });
-
 export type RegistryPackageComponent = z.infer<typeof RegistryPackageComponentSchema>;
-
 interface PackageMetadata {
   requires?: string;
   setup?: RegistrySetupCommand[];
 }
-
 export interface RegistryPackageDependencies {
   createPrompter?: () => Prompter;
   hasInteractiveTerminal?: () => boolean;
 }
-
 export interface RegistryPackageOperations {
   itemAddress(item: string): string;
   metadata(item: unknown): PackageMetadata | undefined;
@@ -44,35 +42,62 @@ export interface RegistryPackageOperations {
 }
 
 async function selectComponents(
+  logger: RegistryCommandLogger,
   item: string,
   components: readonly RegistryPackageComponent[],
   options: AddCommandOptions & { prompter?: Prompter },
   interactive: boolean,
   getPrompter: () => Prompter,
-): Promise<readonly RegistryPackageComponent[]> {
-  if (options.prompter === undefined && (options.yes === true || !interactive)) {
+): Promise<readonly RegistryPackageComponent[] | undefined> {
+  if (
+    options.prompter === undefined &&
+    !options.headless &&
+    (options.yes === true || !interactive)
+  ) {
     return components.filter((component) => component.default);
   }
-  const prompter = getPrompter();
-  const selected = await prompter.select<string>({
+  const question = {
+    key: "components",
     message: `Add ${item}`,
     description: "Select what you want to add to your agent.",
-    multiple: true,
     required: true,
-    initialValues: components
-      .filter((component) => component.default)
-      .map((component) => component.item),
+    recommended: components.filter((component) => component.default),
     options: components.map((component) => ({
-      value: component.item,
+      id: component.item,
+      value: component,
       label: component.label,
       hint: component.description,
     })),
-  });
-  const selectedItems = new Set(selected);
-  return components.filter((component) => selectedItems.has(component.item));
+  };
+  const asker = options.headless
+    ? withAnswers(options.answers ?? {})(
+        options.yes ? withPolicy("assume")(headlessAsker()) : headlessAsker(),
+      )
+    : interactiveAsker(getPrompter());
+  try {
+    return await asker.askMany(question);
+  } catch (error) {
+    if (!options.headless || !(error instanceof Error) || error.name !== "InteractionRequired")
+      throw error;
+    const question = (error as import("#setup/ask.js").InteractionRequired).question;
+    const { setupQuestionToWire } = await import("#setup/setup-question-wire.js");
+    logger.error(
+      formatHeadlessSetupEvent({
+        version: 1,
+        type: "blocked",
+        status: "input_required",
+        item,
+        installed: false,
+        completedItems: [],
+        question: setupQuestionToWire(question),
+        next: { command: headlessSetupContinuation({ item, installed: false }) },
+      }),
+    );
+    process.exitCode = 2;
+    return undefined;
+  }
 }
 
-/** Resolves, installs, and configures the selected components of a registry package. */
 export async function runRegistryPackage(input: {
   logger: RegistryCommandLogger;
   appRoot: string;
@@ -88,35 +113,37 @@ export async function runRegistryPackage(input: {
   let prompter = options.prompter;
   const getPrompter = (): Prompter =>
     (prompter ??= dependencies.createPrompter?.() ?? createPrompter());
-
-  const selected = await selectComponents(item, components, options, interactive, getPrompter);
+  const selected = await selectComponents(
+    logger,
+    item,
+    components,
+    options,
+    interactive,
+    getPrompter,
+  );
+  if (selected === undefined) return false;
   const addresses = selected.map((component) => operations.itemAddress(component.item));
   const manifests = await getRegistryItems(addresses, { config });
-  if (manifests.length !== selected.length) {
+  if (manifests.length !== selected.length)
     throw new Error(`Registry package "${item}" could not resolve all selected components.`);
-  }
   const entries = manifests.map((manifest) => {
     const metadata = operations.metadata(manifest);
     operations.assertCompatibleVersion(metadata?.requires);
     return metadata;
   });
-
-  if (options.skipInstall !== true) {
+  if (options.skipInstall !== true)
     await addRegistryItems(addresses, {
       config,
       cwd: appRoot,
       overwrite: options.overwrite,
       silent: options.silent,
     });
-  }
   let completion: RegistrySetupCompletion = { facts: [] };
   if (options.skipSetup === true) return completion;
-
-  if (options.yes !== true && options.prompter === undefined && !interactive) {
+  if (!options.headless && options.yes !== true && options.prompter === undefined && !interactive) {
     logger.log(operations.setupReminder(item));
     return completion;
   }
-
   for (const metadata of entries) {
     if (metadata?.setup === undefined) continue;
     const result = await operations.runSetups({

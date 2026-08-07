@@ -86,7 +86,7 @@ describe("runRegistrySetupCommand", () => {
         env: expect.objectContaining({
           EVE_SETUP: "1",
           EVE_SETUP_ITEM: "channel/slack",
-          EVE_SETUP_PROTOCOL: "1",
+          EVE_SETUP_PROTOCOL: "2",
         }),
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       }),
@@ -296,6 +296,38 @@ describe("runRegistrySetupCommand", () => {
         options(),
       ),
     ).rejects.toThrow("exited with code 0 before reporting a result");
+  });
+
+  it("returns a structured setup refusal from the child", async () => {
+    spawn.mockReturnValue(
+      protocolChild(0, null, (child) =>
+        child.emit("message", {
+          type: "result",
+          outcome: {
+            kind: "failed",
+            error: {
+              message: "Input required",
+              refusal: {
+                status: "input_required",
+                question: { key: "mode", kind: "confirm", message: "Mode?", required: true },
+              },
+            },
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      runRegistrySetupCommand(
+        "/project",
+        { package: "@acme/slack", bin: "acme-slack", args: [] },
+        "channel/slack",
+        options(),
+      ),
+    ).resolves.toMatchObject({
+      kind: "refused",
+      refusal: { status: "input_required", question: { key: "mode" } },
+    });
   });
 
   it("rejects a binary the installed package does not declare", async () => {

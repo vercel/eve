@@ -1,3 +1,5 @@
+import { InteractionRequired, InvalidAnswerError } from "./ask.js";
+import { SetupPrerequisiteRequired } from "./integrations/shared/prerequisite.js";
 import type {
   EditableSelectOptions,
   MultiSelectOptions,
@@ -6,6 +8,7 @@ import type {
   SelectNotice,
   SingleSelectOptions,
 } from "./prompter.js";
+import { setupQuestionToWire } from "./setup-question-wire.js";
 import { WizardCancelledError } from "./step.js";
 import {
   REGISTRY_SETUP_PROTOCOL_VERSION,
@@ -31,7 +34,33 @@ function send(process: SetupProcess, message: RegistrySetupChildMessage): void {
   process.send(message);
 }
 
-function registrySetupError(error: unknown): { message: string; details?: readonly string[] } {
+function registrySetupError(error: unknown): {
+  message: string;
+  details?: readonly string[];
+  refusal?: import("./registry-setup-protocol.js").RegistrySetupRefusal;
+} {
+  if (error instanceof InteractionRequired) {
+    return {
+      message: error.message,
+      refusal: { status: "input_required", question: setupQuestionToWire(error.question) },
+    };
+  }
+  if (error instanceof InvalidAnswerError) {
+    return {
+      message: error.message,
+      refusal: {
+        status: "input_required",
+        question: setupQuestionToWire(error.question),
+        issue: { code: "invalid_answer", message: error.message },
+      },
+    };
+  }
+  if (error instanceof SetupPrerequisiteRequired) {
+    return {
+      message: error.message,
+      refusal: { status: "prerequisite_required", prerequisite: error.prerequisite },
+    };
+  }
   if (!(error instanceof Error)) return { message: String(error) };
   const details = error.stack
     ?.split("\n")
