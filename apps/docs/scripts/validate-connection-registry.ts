@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { connectionEntries } from "@vercel/eve-catalog";
+import { connectionEntries } from "@eve/catalog";
 
 interface RegistryFile {
   path: string;
@@ -13,6 +13,23 @@ interface RegistryItem {
   dependencies?: string[];
   envVars?: Record<string, string>;
   files?: RegistryFile[];
+  meta?: {
+    eve?: {
+      setup?:
+        | {
+            command?: string;
+            package?: string;
+            bin?: string;
+            args?: string[];
+          }
+        | Array<{
+            command?: string;
+            package?: string;
+            bin?: string;
+            args?: string[];
+          }>;
+    };
+  };
 }
 
 interface Registry {
@@ -26,6 +43,14 @@ const expectedSlugs = connectionEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map((entry) => entry.slug);
 const actualSlugs = items.map((item) => item.name.slice("connection/".length));
+const CONNECT_SERVICES: Readonly<Record<string, string>> = {
+  vercel: "vercel",
+  linear: "mcp.linear.app",
+  notion: "mcp.notion.com",
+  datadog: "mcp.datadoghq.com",
+  honeycomb: "mcp.honeycomb.io",
+  natural: "mcp.natural.com",
+};
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
@@ -34,7 +59,42 @@ if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
 }
 
 for (const item of items) {
+  const declaredSetup = item.meta?.eve?.setup;
+  const setups =
+    declaredSetup === undefined
+      ? undefined
+      : Array.isArray(declaredSetup)
+        ? declaredSetup
+        : [declaredSetup];
+  if (
+    setups?.some(
+      (setup) =>
+        setup.command === undefined ||
+        setup.package === undefined ||
+        setup.bin === undefined ||
+        setup.args === undefined,
+    )
+  ) {
+    throw new Error(
+      `Registry item "${item.name}" setup entries must declare command, package, bin, and args.`,
+    );
+  }
+
   const slug = item.name.slice("connection/".length);
+  if (slug !== "browser-use") {
+    const expectedSetup = {
+      command: "eve",
+      package: "eve",
+      bin: "eve",
+      args: ["integration", "connect", slug, CONNECT_SERVICES[slug] ?? slug, slug],
+    };
+    if (JSON.stringify(setups) !== JSON.stringify([expectedSetup])) {
+      throw new Error(
+        `Registry item "${item.name}" must configure its Vercel Connect connector through eve.`,
+      );
+    }
+  }
+
   const expectedPath = `registry/connections/${slug}.ts`;
   const expectedTarget = `agent/connections/${slug}.ts`;
   const file = item.files?.[0];

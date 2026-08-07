@@ -48,3 +48,9 @@ export {
   type DefineWriteFileToolInput,
   defineWriteFileTool,
 } from "#public/tools/define-write-file-tool.js";
+export {
+  type WebSearchProvider,
+  type WebSearchToolDefinition,
+  type WebSearchToolInput,
+  webSearch,
+} from "#public/tools/web-search.js";

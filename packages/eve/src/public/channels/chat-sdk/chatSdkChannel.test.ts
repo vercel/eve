@@ -6,14 +6,15 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   chatSdkChannel,
   isNotImplemented,
   messageToUserContent,
   type ChatSdkChannelState,
 } from "#public/channels/chat-sdk/index.js";
-import type { RouteHandlerArgs, SendFn } from "#public/definitions/channel.js";
+import type { RouteHandlerArgs } from "#public/definitions/channel.js";
 import type {
   Adapter,
   AdapterPostableMessage,
@@ -70,17 +71,17 @@ const stubAlsContext = (() => {
 
 function callEvent(
   adapter: ChannelAdapter,
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   ctx: any,
-): Promise<HandleMessageStreamEvent> {
+): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
-function makeEvent<T extends HandleMessageStreamEvent["type"]>(
+function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
   type: T,
   data: unknown,
-): HandleMessageStreamEvent {
-  return { type, data } as HandleMessageStreamEvent;
+): UnstampedMessageStreamEvent {
+  return { type, data } as UnstampedMessageStreamEvent;
 }
 
 async function firePost(
@@ -88,8 +89,9 @@ async function firePost(
   path: string,
   body: Record<string, unknown>,
 ): Promise<{
+  cancel: ReturnType<typeof vi.fn>;
   response: Response;
-  send: ReturnType<typeof vi.fn<SendFn<ChatSdkChannelState>>>;
+  send: ReturnType<typeof vi.fn>;
   waitUntil: ReturnType<typeof vi.fn>;
 }> {
   const compiled = asCompiled<ChatSdkChannelState>(channel);
@@ -97,20 +99,10 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error(`Expected POST ${path}.`);
   }
-  const send = vi.fn<SendFn<ChatSdkChannelState>>().mockResolvedValue({
-    continuationToken: "chat-sdk:test",
-    id: "session-1",
-    async cancel() {
-      return { status: "no_active_turn" as const };
-    },
-    async getEventStream() {
-      return new ReadableStream();
-    },
-    async getStreamTailIndex() {
-      return -1;
-    },
-  });
+  const send = vi.fn().mockResolvedValue({ id: "session-1" });
+  const cancel = vi.fn().mockResolvedValue({ sessionId: "session-1", status: "accepted" });
   const waitUntil = vi.fn();
+  const channelContext = mockChannelContext<ChatSdkChannelState>(send);
 
   const response = await post.handler(
     new Request(`https://example.com${path}`, {
@@ -119,14 +111,17 @@ async function firePost(
       method: "POST",
     }),
     {
-      getSession: vi.fn() as any,
-      resolveActiveSession: async () => undefined,
-      cancel: vi.fn(),
-      reset: vi.fn(),
+      from(continuationToken) {
+        return {
+          ...channelContext.from(continuationToken),
+          cancel: () => cancel({ continuationToken }) as never,
+        };
+      },
+      resolveSession: channelContext.resolveSession,
+      attachSession: vi.fn() as any,
       params: {},
-      receive: vi.fn() as any,
+      to: vi.fn() as any,
       requestIp: null,
-      send,
       waitUntil,
     } satisfies RouteHandlerArgs<ChatSdkChannelState>,
   );
@@ -138,7 +133,7 @@ async function firePost(
     await Promise.allSettled(pending);
   }
 
-  return { response, send, waitUntil };
+  return { cancel, response, send, waitUntil };
 }
 
 describe("chatSdkChannel", () => {
@@ -176,14 +171,11 @@ describe("chatSdkChannel", () => {
     const response = await get.handler(
       new Request("https://example.com/eve/v1/test?crc_token=abc123", { method: "GET" }),
       {
-        getSession: vi.fn() as any,
-        resolveActiveSession: async () => undefined,
-        cancel: vi.fn(),
-        reset: vi.fn(),
+        ...mockChannelContext(vi.fn()),
+        attachSession: vi.fn() as any,
         params: {},
-        receive: vi.fn() as any,
+        to: vi.fn() as any,
         requestIp: null,
-        send: vi.fn() as any,
         waitUntil: vi.fn(),
       } satisfies RouteHandlerArgs<ChatSdkChannelState>,
     );
@@ -192,7 +184,7 @@ describe("chatSdkChannel", () => {
     expect(await response.json()).toEqual({ response_token: "sha256=abc123" });
   });
 
-  it("hands Chat SDK mentions to Eve through bridge.send", async () => {
+  it("hands Chat SDK mentions to eve through bridge.send", async () => {
     const adapter = testAdapter();
     const bridge = chatSdkChannel({
       adapters: { test: adapter },
@@ -205,16 +197,17 @@ describe("chatSdkChannel", () => {
       await bridge.send(message.text, { auth: AUTH, thread, title: "mention" });
     });
 
-    const { response, send } = await firePost(bridge.channel, "/eve/v1/test", {
+    const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
       text: "@bot hello",
     });
 
     expect(response.status).toBe(200);
+    expect(cancel).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]?.[0]).toBe("@bot hello");
+    expect(send.mock.calls[0]?.[0]).toBe(THREAD_ID);
     expect(send.mock.calls[0]?.[1]).toMatchObject({
       auth: AUTH,
-      continuationToken: THREAD_ID,
+      message: "@bot hello",
       state: {
         thread: {
           _type: "chat:Thread",
@@ -225,6 +218,70 @@ describe("chatSdkChannel", () => {
       },
       title: "mention",
     });
+  });
+
+  it("cancels the active turn before an experimental steering send", async () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      concurrency: "concurrent",
+      state: memoryState(),
+      userName: "bot",
+    });
+
+    bridge.bot.onNewMention(async (thread: Thread, message: Message) => {
+      await bridge.send(message.text, {
+        auth: AUTH,
+        thread,
+        turnPolicy: "experimental-steer",
+      });
+    });
+
+    const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
+      text: "@bot correction",
+    });
+
+    expect(response.status).toBe(200);
+    expect(cancel).toHaveBeenCalledWith({ continuationToken: THREAD_ID });
+    expect(send).toHaveBeenCalledWith(THREAD_ID, {
+      auth: AUTH,
+      message: "@bot correction",
+      state: {
+        thread: expect.objectContaining({
+          adapterName: "test",
+          id: THREAD_ID,
+        }),
+      },
+    });
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]!);
+  });
+
+  it("does not cancel for an experimental steering response without a message", async () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      concurrency: "concurrent",
+      state: memoryState(),
+      userName: "bot",
+    });
+
+    bridge.bot.onNewMention(async (thread: Thread) => {
+      await bridge.send(
+        { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
+        { thread, turnPolicy: "experimental-steer" },
+      );
+    });
+
+    const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
+      text: "@bot approve",
+    });
+
+    expect(response.status).toBe(200);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith(
+      THREAD_ID,
+      expect.objectContaining({
+        inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+      }),
+    );
   });
 
   it("fails loudly when bridge.send is called outside a Chat SDK webhook", async () => {
@@ -249,19 +306,7 @@ describe("chatSdkChannel", () => {
       state: memoryState(),
       userName: "bot",
     });
-    const send = vi.fn<SendFn<ChatSdkChannelState>>().mockResolvedValue({
-      continuationToken: "chat-sdk:test",
-      id: "session-1",
-      async cancel() {
-        return { status: "no_active_turn" as const };
-      },
-      async getEventStream() {
-        return new ReadableStream();
-      },
-      async getStreamTailIndex() {
-        return -1;
-      },
-    });
+    const send = vi.fn().mockResolvedValue({ id: "session-1" });
 
     await bridge.channel.receive?.(
       {
@@ -269,12 +314,12 @@ describe("chatSdkChannel", () => {
         message: "proactive",
         target: { adapterName: "test", threadId: THREAD_ID },
       },
-      { send },
+      mockChannelContext(send),
     );
 
-    expect(send).toHaveBeenCalledWith("proactive", {
+    expect(send).toHaveBeenCalledWith(THREAD_ID, {
       auth: AUTH,
-      continuationToken: THREAD_ID,
+      message: "proactive",
       state: {
         thread: {
           _type: "chat:Thread",
@@ -288,7 +333,7 @@ describe("chatSdkChannel", () => {
     });
   });
 
-  it("posts completed Eve messages as markdown through the stored Chat SDK thread", async () => {
+  it("posts completed eve messages as markdown through the stored Chat SDK thread", async () => {
     const adapter = testAdapter();
     const bridge = chatSdkChannel({
       adapters: { test: adapter },
@@ -553,19 +598,16 @@ describe("chatSdkChannel", () => {
       value: "approve",
     });
 
-    expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
-      {
-        auth: null,
-        continuationToken: THREAD_ID,
-        state: {
-          thread: expect.objectContaining({
-            adapterName: "test",
-            id: THREAD_ID,
-          }),
-        },
+    expect(send).toHaveBeenCalledWith(THREAD_ID, {
+      auth: null,
+      inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+      state: {
+        thread: expect.objectContaining({
+          adapterName: "test",
+          id: THREAD_ID,
+        }),
       },
-    );
+    });
   });
 });
 

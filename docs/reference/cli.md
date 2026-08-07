@@ -15,14 +15,14 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                                              |
 | `eve dev`                     | Start the local dev server and open the terminal UI                                                                                                   |
 | `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                                 |
+| `eve acp [url]`               | Serve the local application or an existing eve server URL as a stable ACP v1 agent over stdio                                                         |
 | `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                                           |
 | `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                                     |
-| `eve trace ls`                | List locally captured agent traces, most recent first                                                                                                 |
-| `eve trace [trace]`           | Show a local span tree (the most recent when omitted)                                                                                                 |
+| `eve traces ls`               | List locally captured agent traces, most recent first                                                                                                 |
+| `eve traces [trace]`          | Show a local span tree (the most recent when omitted)                                                                                                 |
 | `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                                                |
 | `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                                         |
 | `eve eval`                    | Run evals against the local app or a remote target                                                                                                    |
-| `eve channels add [kind]`     | Scaffold a channel interactively, or by kind (`slack` \| `web`)                                                                                       |
 | `eve channels list`           | List user-authored channels                                                                                                                           |
 | `eve extension init [target]` | Create a new extension package                                                                                                                        |
 | `eve extension build`         | Build the current package as an extension                                                                                                             |
@@ -47,9 +47,9 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 
 After scaffolding, a human terminal usually continues into `eve dev` (or a coding-agent REPL if one is on `PATH` and you pick it). Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                   | Type | Default | Description                                                                                           |
-| ---------------------- | ---- | ------- | ----------------------------------------------------------------------------------------------------- |
-| `--channel-web-nextjs` | flag | off     | Add the Web Chat app (Next.js). Not for existing projects — run `eve channels add web` there instead. |
+| Flag                   | Type | Default | Description                                                                                          |
+| ---------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `--channel-web-nextjs` | flag | off     | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead. |
 
 ## `eve extension`
 
@@ -87,15 +87,22 @@ Commands for installing and discovering [shadcn registry](https://ui.shadcn.com/
 
 ```bash
 eve add extension/agent-browser
+eve add linear
+eve add channel/slack --skip-install
 eve add https://example.com/r/my-extension.json --overwrite
 eve registry add @acme=https://example.com/r/{name}.json
 eve registry search browser
+eve registry search browser --limit 5
 eve registry search browser --registry @acme
 eve registry view @acme/my-extension
 eve add @acme/my-extension
 ```
 
-`eve registry add` records configured sources in `package.json#registries`. `eve registry list` and `search` aggregate the official catalog and all configured sources by default, or browse one supplied URL or namespace. Official and other universal items with explicit file targets do not require shadcn project configuration.
+`eve add` asks before running setup declared by an official item and runs multiple declared flows in declaration order. Product-level packages can offer independently installable components: `eve add linear` lets you select the Linear Channel, Linear MCP, or both, with both selected by default. `--yes` installs a package's default components.
+
+When setup is skipped or cancelled, eve prints the matching `eve add <item> --skip-install` command. `--skip-install` reruns the selected components' declared flows from the beginning without reinstalling them.
+
+`eve registry add` records configured sources in `package.json#registries`. `eve registry list` aggregates the official catalog and all configured sources by default. `eve registry search` also includes [skills.sh](https://skills.sh), available without configuration at `@skills`, and groups results by source with each source's available result count. Search returns up to 10 matches per source by default; pass `--limit <count>` to request between 1 and 100. Either command can browse one supplied URL or namespace. Official and other universal items with explicit file targets do not require shadcn project configuration.
 
 ## `eve info`
 
@@ -181,9 +188,11 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `--context-size <tokens>`           | number | none               | Model context window size, shown as a usage percentage                                    |
 | `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
 
-A fresh `eve init` passes `--input /model`. That bare local input starts onboarding: the TUI installs the Vercel CLI if needed, asks you to log in if needed, then opens `/model`. Other input stays editable in the prompt.
+`eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API and accepts the same URL credentials and request headers as `eve dev <url>`. Pass `--scope <team>` when the active Vercel scope does not own the deployment; `EVE_VERCEL_SCOPE` provides the same value for managed harnesses. See [Use eve through ACP](../guides/acp) for client configuration and capability limits.
 
-For a URL target protected by HTTP Basic auth, put the credentials in the URL. Eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
+A fresh `eve init` passes `--input /model`. That bare local input starts onboarding: the TUI installs the Vercel CLI if needed, asks you to log in if needed, opens `/model`, then offers categorized registry next steps before the first prompt. Other input stays editable in the prompt.
+
+For a URL target protected by HTTP Basic auth, put the credentials in the URL. eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
 
 ```bash
 eve dev https://user:pass@your-app.example.com
@@ -191,9 +200,35 @@ eve dev https://user:pass@your-app.example.com
 
 For bearer tokens or custom schemes, pass explicit headers with `-H`.
 
+### `eve invoke`
+
+| Option                  | Type   | Default | Description                                     |
+| ----------------------- | ------ | ------- | ----------------------------------------------- |
+| `[prompt]`              | string | none    | Prompt, follow-up, or answer to a pending input |
+| `-u, --url <url>`       | string | local   | Invoke an existing server                       |
+| `-H, --header <header>` | string | none    | Request header for a URL target; repeatable     |
+| `--resume`              | flag   | off     | Read a previous resumable result from stdin     |
+| `--scope <team>`        | string | current | Vercel team that owns the URL target            |
+| `--json-schema`         | flag   | off     | Print the result JSON Schema and exit           |
+
+Use `eve invoke` to submit a turn without opening the TUI. It emits JSON after the invocation completes or reaches a blocking input or authorization event.
+
+```bash
+eve invoke "Summarize station telemetry"
+result=$(eve invoke "Deploy the application")
+printf '%s' "$result" | eve invoke --resume "approve"
+eve invoke --json-schema
+```
+
+`--resume` reads a complete previous result from stdin. Supply text for a `ready` follow-up or pending input; the agent harness resolves input text against all pending requests. A `ready` result includes the previous turn's completed or failed `outcome`. An `authorization-required` result lists every unresolved challenge in `authorizations`; complete them, then resume without text. Pass explicit headers again for protected remote servers. If the URL belongs to another Vercel team, pass its slug with `--scope`; this does not relink the current directory. Pass the scope again when resuming. Paused invocations exit `3`; failures exit `1`.
+
+Local callback-based connection authorization requires a persistent server. Run `eve dev`, then use `eve invoke --url <dev-url>` instead. If a waiting invocation receives `SIGINT` or `SIGTERM` after acceptance, it emits a final resumable `running` result before exiting.
+
 Local dev records the last ready URL per resolved app root in `.eve/dev-server-state.v1.json`. A second interactive `eve dev` reconnects only when that URL is loopback and healthy; each terminal UI creates a fresh client session while sharing the server process. A stale or malformed record is replaced when eve starts a new server. Passing `--host`, `--port`, or a `PORT` environment value skips reconnection and reports a healthy recorded server instead.
 
 Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; `/new` terminally retires that session before clearing the transcript, and the next prompt starts a fresh session with a new session-scoped sandbox on first sandbox use. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
+
+When no authored `agent/instrumentation.ts` exists, local dev also records traces under `.eve/traces/`, and bounds that store by age, size, and a keep-newest floor. Configure it with `EVE_TRACES*` in `.env.local`; see [`eve traces`](#retention) for the rules and defaults.
 
 ## `eve logs`
 
@@ -215,16 +250,44 @@ A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.0
 
 Each log has a same-named `.dump` sibling holding environment diagnostics and session stats as one JSON document. `eve logs --dump` (with or without a log id) prepends that document to the JSONL log body; the combined output is a valid JSON value stream (`eve logs --dump | jq -c .`), one self-contained report to attach to an issue. When a log has no dump, the flag is silently a no-op.
 
-## `eve trace`
+## `eve traces`
 
 ```bash
-eve trace ls              # list traces, most recent first
-eve trace ls --json       # emit machine-readable trace summaries
-eve trace                 # show the most recent span tree
-eve trace <trace>         # show one span tree
+eve traces ls              # list traces, most recent first
+eve traces ls --json       # emit machine-readable trace summaries
+eve traces                 # show the most recent span tree
+eve traces <trace>         # show one span tree
+eve traces --verbose       # expand every span with all attributes and events
+eve traces --json          # dump the full trace as JSON
 ```
 
-`eve trace ls` reads the immutable OTLP/JSON segments captured under `.eve/traces/v1`; `eve dev` does not need to be running. `eve trace` accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed or incomplete segments are skipped without hiding valid spans from the same trace.
+Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed segments are skipped without hiding valid spans from the same trace.
+
+Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `ai.toolCall` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
+
+A subagent keeps its own session id but records into the trace its parent had open at dispatch, so delegated work appears under the session that caused it, tagged with `agent.root.session.id`. Either session id resolves to that trace. A remote agent traces under its own deployment and is not recorded here.
+
+A session long enough to outgrow one trace — far longer than anything you will drive locally — continues into a new one. Each is a session window, numbered from zero on `agent.session.window`; passing a session id shows every window it produced, oldest first, and a trace id shows just that window.
+
+One parent turn can dispatch several subagents into the same window, so a child's turn spans name the dispatch: `agent.parent.session.id`, `agent.parent.turn.id`, and `agent.parent.call_id` identify the tool call that created the child, and `agent.subagent.name` the subagent it invoked. Top-level sessions carry none of these.
+
+`agent.session` and `agent.turn` outlive the worker that opened them, so they are recorded as zero-duration markers. The span tree shows their descendant extent instead; `agent.step` and the model and tool spans beneath it carry real durations. A third-party OTel backend reports zero for the markers.
+
+Model and tool-call spans carry their inputs and outputs — system prompt, prompt messages, and response text for models; call arguments and results for tools — each capped at 32 KB. Set `EVE_TRACES_CONTENT=off` to keep payloads out of the spool.
+
+Step spans carry token counts, and cost when Vercel AI Gateway served the call. Both follow the [OTel GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) (`gen_ai.usage.*`), so a third-party backend reads them without mapping.
+
+### Retention
+
+eve sweeps the store when a session finishes and when the dev server starts, evicting oldest-first past the bounds below — except that the newest traces and anything written in the last five minutes are always kept, so a sweep will exceed the size budget rather than drop a trace you just recorded. Set the bounds in `.env.local`, which `eve dev` loads automatically; each accepts `off` to disable it individually.
+
+| Variable                     | Default              | Effect                                                                                      |
+| ---------------------------- | -------------------- | ------------------------------------------------------------------------------------------- |
+| `EVE_TRACES`                 | on                   | `off` stops writing traces and stops sweeping                                               |
+| `EVE_TRACES_CONTENT`         | on                   | `off` stops capturing model prompt/response and tool input/output attributes on local spans |
+| `EVE_TRACES_MAX_AGE_MS`      | `604800000` (7d)     | Age after which a trace may be evicted                                                      |
+| `EVE_TRACES_MAX_TOTAL_BYTES` | `536870912` (512 MB) | Size budget for the whole store                                                             |
+| `EVE_TRACES_RETAIN_COUNT`    | `20`                 | Newest traces kept regardless of age or size                                                |
 
 ## `eve link`
 
@@ -250,33 +313,21 @@ eve eval [evalId...] [--url <url>] [options]
 
 Runs all discovered evals when no eval ids are given; ids match exactly or by directory prefix (`eve eval weather` runs everything under `evals/weather/`). Exits `0` when every eval passed its checks, `1` when any eval failed (a failed check, an execution error, or a `--strict` threshold miss), `2` on configuration errors.
 
-| Flag                    | Type   | Default | Description                                    |
-| ----------------------- | ------ | ------- | ---------------------------------------------- |
-| `--url <url>`           | string | none    | Remote agent URL (skip local host startup)     |
-| `--tag <tag...>`        | string | none    | Run only evals carrying a tag                  |
-| `--strict`              | flag   | off     | Below-threshold scores also fail the exit code |
-| `--list`                | flag   | off     | Print discovered evals without running them    |
-| `--timeout <ms>`        | number | none    | Per-eval timeout in milliseconds               |
-| `--max-concurrency <n>` | number | 8       | Max concurrent eval executions                 |
-| `--json`                | flag   | off     | Output results as JSON                         |
-| `--junit <path>`        | string | none    | Write JUnit XML results to a file              |
-| `--skip-report`         | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)  |
-| `--verbose`             | flag   | off     | Stream per-eval `t.log` lines to stdout        |
+| Flag                     | Type   | Default | Description                                                   |
+| ------------------------ | ------ | ------- | ------------------------------------------------------------- |
+| `--url <url>`            | string | none    | Remote agent URL (skip local host startup)                    |
+| `--tag <tag...>`         | string | none    | Run only evals carrying a tag                                 |
+| `--exclude-tag <tag...>` | string | none    | Skip evals carrying a tag                                     |
+| `--strict`               | flag   | off     | Below-threshold scores also fail the exit code                |
+| `--list`                 | flag   | off     | Print evals selected by the tag filters, without running them |
+| `--timeout <ms>`         | number | none    | Per-eval timeout in milliseconds                              |
+| `--max-concurrency <n>`  | number | 8       | Max concurrent eval executions                                |
+| `--json`                 | flag   | off     | Output results as JSON                                        |
+| `--junit <path>`         | string | none    | Write JUnit XML results to a file                             |
+| `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                 |
+| `--verbose`              | flag   | off     | Stream per-eval `t.log` lines to stdout                       |
 
 See [Evals](../evals/overview) for authoring evals.
-
-## `eve channels add`
-
-```bash
-eve channels add [kind] [-f] [-y]
-```
-
-Scaffolds a channel into `agent/channels/`. With no `kind` it prompts interactively; pass a `kind` (`slack` \| `web`) to scaffold one directly. When the Vercel CLI has an authenticated session, eve scaffolds the Vercel-integrated variant and asks whether to deploy after setup. Without one, Slack setup asks whether to set up Vercel Connect or use portable credentials. The portable variant reads `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` and adds both names to `.env.example`.
-
-| Flag          | Type | Default | Description                                               |
-| ------------- | ---- | ------- | --------------------------------------------------------- |
-| `-f, --force` | flag | off     | Overwrite existing channel files                          |
-| `-y, --yes`   | flag | off     | Assume yes for confirmations; requires an explicit `kind` |
 
 ## `eve channels list`
 

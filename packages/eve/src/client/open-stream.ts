@@ -1,6 +1,6 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
-import { createEveMessageStreamRoutePath } from "#protocol/routes.js";
+import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import type {
@@ -106,7 +106,7 @@ interface OpenStreamInput extends FollowStreamInput {
  */
 export async function* followStreamIterable(
   input: FollowStreamInput,
-): AsyncGenerator<HandleMessageStreamEvent> {
+): AsyncGenerator<MessageStreamEvent> {
   if (input.follow === false && input.startIndex < 0) {
     throw new Error(
       "stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
@@ -226,7 +226,7 @@ export async function openStreamBody(
   for (let attempt = 0; attempt < openRetryPolicy.maxAttempts; attempt += 1) {
     const url = createClientUrl(
       input.host,
-      createEveMessageStreamRoutePath(input.sessionId),
+      createEveSessionStreamRoutePath(input.sessionId),
       Object.keys(searchParams).length > 0 ? searchParams : undefined,
     );
 
@@ -234,6 +234,7 @@ export async function openStreamBody(
     let response: Response;
     try {
       response = await fetch(url, {
+        cache: "no-store",
         headers,
         redirect: input.redirect,
         signal: input.signal ?? null,

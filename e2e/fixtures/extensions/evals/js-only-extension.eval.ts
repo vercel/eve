@@ -3,6 +3,7 @@ import { defineEval } from "eve/evals";
 const JS_ONLY_EXTENSION_TOKEN = "js-only-extension-dist-ok-4N7Q";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "A JavaScript-only extension runs from its publisher-built dist tree.",
   async test(t) {
     await t.send("Call the `javascript__js_ping` tool and report exactly what it returned.");

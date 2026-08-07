@@ -8,7 +8,6 @@ import {
   readFile,
   todo,
   webFetch,
-  webSearch,
   writeFile,
 } from "../src/public/tools/defaults.js";
 
@@ -55,11 +54,6 @@ describe("tool defaults barrel exports", () => {
   it("webFetch has description and execute", () => {
     expect(webFetch.description).toBeTypeOf("string");
     expect(webFetch.execute).toBeTypeOf("function");
-  });
-
-  it("webSearch has description and execute", () => {
-    expect(webSearch.description).toBeTypeOf("string");
-    expect(webSearch.execute).toBeTypeOf("function");
   });
 
   it("loadSkill has description and execute", () => {

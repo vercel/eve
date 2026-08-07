@@ -18,7 +18,7 @@ import {
   SessionIdKey,
 } from "#context/keys.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 function createResolver(
   slug: string,
@@ -45,8 +45,8 @@ function createCtx(): ContextContainer {
   return ctx;
 }
 
-function makeEvent(type: string): HandleMessageStreamEvent {
-  return { type, data: {} } as HandleMessageStreamEvent;
+function makeEvent(type: string): UnstampedMessageStreamEvent {
+  return { type, data: {} } as UnstampedMessageStreamEvent;
 }
 
 describe("dispatchDynamicInstructionEvent", () => {

@@ -9,16 +9,17 @@ import { describe, expect, it, vi } from "vitest";
  * Vercel Connect requires on the receiving deployment.
  */
 
-import type { RouteHandlerArgs, SendFn, SendOptions } from "#channel/routes.js";
-import type { Session as ChannelSession } from "#channel/session.js";
+import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey } from "#context/keys.js";
 import { buildRunContext } from "#execution/runtime-context.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { isConnectionAuthorizationFailedError } from "#public/connections/errors.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { eveChannel, type EveChannelInput } from "#public/channels/eve.js";
+import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 
 const ROUTER_CALLER: SessionAuthContext = {
   attributes: {},
@@ -54,34 +55,25 @@ function createEveCreateHandler(input: EveChannelInput) {
   );
   if (!createRoute) throw new Error("No create POST route found");
 
-  const mockSend = vi.fn<SendFn>().mockResolvedValue({
-    id: "receiver-session-id",
-    continuationToken: "eve:test",
-    async cancel() {
-      return { status: "no_active_turn" };
-    },
-    async getEventStream() {
-      return new ReadableStream();
-    },
-    async getStreamTailIndex() {
-      return -1;
-    },
-  } satisfies ChannelSession);
+  const createSession = vi.fn().mockResolvedValue({
+    events: new ReadableStream(),
+    sessionId: "receiver-session-id",
+  });
 
   return {
-    send: mockSend,
+    createSession,
     async fetch(req: Request) {
-      const args: RouteHandlerArgs = {
-        send: mockSend,
-        resolveActiveSession: async () => undefined,
-        cancel: vi.fn(),
-        reset: vi.fn(),
-        getSession: vi.fn(),
-        receive: vi.fn() as never,
-        params: {},
-        waitUntil: () => undefined,
-        requestIp: "127.0.0.1",
-      };
+      const args = attachRouteSessionCreator<RouteHandlerArgs>(
+        {
+          ...mockChannelContext(vi.fn()),
+          attachSession: vi.fn() as any,
+          to: vi.fn() as never,
+          params: {},
+          waitUntil: () => undefined,
+          requestIp: "127.0.0.1",
+        },
+        createSession,
+      );
       return (
         createRoute as { handler: (req: Request, args: RouteHandlerArgs) => unknown }
       ).handler(req, args) as Promise<Response>;
@@ -111,15 +103,14 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toMatchObject({ ok: true });
 
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+      RunInput,
+      "adapter" | "channelName" | "requestId"
+    >;
     const run: RunInput = {
       adapter: { kind: "eve" },
-      auth: options.auth,
       channelName: "eve",
-      continuationToken: "eve:test",
-      initiatorAuth: options.initiatorAuth,
-      input: { message: "check my dashboards" },
-      mode: "task",
+      ...options,
     };
     const ctx = buildRunContext({ bundle: {} as CompiledBundle, run });
 
@@ -167,16 +158,16 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       }),
     );
 
-    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+      RunInput,
+      "adapter" | "channelName" | "requestId"
+    >;
     const ctx = buildRunContext({
       bundle: {} as CompiledBundle,
       run: {
         adapter: { kind: "eve" },
-        auth: options.auth,
         channelName: "eve",
-        continuationToken: "eve:test",
-        input: { message: "check my dashboards" },
-        mode: "task",
+        ...options,
       },
     });
 

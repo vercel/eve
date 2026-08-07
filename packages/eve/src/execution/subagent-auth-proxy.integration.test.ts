@@ -10,7 +10,7 @@ import { AuthKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import { emitProxiedSubagentEvent } from "#execution/subagent-event-proxy-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { TimedHandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import {
@@ -30,7 +30,7 @@ const authorizationAdapter: ChannelAdapter<AuthorizationAdapterContext> = {
   kind: "authorization-proxy-test",
   "authorization.required"(data, ctx) {
     ctx.state.pendingName = data.name;
-    ctx.session.setContinuationToken("auth-thread");
+    ctx.session.continuation?.rekey("auth-thread");
   },
   "authorization.completed"(data, ctx) {
     delete ctx.state.pendingName;
@@ -131,8 +131,8 @@ function createCapturingWritable(chunks: Uint8Array[]): WritableStream<Uint8Arra
   });
 }
 
-function decodeEvent(chunk: Uint8Array): TimedHandleMessageStreamEvent {
-  return JSON.parse(new TextDecoder().decode(chunk).trim()) as TimedHandleMessageStreamEvent;
+function decodeEvent(chunk: Uint8Array): MessageStreamEvent {
+  return JSON.parse(new TextDecoder().decode(chunk).trim()) as MessageStreamEvent;
 }
 
 describe("subagent authorization proxy", () => {

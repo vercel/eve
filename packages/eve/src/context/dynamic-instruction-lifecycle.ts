@@ -5,7 +5,7 @@ import {
   isBrandedInstructionsEntry,
 } from "#shared/dynamic-tool-definition.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -58,7 +58,7 @@ export function buildDynamicInstructionMessages(ctx: {
 export async function dispatchDynamicInstructionEvent(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicInstructionsResolver[];
-  readonly event: HandleMessageStreamEvent;
+  readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;

@@ -1,7 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import { defineAgent } from "#public/definitions/agent.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
+import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth } from "#public/channels/eve.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
@@ -16,7 +17,11 @@ import { defineInstrumentation } from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { defineTool, experimental_workflow } from "#public/definitions/tool.js";
+import {
+  defineTool,
+  experimental_workflow,
+  type ToolDefinition,
+} from "#public/definitions/tool.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
@@ -25,6 +30,7 @@ describe("definition helper exact inputs", () => {
       limits: {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
+        sessionTimeoutMs: 86_400_000,
       },
       model: "anthropic/claude-sonnet-5",
     });
@@ -37,16 +43,68 @@ describe("definition helper exact inputs", () => {
     expect(agent.description).toBe("type-test");
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
+    expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
     expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 
+  it("accepts async-generator tool executors", () => {
+    const streamedTool = defineTool({
+      description: "Stream report progress.",
+      inputSchema: { type: "object" },
+      async *execute() {
+        yield { phase: "collecting" };
+        yield { phase: "complete" };
+      },
+    });
+
+    expectTypeOf(streamedTool).toMatchTypeOf<
+      ToolDefinition<Record<string, unknown>, { phase: string }>
+    >();
+  });
+
   it("keeps the public hook event map aligned with runtime stream events", () => {
-    expectTypeOf<keyof HookEventMap>().toEqualTypeOf<HandleMessageStreamEvent["type"]>();
+    expectTypeOf<keyof HookEventMap>().toEqualTypeOf<UnstampedMessageStreamEvent["type"]>();
   });
 });
 
 function typeOnlyFixtures(): void {
+  // @ts-expect-error Dynamic subagents require a parent-facing description.
+  defineDynamic({
+    events: {
+      "session.started": () =>
+        defineAgent({
+          model: "anthropic/claude-sonnet-5",
+        }),
+    },
+  });
+
+  defineDynamic({
+    build: { externalDependencies: ["just-bash"] },
+    events: {
+      "session.started": () =>
+        Math.random() > 0.5
+          ? defineAgent({
+              description: "Delegate local research tasks.",
+              model: "anthropic/claude-sonnet-5",
+            })
+          : defineRemoteAgent({
+              description: "Delegate remote research tasks.",
+              url: "https://research.example.com",
+            }),
+    },
+  });
+
+  defineDynamic({
+    events: {
+      "session.started": () =>
+        defineAgent({
+          description: "Delegate research tasks.",
+          model: "anthropic/claude-sonnet-5",
+        }),
+    },
+  });
+
   defineAgent({
     limits: {
       // @ts-expect-error Recursive delegation is root-only; this limit was removed.
@@ -172,9 +230,10 @@ function typeOnlyFixtures(): void {
         const sessionId: string = ctx.session.id;
         void sessionId;
       },
-      "session.failed"(_data, _channel) {
+      "session.failed"(data, _channel) {
         // session.failed has no ctx — fires outside ALS on terminal failures.
-        void _data;
+        const sessionId: string = data.sessionId;
+        void sessionId;
         void _channel;
       },
     },
@@ -226,15 +285,25 @@ function typeOnlyFixtures(): void {
     },
     events: {
       "turn.started"(_data, channel, ctx) {
-        const continuationToken: string = channel.continuationToken;
+        const continuationToken: string | undefined = channel.continuation?.token;
         const sessionId: string = ctx.session.id;
         void continuationToken;
         void sessionId;
       },
-      "session.failed"(_data, channel) {
-        const continuationToken: string = channel.continuationToken;
+      "session.failed"(data, channel) {
+        const sessionId: string = data.sessionId;
+        const continuationToken: string | undefined = channel.continuation?.token;
+        void sessionId;
         void continuationToken;
       },
+    },
+  });
+
+  eveChannel({
+    auth: none(),
+    // @ts-expect-error canonical eve HTTP messages must dispatch or fail.
+    onMessage() {
+      return null;
     },
   });
 

@@ -259,6 +259,7 @@ describe("tool-loop structured compaction accounting", () => {
             toolName: "ask_question",
           },
           display: "select",
+          kind: "question",
           prompt: "Pick one.",
           requestId: "question-call",
         },

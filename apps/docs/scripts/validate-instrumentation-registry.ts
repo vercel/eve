@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { instrumentationEntries } from "@vercel/eve-catalog";
+import { instrumentationEntries } from "@eve/catalog";
 
 interface RegistryFile {
   path: string;
@@ -19,6 +19,7 @@ interface Registry {
 
 const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   braintrust: "braintrust",
+  "posthog-instrumentation": "posthog",
   "sentry-instrumentation": "sentry",
   "datadog-instrumentation": "datadog",
   "honeycomb-instrumentation": "honeycomb",
@@ -47,15 +48,25 @@ if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
 for (const item of items) {
   const slug = item.name.slice("instrumentation/".length);
   const expectedPath = `registry/instrumentation/${slug}.ts`;
-  const file = item.files?.[0];
-  if (
-    item.files?.length !== 1 ||
-    file?.path !== expectedPath ||
-    file.target !== "agent/instrumentation.ts"
-  ) {
-    throw new Error(
-      `Registry item "${item.name}" must write ${expectedPath} to agent/instrumentation.ts.`,
-    );
+  const expectedFiles: RegistryFile[] = [
+    {
+      path: expectedPath,
+      target: "agent/instrumentation.ts",
+    },
+    ...(slug === "braintrust"
+      ? [
+          {
+            path: "registry/instrumentation/braintrust-hook.ts",
+            target: "agent/hooks/braintrust.ts",
+          },
+        ]
+      : []),
+  ];
+  const actualFiles = item.files?.map(({ path, target }) => ({ path, target }));
+  if (JSON.stringify(actualFiles) !== JSON.stringify(expectedFiles)) {
+    throw new Error(`Registry item "${item.name}" does not contain the expected files.`);
   }
-  await access(join(docsRoot, expectedPath));
+  for (const file of expectedFiles) {
+    await access(join(docsRoot, file.path));
+  }
 }

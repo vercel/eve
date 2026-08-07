@@ -11,7 +11,9 @@
     "dynamic-workflows",
     "remote-agents",
     "dev-tui",
+    "acp",
     "frontend",
-    "client"
+    "client",
+    "ucp"
   ]
 }

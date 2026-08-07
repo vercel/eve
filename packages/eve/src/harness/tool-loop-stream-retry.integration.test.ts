@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -33,9 +33,9 @@ function createSession(): HarnessSession {
 
 function createEventCollector(): {
   readonly emit: HarnessEmitFn;
-  readonly events: HandleMessageStreamEvent[];
+  readonly events: UnstampedMessageStreamEvent[];
 } {
-  const events: HandleMessageStreamEvent[] = [];
+  const events: UnstampedMessageStreamEvent[] = [];
   return {
     emit: async (event) => {
       events.push(event);

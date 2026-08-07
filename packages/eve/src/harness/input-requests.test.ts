@@ -7,6 +7,7 @@ import { once } from "#public/tools/approval/approval-helpers.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
+  clearPendingSessionLimitPrompt,
   consumeDeferredStepInput,
   createRuntimeToolCallActionFromToolCall,
   getApprovedTools,
@@ -128,6 +129,7 @@ describe("resolvePendingInput", () => {
             toolName: "ask_question",
           },
           display: "select",
+          kind: "question",
           prompt: "Pick one.",
           requestId: "question-call",
         },
@@ -140,6 +142,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -203,6 +206,7 @@ describe("resolvePendingInput", () => {
             toolName: "ask_question",
           },
           display: "text",
+          kind: "question",
           prompt: "Pick one.",
           requestId: "question-call",
         } satisfies InputRequest,
@@ -264,6 +268,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -331,6 +336,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -390,6 +396,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -454,6 +461,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -520,6 +528,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -589,6 +598,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -646,6 +656,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -682,6 +693,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -722,6 +734,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -781,6 +794,7 @@ describe("resolvePendingInput", () => {
           },
           allowFreeform: false,
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
             { id: "deny", label: "No" },
@@ -872,7 +886,6 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
       requests: [
         createSessionLimitContinuationRequest({
           sessionId: "sess-test",
-          totalUsedTokens: 12,
           violation: { kind: "input", limit: 12, usedTokens: 12 },
         }),
       ],
@@ -909,14 +922,79 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
   });
 
-  it("treats a plain follow-up message as ignoring the prompt", () => {
+  it("keeps the prompt pending and queues a plain follow-up message", () => {
     const result = resolvePendingInput({
       session: createLimitBatchSession(),
       stepInput: { message: "also do this other thing" },
     });
 
-    expect(result.outcome).toBe("resolved");
+    expect(result.outcome).toBe("unresolved");
     expect(result.limitContinuation).toBeUndefined();
     expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(hasDeferredStepInput(result.session)).toBe(true);
+
+    const deferred = consumeDeferredStepInput({ session: result.session });
+    expect(deferred.input).toEqual({ message: "also do this other thing" });
+  });
+});
+
+describe("clearPendingSessionLimitPrompt", () => {
+  it("drops a pending batch made only of session-limit continuation prompts", () => {
+    const session = setPendingInputBatch({
+      requests: [
+        createSessionLimitContinuationRequest({
+          sessionId: "sess-test",
+          violation: { kind: "input", limit: 12, usedTokens: 12 },
+        }),
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+
+    const cleared = clearPendingSessionLimitPrompt(session);
+    const result = resolvePendingInput({ session: cleared, stepInput: { message: "try again" } });
+
+    // No stale batch left: the follow-up message flows to the step (where
+    // the pre-model gate re-raises the prompt) instead of deferring forever.
+    expect(result.outcome).toBe("continue");
+    expect(hasDeferredStepInput(cleared)).toBe(false);
+  });
+
+  it("keeps model-anchored batches (tool approvals) intact", () => {
+    const session = setPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "approval-call",
+            input: { command: "rm -rf /tmp/demo" },
+            kind: "tool-call",
+            toolName: "bash",
+          },
+          allowFreeform: false,
+          display: "confirmation",
+          kind: "tool-approval",
+          options: [
+            { id: "approve", label: "Yes" },
+            { id: "deny", label: "No" },
+          ],
+          prompt: "Approve tool call: bash",
+          requestId: "approval-1",
+        },
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+
+    const kept = clearPendingSessionLimitPrompt(session);
+    const result = resolvePendingInput({ session: kept, stepInput: { message: "and then this" } });
+
+    // The approval still gates the turn: the follow-up defers behind it.
+    expect(result.outcome).toBe("unresolved");
+    expect(hasDeferredStepInput(result.session)).toBe(true);
+  });
+
+  it("is a no-op without a pending batch", () => {
+    const session = createHarnessSession();
+    expect(clearPendingSessionLimitPrompt(session)).toBe(session);
   });
 });

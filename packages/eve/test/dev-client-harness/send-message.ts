@@ -1,9 +1,9 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
-  EVE_CREATE_SESSION_ROUTE_PATH,
-  createEveContinueSessionRoutePath,
-  createEveMessageStreamRoutePath,
+  EVE_SESSION_ROUTE_PATH,
+  createEveSessionRoutePath,
+  createEveSessionStreamRoutePath,
 } from "#protocol/routes.js";
 import {
   createDevelopmentRequestHeadersAsync,
@@ -33,7 +33,7 @@ async function fetchDevelopmentSessionStreamResponse(input: {
   readonly response: Response;
 }> {
   const canonicalResourceUrl = resolveDevelopmentServerResourceUrl({
-    resource: createEveMessageStreamRoutePath(input.sessionId),
+    resource: createEveSessionStreamRoutePath(input.sessionId),
     serverUrl: input.serverUrl,
   });
   const requestResourceUrl = new URL(canonicalResourceUrl);
@@ -79,17 +79,17 @@ async function openDevelopmentSessionStream(input: {
 async function readDevelopmentTurnEvents(input: {
   readonly headers?: DevelopmentRequestHeaders;
   readonly initialStartIndex: number;
-  onEvent?(event: HandleMessageStreamEvent): void;
+  onEvent?(event: MessageStreamEvent): void;
   readonly sessionId: string;
   readonly serverUrl: string;
   readonly signal?: AbortSignal;
   readonly stream: ReturnType<typeof openDevelopmentMessageStream>;
 }): Promise<{
-  readonly events: HandleMessageStreamEvent[];
+  readonly events: MessageStreamEvent[];
   readonly stream: ReturnType<typeof openDevelopmentMessageStream>;
 }> {
   let currentStream = input.stream;
-  const events: HandleMessageStreamEvent[] = [];
+  const events: MessageStreamEvent[] = [];
   let currentStreamIndex = input.initialStartIndex;
   let remainingReconnectAttempts = DEVELOPMENT_TURN_STREAM_RECONNECT_LIMIT;
 
@@ -135,21 +135,21 @@ async function readDevelopmentTurnEvents(input: {
 export async function sendDevelopmentMessage(input: {
   headers?: DevelopmentRequestHeaders;
   message: string;
-  onEvent?(event: HandleMessageStreamEvent): void;
+  onEvent?(event: MessageStreamEvent): void;
   onResponseStart?(response: { sessionId?: string }): void;
   signal?: AbortSignal;
   session: DevelopmentSessionState;
   serverUrl: string;
 }): Promise<{
   completedMessage?: string;
-  events: HandleMessageStreamEvent[];
+  events: MessageStreamEvent[];
   sessionId?: string;
   session: DevelopmentSessionState;
 }> {
   const session = input.session;
   const routePath = session.sessionId
-    ? createEveContinueSessionRoutePath(session.sessionId)
-    : EVE_CREATE_SESSION_ROUTE_PATH;
+    ? createEveSessionRoutePath(session.sessionId)
+    : EVE_SESSION_ROUTE_PATH;
   const messageRouteUrl = resolveDevelopmentServerRouteUrl({
     routePath,
     serverUrl: input.serverUrl,
@@ -180,13 +180,10 @@ export async function sendDevelopmentMessage(input: {
     const payload = (await response.json()) as Record<string, unknown>;
 
     if (payload.status === "completed" && typeof payload.output === "string") {
-      const continuationToken =
-        typeof payload.continuationToken === "string" ? payload.continuationToken : undefined;
-
       return {
         completedMessage: payload.output,
         events: [],
-        session: createDevelopmentSessionState({ continuationToken }),
+        session: createDevelopmentSessionState(),
       };
     }
 
@@ -195,11 +192,6 @@ export async function sendDevelopmentMessage(input: {
       response.headers.get(EVE_SESSION_ID_HEADER)?.trim() ??
       session.sessionId ??
       undefined;
-    const continuationToken =
-      typeof payload.continuationToken === "string"
-        ? payload.continuationToken
-        : session.continuationToken;
-
     if (!sessionId) {
       throw new Error("Message route did not return a session id.");
     }
@@ -237,7 +229,6 @@ export async function sendDevelopmentMessage(input: {
     }
 
     const nextSession = updateDevelopmentSessionState({
-      continuationToken,
       events,
       sessionId,
       session,

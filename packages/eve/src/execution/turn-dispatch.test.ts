@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
-import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
+import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 
 const createHookMock = vi.fn();
@@ -37,13 +37,14 @@ describe("dispatchAndAwaitTurn", () => {
       },
     ]);
     const rekeyHook = vi.fn();
-    const deliveryHook = createDeliveryHook({ rekey: rekeyHook });
+    const commandInbox = createCommandInbox({ rekeyContinuation: rekeyHook });
 
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox,
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook,
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -70,13 +71,14 @@ describe("dispatchAndAwaitTurn", () => {
       },
     ]);
     const rekeyHook = vi.fn();
-    const deliveryHook = createDeliveryHook({ rekey: rekeyHook });
+    const commandInbox = createCommandInbox({ rekeyContinuation: rekeyHook });
 
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox,
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook,
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -130,14 +132,15 @@ describe("dispatchAndAwaitTurn", () => {
     const bufferedDeliveries: DeliverHookPayload[] = [];
     await dispatchAndAwaitTurn({
       bufferedDeliveries,
-      controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook: createDeliveryHook({
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox({
         next: async () => ({
           done: false,
-          value: { kind: "deliver", payloads: [{ message: "later delivery" }] },
+          value: { kind: "send", payload: { message: "later delivery" } },
         }),
       }),
+      controlToken: "turn-control",
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -172,9 +175,10 @@ describe("dispatchAndAwaitTurn", () => {
     const bufferedDeliveries: DeliverHookPayload[] = [delivery];
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook: createDeliveryHook(),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -197,9 +201,10 @@ describe("dispatchAndAwaitTurn", () => {
 
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook: createDeliveryHook(),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -215,11 +220,12 @@ describe("dispatchAndAwaitTurn", () => {
   });
 });
 
-function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): SessionDeliveryHook {
+function createCommandInbox(overrides: Partial<SessionCommandInbox> = {}): SessionCommandInbox {
   return {
+    claimStable: vi.fn(),
     consumeNext: vi.fn(),
-    next: vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {})),
-    rekey: vi.fn(),
+    next: vi.fn(() => new Promise<IteratorResult<SessionInboxPayload>>(() => {})),
+    rekeyContinuation: vi.fn(),
     ...overrides,
   };
 }

@@ -10,7 +10,7 @@ import {
   createTurnCompletedEvent,
   createTurnStartedEvent,
 } from "../src/protocol/message.js";
-import { createEveMessageStreamRoutePath } from "../src/protocol/routes.js";
+import { createEveSessionStreamRoutePath } from "../src/protocol/routes.js";
 import { VERCEL_PROTECTION_BYPASS_HEADER } from "../src/services/dev-client/request-headers.js";
 import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "../src/client/types.js";
 import { sendDevelopmentMessage } from "./dev-client-harness/send-message.js";
@@ -54,12 +54,8 @@ function createControlledStreamResponse(): {
   };
 }
 
-function createStartedMessageResponse(
-  sessionId: string,
-  continuationToken: string,
-  location: string,
-): Response {
-  return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
+function createStartedMessageResponse(sessionId: string, location: string): Response {
+  return new Response(JSON.stringify({ ok: true, sessionId }), {
     headers: {
       "content-type": "application/json",
       location,
@@ -69,8 +65,8 @@ function createStartedMessageResponse(
   });
 }
 
-function createResumedMessageResponse(continuationToken: string): Response {
-  return new Response(JSON.stringify({ continuationToken, ok: true }), {
+function createResumedMessageResponse(): Response {
+  return new Response(JSON.stringify({ ok: true }), {
     headers: {
       "content-type": "application/json",
     },
@@ -105,14 +101,10 @@ describe("sendDevelopmentMessage", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
-        createStartedMessageResponse(
-          "session_001",
-          "http:session_001",
-          createEveMessageStreamRoutePath("session_001"),
-        ),
+        createStartedMessageResponse("session_001", createEveSessionStreamRoutePath("session_001")),
       )
       .mockResolvedValueOnce(firstStream.response)
-      .mockResolvedValueOnce(createResumedMessageResponse("http:session_001"))
+      .mockResolvedValueOnce(createResumedMessageResponse())
       .mockResolvedValueOnce(secondStream.response);
 
     const firstPromise = sendDevelopmentMessage({
@@ -144,7 +136,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       firstStream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      firstStream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
+      firstStream.pushEvent(createSessionWaitingEvent());
     }, 0);
 
     const first = await firstPromise;
@@ -177,7 +169,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       secondStream.pushEvent(createTurnCompletedEvent({ sequence: 2, turnId: "turn_002" }));
-      secondStream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
+      secondStream.pushEvent(createSessionWaitingEvent());
     }, 0);
 
     const second = await secondPromise;
@@ -185,14 +177,12 @@ describe("sendDevelopmentMessage", () => {
     expect(first.sessionId).toBe("session_001");
     expect(first.session).toEqual({
       boundaryCount: 1,
-      continuationToken: "http:session_001",
       sessionId: "session_001",
       streamIndex: 5,
     });
     expect(second.sessionId).toBe("session_001");
     expect(second.session).toEqual({
       boundaryCount: 2,
-      continuationToken: "http:session_001",
       sessionId: "session_001",
       streamIndex: 10,
     });
@@ -231,21 +221,18 @@ describe("sendDevelopmentMessage", () => {
         type: "turn.completed",
       },
       {
-        data: {
-          continuationToken: "http:session_001",
-          wait: "next-user-message",
-        },
+        data: { continuationToken: "", wait: "next-user-message" },
         type: "session.waiting",
       },
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
-      createEveMessageStreamRoutePath("session_001"),
+      createEveSessionStreamRoutePath("session_001"),
     );
     expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("POST");
     expect(String(fetchMock.mock.calls[3]?.[0])).toContain(
-      `${createEveMessageStreamRoutePath("session_001")}?startIndex=5`,
+      `${createEveSessionStreamRoutePath("session_001")}?startIndex=5`,
     );
   });
 
@@ -294,19 +281,15 @@ describe("sendDevelopmentMessage", () => {
         turnId: "turn_002",
       }),
       createTurnCompletedEvent({ sequence: 2, turnId: "turn_002" }),
-      createSessionWaitingEvent("eve:http:session_001"),
+      createSessionWaitingEvent(),
     ]);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
-        createStartedMessageResponse(
-          "session_001",
-          "http:session_001",
-          createEveMessageStreamRoutePath("session_001"),
-        ),
+        createStartedMessageResponse("session_001", createEveSessionStreamRoutePath("session_001")),
       )
       .mockResolvedValueOnce(firstStream.response)
-      .mockResolvedValueOnce(createResumedMessageResponse("http:session_001"))
+      .mockResolvedValueOnce(createResumedMessageResponse())
       .mockResolvedValueOnce(secondStream.response)
       .mockResolvedValueOnce(resumedStream);
 
@@ -339,7 +322,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       firstStream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      firstStream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
+      firstStream.pushEvent(createSessionWaitingEvent());
     }, 0);
 
     const first = await firstPromise;
@@ -433,22 +416,18 @@ describe("sendDevelopmentMessage", () => {
         type: "turn.completed",
       },
       {
-        data: {
-          continuationToken: "http:session_001",
-          wait: "next-user-message",
-        },
+        data: { continuationToken: "", wait: "next-user-message" },
         type: "session.waiting",
       },
     ]);
     expect(second.session).toEqual({
       boundaryCount: 2,
-      continuationToken: "http:session_001",
       sessionId: "session_001",
       streamIndex: 12,
     });
     expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(String(fetchMock.mock.calls[4]?.[0])).toContain(
-      `${createEveMessageStreamRoutePath("session_001")}?startIndex=6`,
+      `${createEveSessionStreamRoutePath("session_001")}?startIndex=6`,
     );
   });
 
@@ -457,11 +436,7 @@ describe("sendDevelopmentMessage", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
-        createStartedMessageResponse(
-          "session_001",
-          "http:session_001",
-          createEveMessageStreamRoutePath("session_001"),
-        ),
+        createStartedMessageResponse("session_001", createEveSessionStreamRoutePath("session_001")),
       )
       .mockResolvedValueOnce(stream.response);
 
@@ -499,7 +474,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       stream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      stream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
+      stream.pushEvent(createSessionWaitingEvent());
     }, 0);
 
     const result = await messagePromise;
@@ -513,7 +488,6 @@ describe("sendDevelopmentMessage", () => {
     expect(streamHeaders.get("authorization")).toBe("Basic dGVzdDpzZWNyZXQ=");
     expect(result.session).toEqual({
       boundaryCount: 1,
-      continuationToken: "http:session_001",
       sessionId: "session_001",
       streamIndex: 5,
     });
@@ -524,11 +498,7 @@ describe("sendDevelopmentMessage", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
-        createStartedMessageResponse(
-          "session_001",
-          "http:session_001",
-          createEveMessageStreamRoutePath("session_001"),
-        ),
+        createStartedMessageResponse("session_001", createEveSessionStreamRoutePath("session_001")),
       )
       .mockResolvedValueOnce(stream.response);
 
@@ -563,7 +533,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       stream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      stream.pushEvent(createSessionWaitingEvent("eve:http:session_001"));
+      stream.pushEvent(createSessionWaitingEvent());
     }, 0);
 
     await messagePromise;

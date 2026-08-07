@@ -15,15 +15,19 @@ import type { SandboxSession } from "../src/shared/sandbox-session.js";
 interface FakeAccessOptions {
   readonly pathResolver?: (path: string) => string;
   /**
-   * Exit code returned by the `command -v rg` probe that runs before
+   * Exit code returned by the ripgrep capability probe that runs before
    * each glob call. Defaults to `0` (ripgrep is available) so tests
    * exercise the ripgrep code path by default. Set to a non-zero
-   * code to force the POSIX fallback branch.
+   * code other than `0` or `1` to force the POSIX fallback branch.
    */
   readonly probeExitCode?: number;
 }
 
-const PROBE_COMMAND = "command -v rg >/dev/null 2>&1";
+const PROBE_COMMAND =
+  "command -v rg >/dev/null 2>&1 || exit 127; " +
+  "rg --line-number --color=never --hidden --glob '!.git/*' --max-count 1 -- " +
+  "'__eve_ripgrep_probe_never_matches__' /workspace";
+const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 
 function createFakeAccess(
   commandHandler: (command: string) => { exitCode: number; stderr: string; stdout: string },
@@ -55,6 +59,9 @@ function createFakeAccess(
           return options.pathResolver ? options.pathResolver(path) : path;
         },
         async run({ command }: { command: string }) {
+          if (command === HOME_PROBE_COMMAND) {
+            return { exitCode: 0, stderr: "", stdout: "/home/agent\n" };
+          }
           if (command === PROBE_COMMAND) {
             return { exitCode: probeExitCode, stderr: "", stdout: "" };
           }
@@ -133,6 +140,28 @@ describe("executeGlobOnSandbox", () => {
         (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "*.ts", path: "src" }),
       ),
     ).rejects.toThrow("filePath must be an absolute path");
+  });
+
+  it("expands a leading $HOME before searching", async () => {
+    let capturedCommand = "";
+    const result = (await runInContext(
+      (cmd) => {
+        capturedCommand = cmd;
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: "/home/agent/.agents/skills/research/SKILL.md\n",
+        };
+      },
+      (sandbox) =>
+        executeGlobOnSandbox(sandbox, {
+          path: "$HOME/.agents/skills/research",
+          pattern: "**/*.md",
+        }),
+    )) as GlobResult;
+
+    expect(capturedCommand).toContain("'/home/agent/.agents/skills/research'");
+    expect(result.path).toBe("/home/agent/.agents/skills/research");
   });
 
   // ---------------------------------------------------------------------------
@@ -303,7 +332,7 @@ describe("executeGlobOnSandbox", () => {
       (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "**/*.ts" }),
     );
 
-    expect(capturedCommand).toMatch(/-- '\/workspace'/);
+    expect(capturedCommand).toMatch(/'\/workspace'$/);
   });
 
   it("preserves /workspace-rooted output paths exactly as emitted", async () => {
@@ -342,7 +371,7 @@ describe("executeGlobOnSandbox", () => {
         };
       },
       (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "**/*.ts" }),
-      { probeExitCode: 1 },
+      { probeExitCode: 127 },
     )) as GlobResult;
 
     // POSIX find, not ripgrep.
@@ -362,6 +391,15 @@ describe("executeGlobOnSandbox", () => {
         (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "**/*.ts" }),
       ),
     ).rejects.toThrow(/glob failed \(exit 2\).*IO error/s);
+  });
+
+  it("throws when ripgrep exits 1 with an error message", async () => {
+    await expect(
+      runInContext(
+        () => ({ exitCode: 1, stderr: "rg: unrecognized option '--'\n", stdout: "" }),
+        (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "**/*.ts" }),
+      ),
+    ).rejects.toThrow(/glob failed \(exit 1\).*unrecognized option/s);
   });
 
   it("treats exit 1 as legitimate 'no files'", async () => {

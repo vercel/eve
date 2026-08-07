@@ -2,13 +2,13 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { H3Event } from "nitro";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { createDevelopmentNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
 import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { dispatchChannelRequest } from "../../src/internal/nitro/routes/channel-dispatch.js";
-import { EVE_CREATE_SESSION_ROUTE_PATH, EVE_INFO_ROUTE_PATH } from "../../src/protocol/routes.js";
+import { EVE_INFO_ROUTE_PATH, EVE_SESSION_ROUTE_PATH } from "../../src/protocol/routes.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const createAppRoot = useTemporaryAppRoots();
@@ -18,14 +18,13 @@ const EVE_CHANNEL_IMPORT_URL = new URL("../../dist/src/public/channels/eve.js", 
 const EVE_TOOLS_IMPORT_URL = new URL("../../dist/src/public/tools/index.js", import.meta.url);
 const INFO_ROUTE_KEY = `GET ${EVE_INFO_ROUTE_PATH}`;
 
-// Loopback request — `localDev()` authenticates this one. Models a
-// developer hitting `eve start` or `vercel dev` on their machine.
+// A request to the local server. The deployment environment, not this
+// URL, decides auth: `localDev()` authenticates only when the process
+// is an `eve dev` or `vercel dev` server (stubbed via EVE_DEV below).
 const LOOPBACK_REQUEST = new Request("http://localhost/eve/v1/info");
 
-// Public-hostname request — what a real Vercel (or self-hosted)
-// deployment sees on the wire. `localDev()` skips this because the
-// request was not addressed to a loopback hostname, so the walk falls
-// through to `vercelOidc()`.
+// A request a real deployment sees on the wire. With no dev flag set,
+// `localDev()` skips it and the walk falls through to `vercelOidc()`.
 const DEPLOYED_REQUEST = new Request("https://weather-agent.vercel.app/eve/v1/info");
 const AUTHORIZED_DEPLOYED_REQUEST = new Request("https://weather-agent.vercel.app/eve/v1/info", {
   headers: {
@@ -92,7 +91,13 @@ async function requestAgentInfo(appRoot: string, request: Request): Promise<Resp
 }
 
 describe("eve agent info route", () => {
-  it("returns inspection JSON when the request is addressed to a loopback hostname", async () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns inspection JSON in a local dev environment", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+
     const { agentRoot, appRoot } = await createAppRoot("eve-agent-info-route-", APP_ROOT_OPTIONS);
 
     await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
@@ -135,7 +140,7 @@ describe("eve agent info route", () => {
       status: "active",
     });
     expect(payload.channels.available.map((channel) => channel.urlPath)).toContain(
-      EVE_CREATE_SESSION_ROUTE_PATH,
+      EVE_SESSION_ROUTE_PATH,
     );
     expect(payload.channels.framework.length).toBeGreaterThan(0);
     expect(payload.diagnostics).toEqual({
@@ -160,11 +165,10 @@ describe("eve agent info route", () => {
     });
   });
 
-  it("returns 401 without a Vercel OIDC bearer token when the request is addressed to a public hostname", async () => {
-    // The default chain `[vercelOidc(), localDev()]` must reject public
-    // traffic that arrives without a token, regardless of `process.env`.
-    // `vercelOidc()` skips because there is no bearer token; `localDev()`
-    // skips because the request URL is not loopback.
+  it("returns 401 for a deployment request without a Vercel OIDC bearer token", async () => {
+    // With no dev flag set, the default chain must reject a request that
+    // carries no token: `vercelOidc()` skips without a bearer token and
+    // `localDev()` skips outside an `eve dev` or `vercel dev` server.
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-agent-info-route-deployed-",
       APP_ROOT_OPTIONS,

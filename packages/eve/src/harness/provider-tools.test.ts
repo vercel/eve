@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
+  WEB_SEARCH_EXA_OUTPUT_SCHEMA,
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
@@ -17,6 +18,7 @@ import {
 const {
   anthropicWebSearch_20250305,
   anthropicWebSearch_20260209,
+  gatewayExaSearch,
   gatewayParallelSearch,
   googleSearch,
   openaiWebSearch,
@@ -27,6 +29,7 @@ const {
   anthropicWebSearch_20260209: vi.fn(() => ({
     providerTool: "anthropic.webSearch_20260209",
   })),
+  gatewayExaSearch: vi.fn(() => ({ providerTool: "gateway.exaSearch" })),
   gatewayParallelSearch: vi.fn(() => ({ providerTool: "gateway.parallelSearch" })),
   googleSearch: vi.fn(() => ({ providerTool: "google.googleSearch" })),
   openaiWebSearch: vi.fn(() => ({ providerTool: "openai.webSearch" })),
@@ -63,6 +66,7 @@ vi.mock("ai", async () => {
     ...actual,
     gateway: {
       tools: {
+        exaSearch: gatewayExaSearch,
         parallelSearch: gatewayParallelSearch,
       },
     },
@@ -77,14 +81,20 @@ describe("resolveWebSearchBackend", () => {
   beforeEach(() => {
     anthropicWebSearch_20250305.mockClear();
     anthropicWebSearch_20260209.mockClear();
+    gatewayExaSearch.mockClear();
     gatewayParallelSearch.mockClear();
     googleSearch.mockClear();
     openaiWebSearch.mockClear();
   });
 
-  it("returns 'parallel' for an OpenAI gateway model", () => {
+  it("returns 'parallel' for an OpenAI gateway model by default", () => {
     const ref: RuntimeModelReference = { id: "openai/gpt-5.4" };
     expect(resolveWebSearchBackend(ref)).toBe("parallel");
+  });
+
+  it("returns the configured Exa provider for a gateway model", () => {
+    const ref: RuntimeModelReference = { id: "openai/gpt-5.4" };
+    expect(resolveWebSearchBackend(ref, "exa")).toBe("exa");
   });
 
   it("returns 'openai' for a BYO OpenAI model", () => {
@@ -97,7 +107,7 @@ describe("resolveWebSearchBackend", () => {
         sourceId: "agent.ts",
       },
     };
-    expect(resolveWebSearchBackend(ref)).toBe("openai");
+    expect(resolveWebSearchBackend(ref, "exa")).toBe("openai");
   });
 
   it("returns 'parallel' for an Anthropic gateway model", () => {
@@ -179,6 +189,17 @@ describe("resolveWebSearchBackend", () => {
     expect(getOutputJsonSchema(tool)).toEqual(WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA);
   });
 
+  it("uses gateway exaSearch for the Exa backend", async () => {
+    const tool = await resolveWebSearchProviderTool("exa");
+
+    expect(gatewayExaSearch).toHaveBeenCalledWith({
+      contents: { highlights: { maxCharacters: 1_000 } },
+      numResults: 10,
+    });
+    expect(tool).toMatchObject({ providerTool: "gateway.exaSearch" });
+    expect(getOutputJsonSchema(tool)).toEqual(WEB_SEARCH_EXA_OUTPUT_SCHEMA);
+  });
+
   it("uses gateway parallelSearch for the Parallel backend", async () => {
     const tool = await resolveWebSearchProviderTool("parallel");
 
@@ -189,6 +210,7 @@ describe("resolveWebSearchBackend", () => {
 
   it("resolves output schemas per selected backend", () => {
     expect(resolveWebSearchOutputSchema("anthropic")).toBe(WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA);
+    expect(resolveWebSearchOutputSchema("exa")).toBe(WEB_SEARCH_EXA_OUTPUT_SCHEMA);
     expect(resolveWebSearchOutputSchema("google")).toBe(WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA);
     expect(resolveWebSearchOutputSchema("openai")).toBe(WEB_SEARCH_OPENAI_OUTPUT_SCHEMA);
     expect(resolveWebSearchOutputSchema("parallel")).toBe(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);

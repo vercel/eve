@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { SANDBOX_BUNDLING_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/sandbox-bundling.js";
-import type { HandleMessageStreamEvent } from "../../src/protocol/message.js";
+import type { MessageStreamEvent } from "../../src/protocol/message.js";
 import { sendDevelopmentMessage } from "../dev-client-harness/send-message.js";
 import { createDevelopmentSessionState } from "../dev-client-harness/session.js";
 import {
@@ -68,7 +68,7 @@ describe.sequential("sandbox-bundling Vercel deployment integration", () => {
   );
 });
 
-function expectAtLeastOneAssistantTextEvent(events: readonly HandleMessageStreamEvent[]): void {
+function expectAtLeastOneAssistantTextEvent(events: readonly MessageStreamEvent[]): void {
   for (const event of events) {
     if (
       event.type === "message.completed" &&

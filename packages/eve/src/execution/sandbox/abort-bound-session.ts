@@ -20,7 +20,7 @@ export function bindSandboxAbortSignal(
   abortSignal: AbortSignal,
 ): SandboxSession {
   const compose = (callSignal: AbortSignal | undefined): AbortSignal =>
-    callSignal === undefined ? abortSignal : AbortSignal.any([abortSignal, callSignal]);
+    AbortSignal.any(callSignal === undefined ? [abortSignal] : [abortSignal, callSignal]);
 
   return {
     ...session,

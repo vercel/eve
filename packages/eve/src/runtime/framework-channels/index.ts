@@ -1,4 +1,4 @@
-import { localDev, vercelOidc } from "#public/channels/auth.js";
+import { localDev, placeholderAuth, vercelOidc } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
@@ -19,7 +19,7 @@ const EVE_CHANNEL_NAME = "eve";
  */
 export function getFrameworkChannelDefinitions(): readonly ResolvedChannelDefinition[] {
   const compiled = eveChannel({
-    auth: [vercelOidc(), localDev()],
+    auth: [vercelOidc(), localDev(), placeholderAuth()],
   }) as CompiledChannel;
 
   const result: ResolvedChannelDefinition[] = [];

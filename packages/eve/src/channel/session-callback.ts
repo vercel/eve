@@ -44,9 +44,9 @@ const sessionCallbackSchema = z
       });
     }
 
-    // SSRF guard: the framework POSTs to this URL on session completion, so a
-    // caller-supplied private/link-local host (e.g. cloud metadata) must be
-    // rejected. The path/token check above does not constrain the host.
+    // SSRF guard: the framework POSTs to this URL when delegated work settles,
+    // so a caller-supplied private/link-local host (e.g. cloud metadata) must
+    // be rejected. The path/token check above does not constrain the host.
     if (isReservedIpAddress(url.hostname)) {
       ctx.addIssue({
         code: "custom",

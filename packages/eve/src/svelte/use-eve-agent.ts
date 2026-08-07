@@ -1,4 +1,5 @@
 import { createSubscriber } from "svelte/reactivity";
+import type { UserContent } from "ai";
 
 import {
   EveAgentStore,
@@ -11,8 +12,14 @@ import { resolveEveAgentHost } from "#client/agent-host.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
-import type { ClientAuth, HeadersValue, SendTurnPayload, SessionState } from "#client/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type {
+  ClientAuth,
+  HeadersValue,
+  RespondTurnOptions,
+  SendTurnOptions,
+  ClientSessionState,
+} from "#client/types.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 
 export type { PrepareSend };
 
@@ -43,13 +50,21 @@ export interface UseEveAgentReturn<TData> {
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: Error | undefined;
   /** Raw server events received during this session (authoritative stream). */
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   /** Clear all state and start a new session. */
   readonly reset: () => void;
-  /** Send a turn with full structured input (message, attachments, input responses). */
-  readonly send: <TOutput = unknown>(input: SendTurnPayload<TOutput>) => Promise<void>;
+  /** Send a message with optional turn settings. */
+  readonly send: <TOutput = unknown>(
+    message: string | UserContent,
+    options?: SendTurnOptions<TOutput>,
+  ) => Promise<void>;
+  /** Answer pending HITL input requests. */
+  readonly respond: <TOutput = unknown>(
+    inputResponses: Parameters<ClientSession["respond"]>[0],
+    options?: RespondTurnOptions<TOutput>,
+  ) => Promise<void>;
   /** Current session identity and stream cursor. */
-  readonly session: SessionState;
+  readonly session: ClientSessionState | undefined;
   /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
   readonly status: UseEveAgentStatus;
   /** Abort the in-flight request. */
@@ -90,10 +105,10 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default ""
    */
   readonly host?: string;
-  /** Seed events for resuming a prior conversation. */
-  readonly initialEvents?: readonly HandleMessageStreamEvent[];
+  /** Ordered prefix of the session stream used to rehydrate projected state. */
+  readonly initialEvents?: readonly MessageStreamEvent[];
   /** Seed session identity and stream cursor for resuming a prior conversation. */
-  readonly initialSession?: SessionState;
+  readonly initialSession?: ClientSessionState;
   /**
    * Project submitted user messages before eve confirms them with a
    * `message.received` stream event. Optimistic events are reducer-facing
@@ -148,12 +163,12 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
     return this.#snapshot.error;
   }
 
-  get events(): readonly HandleMessageStreamEvent[] {
+  get events(): readonly MessageStreamEvent[] {
     this.#subscribe();
     return this.#snapshot.events;
   }
 
-  get session(): SessionState {
+  get session(): ClientSessionState | undefined {
     this.#subscribe();
     return this.#snapshot.session;
   }
@@ -167,8 +182,18 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
     this.#store.reset();
   };
 
-  send = <TOutput = unknown>(input: SendTurnPayload<TOutput>): Promise<void> => {
-    return this.#store.send(input);
+  respond = <TOutput = unknown>(
+    inputResponses: Parameters<ClientSession["respond"]>[0],
+    options?: RespondTurnOptions<TOutput>,
+  ): Promise<void> => {
+    return this.#store.send({ ...options, inputResponses });
+  };
+
+  send = <TOutput = unknown>(
+    message: string | UserContent,
+    options?: SendTurnOptions<TOutput>,
+  ): Promise<void> => {
+    return this.#store.send({ ...options, message });
   };
 
   stop = (): void => {

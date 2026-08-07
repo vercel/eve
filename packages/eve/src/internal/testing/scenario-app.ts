@@ -350,7 +350,8 @@ let cachedScenarioEveTarballPromise: Promise<string> | null = null;
  * `EVE_SCENARIO_EVE_TARBALL_PATH` env var. When the env var is missing
  * (e.g. a developer invokes `vitest` against a single scenario file
  * directly), this falls back to packing into a worker-local cache
- * directory, which is safe because only one worker is running.
+ * directory with lifecycle scripts disabled, so the fallback never mutates
+ * the shared workspace `dist/` even under parallel workers.
  */
 export async function ensureScenarioEveTarballPath(): Promise<string> {
   cachedScenarioEveTarballPromise ??= resolveOrPackScenarioEveTarball();
@@ -370,6 +371,14 @@ async function resolveOrPackScenarioEveTarball(): Promise<string> {
 async function packScenarioEveTarball(): Promise<string> {
   const cacheRoot = await resolveScenarioWorkerCacheDirectory();
   const tarballsRoot = join(cacheRoot, "tarballs");
+  const packageRoot = resolvePackageRoot();
+  const prebuiltEntryPath = join(packageRoot, "dist", "src", "index.js");
+
+  if (!(await isFilePresent(prebuiltEntryPath))) {
+    throw new Error(
+      `Scenario tests require a prebuilt eve package. Run "pnpm build" first. Missing: ${prebuiltEntryPath}`,
+    );
+  }
 
   await rm(tarballsRoot, {
     force: true,
@@ -379,10 +388,8 @@ async function packScenarioEveTarball(): Promise<string> {
     recursive: true,
   });
 
-  const packageRoot = resolvePackageRoot();
-
   await runPnpmCommand({
-    args: ["pack", "--pack-destination", tarballsRoot],
+    args: ["pack", "--config.ignore-scripts=true", "--pack-destination", tarballsRoot],
     cwd: packageRoot,
   });
 

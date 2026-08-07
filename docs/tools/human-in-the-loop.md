@@ -58,7 +58,7 @@ Gating a side effect on approval is also how you make non-idempotent work safe a
 
 ### Skipping approval for schedule-dispatched turns
 
-`session.auth.current` identifies the caller of this turn. Markdown schedules use the app principal (`authenticator: "app"`, `principalId: "eve:app"`, `principalType: "runtime"`) automatically. A `run` schedule must pass its `appAuth` to `receive(...)` for the child session to use that principal. Match all three fields to skip approval for automated turns while still prompting when a person calls the same tool:
+`session.auth.current` identifies the caller of this turn. Markdown schedules use the app principal (`authenticator: "app"`, `principalId: "eve:app"`, `principalType: "runtime"`) automatically. A `run` schedule must pass its `appAuth` to `send(...)` for the child session to use that principal. Match all three fields to skip approval for automated turns while still prompting when a person calls the same tool:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
@@ -102,6 +102,11 @@ Approvals and questions share one protocol:
 3. The turn parks at `session.waiting`, durably, for as long as it takes.
 4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. A follow-up whose text matches an option ID, option label, or numeric option index resolves automatically, including approval options such as `approve` and `deny`.
 
+Each request includes a `kind` discriminator: `tool-approval`, `question`, or
+`session-limit`. Clients should use `kind` to choose behavior and presentation;
+`toolName` and `requestId` identify the action and request but do not encode its
+semantics.
+
 The run picks back up exactly where it parked. Because the pause is durable, nothing is held in memory while it waits — the process can restart and the parked turn survives.
 
 For approval requests, unrelated follow-up text does not deny the tool call. eve keeps the approval pending and holds that text until the approval is answered, then replays it as the next message in the session.
@@ -110,7 +115,7 @@ See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for
 
 ## Answering from a client or channel
 
-Channels turn requests into native UI: the Slack adapter renders approvals as buttons and questions as select menus, and writes the user's choice back as the answer. You get this for free on every [channel](/docs/channels).
+Channels turn requests into native UI: the Slack adapter renders approvals as buttons and questions as select menus, and writes the user's choice back as the answer. You get this for free on every [channel](/docs/channels/overview).
 
 From your own frontend, read the pending request off the latest message and answer through the same session — see [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts) for the client-side reducer and `inputResponses` shape.
 
@@ -120,3 +125,4 @@ From your own frontend, read the pending request off the latest message and answ
 - [Default harness](/docs/concepts/default-harness): the built-in tools, including `ask_question`
 - [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming): the event and resume contract behind the pause
 - [Building a frontend](/docs/guides/frontend/overview): render and answer requests from your own UI
+- [Multi-tenant approvals](/docs/patterns/multi-tenant-approvals): resolve per-tenant approval policy for authored and connection tools

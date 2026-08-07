@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { integrationPath } from "@/lib/geistdocs/canonical";
 import { type Integration, protocolBadgeClassName, protocolLabel } from "@/lib/integrations/data";
 import { logos } from "@/lib/integrations/logos";
 
@@ -11,15 +12,17 @@ const typeLabel: Record<Integration["type"], string> = {
 
 interface IntegrationCardProps {
   integration: Integration;
+  onSelect?: () => void;
 }
 
-export const IntegrationCard = ({ integration }: IntegrationCardProps) => {
+export const IntegrationCard = ({ integration, onSelect }: IntegrationCardProps) => {
   const Logo = logos[integration.logo];
 
   return (
     <Link
       className="group flex flex-col gap-4 rounded-lg border bg-background-100 p-5 transition-colors hover:border-gray-400 hover:bg-gray-100"
-      href={`/integrations/${integration.slug}`}
+      href={integrationPath(integration.slug)}
+      onClick={onSelect}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background text-gray-1000">
@@ -45,9 +48,7 @@ export const IntegrationCard = ({ integration }: IntegrationCardProps) => {
         </div>
       </div>
       <div className="flex min-w-0 flex-col gap-1">
-        <h3 className="break-words font-medium text-base text-gray-1000 tracking-tight">
-          {integration.name}
-        </h3>
+        <h3 className="break-words text-gray-1000 text-heading-16">{integration.name}</h3>
         <p className="break-words text-gray-900 text-sm leading-relaxed">{integration.tagline}</p>
       </div>
     </Link>

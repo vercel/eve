@@ -95,6 +95,7 @@ describe("normalizeAgentDefinition", () => {
         limits: {
           maxInputTokensPerSession: 200_000,
           maxOutputTokensPerSession: 20_000,
+          sessionTimeoutMs: 86_400_000,
         },
       },
       FAILURE_MESSAGE,
@@ -103,6 +104,7 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      sessionTimeoutMs: 86_400_000,
     });
   });
 
@@ -113,6 +115,7 @@ describe("normalizeAgentDefinition", () => {
         limits: {
           maxInputTokensPerSession: false,
           maxOutputTokensPerSession: false,
+          sessionTimeoutMs: false,
         },
       },
       FAILURE_MESSAGE,
@@ -121,6 +124,7 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.limits).toEqual({
       maxInputTokensPerSession: false,
       maxOutputTokensPerSession: false,
+      sessionTimeoutMs: false,
     });
   });
 
@@ -157,7 +161,11 @@ describe("normalizeAgentDefinition", () => {
     ["maxOutputTokensPerSession", 1.5],
     ["maxOutputTokensPerSession", -1],
     ["maxOutputTokensPerSession", "20000"],
-  ])("rejects invalid session token limit %s=%j", (key, value) => {
+    ["sessionTimeoutMs", 0],
+    ["sessionTimeoutMs", 1.5],
+    ["sessionTimeoutMs", -1],
+    ["sessionTimeoutMs", "30d"],
+  ])("rejects invalid session runtime limit %s=%j", (key, value) => {
     expect(() =>
       normalizeAgentDefinition(
         {
@@ -229,6 +237,34 @@ describe("normalizeAgentDefinition", () => {
         FAILURE_MESSAGE,
       ),
     ).toThrow('"experimental.workflow.world" must be a non-empty package name');
+  });
+
+  it("accepts a boolean subagentPersistentSessions flag", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: {
+          subagentPersistentSessions: true,
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.subagentPersistentSessions).toBe(true);
+  });
+
+  it("rejects non-boolean subagentPersistentSessions values", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            subagentPersistentSessions: "yes",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"experimental.subagentPersistentSessions" must be a boolean.');
   });
 });
 

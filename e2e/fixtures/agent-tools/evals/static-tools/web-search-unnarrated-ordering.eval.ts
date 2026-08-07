@@ -2,6 +2,7 @@ import { defineEval } from "eve/evals";
 import { unNarratedWebSearchOrder, WEB_SEARCH_TOOL_NAME } from "./web-search-ordering";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Provider tools: un-narrated web searches preserve event order.",
   async test(t) {
     const turn = await t.send(

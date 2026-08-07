@@ -354,7 +354,10 @@ describe("ensureChannel", () => {
 
     const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
     const sourceChannel = await readFile(
-      new URL("../../../../../apps/templates/web-chat-next/agent/channels/eve.ts", import.meta.url),
+      new URL(
+        "../../../../../apps/docs/registry/channel/web/agent/channels/eve.ts",
+        import.meta.url,
+      ),
       "utf8",
     );
     // The template is LF; a Windows checkout may hand back the source app as
@@ -382,8 +385,9 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("preserveCompletedSessions: true");
-    expect(agentChatSource).toContain("session.cancel({ turnId })");
+    expect(agentChatSource).toContain(".attach(sessionId)");
+    expect(agentChatSource).toContain(".cancel({ turnId })");
+    expect(agentChatSource).toContain("onSessionChange(session)");
     expect(agentChatSource).toContain("cancellation.sentTurnId === turnId");
     expect(agentChatSource).not.toContain("onStop={agent.stop}");
   });
@@ -885,7 +889,7 @@ describe("scaffoldBaseProject", () => {
     expect(agentSource).not.toContain("modelOptions");
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).toContain('"eve": "^0.25.0"');
-    // Channels added later (`eve channels add slack`, possibly next to a
+    // Channels added later (`eve add channel/slack`, possibly next to a
     // running `eve dev`) import @vercel/connect; init ships it so a later
     // channel add never introduces a missing dependency.
     expect(packageJson).toContain('"@vercel/connect": "0.2.2"');
@@ -913,6 +917,10 @@ describe("scaffoldBaseProject", () => {
     expect(agentsMd).toContain("installed eve package docs");
     expect(agentsMd).toContain("node_modules/eve/docs/");
     expect(agentsMd).toContain("resolve the\ninstalled `eve` package location");
+    expect(agentsMd).toContain("`eve registry search <query>`");
+    expect(agentsMd).toContain("`eve registry list`");
+    expect(agentsMd).toContain("`eve registry view <item>`");
+    expect(agentsMd).toContain("`eve add <item>`");
     // `vercel deploy` uploads everything a .vercelignore doesn't exclude, and
     // the platform default-ignores only the .env.local variants — eve's dev
     // artifacts and a bare .env must be excluded here or a source deploy

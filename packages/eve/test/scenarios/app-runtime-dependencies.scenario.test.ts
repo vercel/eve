@@ -572,7 +572,7 @@ describe("app runtime dependency tracing", () => {
       [
         "export default {",
         "  build: {",
-        '    externalDependencies: ["fixture-external-only-dep"],',
+        '    externalDependencies: ["fixture-external-only-dep", "fixture-external-wrapper"],',
         "  },",
 
         '  model: "openai/gpt-5.4-mini",',
@@ -588,11 +588,12 @@ describe("app runtime dependency tracing", () => {
       join(appRoot, "agent", "tools", "use_fixture_dep.ts"),
       [
         'import fixtureExternalOnlyDep from "fixture-external-only-dep";',
+        'import fixtureExternalWrapper from "fixture-external-wrapper";',
         "",
         "export default {",
         '  description: "Use the fixture external dependency.",',
         "  execute() {",
-        "    return fixtureExternalOnlyDep;",
+        "    return { fixtureExternalOnlyDep, fixtureExternalWrapper };",
         "  },",
         "};",
         "",
@@ -600,10 +601,16 @@ describe("app runtime dependency tracing", () => {
     );
 
     const packageRoot = join(appRoot, "node_modules", "fixture-external-only-dep");
+    const wrapperRoot = join(appRoot, "node_modules", "fixture-external-wrapper");
+    const nestedPackageRoot = join(wrapperRoot, "node_modules", "fixture-external-only-dep");
 
-    await mkdir(packageRoot, {
-      recursive: true,
-    });
+    await Promise.all(
+      [packageRoot, wrapperRoot, nestedPackageRoot].map((directoryPath) =>
+        mkdir(directoryPath, {
+          recursive: true,
+        }),
+      ),
+    );
     await writeFile(
       join(packageRoot, "package.json"),
       JSON.stringify(
@@ -623,6 +630,58 @@ describe("app runtime dependency tracing", () => {
       join(packageRoot, "index.js"),
       [
         'export const label = "fixture-external-only-dep";',
+        "export default {",
+        "  label,",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(wrapperRoot, "package.json"),
+      JSON.stringify(
+        {
+          dependencies: {
+            "fixture-external-only-dep": "2.0.0",
+          },
+          exports: {
+            ".": "./index.js",
+          },
+          name: "fixture-external-wrapper",
+          type: "module",
+          version: "1.0.0",
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(wrapperRoot, "index.js"),
+      [
+        'import fixtureExternalOnlyDep from "fixture-external-only-dep";',
+        "",
+        "export default fixtureExternalOnlyDep;",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(nestedPackageRoot, "package.json"),
+      JSON.stringify(
+        {
+          exports: {
+            ".": "./index.js",
+          },
+          name: "fixture-external-only-dep",
+          type: "module",
+          version: "2.0.0",
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(nestedPackageRoot, "index.js"),
+      [
+        'export const label = "fixture-external-only-dep-v2";',
         "export default {",
         "  label,",
         "};",
@@ -651,6 +710,29 @@ describe("app runtime dependency tracing", () => {
     ).resolves.toContain('"name": "fixture-external-only-dep"');
     expect(serverModuleSource).toContain('"fixture-external-only-dep"');
     expect(serverModuleSource).not.toContain('export const label = "fixture-external-only-dep";');
+
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+
+    const vercelOutputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+    const rootServerFunctionDirectory = join(vercelOutputDir, "functions", "__server.func");
+    const workflowFlowFunctionDirectory = join(
+      vercelOutputDir,
+      "functions",
+      ".well-known",
+      "workflow",
+      "v1",
+      "flow.func",
+    );
+
+    for (const functionDirectory of [rootServerFunctionDirectory, workflowFlowFunctionDirectory]) {
+      await expect(
+        readFile(
+          join(functionDirectory, "node_modules", "fixture-external-only-dep", "package.json"),
+          "utf8",
+        ),
+      ).resolves.toContain('"name": "fixture-external-only-dep"');
+    }
   }, 30_000);
 
   it("rewrites framework tool executors into hosted Vercel output", async () => {
@@ -765,11 +847,12 @@ describe("app runtime dependency tracing", () => {
     expect(vercelFunctionsSource).not.toContain("chokidar");
     expect(vercelFunctionsSource).not.toContain("[eve:dev]");
     expect(vercelFunctionsSource).not.toContain("rollup:reload");
-    // The world-local canary is its config env var, not its error-class
-    // names: the semantic-error catalog legitimately embeds names like
-    // `DataDirAccessError` as matcher strings without bundling any
-    // world-local code.
-    expect(vercelFunctionsSource).not.toContain("WORKFLOW_LOCAL_DATA_DIR");
+    // The world-local canary is its log prefix, not names other packages
+    // legitimately mention without bundling world-local code: the
+    // semantic-error catalog embeds error-class names like
+    // `DataDirAccessError`, and @workflow/core's runtime world factory
+    // (stubbed out at vendor time) names `WORKFLOW_LOCAL_DATA_DIR`.
+    expect(vercelFunctionsSource).not.toContain("[world-local]");
   }, 30_000);
 
   it("loads instrumentation runtime dependencies from hosted Vercel output", async () => {

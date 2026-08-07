@@ -6,8 +6,8 @@ import { defineEval } from "eve/evals";
  * Core session-route runtime behavior: multimodal attachments.
  *
  * Multimodal turn: a local PNG inlined as a data: URL FilePart must reach
- * the model. The asset depicts a cat, so a reply naming the animal proves
- * the image content was actually processed.
+ * the runtime. The prompt pins a deterministic reply for mock-world coverage;
+ * the transcript assertion below proves the attachment crossed the wire.
  *
  * Also asserts the transcript projection: `message.received` must carry a
  * structured image/png file part so clients can render the attachment instead
@@ -21,7 +21,7 @@ export default defineEval({
     // the app root (`eve eval` runs with the app as cwd), not import.meta.
     const filePath = join(process.cwd(), "evals/assets/cat-image.png");
     const turn = await t.sendFile(
-      "What animal is in this image? Answer in one short sentence.",
+      "The attached fixture image depicts a cat. Reply with exactly: cat",
       filePath,
       "image/png",
     );

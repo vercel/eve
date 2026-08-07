@@ -12,9 +12,12 @@ The root session receives `agent` by default. The model calls it to delegate a t
 ```ts
 {
   message: string;       // everything the child needs; it does not see the parent's history
+  agentId?: string;      // only with experimental.subagentPersistentSessions: continue an existing child
   outputSchema?: object; // when set, the child runs in task mode and returns structured output
 }
 ```
+
+The `agentId` field exists only when the agent opts into [agent messaging](#agent-messaging); without the opt-in the schema is `{ message, outputSchema? }`.
 
 The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `Workflow`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. To run independent tasks in parallel, emit multiple `agent` calls in one response; eve runs the batch concurrently and returns every result before the root continues. Give parallel children non-overlapping write scopes.
 
@@ -47,17 +50,75 @@ export default defineAgent({
 
 `description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out.
 
+### Conditional availability
+
+To expose a declared subagent only for certain sessions or turns, export
+`defineDynamic` from that subagent's `agent.ts`. Return a `defineAgent`
+configuration to expose the subagent, or nil to omit it from the parent's tools.
+
+```ts title="agent/subagents/researcher/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineDynamic({
+  events: {
+    "session.started": (_event, ctx) =>
+      ctx.session.auth.current?.attributes.research === true
+        ? defineAgent({
+            description: "Investigate ambiguous questions before the parent responds.",
+            model: "anthropic/claude-opus-4.8",
+          })
+        : null,
+  },
+});
+```
+
+Resolvers run at `session.started` or `turn.started`; `step.started` is not
+supported for subagents. A nil result (`null` or `undefined`) removes the
+subagent's description and tool definition from the model-visible surface.
+The subagent's filesystem manifest is always compiled; a non-nil result injects
+the returned agent configuration when the child runs.
+
+Packaging controls must be available before the resolver runs. Put them on
+`defineDynamic`, rather than the `defineAgent` returned by an event handler:
+
+```ts
+export default defineDynamic({
+  build: { externalDependencies: ["native-package"] },
+  events: {
+    "session.started": () =>
+      defineAgent({
+        description: "Use a native package when handling delegated work.",
+        model: "anthropic/claude-opus-4.8",
+      }),
+  },
+});
+```
+
+The compiler applies `build.externalDependencies` while bundling every authored
+module in that dynamic subagent.
+See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-subagents) for
+scope precedence, failure behavior, and the dispatch-time guard.
+
 Minimum files:
 
 ```text
 agent/subagents/researcher/
-├── agent.ts            # required (must export a description)
+├── agent.ts            # required
 ├── instructions.md     # or instructions.ts, optional
 ├── tools/              # optional, its own tools
+├── extensions/         # optional, mounted only into this subagent
 ├── skills/             # optional, its own skills
 ├── sandbox/            # optional, its own sandbox + workspace seed
 └── subagents/          # optional, nested subagents
 ```
+
+Extensions mounted under `subagents/<id>/extensions/` contribute only to that subagent. They use the same file and directory mount forms, namespacing, configuration, and overrides as root-agent extensions:
+
+```ts title="agent/subagents/researcher/extensions/search.ts"
+export { default } from "@acme/research-search";
+```
+
+The root agent does not receive the extension's tools, skills, instructions, connections, or hooks.
 
 `schedules/` is not supported inside a declared subagent. Schedules are root-only.
 
@@ -73,6 +134,7 @@ A declared subagent inherits nothing from the root's authored slots. Discovery t
 | Skills       | Inherited                     | Own `skills/`                          |
 | Sandbox      | Shared with parent            | Own `sandbox/`, else framework default |
 | Hooks        | Inherited                     | Own `hooks/`                           |
+| Extensions   | Inherited contributions       | Own `extensions/`                      |
 | State        | Fresh                         | Fresh                                  |
 | Channels     | Root-only                     | Root-only                              |
 | Schedules    | Root-only                     | Root-only                              |
@@ -85,7 +147,7 @@ The root built-in `agent` tool is the exception. Its children share the root's s
 
 ## What the parent sees
 
-eve lowers every subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result.
+eve lowers every subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape — plus `agentId` when the agent opts into [agent messaging](#agent-messaging). The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result; this works the same with or without agent messaging.
 
 Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
@@ -96,11 +158,12 @@ A declared subagent's tool name is the bare path-derived name, with no prefix. `
 ```ts
 {
   message: string;       // all context the child needs; it never sees the parent's history
+  agentId?: string;      // only with experimental.subagentPersistentSessions: continue an existing child
   outputSchema?: object; // when set, the child runs in task mode and returns structured output
 }
 ```
 
-Because the name lives in the same runtime tool namespace as authored tools, a subagent named `researcher` collides with a tool named `researcher`. eve rejects the build rather than picking a winner, so keep subagent directory names distinct from tool names.
+Because the name lives in the same runtime tool namespace as authored tools, a subagent named `researcher` collides with a tool named `researcher`. eve rejects static collisions at build time and active dynamic collisions at runtime rather than picking a winner, so keep subagent directory names distinct from tool names.
 
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
@@ -109,6 +172,29 @@ Each delegated subagent spins up its own child session and stream. The parent st
 Cancelling a parent turn also requests cancellation of every active child it started, recursively through nested and remote subagents. Each affected session emits its own `turn.cancelled` → `session.waiting` boundary; the cancelled parent does not synthesize tool results or emit `subagent.completed`. A child that already completed or parked has no active turn and is a benign no-op.
 
 Subagent model calls automatically retry classified transient provider failures, including overload errors delivered after a stream starts. eve makes at most three fresh model-call attempts, repeating only the current uncommitted call so completed earlier steps, tool results, and sandbox work remain available to the child. Other recoverable task errors fall back to Workflow's durable step retry from the last committed session snapshot. Exhausting the transient model-call attempts or the dedicated empty-response reissue returns one failed task result instead of stacking both retry budgets; terminal errors fail immediately.
+
+## Agent messaging
+
+Agent messaging is experimental and off by default. Opt in per agent in `agent.ts`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  experimental: {
+    subagentPersistentSessions: true,
+  },
+  model: "anthropic/claude-sonnet-4.5",
+});
+```
+
+Without the opt-in, delegated children run as one-shot tasks: they answer once and terminate, and the subagent tool schema carries no `agentId` field.
+
+With it enabled, a child parks after answering instead of terminating, keeping its session and conversation history alive. A failed child turn can also leave the child parked — its latest status shows the error and the parent may message it again. Pass a parked child's `agentId` to the same subagent tool with a new `message` to continue that session. Omitting `agentId` (or passing an empty string or `null`) always starts a new child, and an `agentId` that matches no known agent falls back to starting a new child rather than failing. Passing a known `agentId` through a different subagent tool fails with `AGENT_MISMATCH`, and messaging a child that is still starting or working on its previous request fails with `AGENT_BUSY` — wait for its result before continuing it.
+
+Whenever the set of parked (resumable) children changes, eve appends a framework-injected note to the conversation — labeled `[Agents]` and carrying an `<agents>` block — listing each child's `agentId`, name, and latest status. The static system prompt tells the model the note is injected by eve, not written by the user. The note is appended only when the listing changes (an append-only design that preserves the provider prompt cache), the most recent note is authoritative, and children that are starting or running do not appear until they park again.
+
+The parent holds agent handles only for its session lifetime. When the parent session ends, eve terminates its local children. Remote children are not terminated on parent shutdown — that is a known gap: a parked remote child stays alive on its own deployment until that deployment's own lifecycle ends it. For [remote agents](./guides/remote-agents), both deployments must run the same eve version to use agent messaging.
 
 ## When to split
 

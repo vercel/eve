@@ -24,7 +24,7 @@ import { setPendingInputBatch } from "#harness/input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
 import { SessionLimitDeclinedError } from "#harness/turn-cancellation.js";
 import {
-  extendSessionTokenBudget,
+  bumpSessionRuntimeTokenLimits,
   getSessionTokenLimitViolation,
   getSessionTokenUsage,
   type SessionTokenLimitViolation,
@@ -43,8 +43,9 @@ interface SessionLimitPolicyInput {
 /**
  * Acts on a resolved session-limit continuation answer.
  *
- * Granted: resets the token budget windows via
- * {@link extendSessionTokenBudget} and lets the step continue transparently.
+ * Granted: bumps the runtime token limits via
+ * {@link bumpSessionRuntimeTokenLimits} and lets the step continue
+ * transparently.
  * Declined: a user decision, not an error — the decline cancels the
  * in-flight turn tree through the standard cancellation path, settling as
  * `turn.cancelled` → `session.waiting` with no failure surfaced anywhere.
@@ -66,7 +67,7 @@ export async function applySessionLimitContinuation(
   }
 
   if (input.limitContinuation.granted) {
-    return { result: null, session: extendSessionTokenBudget(input.session) };
+    return { result: null, session: bumpSessionRuntimeTokenLimits(input.session) };
   }
 
   // A session parked on the continuation prompt always satisfies the
@@ -108,7 +109,11 @@ export async function enforceSessionTokenLimit(
   }
 
   const { emit } = input;
+  // A zero limit is an exhausted quota inherited by a delegated task.
+  // Approving would bump the runtime limit by the configured limit -- zero --
+  // so fail the child and let its parent reach the resumable limit gate.
   if (
+    violation.limit > 0 &&
     emit !== undefined &&
     (input.config.mode === "conversation" || input.config.capabilities?.requestInput === true)
   ) {
@@ -132,10 +137,8 @@ async function parkOnSessionTokenLimit(input: {
   readonly session: HarnessSession;
   readonly violation: SessionTokenLimitViolation;
 }): Promise<StepResult> {
-  const usage = getSessionTokenUsage(input.session);
   const request = createSessionLimitContinuationRequest({
     sessionId: input.session.sessionId,
-    totalUsedTokens: input.violation.kind === "input" ? usage.inputTokens : usage.outputTokens,
     violation: input.violation,
   });
   let emissionState = input.emissionState;
@@ -161,12 +164,7 @@ async function parkOnSessionTokenLimit(input: {
   );
 
   if (input.config.mode === "conversation") {
-    emissionState = await emitTurnEpilogue(
-      input.emit,
-      emissionState,
-      input.config.mode,
-      parkedSession.continuationToken,
-    );
+    emissionState = await emitTurnEpilogue(input.emit, emissionState, input.config.mode);
   }
 
   return {

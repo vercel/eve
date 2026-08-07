@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 
+import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
@@ -15,7 +17,8 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
+import { isEventId } from "#protocol/event-id.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { AuthorizationDefinition, TokenResult } from "#runtime/connections/types.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
@@ -24,7 +27,8 @@ import { toInputSchema } from "#shared/tool-schema.js";
 function buildSerializedContext(overrides: {
   auth?: Record<string, unknown>;
   channelKind: string;
-  continuationToken: string;
+  channelState?: Record<string, unknown>;
+  continuationToken?: string;
   mode: string;
   parent?: {
     readonly callId: string;
@@ -39,10 +43,12 @@ function buildSerializedContext(overrides: {
   const context: Record<string, unknown> = {
     "eve.auth": overrides.auth ?? null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
-    "eve.channel": { kind: overrides.channelKind, state: {} },
-    "eve.continuationToken": overrides.continuationToken,
+    "eve.channel": { kind: overrides.channelKind, state: overrides.channelState ?? {} },
     "eve.mode": overrides.mode,
   };
+  if (overrides.continuationToken !== undefined) {
+    context["eve.continuationToken"] = overrides.continuationToken;
+  }
   if (overrides.parent !== undefined) {
     context["eve.parentSession"] = overrides.parent;
   }
@@ -204,8 +210,8 @@ describe("workflowEntry integration", () => {
           },
         );
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up after auth" }],
+          kind: "send",
+          payload: { message: "follow up after auth" },
         });
 
         const followupTurn = await stream.nextUntil(
@@ -256,7 +262,10 @@ describe("workflowEntry integration", () => {
         const firstTurn = await stream.nextTurn();
 
         expect(hook.token).toBe(continuationToken);
-        expect(firstTurn.at(-1)?.type).toBe("session.waiting");
+        expect(firstTurn.at(-1)).toMatchObject({
+          data: { continuationToken: "workflow-entry-conversation" },
+          type: "session.waiting",
+        });
         expect(firstTurn.every((event) => typeof event.meta?.at === "string")).toBe(true);
         expect(
           firstTurn.some(
@@ -270,12 +279,11 @@ describe("workflowEntry integration", () => {
           compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         });
         await expect(
-          workflowRuntime.deliver({
-            auth: null,
+          workflowRuntime.dispatchContinuation({
+            command: { auth: null, kind: "send", payload: { message: "follow up" } },
             continuationToken,
-            payload: { message: "follow up" },
           }),
-        ).resolves.toEqual({ sessionId: run.runId });
+        ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
 
         const secondTurn = await stream.nextTurn();
 
@@ -291,6 +299,235 @@ describe("workflowEntry integration", () => {
       } finally {
         stream.dispose();
         await run.cancel();
+      }
+    });
+  });
+
+  it("publishes the session ID as the waiting address for an ID-only session", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-id-only" } });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "hello there" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        expect((await stream.nextTurn()).at(-1)).toMatchObject({
+          data: { continuationToken: run.runId },
+          type: "session.waiting",
+        });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("stamps every stream event with an id that survives a rewind", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-event-ids" } });
+    const continuationToken = "http:workflow-entry-event-ids";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "identify these events" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      let firstTurn: readonly MessageStreamEvent[];
+      try {
+        firstTurn = await stream.nextTurn();
+      } finally {
+        stream.dispose();
+      }
+
+      try {
+        expect(firstTurn.length).toBeGreaterThan(1);
+        // No two events share an id, including appends that share
+        // `(turnId, sequence, stepIndex)`.
+        expect(firstTurn.every((event) => isEventId(event.meta.id))).toBe(true);
+        expect(new Set(firstTurn.map((event) => event.meta.id)).size).toBe(firstTurn.length);
+
+        // No stream-order assertion on the ids: they sort in mint order per
+        // process, but a turn's events are appended by separate steps whose
+        // writes can interleave behind minting (see #protocol/event-id.js),
+        // so append order is not contractually sorted.
+        const ids = firstTurn.map((event) => event.meta.id);
+
+        // Re-reading the durable stream returns the same ids.
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        const replayed = await workflowRuntime.getEventStream(run.runId, { startIndex: 0 });
+        const replayedIds: string[] = [];
+        const reader = replayed.getReader();
+        try {
+          while (replayedIds.length < firstTurn.length) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            replayedIds.push(value.meta.id);
+          }
+        } finally {
+          await reader.cancel();
+        }
+
+        expect(replayedIds).toEqual(ids);
+      } finally {
+        await run.cancel();
+      }
+    });
+  });
+
+  it("completes an expired conversation and lets its channel start a fresh session", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-timeout" } });
+    const continuationToken = "http:workflow-entry-timeout";
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "hello there" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+          sessionTimeoutMs: 25,
+        },
+      ]);
+      const stream = captureEvents(run);
+      let replacementSessionId: string | undefined;
+
+      try {
+        const events = await stream.nextUntil(
+          "session completion",
+          (event) => event.type === "session.completed",
+        );
+
+        expect(events.some((event) => event.type === "session.waiting")).toBe(true);
+        expect(events.at(-1)?.type).toBe("session.completed");
+        expect(isEventId(events.at(-1)?.meta.id ?? "")).toBe(true);
+        expect(filterEventsByType(events, "session.failed")).toHaveLength(0);
+        await expect(run.returnValue).resolves.toEqual({ output: "" });
+
+        const replacement = await createChannelAddress({
+          adapter: { kind: "http" },
+          channelName: "http",
+          continuationToken: "workflow-entry-timeout",
+          runtime: workflowRuntime,
+        }).send("start fresh", {
+          auth: null,
+        });
+        replacementSessionId = replacement.id;
+
+        expect(replacement.id).not.toBe(run.runId);
+        await waitForHook(
+          { runId: replacement.id },
+          {
+            token: continuationToken,
+          },
+        );
+      } finally {
+        stream.dispose();
+        if (replacementSessionId !== undefined) {
+          await workflowRuntime.dispatchSession({
+            command: { kind: "reset", reason: "Test cleanup" },
+            sessionId: replacementSessionId,
+          });
+        }
+      }
+    });
+  });
+
+  it("notifies each delegated conversation turn and remains available via agentId", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-delegated-conversation" } });
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+    const childContinuationToken = "subagent:parent-session:call-1";
+
+    await runtime.run(async () => {
+      const child = await start(workflowEntry, [
+        {
+          input: { message: "delegated first turn" },
+          serializedContext: buildSerializedContext({
+            channelKind: "subagent",
+            channelState: {
+              callId: "call-1",
+              parentContinuationToken: childContinuationToken,
+              parentSessionId: "parent-session",
+              subagentName: "researcher",
+            },
+            continuationToken: childContinuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(child);
+
+      try {
+        const firstTurn = await withTimeout(stream.nextTurn(), "delegated first turn");
+        expect(firstTurn.at(-1)?.type).toBe("session.waiting");
+        await expect(waitForRuntimeActionResult(child.runId, "call-1")).resolves.toMatchObject({
+          kind: "runtime-action-result",
+          results: [
+            {
+              callId: "call-1",
+              kind: "subagent-result",
+              output: expect.stringContaining("delegated first turn"),
+              subagentName: "researcher",
+            },
+          ],
+        });
+
+        await expect(
+          workflowRuntime.dispatchSession({
+            command: {
+              caller: {
+                callId: "call-2",
+                replyTo: { kind: "hook", token: childContinuationToken },
+                subagentName: "researcher",
+              },
+              kind: "send",
+              payload: { message: "delegated follow-up turn" },
+            },
+            sessionId: child.runId,
+          }),
+        ).resolves.toEqual({
+          sessionId: child.runId,
+          status: "accepted",
+        });
+
+        const secondTurn = await withTimeout(stream.nextTurn(), "delegated follow-up turn");
+        expect(secondTurn.at(-1)?.type).toBe("session.waiting");
+        await expect(waitForRuntimeActionResult(child.runId, "call-2")).resolves.toMatchObject({
+          kind: "runtime-action-result",
+          results: [
+            {
+              callId: "call-2",
+              kind: "subagent-result",
+              output: expect.stringContaining("delegated follow-up turn"),
+              subagentName: "researcher",
+            },
+          ],
+        });
+      } finally {
+        stream.dispose();
+        await child.cancel();
       }
     });
   });
@@ -342,8 +579,8 @@ describe("workflowEntry integration", () => {
         );
 
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "owner follow up" }],
+          kind: "send",
+          payload: { message: "owner follow up" },
         });
         const ownerFollowUp = await ownerStream.nextTurn();
 
@@ -407,8 +644,8 @@ describe("workflowEntry integration", () => {
         expect(firstTurn.at(-1)?.type).toBe("session.waiting");
 
         await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up without structured output" }],
+          kind: "send",
+          payload: { message: "follow up without structured output" },
         });
 
         const secondTurn = await stream.nextTurn();
@@ -586,8 +823,8 @@ interface CapturedEventStream {
   dispose(): void;
   nextUntil(
     label: string,
-    predicate: (event: HandleMessageStreamEvent) => boolean,
-  ): Promise<HandleMessageStreamEvent[]>;
+    predicate: (event: MessageStreamEvent) => boolean,
+  ): Promise<MessageStreamEvent[]>;
 }
 
 function captureEvents(run: Parameters<typeof captureTurnEvents>[0]): CapturedEventStream {
@@ -618,9 +855,9 @@ async function readUntil(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   decoder: InstanceType<typeof TextDecoder>,
   initialBuffer: string,
-  predicate: (event: HandleMessageStreamEvent) => boolean,
-): Promise<{ buffer: string; events: HandleMessageStreamEvent[] }> {
-  const events: HandleMessageStreamEvent[] = [];
+  predicate: (event: MessageStreamEvent) => boolean,
+): Promise<{ buffer: string; events: MessageStreamEvent[] }> {
+  const events: MessageStreamEvent[] = [];
   let buffer = initialBuffer;
 
   while (true) {
@@ -644,7 +881,7 @@ async function readUntil(
         continue;
       }
 
-      const event = JSON.parse(line) as HandleMessageStreamEvent;
+      const event = JSON.parse(line) as MessageStreamEvent;
       events.push(event);
 
       if (predicate(event)) {
@@ -670,4 +907,56 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
       clearTimeout(timeout);
     }
   }
+}
+
+async function waitForRuntimeActionResult(runId: string, callId: string): Promise<unknown> {
+  const world = await getWorld();
+  const deadline = Date.now() + 10_000;
+  let receivedPayloads: unknown[] = [];
+
+  while (Date.now() < deadline) {
+    const events = await world.events.list({
+      pagination: { limit: 1000 },
+      resolveData: "all",
+      runId,
+    });
+    receivedPayloads = [];
+
+    for (const event of events.data) {
+      if (event.eventType === "hook_received") {
+        const payload = await hydrateWorkflowArguments(event.eventData.payload, runId, undefined);
+        receivedPayloads.push(payload);
+        if (hasSubagentResult(payload, callId)) {
+          return payload;
+        }
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(
+    `Timed out waiting for delegated result "${callId}". Received: ${JSON.stringify(receivedPayloads)}`,
+  );
+}
+
+function hasSubagentResult(value: unknown, callId: string): boolean {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("kind" in value) ||
+    value.kind !== "runtime-action-result" ||
+    !("results" in value) ||
+    !Array.isArray(value.results)
+  ) {
+    return false;
+  }
+
+  return value.results.some(
+    (result) =>
+      typeof result === "object" &&
+      result !== null &&
+      "callId" in result &&
+      result.callId === callId,
+  );
 }

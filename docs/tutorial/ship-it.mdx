@@ -7,10 +7,10 @@ The analytics assistant runs fine in the TUI. Now ship it for real, as a web das
 
 ## Add the Web Chat app
 
-Step 1 scaffolded the agent without a web frontend. Add one now with `eve channels add`, run from the `analytics-assistant/` directory:
+Step 1 scaffolded the agent without a web frontend. Add one now with `eve add channel/web`, run from the `analytics-assistant/` directory:
 
 ```bash
-npx eve channels add web
+npx eve add channel/web
 ```
 
 This adds a Next.js app (`next.config.ts`, `app/page.tsx`, `app/_components/`) wired to the existing eve channel, plus the chat UI components and their dependencies. Run `npm install` afterward to install the added packages. The generated `next.config.ts` wraps your config with `withEve`, which wires the eve routes automatically:
@@ -43,7 +43,7 @@ export function AgentChat() {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
         const message = String(data.get("q") ?? "").trim();
-        if (message) void agent.send({ message });
+        if (message) void agent.send(message);
       }}
     >
       {agent.data.messages.map((message) => (

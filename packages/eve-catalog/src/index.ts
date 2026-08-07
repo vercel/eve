@@ -81,12 +81,6 @@ export function connectionProtocols(connection: ConnectionIdentity): ConnectionP
  * The canonical set of eve integrations. Order is display order. Each entry
  * carries only shared identity; the scaffolder and docs overlay their own
  * surface-specific data keyed by {@link IntegrationEntry.slug}.
- *
- * `surfaces.scaffoldable` reflects what eve's interactive setup flow can
- * provision and scaffold today: Slack and Web Chat for channels, plus its
- * curated connections. Registry installation is independent of this flag.
- * The remaining channels are runtime modules configured by hand, so they
- * appear in the gallery but not the setup picker.
  */
 export const INTEGRATIONS: readonly IntegrationEntry[] = [
   {
@@ -128,14 +122,16 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "github",
     name: "GitHub",
     kind: "channel",
-    tagline: "Drive your agent from issues, pull requests, and comments.",
+    tagline:
+      "Drive your agent from issues, pull requests, and comments, with guided Connect setup.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
     slug: "linear-agent",
     name: "Linear Agent",
     kind: "channel",
-    tagline: "Delegate Linear issues and comments to your agent through Linear's Agent Sessions.",
+    tagline:
+      "Delegate Linear issues and comments through Agent Sessions, with guided Connect setup.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
@@ -223,10 +219,10 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
-    slug: "chat-sdk-photon",
+    slug: "photon",
     name: "Photon",
     kind: "channel",
-    tagline: "Cloud, self-hosted, and local iMessage messaging through Photon.",
+    tagline: "iMessage through Photon, with guided project and phone setup.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
@@ -305,6 +301,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Upstash AgentKit",
     kind: "extension",
     tagline: "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "hindsight",
+    name: "Hindsight",
+    kind: "extension",
+    tagline: "Recall relevant context before every turn and retain each exchange automatically.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
@@ -557,6 +560,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "natural",
+    name: "Natural",
+    kind: "connection",
+    tagline: "Send, request, and manage payments with Natural.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Natural: agentic payments — send and request payments, check balances, and move funds.",
+      mcp: { url: "https://mcp.natural.com/mcp" },
+    },
+  },
+  {
     slug: "netlify",
     name: "Netlify",
     kind: "connection",
@@ -689,6 +704,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "tinybird",
+    name: "Tinybird",
+    kind: "connection",
+    tagline: "Query pipes and data sources in your Tinybird Workspace.",
+    surfaces: { scaffoldable: false, gallery: true },
+    connection: {
+      description:
+        "Tinybird: query pipes and data sources, and run SQL. A token grants one Workspace, so add a connection per Workspace.",
+      mcp: { url: "https://mcp.tinybird.co" },
+    },
+  },
+  {
     slug: "todoist",
     name: "Todoist",
     kind: "connection",
@@ -751,6 +778,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Braintrust",
     kind: "instrumentation",
     tagline: "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
+    slug: "posthog-instrumentation",
+    name: "PostHog",
+    kind: "instrumentation",
+    tagline: "Send agent traces and generations to PostHog AI Observability.",
     surfaces: { scaffoldable: false, gallery: true },
   },
   {

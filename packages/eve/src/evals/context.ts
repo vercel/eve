@@ -1,4 +1,3 @@
-import type { SendTurnInput } from "#client/types.js";
 import { EvalSessionManager } from "#evals/session.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createScopedAssertions } from "#evals/assertions/scoped.js";
@@ -6,6 +5,7 @@ import { buildJudgeContext } from "#evals/judge.js";
 import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 import type {
   Assertion,
+  AssertionEvaluation,
   AssertionHandle,
   EveEvalContext,
   EveEvalJudgeConfig,
@@ -55,15 +55,15 @@ export function createEvalContext(deps: {
     },
     cancel: () => primary().cancel(),
     requireInputRequest: (filter) => primary().requireInputRequest(filter),
-    respond: (...responses) => primary().respond(...responses),
+    respond: (responses, options) => primary().respond(responses, options),
     respondAll: (optionId) => primary().respondAll(optionId),
-    send: (input) => {
-      lastPrompt = promptText(input);
-      return primary().send(input);
+    send: (message, options) => {
+      lastPrompt = typeof message === "string" ? message : "";
+      return primary().send(message, options);
     },
-    start: (input) => {
-      lastPrompt = promptText(input);
-      return primary().start(input);
+    start: (message, options) => {
+      lastPrompt = message;
+      return primary().start(message, options);
     },
     sendFile: (text, filePath, mediaType) => {
       lastPrompt = text;
@@ -107,9 +107,7 @@ async function requireCheck<T>(
   const passed = await collector.recordRequirement({
     name: gated.name,
     threshold: gated.threshold,
-    score: async () => {
-      return { score: await gated.score(value) };
-    },
+    score: () => evaluateAssertion(gated, value),
   });
   if (!passed) throw new EvalRequirementFailed();
   return value;
@@ -124,14 +122,18 @@ function recordCheck(
     name: assertion.name,
     severity: assertion.severity,
     threshold: assertion.threshold,
-    score: async () => ({ score: await assertion.score(value) }),
+    score: () => evaluateAssertion(assertion, value),
   });
 }
 
-function promptText(input: SendTurnInput): string {
-  if (typeof input === "string") return input;
-  const message = (input as { readonly message?: unknown }).message;
-  return typeof message === "string" ? message : "";
+async function evaluateAssertion(
+  assertion: Assertion,
+  value: unknown,
+): Promise<AssertionEvaluation> {
+  if (assertion.evaluate !== undefined) {
+    return await assertion.evaluate(value);
+  }
+  return { score: await assertion.score(value) };
 }
 
 function sleep(ms = 1_000, signal?: AbortSignal): Promise<void> {

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { expectScheduleRun, SCHEDULE_ADAPTER_KIND, ScheduleDispatcher } from "#channel/schedule.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer } from "#context/container.js";
@@ -57,36 +57,32 @@ interface CapturedRun {
 
 function createCapturingRuntime(captured: CapturedRun[]): Runtime {
   return {
-    async cancelTurn() {
-      throw new Error("cancelTurn should not be called in this scenario");
-    },
-    async resolveSession() {
-      throw new Error("resolveSession should not be called in this scenario");
-    },
-    async run(input) {
+    async createSession(input) {
       captured.push({
         adapter: input.adapter,
         input: input.input as { message: string },
       });
 
       const handle: RunHandle = {
-        continuationToken: "scenario-token",
-        events: new ReadableStream<HandleMessageStreamEvent>(),
+        events: new ReadableStream<MessageStreamEvent>(),
         sessionId: "scenario-session",
       };
       return handle;
     },
-    async deliver() {
-      throw new Error("deliver should not be called in this scenario");
+    async dispatchContinuation() {
+      throw new Error("dispatchContinuation should not be called in this scenario");
+    },
+    async dispatchSession() {
+      throw new Error("dispatchSession should not be called in this scenario");
     },
     async getEventStream() {
-      return new ReadableStream<HandleMessageStreamEvent>();
+      return new ReadableStream<MessageStreamEvent>();
     },
     async getStreamTailIndex() {
       return -1;
     },
-    async terminateSession() {
-      throw new Error("terminateSession should not be called in this scenario");
+    async resolveContinuation() {
+      throw new Error("resolveContinuation should not be called in this scenario");
     },
   };
 }

@@ -5,7 +5,6 @@ import { join } from "node:path";
 import type { CompileMetadata } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
-import { getWorldImport } from "@workflow/utils";
 import { stringifyEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
   resolvePackageCompiledFilePath,
@@ -15,6 +14,7 @@ import { buildPackageUserAgent } from "#internal/user-agent.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
+import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
 
 export type BuiltInWorkflowWorldTarget = "local" | "vercel";
 
@@ -313,7 +313,7 @@ export function createWorkflowWorldPluginSource(input: {
   defaultWorld: BuiltInWorkflowWorldTarget;
 }): string {
   const targetWorld = input.configuredWorld ?? input.defaultWorld;
-  const packageName = getWorldImport({ WORKFLOW_TARGET_WORLD: targetWorld });
+  const packageName = resolveWorkflowWorldImport(targetWorld);
   const wiring = resolveWorkflowWorldWiring(packageName);
   const workflowRuntimeImportSpecifier = resolvePackageCompiledFilePath(
     "src/compiled/@workflow/core/runtime.js",

@@ -80,15 +80,21 @@ async function hydrateCompiledModuleMapFromManifest(
       })),
   ];
 
-  const scopeIndex: ExtensionScopeIndex = {
-    byMountNamespace: new Map(
-      manifest.extensionMounts.map((mount) => [mount.namespace, mount.packageNamespace]),
-    ),
-    byMountSourceId: new Map(
-      manifest.extensionMounts.map((mount) => [mount.mountSourceId, mount.packageNamespace]),
-    ),
-  };
   for (const nodeManifest of nodeManifests) {
+    const scopeIndex: ExtensionScopeIndex = {
+      byMountNamespace: new Map(
+        nodeManifest.manifest.extensionMounts.map((mount) => [
+          mount.namespace,
+          mount.packageNamespace,
+        ]),
+      ),
+      byMountSourceId: new Map(
+        nodeManifest.manifest.extensionMounts.map((mount) => [
+          mount.mountSourceId,
+          mount.packageNamespace,
+        ]),
+      ),
+    };
     nodes[nodeManifest.nodeId] = {
       modules: await hydrateCompiledNodeScope({
         agentRoot: nodeManifest.agentRoot,

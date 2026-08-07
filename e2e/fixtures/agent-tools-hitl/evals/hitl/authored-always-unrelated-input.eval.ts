@@ -5,6 +5,7 @@ const TOOL_NAME = "gate";
 
 /** Regression reproduction for https://github.com/vercel/eve/issues/533. */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "HITL repro (#533): unrelated input does not replay an unresolved authored tool call.",
   async test(t) {
@@ -24,10 +25,12 @@ export default defineEval({
     unrelated.notEvent("step.started");
     unrelated.event("session.waiting", { count: 1 });
 
-    const approved = await t.respond({
-      optionId: "approve",
-      requestId: approval.requestId,
-    });
+    const approved = await t.respond([
+      {
+        optionId: "approve",
+        requestId: approval.requestId,
+      },
+    ]);
 
     approved.expectOk();
     approved.event("action.result", {

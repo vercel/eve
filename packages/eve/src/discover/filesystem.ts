@@ -21,6 +21,7 @@ export const PROJECT_MARKER_FILE_NAMES = ["package.json", "vercel.json"] as cons
 
 const PROJECT_MARKER_FILE_NAME_SET = new Set<string>(PROJECT_MARKER_FILE_NAMES);
 const GENERATED_AGENT_DIRECTORY_NAMES = new Set<string>([
+  ".devtools",
   ".eve",
   ".next",
   ".output",
@@ -62,6 +63,7 @@ export type AgentRootEntryKind =
 export type LocalSubagentEntryKind =
   | "agent-config-module"
   | "connections-directory"
+  | "extensions-directory"
   | "hooks-directory"
   | "ignored-directory"
   | "instructions-directory"
@@ -243,6 +245,10 @@ export function classifyLocalSubagentEntry(
 
     if (name === "connections") {
       return "connections-directory";
+    }
+
+    if (name === "extensions") {
+      return "extensions-directory";
     }
 
     if (name === "hooks") {

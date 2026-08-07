@@ -4,10 +4,10 @@ import { satisfies } from "eve/evals/expect";
 import { postChannel } from "./shared";
 
 /**
- * Custom-channel eval for cross-channel `args.receive` handoff.
+ * Custom-channel eval for cross-channel `ctx.to(...).send(...)` handoff.
  *
  * The `/webhook` route does not start a session itself; it hands the
- * message to the target channel via `args.receive` and returns the new
+ * message to the target channel via `ctx.to(...).send(...)` and returns the new
  * session id, which we attach to and drive to a turn boundary.
  */
 export default defineEval({

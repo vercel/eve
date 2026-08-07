@@ -85,6 +85,7 @@ function request(): InputRequest {
   return {
     action: { callId: "TC", input: {}, kind: "tool-call", toolName: "deploy" },
     display: "confirmation",
+    kind: "tool-approval",
     options: [
       { id: "approve", label: "Approve", style: "primary" },
       { id: "deny", label: "Deny", style: "danger" },

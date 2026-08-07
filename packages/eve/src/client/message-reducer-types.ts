@@ -1,4 +1,4 @@
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { AuthorizationOutcome } from "#protocol/message.js";
 
 /**
@@ -125,6 +125,8 @@ export type EveAuthorizationPart = {
  * `"output-available"`, `"output-error"` (`errorText` set), or `"output-denied"`
  * (`approval.approved` is `false`). Which of `input`, `output`, `errorText`, and
  * `approval` are present depends on `state`, so narrow on `state` before reading them.
+ * Preliminary generator output uses `"output-available"` with `partial: true`;
+ * the terminal tool result clears that flag.
  * `toolName` and `toolMetadata.eve` ({@link EveMessageToolMetadata}) record call identity.
  */
 export type EveDynamicToolPart = {
@@ -182,6 +184,7 @@ export type EveDynamicToolPart = {
       readonly errorText?: never;
       readonly input: unknown;
       readonly output: unknown;
+      readonly partial?: true;
       readonly state: "output-available";
     }
   | {
@@ -231,12 +234,14 @@ export interface EveMessageToolMetadata {
  * is the question, `display` selects the control (`"confirmation"`, `"select"`,
  * or `"text"`), `options` lists selectable choices (each with a `label` and
  * optional `style`), and `allowFreeform` permits a typed response alongside the
- * options. `requestId` is the stable identifier the client returns in the
- * responding {@link InputResponse}.
+ * options. `kind` identifies the framework-owned request source. `requestId`
+ * is the stable identifier the client returns in the responding
+ * {@link InputResponse}.
  */
 export interface EveMessageInputRequest {
   readonly allowFreeform?: boolean;
   readonly display?: "confirmation" | "select" | "text";
+  readonly kind: InputRequest["kind"];
   readonly options?: readonly {
     readonly description?: string;
     readonly id: string;

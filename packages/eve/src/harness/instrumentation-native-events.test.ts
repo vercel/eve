@@ -42,7 +42,7 @@ describe("createInstrumentationHandleEvent", () => {
       }),
     );
     await handleEvent(createTurnCompletedEvent({ sequence: 0, turnId: "turn-1" }));
-    await handleEvent(createSessionWaitingEvent("continue-1"));
+    await handleEvent(createSessionWaitingEvent());
 
     expect(order).toEqual([
       "durable:session.started",
@@ -86,8 +86,55 @@ describe("createInstrumentationHandleEvent", () => {
       turnId: "turn-1",
     })!;
 
-    await handleEvent(createSessionWaitingEvent("continue-1"));
+    await handleEvent(createSessionWaitingEvent());
 
     expect(events).toEqual([{ sessionId: "session-1", turnId: "turn-1", type: "session.waiting" }]);
+  });
+
+  it("carries the dispatch lineage onto every turn a child session starts", async () => {
+    const events: { readonly type: string }[] = [];
+    const parentLineage = {
+      callId: "call-7",
+      sessionId: "session-1",
+      subagentName: "researcher",
+      turnId: "turn-1",
+    };
+    const handleEvent = createInstrumentationHandleEvent({
+      handleEvent: async () => {},
+      hooks: {
+        after: async () => {},
+        before: async () => {},
+        publish: async (event) => {
+          events.push(event);
+        },
+      },
+      parentLineage,
+      rootSessionId: "session-1",
+      sessionId: "child-1",
+    })!;
+
+    await handleEvent(createTurnStartedEvent({ sequence: 0, turnId: "child-turn-1" }));
+    await handleEvent(createTurnStartedEvent({ sequence: 1, turnId: "child-turn-2" }));
+
+    expect(events.filter((event) => event.type === "turn.started")).toEqual([
+      {
+        parentLineage,
+        parentTraceContext: undefined,
+        rootSessionId: "session-1",
+        sequence: 0,
+        sessionId: "child-1",
+        turnId: "child-turn-1",
+        type: "turn.started",
+      },
+      {
+        parentLineage,
+        parentTraceContext: undefined,
+        rootSessionId: "session-1",
+        sequence: 1,
+        sessionId: "child-1",
+        turnId: "child-turn-2",
+        type: "turn.started",
+      },
+    ]);
   });
 });

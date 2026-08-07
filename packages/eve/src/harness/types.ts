@@ -2,14 +2,16 @@ import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
-import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessInstrumentation } from "#harness/instrumentation-runtime.js";
@@ -166,12 +168,29 @@ export interface StepDone {
  */
 export type StepNext = StepDone | StepFn | null;
 
+/** User-facing answer produced when a conversation turn settles. */
+export interface SettledTurn {
+  readonly output: unknown;
+  readonly isError?: boolean;
+  /**
+   * Usage this turn added to the child's session subtree. The harness never
+   * sets it; the durable turn step fills it with the per-turn delta before
+   * the answer crosses the park boundary to the delegated caller.
+   */
+  readonly usage?: TokenUsage;
+}
+
 /**
  * Result returned by one harness step invocation.
  */
 export interface StepResult {
   readonly next: StepNext;
   readonly session: HarnessSession;
+  /**
+   * Present when a conversation turn settled with a user-facing answer; carried
+   * across the park boundary so a delegated parent can be notified.
+   */
+  readonly settledTurn?: SettledTurn;
 }
 
 /**
@@ -196,7 +215,7 @@ export type HarnessToolMap = ReadonlyMap<string, HarnessToolDefinition>;
  * events without knowing about writables or handlers.
  */
 export type HarnessEmitFn = (
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
@@ -209,7 +228,7 @@ export type HarnessEmitFn = (
  * and dynamic tool dispatch in one call.
  */
 export type HandleEventFn = (
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
@@ -225,6 +244,10 @@ export interface ToolLoopHarnessConfig {
    * per-step toolset to decide whether `ask_question` is available.
    */
   readonly capabilities?: SessionCapabilities;
+  /** Clears model-message history without running a model turn. */
+  readonly clearOnly?: boolean;
+  /** Forces one context-compaction pass without running a model turn. */
+  readonly compactOnly?: boolean;
   /**
    * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
@@ -240,6 +263,8 @@ export interface ToolLoopHarnessConfig {
    * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
    */
   readonly workflowMaxSubagents?: number;
+  /** AI Gateway provider selected for the framework `web_search` tool. */
+  readonly webSearchProvider?: WebSearchProvider;
   readonly handleEvent?: HandleEventFn;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
@@ -261,9 +286,15 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
+  /**
+   * Whether the agent opted into `experimental.subagentPersistentSessions`.
+   * Gates delegated-agent handle tracking and the model-visible `<agents>`
+   * listing appended after runtime-action batches resolve.
+   */
+  readonly persistentSubagentSessions?: boolean;
   readonly dispatchDynamicModelEvent?: (input: {
     readonly ctx: AlsContext;
-    readonly event: HandleMessageStreamEvent;
+    readonly event: UnstampedMessageStreamEvent;
     readonly fallback: RuntimeModelReference;
     readonly messages: readonly ModelMessage[];
   }) => Promise<void>;

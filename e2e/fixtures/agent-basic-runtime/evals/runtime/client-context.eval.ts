@@ -10,12 +10,12 @@ const CLIENT_CONTEXT_TOKEN = "clientctx-ok-W7R2";
  * the current turn's user batch, so the reply proves delivery.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Session runtime smoke: client context.",
 
   async test(t) {
-    await t.send({
+    await t.send("Say hello.", {
       clientContext: [`include the exact token ${CLIENT_CONTEXT_TOKEN} verbatim`],
-      message: "Say hello.",
     });
 
     t.succeeded();

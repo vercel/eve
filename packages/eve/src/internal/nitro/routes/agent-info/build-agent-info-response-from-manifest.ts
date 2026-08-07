@@ -1,9 +1,11 @@
-import { getAllFrameworkToolNames } from "#runtime/framework-tools/index.js";
+import {
+  getAllFrameworkToolNames,
+  getFrameworkDynamicToolResolvers,
+} from "#runtime/framework-tools/index.js";
 import {
   getAllFrameworkChannelNames,
   getFrameworkChannelDefinitions,
 } from "#runtime/framework-channels/index.js";
-import { createConnectionSearchResolver } from "#runtime/framework-tools/connection-search-dynamic.js";
 import type { AgentInfoManifestData } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
@@ -202,9 +204,9 @@ export function buildAgentInfoResponseFromManifest(
       authored: authoredTools,
       disabledFramework: [...manifest.disabledFrameworkTools],
       dynamic: [
-        ...(manifest.connections.length > 0
-          ? [renderDynamicResolver(createConnectionSearchResolver(), { origin: "framework" })]
-          : []),
+        ...getFrameworkDynamicToolResolvers().map((resolver) =>
+          renderDynamicResolver(resolver, { origin: "framework" }),
+        ),
         ...manifest.dynamicTools.map((resolver) =>
           renderDynamicResolver(resolver, { origin: "authored" }),
         ),

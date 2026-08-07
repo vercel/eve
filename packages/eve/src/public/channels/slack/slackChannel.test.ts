@@ -5,10 +5,15 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
+import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import {
+  mockChannelContext,
+  type ObservedChannelDelivery,
+} from "#internal/testing/mocks/mock-channel-operations.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
 import {
   HITL_ACTION_PREFIX,
@@ -78,15 +83,15 @@ const stubAlsContext = (() => {
 
 function callEvent(
   adapter: ChannelAdapter,
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   ctx: any,
-): Promise<HandleMessageStreamEvent> {
+): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
 /**
  * Accessor whose `set` writes are captured so tests can assert on
- * `setContinuationToken` flowing through the SessionHandle. Returns
+ * `continuation.rekey` flowing through the SessionHandle. Returns
  * undefined for unset keys (matching the real `ContextContainer`
  * behavior), while seeding the current continuation token so
  * SessionHandle can preserve the runtime namespace.
@@ -115,11 +120,11 @@ function captureAccessor(initialContinuationToken: string): {
   };
 }
 
-function makeEvent<T extends HandleMessageStreamEvent["type"]>(
+function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
   type: T,
   data: unknown,
-): HandleMessageStreamEvent {
-  return { type, data } as HandleMessageStreamEvent;
+): UnstampedMessageStreamEvent {
+  return { type, data } as UnstampedMessageStreamEvent;
 }
 
 const THREAD_STATE = {
@@ -250,13 +255,16 @@ async function firePost(
   channel: unknown,
   request: Request,
   overrides: {
-    readonly cancel?: ReturnType<typeof vi.fn>;
-    readonly reset?: ReturnType<typeof vi.fn>;
-    readonly resolveActiveSession?: ReturnType<typeof vi.fn>;
+    readonly cancel?: (address: string, options?: { readonly turnId?: string }) => Promise<unknown>;
+    readonly clear?: (address: string) => Promise<unknown>;
+    readonly compact?: (address: string) => Promise<unknown>;
+    readonly reset?: (address: string, options?: { readonly reason?: string }) => Promise<unknown>;
+    readonly resolveSession?: (address: string) => Promise<unknown>;
+    readonly send?: ReturnType<typeof vi.fn>;
   } = {},
 ): Promise<{
-  cancel: ReturnType<typeof vi.fn>;
-  reset: ReturnType<typeof vi.fn>;
+  cancel: ReturnType<typeof vi.fn<(options?: Record<string, unknown>) => Promise<unknown>>>;
+  reset: ReturnType<typeof vi.fn<(options?: Record<string, unknown>) => Promise<unknown>>>;
   response: Response;
   send: ReturnType<typeof vi.fn>;
   waitUntil: ReturnType<typeof vi.fn>;
@@ -266,24 +274,49 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected slack channel to define a POST route.");
   }
-  const cancel = overrides.cancel ?? vi.fn().mockResolvedValue({ status: "accepted" });
-  const reset =
-    overrides.reset ??
-    vi.fn().mockResolvedValue({ status: "reset", previousSessionId: "session_previous" });
-  const send = vi.fn().mockResolvedValue({ id: "s1", continuationToken: "ct" });
+  const cancel = vi
+    .fn<(options?: Record<string, unknown>) => Promise<unknown>>()
+    .mockResolvedValue({ sessionId: "session_current", status: "accepted" });
+  const reset = vi
+    .fn<(options?: Record<string, unknown>) => Promise<unknown>>()
+    .mockResolvedValue({ status: "reset", previousSessionId: "session_previous" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
+  const observeSend = overrides.send ?? send;
+  const baseFrom = mockChannelContext<SlackChannelState>(
+    observeSend as (address: string, input: ObservedChannelDelivery<SlackChannelState>) => unknown,
+  ).from;
+  const from: ChannelFrom<SlackChannelState> = (address) => {
+    const source = baseFrom(address);
+    return {
+      ...source,
+      cancel: (options) =>
+        (overrides.cancel?.(address, options) ??
+          cancel({ ...options, continuationToken: address })) as ReturnType<
+          ChannelSource<SlackChannelState>["cancel"]
+        >,
+      clear: () =>
+        (overrides.clear?.(address) ??
+          Promise.resolve({ sessionId: "s1", status: "accepted" })) as never,
+      compact: () =>
+        (overrides.compact?.(address) ??
+          Promise.resolve({ sessionId: "s1", status: "accepted" })) as never,
+      reset: (options) =>
+        (overrides.reset?.(address, options) ??
+          reset({ ...options, continuationToken: address })) as never,
+    };
+  };
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
-    cancel,
-    reset,
-    send,
-    resolveActiveSession:
-      overrides.resolveActiveSession ?? vi.fn().mockResolvedValue({ sessionId: "s1" }),
+    from,
+    resolveSession: (address) =>
+      (overrides.resolveSession?.(address) ?? Promise.resolve({ id: "s1" })) as never,
     waitUntil,
-    getSession: vi.fn() as any,
+    attachSession: vi.fn() as any,
+    to: vi.fn() as any,
     params: {},
     requestIp: null,
-  } as any);
+  });
 
   let drained = 0;
   while (drained < waitUntil.mock.calls.length) {
@@ -445,6 +478,7 @@ describe("slackChannel() default event handlers", () => {
               toolName: "mongodb-mutate",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },
@@ -553,6 +587,7 @@ describe("slackChannel() default event handlers", () => {
               toolName: "ask_question",
             },
             display: "text",
+            kind: "question",
             prompt: longPrompt,
             requestId: "call_long",
           },
@@ -594,6 +629,7 @@ describe("slackChannel() default event handlers", () => {
         toolName: "mongodb-mutate",
       },
       display: "confirmation" as const,
+      kind: "tool-approval" as const,
       options: [
         { id: "approve", label: "Yes" },
         { id: "deny", label: "No" },
@@ -954,7 +990,7 @@ describe("rebuildSlackContext", () => {
     expect((adapter.state as { threadTs: string | null }).threadTs).toBe("1800000000.123456");
 
     // The anchor moment wrote the new continuation token to context
-    // via `session.setContinuationToken(...)`. The workflow body picks
+    // via `session.continuation.rekey(...)`. The workflow body picks
     // this up via `reconcileSessionContinuationToken` after the step.
     const tokenWrites = writes.filter(([key]) => key === "eve.continuationToken");
     expect(tokenWrites).toEqual([["eve.continuationToken", "slack:C01:1800000000.123456"]]);
@@ -981,7 +1017,7 @@ describe("rebuildSlackContext", () => {
     const secondBody = parseSlackRequestBody(fetchMock.mock.calls[1]![1] as RequestInit);
     expect(secondBody.thread_ts).toBe("1800000000.123456");
 
-    // Once anchored, setContinuationToken does not fire again — the
+    // Once anchored, continuation.rekey does not fire again — the
     // raw token is unchanged across subsequent posts.
     const allTokenWrites = writes.filter(([key]) => key === "eve.continuationToken");
     expect(allTokenWrites).toHaveLength(1);
@@ -1087,6 +1123,55 @@ describe("slackChannel() inbound mention pipeline", () => {
       authenticator: "test",
       principalId: "U999",
       principalType: "user",
+    });
+  });
+
+  it("binds onAppMention to flat session operations", async () => {
+    const clear = vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.clear();
+        return { auth: null };
+      },
+    });
+    const { body } = buildMentionBody({
+      channel: "C_BOUND",
+      threadTs: "1700000000.000300",
+    });
+
+    await firePost(channel, buildSignedRequest({ body }), { clear });
+
+    expect(clear).toHaveBeenCalledWith("C_BOUND:1700000000.000300");
+  });
+
+  it("sends from the flat message context with Slack-derived auth", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.send("Imperative follow-up");
+        return null;
+      },
+    });
+    const { body } = buildMentionBody({
+      channel: "C_BOUND",
+      threadTs: "1700000000.000300",
+    });
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledWith("C_BOUND:1700000000.000300", {
+      auth: expect.objectContaining({
+        authenticator: "slack-webhook",
+        principalId: "slack:T01:U01",
+      }),
+      message: "Imperative follow-up",
+      state: {
+        channelId: "C_BOUND",
+        teamId: "T01",
+        threadTs: "1700000000.000300",
+        triggeringUserId: "U01",
+      },
     });
   });
 
@@ -1238,8 +1323,8 @@ describe("slackChannel() inbound mention pipeline", () => {
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload] = send.mock.calls[0]!;
-    const { context, message } = payload as { context: readonly string[]; message: string };
+    const [, input] = send.mock.calls[0]!;
+    const { context, message } = input as { context: readonly string[]; message: string };
     expect(context).toEqual(["prior thread context"]);
     expect(message).toContain("<slack_message>");
     expect(message).toContain("sender_id: U01");
@@ -1256,12 +1341,12 @@ describe("slackChannel() inbound mention pipeline", () => {
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    const { context, message } = payload as { context?: readonly string[]; message: string };
+    const [, input] = send.mock.calls[0]!;
+    const { context, message } = input as { context?: readonly string[]; message: string };
     expect(context).toBeUndefined();
     expect(message).toContain("sender_id: U01");
     expect(message).toContain("message_ts:");
-    expect(options.title).toBe("hello");
+    expect(input.title).toBe("hello");
   });
 
   it("uses only this app's reply as the incremental thread context boundary", async () => {
@@ -1338,7 +1423,7 @@ describe("slackChannel() inbound mention pipeline", () => {
 
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
-    const [{ message }] = send.mock.calls[0]! as [{ message: string }];
+    const [, { message }] = send.mock.calls[0]! as [string, { message: string }];
     expect(message).toContain("<slack_thread_context>");
     expect(message).toContain("sender_id: U_BACKEND");
     expect(message).toContain("sender_id: U_OTHER_BOT");
@@ -1493,8 +1578,8 @@ describe("slackChannel() onMessage", () => {
     const { send } = await firePost(channel, buildSignedRequest({ body: reply }));
 
     expect(send).toHaveBeenCalledWith(
+      "C01:1700000000.000100",
       expect.objectContaining({ message: expect.any(String) }),
-      expect.objectContaining({ continuationToken: "C01:1700000000.000100" }),
     );
   });
 
@@ -1667,8 +1752,7 @@ describe("slackChannel() generic Events API pipeline", () => {
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
         await ctx.cancel({
-          channelId: "C01",
-          threadTs: "1700000000.000001",
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
           turnId: "turn_observed",
         });
       },
@@ -1683,14 +1767,57 @@ describe("slackChannel() generic Events API pipeline", () => {
     });
   });
 
+  it("targets session operations from generic Slack events", async () => {
+    const compact = vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx.compact({
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
+        });
+      },
+    });
+
+    const body = buildEventBody({ type: "reaction_added", user: "U01" });
+    await firePost(channel, buildSignedRequest({ body }), { compact });
+
+    expect(compact).toHaveBeenCalledWith("C01:1700000000.000001");
+  });
+
+  it("binds Slack session state when a generic event send creates", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx.send("follow up", {
+          auth: null,
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
+        });
+      },
+    });
+
+    const body = buildEventBody({ type: "reaction_added", user: "U01" }, { teamId: "T_WORKSPACE" });
+    await firePost(channel, buildSignedRequest({ body }), { send });
+
+    expect(send).toHaveBeenCalledWith("C01:1700000000.000001", {
+      auth: null,
+      message: "follow up",
+      state: {
+        channelId: "C01",
+        teamId: "T_WORKSPACE",
+        threadTs: "1700000000.000001",
+        triggeringUserId: "U01",
+      },
+    });
+  });
+
   it("resets a targeted Slack thread from onEvent", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
         await ctx.reset({
-          channelId: "C01",
-          threadTs: "1700000000.000001",
           reason: "Reaction requested a fresh conversation",
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
         });
       },
     });
@@ -1704,7 +1831,7 @@ describe("slackChannel() generic Events API pipeline", () => {
     });
   });
 
-  it("can start multiple turns through the pre-bound receive function", async () => {
+  it("can start multiple turns through ctx.send", async () => {
     const auth = {
       attributes: { source: "reaction" },
       authenticator: "test",
@@ -1713,17 +1840,15 @@ describe("slackChannel() generic Events API pipeline", () => {
     };
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
-      async onEvent({ receive }, event) {
+      async onEvent(ctx, event) {
         expect(event.type).toBe("reaction_added");
         await Promise.all([
-          receive({
+          ctx.send("Investigate the first message.", {
             auth,
-            message: "Investigate the first message.",
             target: { channelId: "C01", threadTs: "1700000000.000001" },
           }),
-          receive({
+          ctx.send("Investigate the second message.", {
             auth: null,
-            message: "Investigate the second message.",
             target: { channelId: "C02", threadTs: "1700000000.000002" },
           }),
         ]);
@@ -1737,15 +1862,15 @@ describe("slackChannel() generic Events API pipeline", () => {
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
     expect(send).toHaveBeenCalledTimes(2);
-    expect(send.mock.calls.map(([message]) => message)).toEqual([
+    expect(send.mock.calls.map(([, input]) => input.message)).toEqual([
       "Investigate the first message.",
       "Investigate the second message.",
     ]);
-    expect(send.mock.calls.map(([, options]) => options.continuationToken)).toEqual([
+    expect(send.mock.calls.map(([continuationToken]) => continuationToken)).toEqual([
       "C01:1700000000.000001",
       "C02:1700000000.000002",
     ]);
-    expect(send.mock.calls.map(([, options]) => options.state.teamId)).toEqual([
+    expect(send.mock.calls.map(([, input]) => input.state.teamId)).toEqual([
       "T_WORKSPACE",
       "T_WORKSPACE",
     ]);
@@ -1753,14 +1878,13 @@ describe("slackChannel() generic Events API pipeline", () => {
     expect(send.mock.calls[1]![1].auth).toBeNull();
   });
 
-  it("keeps detached receive calls alive through the handler waitUntil", async () => {
+  it("keeps detached send calls alive through the handler waitUntil", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       onEvent(ctx) {
         ctx.waitUntil(
-          ctx.receive({
+          ctx.send("Run detached work.", {
             auth: null,
-            message: "Run detached work.",
             target: { channelId: "C01" },
           }),
         );
@@ -2176,11 +2300,9 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload).toEqual({
-      inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }],
-    });
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(continuationToken).toBe("C01:1700000000.000001");
+    expect(input).toMatchObject({
       auth: {
         attributes: {
           author_type: "user",
@@ -2195,13 +2317,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
         principalId: "slack:T01:U_APPROVER",
         principalType: "user",
       },
-      continuationToken: "C01:1700000000.000001",
-      state: {
-        channelId: "C01",
-        teamId: "T01",
-        threadTs: "1700000000.000001",
-        triggeringUserId: "U_APPROVER",
-      },
+      inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }],
     });
   });
 
@@ -2304,7 +2420,8 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]?.[0]).toEqual({
+    expect(send.mock.calls[0]?.[0]).toBe("C01:1700000000.000001");
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
       inputResponses: [{ optionId: "approve", requestId: "approval_451" }],
     });
 
@@ -2364,6 +2481,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
               toolName: "escalate_issue",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },
@@ -2379,6 +2497,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
               toolName: "escalate_issue",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
               { id: "deny", label: "No" },
@@ -2448,7 +2567,8 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]?.[0]).toEqual({
+    expect(send.mock.calls[0]?.[0]).toBe("C01:1700000000.000001");
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
       inputResponses: [{ optionId: "deny", requestId: "approval_451" }],
     });
 
@@ -2515,11 +2635,9 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload).toEqual({
-      inputResponses: [{ requestId: "call_abc123", text: "approved with context" }],
-    });
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(continuationToken).toBe("C01:1700000000.000001");
+    expect(input).toMatchObject({
       auth: {
         attributes: {
           author_type: "user",
@@ -2534,13 +2652,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
         principalId: "slack:T01:U_SUBMITTER",
         principalType: "user",
       },
-      continuationToken: "C01:1700000000.000001",
-      state: {
-        channelId: "C01",
-        teamId: "T01",
-        threadTs: "1700000000.000001",
-        triggeringUserId: "U_SUBMITTER",
-      },
+      inputResponses: [{ requestId: "call_abc123", text: "approved with context" }],
     });
   });
 });
@@ -2631,26 +2743,26 @@ describe("slackChannel().receive", () => {
   }
 
   it("sends with an explicit continuation token built from channelId + threadTs", async () => {
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
     await buildReceive()(
       {
         message: "do the thing",
         target: { channelId: "C123", threadTs: "1700000000.000001" },
         auth: { attributes: {}, authenticator: "app", principalId: "p", principalType: "user" },
       },
-      { send },
+      mockChannelContext(send),
     );
     expect(send).toHaveBeenCalledTimes(1);
-    const [message, options] = send.mock.calls[0]!;
-    expect(message).toBe("do the thing");
-    expect(options.continuationToken).toBe("C123:1700000000.000001");
-    expect(options.state).toEqual({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(continuationToken).toBe("C123:1700000000.000001");
+    expect(input.message).toBe("do the thing");
+    expect(input.state).toEqual({
       channelId: "C123",
       threadTs: "1700000000.000001",
       teamId: null,
       triggeringUserId: null,
     });
-    expect(options.auth.principalId).toBe("p");
+    expect(input.auth.principalId).toBe("p");
   });
 
   it("gives each threadless proactive session a unique temporary continuation token", async () => {
@@ -2658,7 +2770,7 @@ describe("slackChannel().receive", () => {
       .spyOn(crypto, "randomUUID")
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000001")
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000002");
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
 
     try {
       const receive = buildReceive();
@@ -2668,14 +2780,14 @@ describe("slackChannel().receive", () => {
         auth: null,
       };
 
-      await receive(input, { send });
-      await receive(input, { send });
+      await receive(input, mockChannelContext(send));
+      await receive(input, mockChannelContext(send));
 
-      expect(send.mock.calls.map(([, options]) => options.continuationToken)).toEqual([
+      expect(send.mock.calls.map(([continuationToken]) => continuationToken)).toEqual([
         "C123:00000000-0000-4000-8000-000000000001",
         "C123:00000000-0000-4000-8000-000000000002",
       ]);
-      expect(send.mock.calls.map(([, options]) => options.state.threadTs)).toEqual([null, null]);
+      expect(send.mock.calls.map(([, input]) => input.state.threadTs)).toEqual([null, null]);
     } finally {
       randomUUID.mockRestore();
     }
@@ -2684,7 +2796,7 @@ describe("slackChannel().receive", () => {
   it("requires channelId", async () => {
     const send = vi.fn();
     await expect(
-      buildReceive()({ message: "x", target: {}, auth: null }, { send }),
+      buildReceive()({ message: "x", target: {}, auth: null }, mockChannelContext(send)),
     ).rejects.toThrow(/requires target.channelId/);
     expect(send).not.toHaveBeenCalled();
   });
@@ -2695,7 +2807,7 @@ describe("slackChannel().receive", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
 
     const { Card, CardText } = await import("#compiled/chat/index.js");
     await buildReceive()(
@@ -2710,7 +2822,7 @@ describe("slackChannel().receive", () => {
         },
         auth: null,
       },
-      { send },
+      mockChannelContext(send),
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -2724,9 +2836,9 @@ describe("slackChannel().receive", () => {
     expect(Array.isArray(body.blocks)).toBe(true);
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [, options] = send.mock.calls[0]!;
-    expect(options.continuationToken).toBe("C123:1800000000.000900");
-    expect(options.state.threadTs).toBe("1800000000.000900");
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(continuationToken).toBe("C123:1800000000.000900");
+    expect(input.state.threadTs).toBe("1800000000.000900");
   });
 
   it("rejects passing both threadTs and initialMessage", async () => {
@@ -2743,7 +2855,7 @@ describe("slackChannel().receive", () => {
           },
           auth: null,
         },
-        { send },
+        mockChannelContext(send),
       ),
     ).rejects.toThrow(/mutually exclusive/);
     expect(send).not.toHaveBeenCalled();
@@ -2770,7 +2882,7 @@ describe("slackChannel().receive", () => {
           },
           auth: null,
         },
-        { send },
+        mockChannelContext(send),
       ),
     ).rejects.toThrow(/not_in_channel/);
     expect(send).not.toHaveBeenCalled();
@@ -2788,7 +2900,7 @@ describe("slackChannel().receive", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
     const { Card, CardText } = await import("#compiled/chat/index.js");
 
     await buildReceive()(
@@ -2803,17 +2915,16 @@ describe("slackChannel().receive", () => {
         },
         auth: null,
       },
-      { send },
+      mockChannelContext(send),
     );
-    const receiveToken = (send.mock.calls[0]![1] as { continuationToken: string })
-      .continuationToken;
+    const receiveToken = send.mock.calls[0]![0] as string;
     expect(receiveToken).toBe(`C123:${initialMessageTs}`);
 
     // Now simulate Slack delivering an `app_mention` reply threaded
     // under the anchor card. The inbound dispatch path builds the
     // token from `event.thread_ts` so it matches the one receive()
     // used, and the parked session resumes via runtime.deliver.
-    const inboundSend = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const inboundSend = vi.fn().mockResolvedValue({ id: "s" });
     const mentionBody = JSON.stringify({
       type: "event_callback",
       team_id: "T01",
@@ -2837,13 +2948,13 @@ describe("slackChannel().receive", () => {
     if (!post) throw new Error("expected POST route");
     const waitUntil = vi.fn();
     await post.handler(req, {
-      send: inboundSend,
+      attachSession: vi.fn() as any,
+      ...mockChannelContext(inboundSend),
       waitUntil,
-      getSession: vi.fn() as any,
-      receive: vi.fn() as any,
+      to: vi.fn() as any,
       params: {},
       requestIp: null,
-    } as any);
+    });
 
     let drained = 0;
     while (drained < waitUntil.mock.calls.length) {
@@ -2853,8 +2964,7 @@ describe("slackChannel().receive", () => {
     }
 
     expect(inboundSend).toHaveBeenCalledTimes(1);
-    const inboundToken = (inboundSend.mock.calls[0]![1] as { continuationToken: string })
-      .continuationToken;
+    const inboundToken = inboundSend.mock.calls[0]![0] as string;
     expect(inboundToken).toBe(receiveToken);
   });
 });

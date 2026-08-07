@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { channelEntries } from "@vercel/eve-catalog";
+import { channelEntries } from "@eve/catalog";
 
 interface RegistryFile {
   path: string;
@@ -12,7 +12,23 @@ interface RegistryItem {
   name: string;
   dependencies?: string[];
   files?: RegistryFile[];
-  meta?: { eve?: { channel?: string } };
+  meta?: {
+    eve?: {
+      setup?:
+        | {
+            command?: string;
+            package?: string;
+            bin?: string;
+            args?: string[];
+          }
+        | Array<{
+            command?: string;
+            package?: string;
+            bin?: string;
+            args?: string[];
+          }>;
+    };
+  };
 }
 
 interface Registry {
@@ -21,6 +37,15 @@ interface Registry {
 
 const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   eve: "web",
+  photon: "photon-imessage",
+};
+
+const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
+  discord: "discord",
+  github: "github",
+  "linear-agent": "linear",
+  eve: "web",
+  photon: "photon",
 };
 
 const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
@@ -35,7 +60,6 @@ const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-liveblocks": "@liveblocks/chat-sdk-adapter",
   "chat-sdk-linq": "@linqapp/chat-sdk-adapter",
   "chat-sdk-kapso": "@kapso/chat-adapter",
-  "chat-sdk-photon": "@photon-ai/chat-adapter-imessage",
   "chat-sdk-dial": "@getdial/chat-sdk-adapter",
   "chat-sdk-agentphone": "@agentphone/chat-sdk-adapter",
   "chat-sdk-lark": "@larksuite/vercel-chat-adapter",
@@ -56,7 +80,6 @@ const targetSlugsByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-liveblocks": "liveblocks",
   "chat-sdk-linq": "linq",
   "chat-sdk-kapso": "kapso",
-  "chat-sdk-photon": "imessage",
   "chat-sdk-dial": "dial",
   "chat-sdk-agentphone": "agentphone",
   "chat-sdk-lark": "lark",
@@ -80,14 +103,50 @@ if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
 }
 
 for (const [index, item] of items.entries()) {
+  const declaredSetup = item.meta?.eve?.setup;
+  const setups =
+    declaredSetup === undefined
+      ? undefined
+      : Array.isArray(declaredSetup)
+        ? declaredSetup
+        : [declaredSetup];
+  if (
+    setups?.some(
+      (setup) =>
+        setup.command === undefined ||
+        setup.package === undefined ||
+        setup.bin === undefined ||
+        setup.args === undefined,
+    )
+  ) {
+    throw new Error(
+      `Registry item "${item.name}" setup entries must declare command, package, bin, and args.`,
+    );
+  }
+
   const entry = galleryEntries[index];
   if (entry === undefined) throw new Error(`Unexpected channel registry item "${item.name}".`);
   const registrySlug = expectedSlugs[index];
 
-  if (entry.slug === "slack" || entry.slug === "eve") {
-    if (item.files !== undefined || item.meta?.eve?.channel !== registrySlug) {
+  if (
+    entry.slug === "slack" ||
+    entry.slug === "discord" ||
+    entry.slug === "github" ||
+    entry.slug === "linear-agent" ||
+    entry.slug === "eve" ||
+    entry.slug === "photon"
+  ) {
+    const expectedArgs = [
+      "integration",
+      "setup",
+      setupKindsByCatalogSlug[entry.slug] ?? registrySlug,
+    ];
+    if (
+      JSON.stringify(setups) !==
+      JSON.stringify([{ command: "eve", package: "eve", bin: "eve", args: expectedArgs }])
+    ) {
       throw new Error(
-        `Registry item "${item.name}" must delegate to eve channels add ${registrySlug}.`,
+        `Registry item "${item.name}" must delegate setup to eve integration setup ${expectedArgs[2]}.`,
       );
     }
     continue;

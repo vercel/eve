@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createTurnCancellationControl } from "#execution/turn-cancellation-control.js";
-import { sessionCancelHookToken } from "#execution/turn-cancellation-token.js";
+import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 
 const createHookMock = vi.fn();
@@ -42,9 +42,11 @@ async function settles(promise: Promise<unknown>): Promise<boolean> {
   ]);
 }
 
-describe("sessionCancelHookToken", () => {
-  it("derives the stable token from the session id", () => {
-    expect(sessionCancelHookToken("wrun_abc")).toBe("wrun_abc:cancel");
+describe("turnCancellationHookToken", () => {
+  it("derives a private token from the turn control token", () => {
+    expect(turnCancellationHookToken("wrun_abc:turn-control:1")).toBe(
+      "wrun_abc:turn-control:1:cancel",
+    );
   });
 });
 
@@ -57,8 +59,8 @@ describe("createTurnCancellationControl", () => {
     installCancelHook({ conflict: { runId: "wrun_stale" } });
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_0",
-      sessionId: "session-1",
     });
 
     expect(control).toBeUndefined();
@@ -68,8 +70,8 @@ describe("createTurnCancellationControl", () => {
     installCancelHook({ payloads: [{}] });
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_0",
-      sessionId: "session-1",
     });
 
     await expect(control!.requested).resolves.toBe("cancel");
@@ -81,8 +83,8 @@ describe("createTurnCancellationControl", () => {
     installCancelHook({ payloads: [{ turnId: "turn_2" }] });
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_2",
-      sessionId: "session-1",
     });
 
     await expect(control!.requested).resolves.toBe("cancel");
@@ -93,8 +95,8 @@ describe("createTurnCancellationControl", () => {
     installCancelHook({ payloads: [{ turnId: "turn_99" }, { turnId: "turn_2" }] });
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_2",
-      sessionId: "session-1",
     });
 
     await expect(control!.requested).resolves.toBe("cancel");
@@ -105,20 +107,64 @@ describe("createTurnCancellationControl", () => {
     installCancelHook({ payloads: [{ turnId: "turn_99" }] });
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_2",
-      sessionId: "session-1",
     });
 
     expect(await settles(control!.requested)).toBe(false);
     expect(control!.signal.aborted).toBe(false);
   });
 
+  it("flips the signal in the same microtask that consumes the payload", async () => {
+    // A wake replays a journaled cancel and a completed step in one drain,
+    // payload first; the settle check reads `signal.aborted` one microtask
+    // later, so a `.then`-chained abort would lose to it.
+    let releasePayload!: (result: IteratorResult<unknown>) => void;
+    const firstRead = new Promise<IteratorResult<unknown>>((resolve) => {
+      releasePayload = resolve;
+    });
+    let delivered = false;
+    createHookMock.mockReturnValue({
+      token: "session-1:cancel",
+      getConflict: vi.fn(async () => null),
+      dispose: vi.fn(),
+      [Symbol.asyncIterator](): AsyncIterator<unknown> {
+        return {
+          next: () => {
+            if (delivered) return new Promise<IteratorResult<unknown>>(() => {});
+            delivered = true;
+            return firstRead;
+          },
+          return: vi.fn(async () => ({ done: true, value: undefined })),
+        };
+      },
+    });
+
+    const control = await createTurnCancellationControl({
+      controlToken: "session-1",
+      expectedTurnId: "turn_0",
+    });
+
+    let releaseStep!: () => void;
+    const step = new Promise<void>((resolve) => {
+      releaseStep = resolve;
+    });
+    const abortedAtStepContinuation = step.then(() => control!.signal.aborted);
+
+    // Journal order: the cancel payload resolves before the step result.
+    releasePayload({ done: false, value: {} });
+    releaseStep();
+
+    await expect(abortedAtStepContinuation).resolves.toBe(true);
+    await expect(control!.requested).resolves.toBe("cancel");
+  });
+
   it("disposes idempotently", async () => {
     const { dispose } = installCancelHook({});
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_0",
-      sessionId: "session-1",
     });
 
     await control!.dispose();

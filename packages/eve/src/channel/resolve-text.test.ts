@@ -6,6 +6,7 @@ const APPROVAL_REQUEST: InputRequest = {
   action: { callId: "call-1", input: { command: "rm -rf" }, kind: "tool-call", toolName: "bash" },
   allowFreeform: false,
   display: "confirmation",
+  kind: "tool-approval",
   options: [
     { id: "approve", label: "Approve", style: "primary" },
     { id: "deny", label: "Deny", style: "danger" },
@@ -17,6 +18,7 @@ const APPROVAL_REQUEST: InputRequest = {
 const SELECT_REQUEST: InputRequest = {
   action: { callId: "call-2", input: {}, kind: "tool-call", toolName: "ask_question" },
   display: "select",
+  kind: "question",
   options: [
     { id: "postgres", label: "Postgres" },
     { id: "mysql", label: "MySQL" },
@@ -30,6 +32,7 @@ const FREEFORM_REQUEST: InputRequest = {
   action: { callId: "call-3", input: {}, kind: "tool-call", toolName: "ask_question" },
   allowFreeform: true,
   display: "text",
+  kind: "question",
   prompt: "What is your name?",
   requestId: "req-3",
 };
@@ -38,6 +41,7 @@ const SELECT_WITH_FREEFORM_REQUEST: InputRequest = {
   action: { callId: "call-4", input: {}, kind: "tool-call", toolName: "ask_question" },
   allowFreeform: true,
   display: "select",
+  kind: "question",
   options: [
     { id: "red", label: "Red" },
     { id: "blue", label: "Blue" },
@@ -120,6 +124,7 @@ describe("resolveTextToResponse", () => {
   it("falls back to freeform for requests with no options", () => {
     const noOptions: InputRequest = {
       action: { callId: "call-5", input: {}, kind: "tool-call", toolName: "ask_question" },
+      kind: "question",
       prompt: "Tell me something.",
       requestId: "req-5",
     };

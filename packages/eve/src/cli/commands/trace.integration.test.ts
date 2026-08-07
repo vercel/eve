@@ -4,17 +4,14 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  listLocalTraces,
-  resolveLocalTrace,
-  runTraceListCommand,
-  runTraceShowCommand,
-} from "./trace.js";
+import { listLocalTraces } from "#tracing/local-trace-reader.js";
+
+import { resolveLocalTraces, runTraceListCommand, runTraceShowCommand } from "./trace.js";
 
 const TRACE_ONE = "1".repeat(32);
 const TRACE_TWO = "2".repeat(32);
 
-describe("eve trace", () => {
+describe("eve traces", () => {
   const roots: string[] = [];
 
   afterEach(async () => {
@@ -72,11 +69,72 @@ describe("eve trace", () => {
     );
     const traces = await listLocalTraces(root);
 
-    expect(resolveLocalTrace(traces, TRACE_ONE).traceId).toBe(TRACE_ONE);
-    expect(resolveLocalTrace(traces, "session-two").traceId).toBe(TRACE_TWO);
-    expect(resolveLocalTrace(traces, "session-o").traceId).toBe(TRACE_ONE);
-    expect(() => resolveLocalTrace(traces, "session-")).toThrow(/matches 2 local traces/u);
-    expect(() => resolveLocalTrace(traces, "missing")).toThrow(/No local trace matches/u);
+    expect(ids(resolveLocalTraces(traces, TRACE_ONE))).toEqual([TRACE_ONE]);
+    expect(ids(resolveLocalTraces(traces, "session-two"))).toEqual([TRACE_TWO]);
+    expect(ids(resolveLocalTraces(traces, "session-o"))).toEqual([TRACE_ONE]);
+    expect(() => resolveLocalTraces(traces, "session-")).toThrow(/matches 2 local traces/u);
+    expect(() => resolveLocalTraces(traces, "missing")).toThrow(/No local trace matches/u);
+  });
+
+  it("resolves a windowed session to every window, oldest first", async () => {
+    const root = await createRoot();
+    await writeSegment(
+      root,
+      TRACE_TWO,
+      span("b", "agent.session", 100, 100, undefined, {
+        "agent.session.id": "session-one",
+        "agent.session.window": 1,
+      }),
+    );
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span("a", "agent.session", 10, 10, undefined, {
+        "agent.session.id": "session-one",
+        "agent.session.window": 0,
+      }),
+    );
+    const traces = await listLocalTraces(root);
+
+    expect(traces.map((trace) => trace.window)).toEqual([1, 0]);
+    expect(ids(resolveLocalTraces(traces, "session-one"))).toEqual([TRACE_ONE, TRACE_TWO]);
+
+    const output = collectingLogger();
+    await runTraceShowCommand(output.logger, root, "session-one");
+
+    expect(output.out[0]).toContain(TRACE_ONE);
+    expect(output.out[0]).toContain(TRACE_TWO);
+    expect(output.out[0]!.indexOf(TRACE_ONE)).toBeLessThan(output.out[0]!.indexOf(TRACE_TWO));
+    expect(output.out[0]).toContain("Window");
+  });
+
+  it("resolves a subagent child to the parent window it recorded into", async () => {
+    const root = await createRoot();
+    const window = "a".repeat(16);
+    const child = "b".repeat(16);
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(window, "agent.session", 10, 10, undefined, {
+        "agent.root.session.id": "session-one",
+        "agent.session.id": "session-one",
+        "agent.session.window": 0,
+      }),
+    );
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(child, "agent.turn", 20, 30, window, {
+        "agent.root.session.id": "session-one",
+        "agent.session.id": "child-one",
+      }),
+    );
+    const traces = await listLocalTraces(root);
+
+    // The opener still names the trace, so `eve trace ls` reads unchanged.
+    expect(traces[0]!.sessionId).toBe("session-one");
+    expect(ids(resolveLocalTraces(traces, "child-one"))).toEqual([TRACE_ONE]);
+    expect(ids(resolveLocalTraces(traces, "session-one"))).toEqual([TRACE_ONE]);
   });
 
   it("renders a parented span tree and tolerates missing parents", async () => {
@@ -126,6 +184,161 @@ describe("eve trace", () => {
     expect(output.out[0]).not.toContain("\u001B");
   });
 
+  it("shows subtree extent for a marker span instead of no duration", async () => {
+    const root = await createRoot();
+    const session = "a".repeat(16);
+    const turn = "b".repeat(16);
+    const step = "c".repeat(16);
+    const terminal = "d".repeat(16);
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(session, "agent.session", 10, 10, undefined, {
+        "agent.session.id": "session-one",
+      }),
+    );
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(turn, "agent.turn", 10, 10, session, { "agent.session.id": "session-one" }),
+    );
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(step, "agent.step", 20, 90, turn, { "agent.session.id": "session-one" }),
+    );
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span(terminal, "agent.turn.terminal", 95, 95, turn, {
+        "agent.session.id": "session-one",
+      }),
+    );
+    const output = collectingLogger();
+
+    await runTraceShowCommand(output.logger, root, "session-one");
+
+    expect(output.out[0]).toContain("agent.session  85ms");
+    expect(output.out[0]).toContain("agent.turn  85ms");
+    expect(output.out[0]).toContain("agent.step  70ms");
+    // A marker with no descendants has no extent to borrow.
+    expect(output.out[0]).toContain("agent.turn.terminal  0ms");
+  });
+
+  it("shows usage and cost chips on span rows and totals in the header", async () => {
+    const root = await createRoot();
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span("a", "agent.step", 10, 80, undefined, {
+        "agent.model.id": "gpt-5",
+        "agent.session.id": "session-one",
+        "agent.step.attempt": 0,
+        "agent.step.index": 0,
+        "agent.usage.input_tokens": 1400,
+        "agent.usage.output_tokens": 213,
+        "gen_ai.usage.gateway_cost": 0.0031,
+      }),
+    );
+    await writeSegment(
+      root,
+      TRACE_ONE,
+      span("b", "ai.toolCall", 20, 30, "a", { "gen_ai.tool.name": "get_weather" }),
+    );
+    const output = collectingLogger();
+
+    await runTraceShowCommand(output.logger, root, "session-one");
+
+    expect(output.out[0]).toContain("Models");
+    expect(output.out[0]).toContain("gpt-5");
+    expect(output.out[0]).toContain("Tokens");
+    expect(output.out[0]).toContain("↑1.4K in · ↓213 out");
+    expect(output.out[0]).toContain("Cost");
+    expect(output.out[0]).toContain("$0.0031");
+    expect(output.out[0]).toContain("agent.step [step 0, attempt 0]  70ms  ↑1.4K ↓213 $0.0031");
+    expect(output.out[0]).toContain("ai.toolCall  10ms  get_weather");
+    // Attributes and events stay behind --verbose.
+    expect(output.out[0]).not.toContain("events:");
+    expect(output.out[0]).not.toContain("agent.model.id:");
+  });
+
+  it("expands every span with all attributes and events under --verbose", async () => {
+    const root = await createRoot();
+    await writeSegment(root, TRACE_ONE, {
+      ...span("a", "agent.step", 10, 80, undefined, {
+        "agent.model.id": "gpt-5",
+        "agent.session.id": "session-one",
+        "agent.step.index": 0,
+      }),
+      events: [
+        { name: "step.started", timeUnixNano: "10000000" },
+        {
+          attributes: [{ key: "step.index", value: { intValue: 0 } }],
+          name: "step.completed",
+          timeUnixNano: "80000000",
+        },
+      ],
+    });
+    await writeSegment(root, TRACE_ONE, {
+      ...span("b", "ai.toolCall", 20, 30, "a".repeat(16), {
+        "gen_ai.tool.name": "get_weather",
+      }),
+      status: { code: 2, message: "tool exploded" },
+    });
+    const output = collectingLogger();
+
+    await runTraceShowCommand(output.logger, root, "session-one", { verbose: true });
+
+    expect(output.out[0]).toContain("agent.step [step 0]");
+    expect(output.out[0]).toContain("├─ status: ok");
+    expect(output.out[0]).toContain("├─ agent.model.id: gpt-5");
+    expect(output.out[0]).toContain("├─ events:");
+    expect(output.out[0]).toContain("├─ step.started  +0ms");
+    expect(output.out[0]).toContain("└─ step.completed  +70ms");
+    expect(output.out[0]).toContain("step.index: 0");
+    expect(output.out[0]).toContain("└─ ai.toolCall  10ms  get_weather ERROR");
+    expect(output.out[0]).toContain("├─ status: ERROR — tool exploded");
+    expect(output.out[0]).toContain("└─ gen_ai.tool.name: get_weather");
+    expect(output.out[0]).toContain("Errors");
+    expect(output.out[0]).not.toContain("\u001B");
+  });
+
+  it("dumps full span data including attributes and events as JSON", async () => {
+    const root = await createRoot();
+    await writeSegment(root, TRACE_ONE, {
+      ...span("a", "agent.step", 10, 80, undefined, {
+        "agent.model.id": "gpt-5",
+        "agent.session.id": "session-one",
+      }),
+      events: [{ name: "step.started", timeUnixNano: "10000000" }],
+    });
+    await writeSegment(root, TRACE_ONE, {
+      ...span("b", "ai.toolCall", 20, 30, "a", { "gen_ai.tool.name": "get_weather" }),
+      status: { code: 2, message: "tool exploded" },
+    });
+    const output = collectingLogger();
+
+    await runTraceShowCommand(output.logger, root, "session-one", { json: true });
+
+    const [trace] = JSON.parse(output.out[0]!) as [
+      {
+        traceId: string;
+        spans: {
+          attributes: Record<string, unknown>;
+          events: { name: string; timeNs: string }[];
+          name: string;
+          statusMessage: string | null;
+        }[];
+      },
+    ];
+    expect(trace.traceId).toBe(TRACE_ONE);
+    const stepSpan = trace.spans.find((span) => span.name === "agent.step")!;
+    expect(stepSpan.attributes["agent.model.id"]).toBe("gpt-5");
+    expect(stepSpan.events).toEqual([{ attributes: {}, name: "step.started", timeNs: "10000000" }]);
+    const toolSpan = trace.spans.find((span) => span.name === "ai.toolCall")!;
+    expect(toolSpan.statusMessage).toBe("tool exploded");
+  });
+
   it("prints empty and JSON list output", async () => {
     const root = await createRoot();
     const empty = collectingLogger();
@@ -160,6 +373,10 @@ describe("eve trace", () => {
   }
 });
 
+function ids(traces: readonly { readonly traceId: string }[]): string[] {
+  return traces.map((trace) => trace.traceId);
+}
+
 function collectingLogger() {
   const out: string[] = [];
   return {
@@ -171,11 +388,19 @@ function collectingLogger() {
   };
 }
 
-async function writeSegment(
-  root: string,
-  traceId: string,
-  value: ReturnType<typeof span>,
-): Promise<void> {
+interface TestSegmentSpan {
+  readonly attributes: readonly { key: string; value: Record<string, unknown> }[];
+  readonly endTimeUnixNano: string;
+  readonly events?: readonly unknown[];
+  readonly name: string;
+  readonly parentSpanId?: string;
+  readonly spanId: string;
+  readonly startTimeUnixNano: string;
+  readonly status: { readonly code: number; readonly message?: string };
+  readonly traceId: string;
+}
+
+async function writeSegment(root: string, traceId: string, value: TestSegmentSpan): Promise<void> {
   const directory = join(root, ".eve", "traces", "v1", traceId, "segments");
   await mkdir(directory, { recursive: true });
   await writeFile(
@@ -195,7 +420,7 @@ function span(
   end: number,
   parentSpanId?: string,
   attributes: Record<string, string | number> = {},
-) {
+): TestSegmentSpan {
   return {
     attributes: Object.entries(attributes).map(([key, value]) => ({
       key,

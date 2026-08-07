@@ -12,7 +12,9 @@ const NETWORK_ERROR_CODES = [
   "ENOTFOUND",
   "EPIPE",
   "ETIMEDOUT",
+  "UND_ERR_BODY_TIMEOUT",
   "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
   "UND_ERR_SOCKET",
 ] as const;
 
@@ -53,14 +55,15 @@ export const SYSTEM_RULES: readonly SemanticErrorRule[] = [
     // Exact-equality message fallback, verified empirically on Node 26:
     // a failed `fetch` rejects with a TypeError whose message is exactly
     // "fetch failed" (the coded cause is sometimes stripped in transit),
-    // and a peer-destroyed HTTP socket errors with exactly "socket hang
-    // up" (code ECONNRESET — the code rule above normally wins).
-    // Equality, never containment: a user error that merely mentions
-    // "fetch failed" must not be reclassified as a connectivity problem.
+    // a peer-destroyed HTTP socket errors with exactly "socket hang up",
+    // and an undici headers/body timeout can surface as exactly
+    // "terminated" when its coded cause is stripped in transit. Equality,
+    // never containment: user errors that merely mention these messages
+    // must not be reclassified as connectivity problems.
     id: "network-request-failed",
     name: "Network request failed",
     tags: ["system", "transient"],
-    when: messageIs("fetch failed", "socket hang up"),
+    when: messageIs("fetch failed", "socket hang up", "terminated"),
     message: (link) => networkFailureMessage(link.message.trim()),
     hint: NETWORK_FAILURE_HINT,
   },

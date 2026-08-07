@@ -111,6 +111,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       input.manifest.workflowTool === undefined
         ? undefined
         : { maxSubagents: input.manifest.workflowTool.maxSubagents },
+    webSearchProvider: input.manifest.webSearchProvider,
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,
@@ -226,6 +227,7 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
 
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
+      subagentPersistentSessions: manifest.config.experimental.subagentPersistentSessions,
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined
@@ -249,6 +251,7 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     config.limits = {
       maxInputTokensPerSession: manifest.config.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: manifest.config.limits.maxOutputTokensPerSession,
+      sessionTimeoutMs: manifest.config.limits.sessionTimeoutMs,
     };
   }
 

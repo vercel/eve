@@ -3,7 +3,7 @@ import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { HeadersValue } from "#client/types.js";
 import type { DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ChannelRouteMethod, RouteContext } from "#public/definitions/channel.js";
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
@@ -33,6 +33,7 @@ import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { InternalAgentDefinition } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
 import type { ToolSchema } from "#shared/tool-schema.js";
@@ -210,7 +211,7 @@ export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
    * wildcard if declared. Unknown keys are accepted at resolve time
    * and ignored at dispatch time.
    */
-  readonly events: Readonly<Record<string, StreamEventHook<HandleMessageStreamEvent>>>;
+  readonly events: Readonly<Record<string, StreamEventHook<MessageStreamEvent>>>;
 }
 
 /**
@@ -231,7 +232,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   /**
    * Universal entry point for new sessions, called by cross-channel
    * initiators (the schedule dispatcher today). Typed precisely as
-   * {@link CompiledChannel.receive} — `(input, { send }) => Session` —
+   * {@link CompiledChannel.receive} — `(input, ctx) => Session` —
    * so any caller passing the wrong context shape is a typecheck error,
    * not a runtime crash.
    *
@@ -243,7 +244,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly receive?: CompiledChannel["receive"];
   /**
    * Reference to the authored {@link CompiledChannel} value the channel
-   * module exported. Preserved so callers of `args.receive(channel, …)`
+   * module exported. Preserved so callers of `ctx.to(channel, target)`
    * can identify a target by the same imported reference. `undefined`
    * for framework-internal channels constructed without going through
    * `defineChannel`.
@@ -268,10 +269,18 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
 export type ResolvedRuntimeSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
-      description: string;
       kind: "subagent";
       name: string;
-    }
+    } & (
+      | {
+          description: string;
+          dynamic?: never;
+        }
+      | {
+          description?: never;
+          dynamic: ResolvedDynamicSubagentDefinition;
+        }
+    )
 >;
 
 /**
@@ -299,6 +308,13 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
 export type ResolvedRuntimeDelegationNode =
   | ResolvedRuntimeRemoteAgentNode
   | ResolvedRuntimeSubagentNode;
+
+export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSourceRef> {
+  readonly eventNames: readonly string[];
+  readonly events: Readonly<
+    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
+  >;
+}
 
 /**
  * Runtime-owned additive agent configuration resolved from `agent.ts`.
@@ -396,6 +412,8 @@ export interface ResolvedAgent {
   readonly workflowTool?: {
     readonly maxSubagents?: number;
   };
+  /** AI Gateway provider selected for the framework `web_search` tool. */
+  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructionsResolvers: readonly ResolvedDynamicInstructionsResolver[];
   readonly dynamicSkillResolvers: readonly ResolvedDynamicSkillResolver[];
   readonly dynamicToolResolvers: readonly ResolvedDynamicToolResolver[];

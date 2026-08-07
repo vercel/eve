@@ -7,6 +7,7 @@ import { defineEval } from "eve/evals";
  * old selection is still relevant.
  */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "HITL smoke: a stale ask-question selection becomes a new user turn while another question is pending.",
   async test(t) {
@@ -55,10 +56,12 @@ export default defineEval({
       throw new Error("The second ask_question call reused the stale request ID.");
     }
 
-    const staleSelection = await t.respond({
-      requestId: request.requestId,
-      optionId: "candidate",
-    });
+    const staleSelection = await t.respond([
+      {
+        requestId: request.requestId,
+        optionId: "candidate",
+      },
+    ]);
     staleSelection.expectOk();
     staleSelection.event("message.received", {
       count: 1,

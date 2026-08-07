@@ -1,9 +1,9 @@
 ---
 title: "Dynamic Capabilities"
-description: "Resolve models, tools, skills, and instructions at runtime: dynamic model selection, defineDynamic resolver events, execution order, and durable dynamic tools."
+description: "Resolve models, subagents, tools, skills, and instructions at runtime with defineDynamic resolver events."
 ---
 
-`defineDynamic` resolves the model, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
+`defineDynamic` resolves the model, subagents, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [subagents](../subagents), [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
 
 ## Dynamic models
 
@@ -16,10 +16,77 @@ uncached prices. See
 [agent configuration](../agent-config#choose-the-model-dynamically) for the
 full contract.
 
-`fallback` is model-only: the agent always needs exactly one model, and the
-compiled fallback anchors build-time metadata. Tools, skills, and instructions
-default by authoring a static entry (or returning `null`), so `fallback` on
-their `defineDynamic` export is a build error.
+The agent always needs exactly one model, so the compiled fallback anchors
+build-time metadata. Tools, skills, instructions, and subagents default by
+authoring a static entry (or returning `null`), so `fallback` on their
+`defineDynamic` export is a build error.
+
+## Dynamic subagents
+
+Wrap a declared subagent's own `agent.ts` in `defineDynamic` when its
+availability depends on the caller, tenant, environment, or a feature flag.
+Return the child definition to configure and expose it. Return `null` or
+`undefined` to omit it from the parent's model-visible tools.
+
+```ts title="agent/subagents/finance/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineDynamic({
+  events: {
+    "session.started": (_event, ctx) =>
+      ctx.session.auth.current?.attributes.plan === "enterprise"
+        ? defineAgent({
+            description: "Analyze financial and accounting data.",
+            model: "openai/gpt-5.5",
+          })
+        : null,
+  },
+});
+```
+
+eve always compiles the subagent's filesystem manifest, including its
+instructions, tools, skills, connections, sandbox, and nested subagents. When
+the resolver selects it, eve injects the returned agent configuration into that
+compiled manifest. Each resolution can return a different model or other
+runtime agent settings. Runtime-selected models must use string model IDs;
+build and Workflow-world configuration cannot be selected at runtime.
+
+A single-file remote subagent uses the same lifecycle. Return
+`defineRemoteAgent(...)` to expose the selected deployment, or nil to omit it:
+
+```ts title="agent/subagents/finance.ts"
+import { defineDynamic, defineRemoteAgent } from "eve";
+
+export default defineDynamic({
+  events: {
+    "session.started": (_event, ctx) =>
+      ctx.session.auth.current?.attributes.plan === "enterprise"
+        ? defineRemoteAgent({
+            description: "Analyze financial and accounting data.",
+            url: "https://finance-agent.example.com",
+          })
+        : null,
+  },
+});
+```
+
+The returned remote definition can change its URL, path, headers, auth,
+principal forwarding, and output schema. Function-valued URLs resolve when the
+dynamic event runs. Auth and headers remain lazy and resolve before each
+outbound request without entering durable workflow state.
+
+Dynamic subagents support `session.started` and `turn.started`. A turn selection
+shadows the session selection for that turn, including when the turn handler
+returns nil. If a resolver throws or returns an invalid definition, eve logs the
+failure and omits the subagent.
+
+The resolved set applies to local and remote direct delegation and the
+`Workflow` tool. eve
+also checks availability again before starting the child, so a stale or
+manually constructed call fails with `SUBAGENT_UNAVAILABLE`. Treat conditional
+availability as capability composition, not as the only authorization
+boundary: sensitive child tools still need their own authorization and
+approval checks.
 
 ## Dynamic tools
 
@@ -162,6 +229,7 @@ Both resolve before the prompt is assembled, so the model sees the right instruc
 
 ## What to read next
 
+- Conditionally expose a specialist → [Subagents](../subagents)
 - The static tool basics this builds on → [Tools](../tools)
 - The built-in tools and how to override them → [Default harness](../concepts/default-harness)
 - Authenticate a tool or connection to an external service → [Auth & route protection](./auth-and-route-protection)

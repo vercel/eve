@@ -4,6 +4,31 @@
   "homepage": "https://eve.dev",
   "items": [
     {
+      "name": "linear",
+      "type": "registry:item",
+      "title": "Linear",
+      "description": "Receive delegated Linear work and give your agent tools for issues, projects, and comments.",
+      "meta": {
+        "eve": {
+          "requires": ">=0.30.6",
+          "components": [
+            {
+              "item": "channel/linear-agent",
+              "label": "Linear Channel",
+              "description": "Interact with your eve agent natively in Linear",
+              "default": true
+            },
+            {
+              "item": "connection/linear",
+              "label": "Linear MCP",
+              "description": "Use the Linear MCP",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "extension/agent-browser",
       "type": "registry:item",
       "title": "agent-browser",
@@ -105,6 +130,30 @@
       ]
     },
     {
+      "name": "extension/hindsight",
+      "type": "registry:item",
+      "title": "Hindsight",
+      "description": "Recall relevant context before every turn and retain each exchange automatically.",
+      "dependencies": ["@vectorize-io/hindsight-eve"],
+      "envVars": {
+        "HINDSIGHT_API_KEY": "",
+        "HINDSIGHT_API_URL": "",
+        "HINDSIGHT_BANK_ID": ""
+      },
+      "files": [
+        {
+          "path": "registry/extensions/hindsight-instructions.ts",
+          "type": "registry:file",
+          "target": "agent/instructions/hindsight.ts"
+        },
+        {
+          "path": "registry/extensions/hindsight-hook.ts",
+          "type": "registry:file",
+          "target": "agent/hooks/hindsight.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/browser-use",
       "type": "registry:item",
       "title": "Browser Use",
@@ -125,6 +174,17 @@
       "type": "registry:item",
       "title": "Vercel",
       "description": "Manage Vercel projects, deployments, and logs through Vercel's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "vercel", "vercel", "vercel"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -139,6 +199,17 @@
       "type": "registry:item",
       "title": "Linear",
       "description": "Issues, projects, cycles, and comments via Linear's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "linear", "mcp.linear.app", "linear"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -153,6 +224,17 @@
       "type": "registry:item",
       "title": "Notion",
       "description": "Search and edit Notion pages and databases over MCP or OpenAPI.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "notion", "mcp.notion.com", "notion"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -167,6 +249,17 @@
       "type": "registry:item",
       "title": "Datadog",
       "description": "Query metrics, monitors, and logs through Datadog's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "datadog", "mcp.datadoghq.com", "datadog"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -181,6 +274,17 @@
       "type": "registry:item",
       "title": "Honeycomb",
       "description": "Explore traces and run queries through Honeycomb's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "honeycomb", "mcp.honeycomb.io", "honeycomb"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -195,6 +299,17 @@
       "type": "registry:item",
       "title": "Airtable",
       "description": "Bases, tables, and records through Airtable's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "airtable", "airtable", "airtable"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -209,6 +324,17 @@
       "type": "registry:item",
       "title": "Bitly",
       "description": "Shorten links, generate QR Codes, and track performance.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "bitly", "bitly", "bitly"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -223,6 +349,17 @@
       "type": "registry:item",
       "title": "Brex",
       "description": "Expenses, cards, and cash through Brex's finance automation.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "brex", "brex", "brex"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -237,6 +374,17 @@
       "type": "registry:item",
       "title": "Candid",
       "description": "Research nonprofits and funders using Candid's data.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "candid", "candid", "candid"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -251,6 +399,17 @@
       "type": "registry:item",
       "title": "ClickHouse",
       "description": "Query and explore your ClickHouse Cloud data.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "clickhouse", "clickhouse", "clickhouse"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -265,6 +424,17 @@
       "type": "registry:item",
       "title": "Cloudinary",
       "description": "Manage, transform, and deliver your images and videos.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "cloudinary", "cloudinary", "cloudinary"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -279,6 +449,17 @@
       "type": "registry:item",
       "title": "Coda",
       "description": "Create, search, and update docs and tables.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "coda", "coda", "coda"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -293,6 +474,17 @@
       "type": "registry:item",
       "title": "Egnyte",
       "description": "Securely access and analyze Egnyte content.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "egnyte", "egnyte", "egnyte"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -307,6 +499,17 @@
       "type": "registry:item",
       "title": "Embat",
       "description": "Ask Embat about cash, debt, payments, and accounting.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "embat", "embat", "embat"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -321,6 +524,17 @@
       "type": "registry:item",
       "title": "Hugging Face",
       "description": "Access the Hugging Face Hub and thousands of Gradio apps.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "hugging-face", "hugging-face", "hugging-face"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -335,6 +549,17 @@
       "type": "registry:item",
       "title": "Local Falcon",
       "description": "AI visibility and local search intelligence.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "local-falcon", "local-falcon", "local-falcon"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -349,6 +574,17 @@
       "type": "registry:item",
       "title": "Make",
       "description": "Run Make scenarios and manage your Make account.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "make", "make", "make"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -363,6 +599,17 @@
       "type": "registry:item",
       "title": "Manufact",
       "description": "Deploy and monitor MCP servers with Manufact.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "manufact", "manufact", "manufact"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -377,6 +624,17 @@
       "type": "registry:item",
       "title": "Mem0",
       "description": "Persistent memory for AI agents and assistants.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "mem0", "mem0", "mem0"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -391,6 +649,17 @@
       "type": "registry:item",
       "title": "Miro",
       "description": "Access and create content on Miro boards.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "miro", "miro", "miro"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -405,6 +674,17 @@
       "type": "registry:item",
       "title": "Mixpanel",
       "description": "Analyze, query, and manage your Mixpanel data.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "mixpanel", "mixpanel", "mixpanel"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -415,10 +695,46 @@
       ]
     },
     {
+      "name": "connection/natural",
+      "type": "registry:item",
+      "title": "Natural",
+      "description": "Send, request, and manage payments with Natural.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "natural", "mcp.natural.com", "natural"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/natural.ts",
+          "type": "registry:file",
+          "target": "agent/connections/natural.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/netlify",
       "type": "registry:item",
       "title": "Netlify",
       "description": "Create, deploy, manage, and secure websites on Netlify.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "netlify", "netlify", "netlify"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -433,6 +749,17 @@
       "type": "registry:item",
       "title": "O'Reilly",
       "description": "Discover O'Reilly's expert learning content.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "oreilly", "oreilly", "oreilly"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -447,6 +774,17 @@
       "type": "registry:item",
       "title": "PlanetScale",
       "description": "Authenticated access to your PlanetScale Postgres and MySQL databases.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "planetscale", "planetscale", "planetscale"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -461,6 +799,17 @@
       "type": "registry:item",
       "title": "PostHog",
       "description": "Query, analyze, and manage your PostHog insights.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "posthog", "posthog", "posthog"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -475,6 +824,17 @@
       "type": "registry:item",
       "title": "Postman",
       "description": "Give API context to your coding agents with Postman.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "postman", "postman", "postman"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -489,6 +849,17 @@
       "type": "registry:item",
       "title": "Razorpay",
       "description": "Razorpay payments, settlements, and dashboard data.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "razorpay", "razorpay", "razorpay"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -503,6 +874,17 @@
       "type": "registry:item",
       "title": "Sentry",
       "description": "Search, query, and debug errors intelligently.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "sentry", "sentry", "sentry"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -517,6 +899,17 @@
       "type": "registry:item",
       "title": "Similarweb",
       "description": "Real-time web, mobile app, and market data.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "similarweb", "similarweb", "similarweb"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -531,6 +924,17 @@
       "type": "registry:item",
       "title": "Stripe",
       "description": "Payment processing and financial infrastructure tools.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "stripe", "stripe", "stripe"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -545,6 +949,17 @@
       "type": "registry:item",
       "title": "Supabase",
       "description": "Manage databases, authentication, and storage.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "supabase", "supabase", "supabase"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -559,6 +974,17 @@
       "type": "registry:item",
       "title": "Ticket Tailor",
       "description": "Manage tickets, orders, and events with Ticket Tailor.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "ticket-tailor", "ticket-tailor", "ticket-tailor"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -573,6 +999,17 @@
       "type": "registry:item",
       "title": "TickTick",
       "description": "Search, create, and manage your tasks and habits in TickTick.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "ticktick", "ticktick", "ticktick"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -583,10 +1020,46 @@
       ]
     },
     {
+      "name": "connection/tinybird",
+      "type": "registry:item",
+      "title": "Tinybird",
+      "description": "Query pipes and data sources in your Tinybird Workspace.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "tinybird", "tinybird", "tinybird"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/tinybird.ts",
+          "type": "registry:file",
+          "target": "agent/connections/tinybird.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/todoist",
       "type": "registry:item",
       "title": "Todoist",
       "description": "Search, complete, and manage your tasks in Todoist.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "todoist", "todoist", "todoist"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -601,6 +1074,17 @@
       "type": "registry:item",
       "title": "Webflow",
       "description": "Manage Webflow CMS, pages, assets, and sites.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "webflow", "webflow", "webflow"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -615,6 +1099,17 @@
       "type": "registry:item",
       "title": "Wix",
       "description": "Manage and build sites and apps on Wix.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "wix", "wix", "wix"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -629,6 +1124,17 @@
       "type": "registry:item",
       "title": "Zapier",
       "description": "Automate workflows across thousands of apps.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "zapier", "zapier", "zapier"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -643,6 +1149,17 @@
       "type": "registry:item",
       "title": "Zomato",
       "description": "Online food ordering and delivery through Zomato.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "zomato", "zomato", "zomato"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
       "dependencies": ["@vercel/connect"],
       "files": [
         {
@@ -659,27 +1176,34 @@
       "description": "Connect an eve agent to Slack with Vercel Connect or portable credentials.",
       "meta": {
         "eve": {
-          "channel": "slack"
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "slack"]
+          },
+          "requires": ">=0.27.8"
         }
-      }
+      },
+      "dependencies": ["@vercel/connect@>=0.4.2"]
     },
     {
       "name": "channel/discord",
       "type": "registry:item",
       "title": "Discord",
-      "description": "Run your agent as a Discord bot across servers and threads.",
-      "envVars": {
-        "DISCORD_APPLICATION_ID": "",
-        "DISCORD_BOT_TOKEN": "",
-        "DISCORD_PUBLIC_KEY": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/discord.ts",
-          "type": "registry:file",
-          "target": "agent/channels/discord.ts"
+      "description": "Connect an eve agent to Discord with guided connector and slash-command setup.",
+      "dependencies": ["@vercel/connect@>=0.6.0"],
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "discord"]
+          },
+          "requires": ">=0.30.0"
         }
-      ]
+      }
     },
     {
       "name": "channel/teams",
@@ -735,36 +1259,37 @@
       "name": "channel/github",
       "type": "registry:item",
       "title": "GitHub",
-      "description": "Drive your agent from issues, pull requests, and comments.",
-      "envVars": {
-        "GITHUB_APP_ID": "",
-        "GITHUB_APP_PRIVATE_KEY": "",
-        "GITHUB_WEBHOOK_SECRET": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/github.ts",
-          "type": "registry:file",
-          "target": "agent/channels/github.ts"
+      "description": "Drive your agent from issues, pull requests, and comments, with guided Connect setup.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "github"]
+          },
+          "requires": ">=0.30.7"
         }
-      ]
+      },
+      "dependencies": ["@vercel/connect@>=0.6.0"]
     },
     {
       "name": "channel/linear-agent",
       "type": "registry:item",
       "title": "Linear Agent",
-      "description": "Delegate Linear issues and comments to your agent through Linear's Agent Sessions.",
-      "envVars": {
-        "LINEAR_AGENT_ACCESS_TOKEN": "",
-        "LINEAR_WEBHOOK_SECRET": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/linear-agent.ts",
-          "type": "registry:file",
-          "target": "agent/channels/linear.ts"
+      "description": "Delegate Linear issues and comments through Agent Sessions, with guided Vercel Connect setup.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "linear"]
+          },
+          "requires": ">=0.30.6"
         }
-      ]
+      },
+      "dependencies": ["@vercel/connect"]
     },
     {
       "name": "channel/web",
@@ -773,9 +1298,231 @@
       "description": "Add the built-in Next.js Web Chat channel to an eve agent.",
       "meta": {
         "eve": {
-          "channel": "web"
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "web"]
+          },
+          "requires": ">=0.27.8"
         }
-      }
+      },
+      "dependencies": [
+        "@radix-ui/react-use-controllable-state@1.2.2",
+        "@shikijs/core@4.1.0",
+        "@shikijs/engine-javascript@4.1.0",
+        "@shikijs/engine-oniguruma@4.1.0",
+        "@streamdown/cjk@1.0.3",
+        "@streamdown/code@1.1.1",
+        "@streamdown/math@1.0.2",
+        "@streamdown/mermaid@1.0.2",
+        "@tailwindcss/postcss@4.3.0",
+        "ai@^7.0.38",
+        "class-variance-authority@0.7.1",
+        "clsx@2.1.1",
+        "cmdk@1.1.1",
+        "lucide-react@1.16.0",
+        "motion@12.40.0",
+        "nanoid@5.1.11",
+        "next@16.3.0-preview.6",
+        "radix-ui@1.4.3",
+        "react@19.2.6",
+        "react-dom@19.2.6",
+        "shiki@4.1.0",
+        "streamdown@2.5.0",
+        "tailwind-merge@3.6.0",
+        "tailwindcss@4.3.0",
+        "use-stick-to-bottom@1.1.4",
+        "zod@4.4.3"
+      ],
+      "devDependencies": [
+        "@types/node@26",
+        "@types/react@19.2.15",
+        "@types/react-dom@19.2.3",
+        "typescript@6.0.3"
+      ],
+      "files": [
+        {
+          "path": "registry/channel/web/agent/channels/eve.ts",
+          "type": "registry:file",
+          "target": "agent/channels/eve.ts"
+        },
+        {
+          "path": "registry/channel/web/app/_components/agent-chat.tsx",
+          "type": "registry:file",
+          "target": "app/_components/agent-chat.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/_components/agent-message.tsx",
+          "type": "registry:file",
+          "target": "app/_components/agent-message.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/globals.css",
+          "type": "registry:file",
+          "target": "app/globals.css"
+        },
+        {
+          "path": "registry/channel/web/app/layout.tsx",
+          "type": "registry:file",
+          "target": "app/layout.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/page.tsx",
+          "type": "registry:file",
+          "target": "app/page.tsx"
+        },
+        {
+          "path": "registry/channel/web/components.json",
+          "type": "registry:file",
+          "target": "components.json"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/chain-of-thought.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/chain-of-thought.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/code-block.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/code-block.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/conversation.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/conversation.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/message.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/message.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/prompt-input.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/prompt-input.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/reasoning.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/reasoning.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/shimmer.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/shimmer.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/tool.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/tool.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/badge.tsx",
+          "type": "registry:file",
+          "target": "components/ui/badge.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/button-group.tsx",
+          "type": "registry:file",
+          "target": "components/ui/button-group.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/button.tsx",
+          "type": "registry:file",
+          "target": "components/ui/button.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/collapsible.tsx",
+          "type": "registry:file",
+          "target": "components/ui/collapsible.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/command.tsx",
+          "type": "registry:file",
+          "target": "components/ui/command.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/dialog.tsx",
+          "type": "registry:file",
+          "target": "components/ui/dialog.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/dropdown-menu.tsx",
+          "type": "registry:file",
+          "target": "components/ui/dropdown-menu.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/hover-card.tsx",
+          "type": "registry:file",
+          "target": "components/ui/hover-card.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/input-group.tsx",
+          "type": "registry:file",
+          "target": "components/ui/input-group.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/input.tsx",
+          "type": "registry:file",
+          "target": "components/ui/input.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/select.tsx",
+          "type": "registry:file",
+          "target": "components/ui/select.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/separator.tsx",
+          "type": "registry:file",
+          "target": "components/ui/separator.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/spinner.tsx",
+          "type": "registry:file",
+          "target": "components/ui/spinner.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/textarea.tsx",
+          "type": "registry:file",
+          "target": "components/ui/textarea.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/tooltip.tsx",
+          "type": "registry:file",
+          "target": "components/ui/tooltip.tsx"
+        },
+        {
+          "path": "registry/channel/web/css.d.ts",
+          "type": "registry:file",
+          "target": "css.d.ts"
+        },
+        {
+          "path": "registry/channel/web/lib/utils.ts",
+          "type": "registry:file",
+          "target": "lib/utils.ts"
+        },
+        {
+          "path": "registry/channel/web/next-env.d.ts",
+          "type": "registry:file",
+          "target": "next-env.d.ts"
+        },
+        {
+          "path": "registry/channel/web/next.config.ts",
+          "type": "registry:file",
+          "target": "next.config.ts"
+        },
+        {
+          "path": "registry/channel/web/postcss.config.mjs",
+          "type": "registry:file",
+          "target": "postcss.config.mjs"
+        },
+        {
+          "path": "registry/channel/web/tsconfig.json",
+          "type": "registry:file",
+          "target": "tsconfig.json"
+        }
+      ]
     },
     {
       "name": "channel/chat-sdk-gchat",
@@ -980,22 +1727,22 @@
       ]
     },
     {
-      "name": "channel/chat-sdk-photon",
+      "name": "channel/photon-imessage",
       "type": "registry:item",
-      "title": "Photon",
-      "description": "Cloud, self-hosted, and local iMessage messaging through Photon.",
-      "dependencies": ["chat", "@photon-ai/chat-adapter-imessage", "@chat-adapter/state-memory"],
-      "envVars": {
-        "IMESSAGE_PROJECT_ID": "",
-        "IMESSAGE_PROJECT_SECRET": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/chat-sdk-photon.ts",
-          "type": "registry:file",
-          "target": "agent/channels/imessage.ts"
+      "title": "Photon iMessage",
+      "description": "Connect an eve agent to iMessage through Photon with guided project and phone setup.",
+      "dependencies": ["@vercel/connect@>=0.5.0"],
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "photon"]
+          },
+          "requires": ">=0.29.0"
         }
-      ]
+      }
     },
     {
       "name": "channel/chat-sdk-dial",
@@ -1094,14 +1841,43 @@
       "name": "instrumentation/braintrust",
       "type": "registry:item",
       "title": "Braintrust",
-      "description": "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
-      "dependencies": ["@braintrust/otel", "@vercel/otel"],
+      "description": "Trace eve agent sessions in Braintrust, including turns, steps, tool calls, and subagent interactions.",
+      "dependencies": ["braintrust"],
       "envVars": {
         "BRAINTRUST_API_KEY": ""
       },
       "files": [
         {
           "path": "registry/instrumentation/braintrust.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation.ts"
+        },
+        {
+          "path": "registry/instrumentation/braintrust-hook.ts",
+          "type": "registry:file",
+          "target": "agent/hooks/braintrust.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/posthog",
+      "type": "registry:item",
+      "title": "PostHog",
+      "description": "Send agent traces and generations to PostHog AI Observability.",
+      "dependencies": [
+        "@posthog/ai@^7.19.6",
+        "@opentelemetry/api",
+        "@opentelemetry/exporter-trace-otlp-http",
+        "@opentelemetry/sdk-trace-base",
+        "@vercel/otel"
+      ],
+      "envVars": {
+        "POSTHOG_PROJECT_TOKEN": "",
+        "POSTHOG_HOST": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/posthog.ts",
           "type": "registry:file",
           "target": "agent/instrumentation.ts"
         }

@@ -6,7 +6,8 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { linearChannel, type LinearChannelState } from "#public/channels/linear/linearChannel.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 import type { InputRequest } from "#runtime/input/types.js";
@@ -45,17 +46,17 @@ const stubAlsContext = (() => {
 
 function callEvent(
   adapter: ChannelAdapter,
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   ctx: any,
-): Promise<HandleMessageStreamEvent> {
+): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
-function makeEvent<T extends HandleMessageStreamEvent["type"]>(
+function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
   type: T,
   data: unknown,
-): HandleMessageStreamEvent {
-  return { data, type } as HandleMessageStreamEvent;
+): UnstampedMessageStreamEvent {
+  return { data, type } as UnstampedMessageStreamEvent;
 }
 
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
@@ -122,18 +123,15 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected linear channel to define a POST route.");
   }
-  const send = vi.fn().mockResolvedValue({ continuationToken: "linear:test", id: "s1" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
-    cancel: vi.fn(),
-    reset: vi.fn(),
-    resolveActiveSession: async () => undefined,
-    getSession: vi.fn() as any,
+    attachSession: vi.fn() as any,
+    ...mockChannelContext(send),
     params: {},
-    receive: vi.fn() as any,
+    to: vi.fn() as any,
     requestIp: null,
-    send,
     waitUntil,
   });
 
@@ -153,6 +151,7 @@ function makeRequest(overrides: Partial<InputRequest> = {}): InputRequest {
     prompt: "Approve deployment?",
     requestId: "call_1",
     ...overrides,
+    kind: overrides.kind ?? "question",
   };
 }
 
@@ -163,16 +162,16 @@ describe("linearChannel inbound Agent Session events", () => {
 
     expect(response.status).toBe(200);
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload.message).toBe("Please handle this issue.");
-    expect(payload.context[0]).toContain("<linear_context>");
-    expect(payload.context[0]).toContain("issue_identifier: EVE-123");
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(input.message).toBe("Please handle this issue.");
+    expect(input.context?.[0]).toContain("<linear_context>");
+    expect(input.context?.[0]).toContain("issue_identifier: EVE-123");
+    expect(continuationToken).toBe("agent-session:agent_session_1");
+    expect(input).toMatchObject({
       auth: {
         authenticator: "linear-agent-webhook",
         principalId: "linear:user_1",
       },
-      continuationToken: "agent-session:agent_session_1",
       state: {
         agentSessionId: "agent_session_1",
         issueId: "issue_1",
@@ -200,9 +199,9 @@ describe("linearChannel inbound Agent Session events", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload] = send.mock.calls[0]!;
-    expect(payload.inputResponses).toBeUndefined();
-    expect(payload.message).toBe("approve");
+    const [, input] = send.mock.calls[0]!;
+    expect(input.inputResponses).toBeUndefined();
+    expect(input.message).toBe("approve");
   });
 
   it("attaches authenticated Linear upload images to prompted messages", async () => {
@@ -237,10 +236,10 @@ describe("linearChannel inbound Agent Session events", () => {
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
       "Bearer linear-token",
     );
-    const [payload] = send.mock.calls[0]!;
-    expect(payload.message[0]).toEqual({ text: "Inspect screenshot.", type: "text" });
-    expect(payload.message[1]).toMatchObject({ mediaType: "image/webp", type: "file" });
-    expect(payload.message[1].data).toEqual(Buffer.from([1, 2, 3]));
+    const [, input] = send.mock.calls[0]!;
+    expect(input.message?.[0]).toEqual({ text: "Inspect screenshot.", type: "text" });
+    expect(input.message?.[1]).toMatchObject({ mediaType: "image/webp", type: "file" });
+    expect(input.message?.[1]?.data).toEqual(Buffer.from([1, 2, 3]));
   });
 
   it("acks generic data webhooks without dispatch when no hook is configured", async () => {
@@ -499,7 +498,7 @@ describe("linearChannel default event handlers", () => {
 
   it("receive starts a session from an existing Agent Session id", async () => {
     const channel = linearChannel();
-    const send = vi.fn().mockResolvedValue({ continuationToken: "linear:test", id: "s1" });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await channel.receive!(
       {
@@ -507,12 +506,14 @@ describe("linearChannel default event handlers", () => {
         message: "start",
         target: { agentSessionId: "agent_session_1" },
       },
-      { send },
+      {
+        ...mockChannelContext(send),
+      },
     );
 
-    expect(send).toHaveBeenCalledWith("start", {
+    expect(send).toHaveBeenCalledWith("agent-session:agent_session_1", {
       auth: null,
-      continuationToken: "agent-session:agent_session_1",
+      message: "start",
       state: {
         agentSessionId: "agent_session_1",
         agentSessionUrl: null,
@@ -547,7 +548,7 @@ describe("linearChannel default event handlers", () => {
       api: { apiBaseUrl: "https://linear.test/graphql", fetch: fetchMock },
       credentials: { accessToken: "linear-token" },
     });
-    const send = vi.fn().mockResolvedValue({ continuationToken: "linear:test", id: "s1" });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await channel.receive!(
       {
@@ -555,15 +556,17 @@ describe("linearChannel default event handlers", () => {
         message: "start",
         target: { issueId: "issue_1" },
       },
-      { send },
+      {
+        ...mockChannelContext(send),
+      },
     );
 
     expect(requestBody(fetchMock.mock.calls[0]?.[1])).toMatchObject({
       variables: { input: { issueId: "issue_1" } },
     });
-    expect(send).toHaveBeenCalledWith("start", {
+    expect(send).toHaveBeenCalledWith("agent-session:agent_session_2", {
       auth: null,
-      continuationToken: "agent-session:agent_session_2",
+      message: "start",
       state: expect.objectContaining({
         agentSessionId: "agent_session_2",
         issueId: "issue_1",

@@ -1,5 +1,5 @@
 import type {
-  HandleMessageStreamEvent,
+  UnstampedMessageStreamEvent,
   MessageAppendedStreamEvent,
   ReasoningAppendedStreamEvent,
 } from "#protocol/message.js";
@@ -11,7 +11,7 @@ const MAX_PENDING_DELTA_CHARACTERS = 64 * 1024;
 interface PendingEmission {
   deltaCharacters: number;
   deltaParts?: string[];
-  event: HandleMessageStreamEvent;
+  event: UnstampedMessageStreamEvent;
   messages?: readonly import("ai").ModelMessage[];
   sourceEvents: number;
 }
@@ -24,8 +24,9 @@ interface OrderedStreamEmitter {
 
 /**
  * Decouples model-stream consumption from the durable event sink while
- * preserving FIFO dispatch. Adjacent append events waiting behind the active
- * write are folded together; every other event remains an ordering barrier.
+ * preserving FIFO dispatch. Adjacent append events and same-call tool partials
+ * waiting behind the active write are folded together; every other event
+ * remains an ordering barrier.
  * Coalescing before the durable writer keeps one Workflow chunk per emitted
  * event, so event-count reconnect cursors remain aligned with chunk indexes.
  */
@@ -133,7 +134,7 @@ export function createOrderedStreamEmitter(
       const lastIndex = pending.length - 1;
       const last = pending[lastIndex];
       const delta = appendDelta(event);
-      if (last === undefined || !mergeAdjacentAppends(last, event, messages)) {
+      if (last === undefined || !mergeAdjacentEmissions(last, event, messages)) {
         pending.push({
           deltaCharacters: delta?.length ?? 0,
           event,
@@ -161,9 +162,9 @@ export function createOrderedStreamEmitter(
   };
 }
 
-function mergeAdjacentAppends(
+function mergeAdjacentEmissions(
   left: PendingEmission,
-  right: HandleMessageStreamEvent,
+  right: UnstampedMessageStreamEvent,
   messages: readonly import("ai").ModelMessage[] | undefined,
 ): boolean {
   if (left.event.type === "message.appended" && right.type === "message.appended") {
@@ -184,16 +185,23 @@ function mergeAdjacentAppends(
     return true;
   }
 
+  if (left.event.type === "action.partial" && right.type === "action.partial") {
+    if (left.event.data.result.callId !== right.data.result.callId) return false;
+    left.event = right;
+    left.messages = messages;
+    return true;
+  }
+
   return false;
 }
 
-function appendDelta(event: HandleMessageStreamEvent): string | undefined {
+function appendDelta(event: UnstampedMessageStreamEvent): string | undefined {
   if (event.type === "message.appended") return event.data.messageDelta;
   if (event.type === "reasoning.appended") return event.data.reasoningDelta;
   return undefined;
 }
 
-function materializeEvent(emission: PendingEmission): HandleMessageStreamEvent {
+function materializeEvent(emission: PendingEmission): UnstampedMessageStreamEvent {
   if (emission.deltaParts === undefined) return emission.event;
 
   if (emission.event.type === "message.appended") {

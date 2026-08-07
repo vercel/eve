@@ -9,11 +9,14 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
+import {
+  notifyTurnCallerStep,
+  resolveInitialTurnCallerStep,
+} from "#execution/delegated-parent-notification.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { startRemoteAgentSession } from "#execution/remote-agent-dispatch.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { authHookToken, CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
   createEveCallbackRoutePath,
   createEveConnectionCallbackRoutePath,
@@ -35,8 +38,8 @@ import type { HarnessSession } from "#harness/types.js";
  *    remote-subagent session callback (`startRemoteAgentSession`) and the
  *    connection hook URL (`getHookUrl`);
  * 3. the remote side validates the callback metadata with the real
- *    create-session parser (`parseSessionCallback`) and posts the terminal
- *    result with the real durable step (`fireSessionCallbackStep`);
+ *    create-session parser (`parseSessionCallback`) and posts the settled turn
+ *    with the real durable step (`notifyTurnCallerStep`);
  * 4. each parent service only serves its own prefix-stripped `/eve/v1/*`
  *    callback routes — anything else 404s, matching production.
  *
@@ -219,18 +222,21 @@ describe("multi-agent callback routing", () => {
     });
     deploymentOrigin = await listen(deploymentServer);
 
-    // Remote subagent: records the create-session body and returns a session
-    // id, like the eve channel's create-session route.
+    // Remote subagent: records the create-session body and returns the eve
+    // channel's canonical accepted response.
     remoteAgentServer = createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", () => {
         createSessionBodies.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        response.writeHead(200, {
-          "content-type": "application/json",
-          [EVE_SESSION_ID_HEADER]: "remote-session-1",
-        });
-        response.end(JSON.stringify({ ok: true }));
+        response.writeHead(202, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            ok: true,
+            sessionId: "remote-session-1",
+            status: "accepted",
+          }),
+        );
       });
     });
     remoteAgentOrigin = await listen(remoteAgentServer);
@@ -266,7 +272,7 @@ describe("multi-agent callback routing", () => {
     const callbackToken = `${sessionId}:callback-token`;
     const bodyCountBefore = createSessionBodies.length;
 
-    const remoteSessionId = await startRemoteAgentSession({
+    const { sessionId: remoteSessionId } = await startRemoteAgentSession({
       action: {
         callId: `call-${agentName}`,
         description: "delegate research",
@@ -300,7 +306,7 @@ describe("multi-agent callback routing", () => {
   }
 
   for (const agent of DEPLOYMENT_AGENTS) {
-    it(`delivers the remote-subagent session callback for ${agent.name} through its public mount`, async () => {
+    it(`delivers the remote-subagent settled turn for ${agent.name} through its public mount`, async () => {
       stubAgentRuntimeEnvironment(agent.publicRoutePrefix);
 
       const { callback, remoteSessionId } = await mintRemoteAgentCallback(agent.name);
@@ -315,21 +321,22 @@ describe("multi-agent callback routing", () => {
       // the prefixed URL must parse, or the remote rejects with HTTP 400.
       expect(parseSessionCallback(callback)).toMatchObject({ ok: true });
 
-      // Remote-side terminal POST (the step that failed with HTTP 404 in
-      // production) must reach the parent service through the deployment
-      // router and succeed.
+      // The remote conversation's first settled turn must reach the parent
+      // service through the deployment router and succeed.
+      const serializedContext = {
+        [SessionCallbackKey.name]: {
+          callId: `call-${agent.name}`,
+          subagentName: "research",
+          ...callback,
+        },
+      };
+      const caller = await resolveInitialTurnCallerStep({ serializedContext });
       await expect(
-        fireSessionCallbackStep({
-          output: "report done",
-          serializedContext: {
-            [SessionIdKey.name]: "remote-session-1",
-            [SessionCallbackKey.name]: {
-              callId: `call-${agent.name}`,
-              subagentName: "research",
-              ...callback,
-            },
-          },
-          status: "completed",
+        notifyTurnCallerStep({
+          caller,
+          lifecycle: "parked",
+          sessionId: "remote-session-1",
+          settled: { output: "report done" },
         }),
       ).resolves.toBeUndefined();
 

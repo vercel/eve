@@ -32,7 +32,7 @@ void (async () => {
     logs: "all",
     unicode: true,
   });
-  const runner = new EveTUIRunner({ session: client.session(), client, renderer });
+  const runner = new EveTUIRunner({ client, renderer });
 
   const runPromise = runner.run().catch((error: unknown) => {
     if (error instanceof Error && error.message === "Interrupted") {
@@ -83,6 +83,7 @@ void (async () => {
       `${theme.muted("[tui-server-logs] log region rendered, single user region")}\n`,
     );
   } catch (error) {
+    input.ctrlC();
     input.ctrlC();
     await runPromise.catch(() => {});
     throw error;

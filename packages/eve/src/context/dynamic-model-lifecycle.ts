@@ -10,7 +10,7 @@ import {
   type LiveDynamicModelSelection,
 } from "#context/keys.js";
 import { createLogger } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
   RuntimeDynamicModelReference,
   RuntimeModelReference,
@@ -76,7 +76,7 @@ export function getActiveDynamicModelSelection(ctx: {
 export async function dispatchDynamicModelEvent(input: {
   readonly ctx: AlsContext;
   readonly dynamicModel: RuntimeDynamicModelReference | undefined;
-  readonly event: HandleMessageStreamEvent;
+  readonly event: UnstampedMessageStreamEvent;
   readonly fallback: RuntimeModelReference;
   readonly messages: readonly ModelMessage[];
   readonly scope: RuntimeModelResolutionScope;

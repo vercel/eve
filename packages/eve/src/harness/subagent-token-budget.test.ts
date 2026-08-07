@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
-import { setTurnUsageState } from "#harness/turn-tag-state.js";
+import { bumpSessionRuntimeTokenLimits, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, SessionLimits } from "#harness/types.js";
 
 function createSessionWithUsage(input: {
@@ -66,6 +66,20 @@ describe("resolveRemainingSessionTokenLimits", () => {
     expect(resolveRemainingSessionTokenLimits(session)).toEqual({
       maxInputTokensPerSession: 1_000_000,
       maxOutputTokensPerSession: false,
+    });
+  });
+
+  it("measures a delegated grant from the bumped runtime limit", () => {
+    const exhausted = createSessionWithUsage({
+      limits: { maxInputTokensPerSession: 1_000_000, maxOutputTokensPerSession: 100_000 },
+      usedInputTokens: 1_100_000,
+      usedOutputTokens: 110_000,
+    });
+    const continued = bumpSessionRuntimeTokenLimits(exhausted);
+
+    expect(resolveRemainingSessionTokenLimits(continued)).toEqual({
+      maxInputTokensPerSession: 1_000_000,
+      maxOutputTokensPerSession: 100_000,
     });
   });
 

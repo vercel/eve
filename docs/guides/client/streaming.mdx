@@ -5,19 +5,37 @@ description: "Consume eve client stream events live, reconnect by event index, a
 
 Every `ClientSession.send()` call posts the turn, then reads the session's NDJSON (newline-delimited JSON) event stream. `MessageResponse` gives you two ways to consume that stream, aggregating it with `result()` or iterating it live.
 
-Once `send()` is accepted, the session exposes its assigned `sessionId` and can request cooperative cancellation with `session.cancel()`, even while the response stream is still running. The result status is `accepted` when the active turn accepted the signal or `no_active_turn` when it already settled:
+Once `send()` is accepted, the session exposes its assigned `sessionId` and can request cooperative cancellation with `session.cancel()`, even while the response stream is still running. The result status is `accepted` when the live session durably queued the command, including when a parked session consumes it as a no-op. An unknown or terminal session returns `no_active_turn`:
 
 ```ts
-const session = client.session();
-const response = await session.send("Run the long operation.");
+const { session, response } = await client.sessions.create({ message: "Run the long operation." });
 
 const cancellation = await session.cancel();
-console.log(cancellation.status);
+if (cancellation.status === "accepted") {
+  console.log(cancellation.sessionId);
+}
 
 const result = await response.result();
 ```
 
+The cancellation result is discriminated by `status`: only `accepted` includes
+`sessionId`; `no_active_turn` has no session identity field.
+
 Cancellation does not replace stream consumption. Continue reading the response to observe its terminal `turn.cancelled` and `session.waiting` boundary and to advance the client session cursor normally.
+
+Between turns, `session.compact()` queues context compaction without sending model input. An accepted request reports the session id; consume the durable stream through the following `session.waiting` boundary before sending the next turn. `compaction.completed` confirms that summarization succeeded; without it, eve preserves the previous history. A never-started session returns `no_active_session` as a successful no-op.
+
+```ts
+const compaction = await session.compact();
+console.log(compaction.status);
+```
+
+Use `session.clear()` to remove model-message history while retaining the session and its durable resources. Consume `context.cleared` and the following `session.waiting` before sending the next turn.
+
+```ts
+const cleared = await session.clear();
+console.log(cleared.status);
+```
 
 ## Aggregate a turn
 
@@ -60,13 +78,17 @@ for await (const event of response) {
 
 ## Handle event types
 
-Import event types from `eve/client` when you want exhaustiveness or helpers:
+Import event types from `eve/client` when you want exhaustiveness or helpers. Events read from a stream are `MessageStreamEvent`: the same union, with the `meta` envelope guaranteed present.
+
+`HandleMessageStreamEvent` remains available as a deprecated alias, so existing type imports continue to compile.
 
 ```ts
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import { isCurrentTurnBoundaryEvent } from "eve/client";
 
-function handleEvent(event: HandleMessageStreamEvent) {
+function handleEvent(event: MessageStreamEvent) {
+  console.log(event.meta.id, event.meta.at);
+
   if (isCurrentTurnBoundaryEvent(event)) {
     console.log("turn settled:", event.type);
   }
@@ -81,10 +103,11 @@ The most common UI events are:
 | `reasoning.appended` | Render reasoning deltas when the model provides them.                          |
 | `message.appended`   | Render assistant text deltas.                                                  |
 | `actions.requested`  | Show tool calls as the model requests them, before execution.                  |
+| `action.partial`     | Update a generator tool's provisional output snapshot.                         |
 | `action.result`      | Show tool call results.                                                        |
 | `input.requested`    | Pause the UI for approval or a question answer.                                |
 | `result.completed`   | Read structured output from an [output schema](./output-schema).               |
-| `session.waiting`    | Enable the composer and read the current `data.continuationToken`.             |
+| `session.waiting`    | Enable the composer; the same fixed session handle accepts the next message.   |
 | `session.completed`  | Mark the conversation terminal.                                                |
 | `session.failed`     | Mark the conversation failed.                                                  |
 
@@ -105,11 +128,12 @@ If you support refresh while an authorization prompt is pending, keep the sessio
 
 HTTP connections can end before a run does. The client reconnects from the number of events already consumed, so long turns continue without replaying events. It stops at a turn boundary, when aborted, or when the stream can no longer make progress.
 
+If your consumer persists events, key on `event.meta.id`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. See [the event envelope](../../concepts/sessions-runs-and-streaming#the-event-envelope).
+
 Set `streamReconnectPolicy: { reconnect: false }` when a relay or proxy owns the cursor and reconnection policy. This makes a single stream GET attempt and returns when that connection ends; it does not stop the server-side turn:
 
 ```ts
-const response = await session.send({
-  message: "Run the long operation.",
+const response = await session.send("Run the long operation.", {
   streamReconnectPolicy: { reconnect: false },
 });
 
@@ -125,9 +149,7 @@ The same option is available on manual attachments as `session.stream({ streamRe
 Use `session.stream()` when you already have a session cursor and only need to attach to the existing stream:
 
 ```ts
-const session = client.session({
-  continuationToken: "eve:6c8b1f2e-3d4a-4b9c-8e21-9f0a1b2c3d4e",
-  sessionId: "wrun_01ARYZ6S41TSV4RRFFQ69G5FAV",
+const session = client.sessions.attach("wrun_01ARYZ6S41TSV4RRFFQ69G5FAV", {
   streamIndex: 10,
 });
 
@@ -148,9 +170,7 @@ Nonnegative values are absolute event indexes. Negative values read relative to 
 
 ```ts
 for await (const event of session.stream({ startIndex: -1 })) {
-  if (event.type === "session.waiting") {
-    console.log(event.data.continuationToken);
-  }
+  console.log(event.type);
   break;
 }
 ```
@@ -172,7 +192,27 @@ The first connection pins the bound to the tail the server reports at open time;
 
 Because a tail-relative cursor cannot be bounded, `follow: false` throws when combined with a negative `startIndex`. It also fails if the server does not report the durable tail (an agent running an older eve version).
 
-`stream()` throws if the session has no `sessionId`, because there's no stream to attach to before the first send.
+## Snapshot a session
+
+Use `snapshot()` when you need the complete event prefix and its matching cursor
+as one value, such as when hydrating a server-rendered chat:
+
+```ts
+const session = client.sessions.attach(sessionId);
+const snapshot = await session.snapshot();
+
+// snapshot.events contains event indexes 0 through snapshot.session.streamIndex - 1.
+```
+
+The read pins the durable tail when it opens, just like
+`stream({ follow: false })`. Events written afterward are not included, and
+`snapshot.session.streamIndex` is the exact index from which a live consumer can
+continue. `snapshot()` always reads from index `0`; use a bounded stream directly
+when you only need the unread suffix from an existing cursor.
+
+Unlike `stream()`, `snapshot()` does not advance the originating
+`ClientSession`. Its returned cursor contains the fixed session ID and the exact
+stream index after the captured prefix.
 
 ## Abort a request
 
@@ -184,8 +224,7 @@ Arm the timeout before awaiting `send()` so it covers the POST as well as the st
 const controller = new AbortController();
 const timeout = setTimeout(() => controller.abort(), 10_000);
 
-const response = await session.send({
-  message: "Run a long analysis.",
+const response = await session.send("Run a long analysis.", {
   signal: controller.signal,
 });
 

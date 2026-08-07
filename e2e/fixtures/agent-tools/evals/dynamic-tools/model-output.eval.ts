@@ -3,6 +3,7 @@ import { defineEval } from "eve/evals";
 // The action.result stream event carries the RAW execute output
 // (including the secret field), not the toModelOutput projection.
 export default defineEval({
+  tags: ["real-model"],
   description: "Dynamic tools smoke: action.result carries the raw execute output.",
   async test(t) {
     await t.send(

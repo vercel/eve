@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   readDevelopmentRuntimeArtifactsRevision,
   rebuildDevelopmentRuntimeArtifacts,
+  resumeDevelopmentRuntimeArtifacts,
+  suspendDevelopmentRuntimeArtifacts,
 } from "./runtime-artifacts.js";
 
 const SERVER_URL = "http://127.0.0.1:3000";
@@ -44,6 +46,29 @@ describe("readDevelopmentRuntimeArtifactsRevision", () => {
     await expect(
       readDevelopmentRuntimeArtifactsRevision({ serverUrl: SERVER_URL }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("development runtime artifact suspension", () => {
+  it("posts to suspend and resume routes", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ revision: "rev-3" })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(suspendDevelopmentRuntimeArtifacts({ serverUrl: SERVER_URL })).resolves.toBe(true);
+    await expect(resumeDevelopmentRuntimeArtifacts({ serverUrl: SERVER_URL })).resolves.toBe(
+      "rev-3",
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      new URL("/eve/v1/dev/runtime-artifacts/suspend", SERVER_URL),
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      new URL("/eve/v1/dev/runtime-artifacts/resume", SERVER_URL),
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });
 

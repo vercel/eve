@@ -272,6 +272,7 @@ async function patchWebPackageJson(
   workspaceProbeRoot: string,
   options: Required<WebPackageVersions>,
   onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>,
+  includeDependencies = true,
 ): Promise<{
   mutations: PackageJsonMutation[];
   nodeEngineOverride?: NodeEngineOverride;
@@ -310,11 +311,11 @@ async function patchWebPackageJson(
   const scripts = WEB_APP_TEMPLATE_PACKAGE_JSON.scripts;
 
   const workspaceMember = isPackageManagerWorkspaceMember(packageManager, workspaceProbeRoot);
-  const packageJsonPatch: PackageJsonPatch = {
-    dependencies,
-    devDependencies,
-    scripts,
-  };
+  const packageJsonPatch: PackageJsonPatch = { scripts };
+  if (includeDependencies) {
+    packageJsonPatch.dependencies = dependencies;
+    packageJsonPatch.devDependencies = devDependencies;
+  }
   if (!workspaceMember) {
     packageJsonPatch.nodeEngineRequirement = evePackage.nodeEngine;
   }
@@ -335,8 +336,8 @@ async function patchWebPackageJson(
     mutations: [
       {
         path: packageJsonPath,
-        dependencies: Object.keys(dependencies),
-        devDependencies: Object.keys(devDependencies),
+        dependencies: includeDependencies ? Object.keys(dependencies) : [],
+        devDependencies: includeDependencies ? Object.keys(devDependencies) : [],
         scripts: Object.keys(scripts),
       },
     ],
@@ -469,6 +470,8 @@ export interface EnsureChannelOptions {
   /** When false, Web Chat leaves Vercel Services config unwritten for preview-only scaffolds. */
   configureVercelServices?: boolean;
   onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
+  /** Dependencies are already owned and installed by a registry item. */
+  skipDependencyMutation?: boolean;
 }
 
 export interface WebPackageVersions {
@@ -518,6 +521,7 @@ async function ensureWebChannel(
     workspaceProbeRoot,
     webPackageVersions,
     options.onWorkspaceRootMutation,
+    !options.skipDependencyMutation,
   );
   const filesWritten: string[] = [];
   const filesOverwritten: string[] = [];
@@ -545,20 +549,22 @@ async function ensureWebChannel(
   filesWritten.push(...packageManagerConfiguration.filesWritten);
   filesSkipped.push(...packageManagerConfiguration.filesSkipped);
 
-  for (const [relPath, content] of Object.entries(WEB_APP_TEMPLATE_FILES)) {
-    const filePath = join(options.projectRoot, relPath);
-    if (relPath === WEB_CHANNEL_PATH && !options.force && (await pathExists(filePath))) {
-      filesSkipped.push(filePath);
-      continue;
-    }
+  if (!options.skipDependencyMutation) {
+    for (const [relPath, content] of Object.entries(WEB_APP_TEMPLATE_FILES)) {
+      const filePath = join(options.projectRoot, relPath);
+      if (relPath === WEB_CHANNEL_PATH && !options.force && (await pathExists(filePath))) {
+        filesSkipped.push(filePath);
+        continue;
+      }
 
-    const existed = await pathExists(filePath);
-    await writeTextFile(filePath, renderWebAppTemplate(content, appName), {
-      force: true,
-    });
-    filesWritten.push(filePath);
-    if (existed) {
-      filesOverwritten.push(filePath);
+      const existed = await pathExists(filePath);
+      await writeTextFile(filePath, renderWebAppTemplate(content, appName), {
+        force: true,
+      });
+      filesWritten.push(filePath);
+      if (existed) {
+        filesOverwritten.push(filePath);
+      }
     }
   }
 
@@ -611,15 +617,17 @@ async function ensureSlackChannel(
   let envExampleRollback: { path: string; content?: string } | undefined;
 
   if (credentials === "vercel-connect") {
-    const connectPackageVersion = resolveVersionToken(
-      "connectPackageVersion",
-      options.connectPackageVersion ?? DEFAULT_CONNECT_PACKAGE_VERSION,
-    );
-    packageJsonUpdated = await ensurePackageDependency(
-      join(options.projectRoot, "package.json"),
-      CONNECT_PACKAGE_NAME,
-      connectPackageVersion,
-    );
+    if (!options.skipDependencyMutation) {
+      const connectPackageVersion = resolveVersionToken(
+        "connectPackageVersion",
+        options.connectPackageVersion ?? DEFAULT_CONNECT_PACKAGE_VERSION,
+      );
+      packageJsonUpdated = await ensurePackageDependency(
+        join(options.projectRoot, "package.json"),
+        CONNECT_PACKAGE_NAME,
+        connectPackageVersion,
+      );
+    }
     const connectorUid = options.slackConnectorUid ?? `slack/${slug}`;
     template = buildSlackConnectTemplate(connectorUid);
   } else {

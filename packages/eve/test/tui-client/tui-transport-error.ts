@@ -18,11 +18,9 @@ process.env.EVE_TUI_UNICODE = "1";
 
 void (async () => {
   const client = new Client({ host: UNREACHABLE_HOST });
-  const session = client.session();
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    session,
     client,
     screen,
     userInput: input,
@@ -51,8 +49,10 @@ void (async () => {
     console.log(theme.muted("[tui-transport-error] runner returned to prompt"));
 
     input.ctrlC();
+    input.ctrlC();
     await runPromise;
   } catch (error) {
+    input.ctrlC();
     input.ctrlC();
     await runPromise.catch(() => {});
     throw error;

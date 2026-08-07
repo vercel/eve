@@ -23,16 +23,17 @@ Import from `eve/svelte` and read the reactive getters directly. No `$` prefix:
 
 ## What it returns
 
-| Property  | Type                                        | Description                                                               |
-| --------- | ------------------------------------------- | ------------------------------------------------------------------------- |
-| `data`    | `TData`                                     | Projected state. With the default reducer, `EveMessageData` (`messages`). |
-| `status`  | `UseEveAgentStatus`                         | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`.                    |
-| `error`   | `Error \| undefined`                        | Last transport-level error.                                               |
-| `events`  | `readonly HandleMessageStreamEvent[]`       | Raw server events for this session.                                       |
-| `session` | `SessionState`                              | Snapshot of session state.                                                |
-| `send`    | `(input: SendTurnPayload) => Promise<void>` | Send text or a full turn (multi-part, attachments, HITL responses).       |
-| `stop`    | `() => void`                                | Abort the client's in-flight stream.                                      |
-| `reset`   | `() => void`                                | Clear state and start a new session.                                      |
+| Property  | Type                                          | Description                                                               |
+| --------- | --------------------------------------------- | ------------------------------------------------------------------------- |
+| `data`    | `TData`                                       | Projected state. With the default reducer, `EveMessageData` (`messages`). |
+| `status`  | `UseEveAgentStatus`                           | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`.                    |
+| `error`   | `Error \| undefined`                          | Last transport-level error.                                               |
+| `events`  | `readonly MessageStreamEvent[]`               | Raw server events for this session.                                       |
+| `session` | `ClientSessionState \| undefined`             | Fixed session ID and stream cursor.                                       |
+| `send`    | `(message, options?) => Promise<void>`        | Send text or a multi-part message.                                        |
+| `respond` | `(inputResponses, options?) => Promise<void>` | Answer pending HITL input requests.                                       |
+| `stop`    | `() => void`                                  | Abort the client's in-flight stream.                                      |
+| `reset`   | `() => void`                                  | Clear state and start a new session.                                      |
 
 These state fields are reactive getters, so read them straight from templates, `$derived`, or `$effect`. They are not stores, so don't prefix them with `$`.
 
@@ -49,7 +50,7 @@ These state fields are reactive getters, so read them straight from templates, `
     const text = message.trim();
     if (!text) return;
     message = "";
-    await agent.send({ message: text });
+    await agent.send(text);
   }
 </script>
 
@@ -68,17 +69,15 @@ When a turn is more than plain text, reach for `send()`. Attachments follow the 
 const bytes = new Uint8Array(await file.arrayBuffer());
 const base64 = btoa(String.fromCodePoint(...bytes));
 
-await agent.send({
-  message: [
-    { type: "text", text: "Describe this image." },
-    { type: "file", data: `data:${file.type};base64,${base64}`, mediaType: file.type },
-  ],
-});
+await agent.send([
+  { type: "text", text: "Describe this image." },
+  { type: "file", data: `data:${file.type};base64,${base64}`, mediaType: file.type },
+]);
 ```
 
 ## Human-in-the-loop prompts
 
-A tool opts into approval with `approval` ([Tools](../../tools)). When one fires, the pending request rides along on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `agent.send({ inputResponses })`:
+A tool opts into approval with `approval` ([Tools](../../tools)). When one fires, the pending request rides along on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `agent.respond(inputResponses)`:
 
 ```ts
 import type { EveDynamicToolPart, EveMessagePart } from "eve/svelte";
@@ -93,9 +92,7 @@ const request = agent.data.messages
   .find((value) => value !== undefined);
 
 if (request) {
-  await agent.send({
-    inputResponses: [{ requestId: request.requestId, optionId: "approve" }],
-  });
+  await agent.respond([{ requestId: request.requestId, optionId: "approve" }]);
 }
 ```
 
@@ -133,8 +130,7 @@ const agent = useEveAgent({
 `clientContext` adds ephemeral context for the next model call and nothing more. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, never dispatches a turn on its own, and never lands in durable session history. Pass it to `send()`:
 
 ```ts
-await agent.send({
-  message: "What should I do on this screen?",
+await agent.send("What should I do on this screen?", {
   clientContext: { route: "/billing", plan: "pro", seatsUsed: 4 },
 });
 ```

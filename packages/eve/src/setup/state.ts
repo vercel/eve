@@ -137,8 +137,6 @@ export interface SetupState {
   setupMode: SetupMode;
   modelId: string;
   modelWiring: WiringMode;
-  /** Channels chosen in the interview phase; scaffolded later by the channels box. */
-  channelSelection: ChannelKind[];
   /** Connections planned in the interview phase; scaffolded later by the connections box. */
   connectionSelection: ConnectionPlan[];
   /** Decided once by the resolve-provisioning box; executed later by the link box. */
@@ -149,42 +147,21 @@ export interface SetupState {
   aiGatewayCredentials: ResolvedAiGatewayCredentials;
   chat: ChatPreference | null;
 
-  // Status retained while channel setup retries installs, deployments, or
-  // Connect calls. Advanced by the channel and deploy boxes.
-  /** Channels scaffolded so far in this run. */
-  channels: ChannelKind[];
-  webScaffolded: boolean;
-  slackScaffolded: boolean;
   deploymentDependenciesInstalled: boolean;
   /** The linked Vercel project facts, from the link box or the on-disk `.vercel` link. */
   project: ProjectResolution;
   deploymentPending: boolean;
-  slackbotCreated: boolean;
-  slackbotAttached: boolean;
-  slackConnectorUid: string | undefined;
-  /** Deep link that opens a DM compose with the bot ("chat with your agent"). */
-  slackChatUrl: string | undefined;
-  slackWorkspaceName: string | undefined;
 }
 
 export function createDefaultSetupState(): SetupState {
   return {
-    channels: [],
-    webScaffolded: false,
-    slackScaffolded: false,
     deploymentDependenciesInstalled: false,
     project: { kind: "unresolved" },
     deploymentPending: false,
-    slackbotCreated: false,
-    slackbotAttached: false,
-    slackConnectorUid: undefined,
-    slackChatUrl: undefined,
-    slackWorkspaceName: undefined,
     agentName: "",
     setupMode: "complete",
     modelId: "",
     modelWiring: "gateway",
-    channelSelection: [],
     connectionSelection: [],
     vercelProject: { kind: "none" },
     aiGateway: { kind: "inherit" },
@@ -226,9 +203,7 @@ export function snapshotSetupState(state: SetupState): SetupState {
     ...state,
     aiGatewayCredentials: Object.freeze({ ...state.aiGatewayCredentials }),
     aiGateway: Object.freeze({ ...state.aiGateway }),
-    channelSelection: Object.freeze([...state.channelSelection]) as ChannelKind[],
     connectionSelection: Object.freeze([...state.connectionSelection]) as ConnectionPlan[],
-    channels: Object.freeze([...state.channels]) as ChannelKind[],
     project: Object.freeze({ ...state.project }) as ProjectResolution,
     projectPath: Object.freeze({ ...state.projectPath }),
     vercelProject: Object.freeze({ ...state.vercelProject }),

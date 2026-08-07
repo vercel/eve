@@ -11,7 +11,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { serializeContext } from "#context/serialize.js";
 import { hasProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -140,6 +140,7 @@ function buildApprovalRequest(requestId: string): InputRequest {
       toolName: "create_issue",
     },
     display: "confirmation",
+    kind: "tool-approval",
     options: [
       { id: "approve", label: "Approve", style: "primary" },
       { id: "deny", label: "Deny", style: "danger" },
@@ -175,10 +176,10 @@ function buildEmptySession(continuationToken: string, sessionId: string): Harnes
  */
 function buildCapturingEmit(ctx: ContextContainer): {
   readonly emit: HarnessEmitFn;
-  readonly events: HandleMessageStreamEvent[];
+  readonly events: UnstampedMessageStreamEvent[];
   readonly persistAdapterState: () => void;
 } {
-  const events: HandleMessageStreamEvent[] = [];
+  const events: UnstampedMessageStreamEvent[] = [];
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const emit: HarnessEmitFn = async (event) => {
@@ -237,7 +238,15 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     expect((afterEmitAdapter.state as SlackishState | undefined)?.pendingRequests).toEqual([
       approvalRequest,
     ]);
-    expect(entries).toEqual([["req-approve-1", "subagent:parent:call-1"]]);
+    expect(entries).toEqual([
+      [
+        "req-approve-1",
+        {
+          childContinuationToken: "subagent:parent:call-1",
+          kind: "tool-approval",
+        },
+      ],
+    ]);
 
     // The parent is in conversation mode, so the helper follows the
     // proxied `input.requested` with a `turn.completed` +

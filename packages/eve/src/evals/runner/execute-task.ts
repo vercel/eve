@@ -1,5 +1,5 @@
 import type { Client } from "#client/client.js";
-import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
+import type { MessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type {
   AssertionResult,
@@ -71,7 +71,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   let error: string | undefined;
   let skipReason: string | undefined;
   try {
-    await evaluation.test(context);
+    await runUntilAborted(evaluation.test(context), signal);
   } catch (err) {
     if (err instanceof EvalSkipped) {
       skipReason = err.reason;
@@ -141,7 +141,7 @@ function selectPrimarySessionId(sessions: readonly EveEvalSessionResult[]): stri
  * in the stream, if present.
  */
 function extractRuntimeIdentity(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
 ): RuntimeIdentity | undefined {
   for (const event of events) {
     if (event.type === "session.started" && event.data.runtime !== undefined) {
@@ -158,4 +158,22 @@ function sum<T>(entries: readonly T[], read: (entry: T) => number): number {
 
 function neverAbortSignal(): AbortSignal {
   return new AbortController().signal;
+}
+
+async function runUntilAborted(task: void | Promise<void>, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+
+  try {
+    await Promise.race([task, aborted]);
+  } finally {
+    if (onAbort !== undefined) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
 }

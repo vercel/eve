@@ -16,7 +16,8 @@ export async function computeDevelopmentHostFingerprint(
       externalDependencies: [
         ...new Set(agentNodes.flatMap((node) => node.config.build?.externalDependencies ?? [])),
       ].sort((left, right) => left.localeCompare(right)),
-      extensionScopes: (manifest.extensionMounts ?? [])
+      extensionScopes: agentNodes
+        .flatMap((node) => node.extensionMounts)
         .map((mount) => ({
           packageNamespace: mount.packageNamespace,
           sourceRoot: mount.sourceRoot,

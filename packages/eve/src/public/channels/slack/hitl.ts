@@ -432,10 +432,5 @@ function truncateWithEllipsis(value: string, maxLength: number): string {
 }
 
 function isApprovalRequest(request: InputRequest): boolean {
-  return (
-    request.display === "confirmation" &&
-    request.options?.length === 2 &&
-    request.options[0]?.id === "approve" &&
-    request.options[1]?.id === "deny"
-  );
+  return request.kind === "tool-approval";
 }

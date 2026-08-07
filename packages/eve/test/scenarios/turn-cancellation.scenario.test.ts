@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { Client } from "../../src/client/client.js";
-import {
-  type HandleMessageStreamEvent,
-  isCurrentTurnBoundaryEvent,
-} from "../../src/protocol/message.js";
-import { createEveCancelTurnRoutePath } from "../../src/protocol/routes.js";
+import { type MessageStreamEvent, isCurrentTurnBoundaryEvent } from "../../src/protocol/message.js";
+import { createEveSessionCancelRoutePath } from "../../src/protocol/routes.js";
 import {
   type ScenarioAppDescriptor,
   useScenarioApp,
@@ -120,13 +117,12 @@ describe("turn cancellation descendant cascade", () => {
 
         try {
           const parentClient = new Client({ host: parentServer.url });
-          const parentSession = parentClient.session();
-          const response = await parentSession.send(
-            [
+          const { session: parentSession, response } = await parentClient.sessions.create({
+            message: [
               "Call tools in parallel: local-sleeper, remote-sleeper",
               'message: "Use wait-for-cancel."',
             ].join("\n"),
-          );
+          });
           const parentIterator = response[Symbol.asyncIterator]();
           const called = await readSubagentCalls({
             count: 2,
@@ -140,8 +136,8 @@ describe("turn cancellation descendant cascade", () => {
           }
           expect(remoteCalled.data.remote?.url).toBe(remoteServer.url);
 
-          const localIterator = parentClient
-            .session({ sessionId: localCalled.data.childSessionId, streamIndex: 0 })
+          const localIterator = parentClient.sessions
+            .attach(localCalled.data.childSessionId)
             .stream()
             [Symbol.asyncIterator]();
 
@@ -149,8 +145,8 @@ describe("turn cancellation descendant cascade", () => {
             auth: { bearer: REMOTE_TOKEN },
             host: remoteServer.url,
           });
-          const remoteIterator = remoteClient
-            .session({ sessionId: remoteCalled.data.childSessionId, streamIndex: 0 })
+          const remoteIterator = remoteClient.sessions
+            .attach(remoteCalled.data.childSessionId)
             .stream()
             [Symbol.asyncIterator]();
           await Promise.all([
@@ -167,7 +163,7 @@ describe("turn cancellation descendant cascade", () => {
           ]);
 
           const cancelResponse = await parentClient.fetch(
-            createEveCancelTurnRoutePath(response.sessionId),
+            createEveSessionCancelRoutePath(response.sessionId),
             { method: "POST" },
           );
           expect(cancelResponse.status).toBe(202);
@@ -225,11 +221,11 @@ describe("turn cancellation descendant cascade", () => {
   );
 });
 
-type SubagentCalledEvent = Extract<HandleMessageStreamEvent, { type: "subagent.called" }>;
+type SubagentCalledEvent = Extract<MessageStreamEvent, { type: "subagent.called" }>;
 
 async function readSubagentCalls(input: {
   readonly count: number;
-  readonly iterator: AsyncIterator<HandleMessageStreamEvent>;
+  readonly iterator: AsyncIterator<MessageStreamEvent>;
   readonly label: string;
 }): Promise<readonly SubagentCalledEvent[]> {
   return await withinEventDeadline(
@@ -246,7 +242,7 @@ async function readSubagentCalls(input: {
   );
 }
 
-function isWaitForCancelToolCall(event: HandleMessageStreamEvent): boolean {
+function isWaitForCancelToolCall(event: MessageStreamEvent): boolean {
   return (
     event.type === "actions.requested" &&
     event.data.actions.some(
@@ -256,10 +252,10 @@ function isWaitForCancelToolCall(event: HandleMessageStreamEvent): boolean {
 }
 
 async function readUntil(input: {
-  readonly iterator: AsyncIterator<HandleMessageStreamEvent>;
+  readonly iterator: AsyncIterator<MessageStreamEvent>;
   readonly label: string;
-  readonly matches: (event: HandleMessageStreamEvent) => boolean;
-}): Promise<{ readonly event: HandleMessageStreamEvent }> {
+  readonly matches: (event: MessageStreamEvent) => boolean;
+}): Promise<{ readonly event: MessageStreamEvent }> {
   return await withinEventDeadline(
     (async () => {
       while (true) {
@@ -273,10 +269,10 @@ async function readUntil(input: {
 }
 
 async function readThroughBoundary(input: {
-  readonly iterator: AsyncIterator<HandleMessageStreamEvent>;
+  readonly iterator: AsyncIterator<MessageStreamEvent>;
   readonly label: string;
-}): Promise<readonly HandleMessageStreamEvent[]> {
-  const events: HandleMessageStreamEvent[] = [];
+}): Promise<readonly MessageStreamEvent[]> {
+  const events: MessageStreamEvent[] = [];
   await withinEventDeadline(
     (async () => {
       while (true) {
@@ -297,7 +293,7 @@ async function readThroughBoundary(input: {
   return events;
 }
 
-function expectCancellationBoundary(events: readonly HandleMessageStreamEvent[]): void {
+function expectCancellationBoundary(events: readonly MessageStreamEvent[]): void {
   const types = events.map((event) => event.type);
   expect(types).toContain("turn.cancelled");
   expect(types.at(-1)).toBe("session.waiting");

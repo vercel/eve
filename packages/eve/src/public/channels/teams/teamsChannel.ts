@@ -1,11 +1,12 @@
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
+import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/channel.js";
+import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   buildTeamsTurnMessage,
   collectTeamsFileParts,
@@ -54,13 +55,14 @@ import {
   type TeamsMessageActivity,
 } from "#public/channels/teams/inbound.js";
 import { verifyTeamsRequest, type TeamsWebhookVerifier } from "#public/channels/teams/verify.js";
+import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { defineChannel, POST, type Channel, type SendFn } from "#public/definitions/channel.js";
+import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 
 const log = createLogger("teams.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Teams context passed to invoke hooks. */
 export interface TeamsContext {
@@ -80,8 +82,8 @@ export interface TeamsChannelContext extends TeamsContext {
   state: TeamsChannelState;
 }
 
-/** Event-handler Teams context, including session operations. */
-export interface TeamsEventContext extends TeamsChannelContext, ChannelSessionOps {}
+/** Event-handler Teams context, including continuation routing. */
+export interface TeamsEventContext extends TeamsChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable Teams channel state. */
 export interface TeamsChannelState {
@@ -149,7 +151,7 @@ export type TeamsInvokeResult = Record<string, unknown> | Response | null | unde
 /** Sync or async {@link TeamsInvokeResult}. */
 export type TeamsInvokeResultOrPromise = TeamsInvokeResult | Promise<TeamsInvokeResult>;
 
-type TeamsEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type TeamsEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: TeamsEventContext,
   ctx: SessionContext,
@@ -164,6 +166,7 @@ type TeamsSessionFailedHandler = (
 export interface TeamsChannelEvents {
   readonly "turn.started"?: TeamsEventHandler<"turn.started">;
   readonly "actions.requested"?: TeamsEventHandler<"actions.requested">;
+  readonly "action.partial"?: TeamsEventHandler<"action.partial">;
   readonly "action.result"?: TeamsEventHandler<"action.result">;
   readonly "message.completed"?: TeamsEventHandler<"message.completed">;
   readonly "message.appended"?: TeamsEventHandler<"message.appended">;
@@ -295,7 +298,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
     routes: [
       POST<TeamsChannelState>(
         config.route ?? "/eve/v1/teams",
-        async (req, { resolveActiveSession, send, waitUntil }) => {
+        async (req, { from, resolveSession, waitUntil }) => {
           const body = await verifyInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
 
@@ -313,14 +316,14 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           if (activity.type === "message") {
             waitUntil(
               isTeamsInputResponseActivity(activity)
-                ? dispatchInputResponses({ activity, config, onInputResponse, send })
+                ? dispatchInputResponses({ activity, config, from, onInputResponse })
                 : dispatchMessage({
                     activity,
                     config,
                     filesPolicy,
                     onMessage,
-                    resolveActiveSession,
-                    send,
+                    from,
+                    resolveSession,
                   }),
             );
             return teamsOk();
@@ -331,8 +334,8 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
               activity,
               config,
               onInputResponse,
-              send,
               waitUntil,
+              from,
             });
           }
 
@@ -341,18 +344,18 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
       ),
     ],
 
-    async receive(input, { send }) {
+    async receive(input, { from }) {
       const receiveTarget = input.target as Partial<TeamsReceiveTarget>;
-      const serviceUrl = readString(receiveTarget.serviceUrl);
-      const conversationId = readString(receiveTarget.conversationId);
+      const serviceUrl = readNonEmptyString(receiveTarget.serviceUrl);
+      const conversationId = readNonEmptyString(receiveTarget.conversationId);
       if (!serviceUrl || !conversationId) {
         throw new Error(
           "teamsChannel().receive requires target.serviceUrl and target.conversationId.",
         );
       }
 
-      const conversationType = readString(receiveTarget.conversationType) ?? null;
-      let replyToActivityId = readString(receiveTarget.replyToActivityId) ?? null;
+      const conversationType = readNonEmptyString(receiveTarget.conversationType) ?? null;
+      let replyToActivityId = readNonEmptyString(receiveTarget.replyToActivityId) ?? null;
       const initialMessage = receiveTarget.initialMessage;
       if (initialMessage !== undefined && replyToActivityId !== null) {
         throw new Error(
@@ -362,13 +365,13 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 
       const state: TeamsChannelState = {
         ...initialTeamsState(),
-        channelId: readString(receiveTarget.channelId) ?? null,
+        channelId: readNonEmptyString(receiveTarget.channelId) ?? null,
         conversationId,
         conversationType,
         replyToActivityId,
         serviceUrl,
-        teamId: readString(receiveTarget.teamId) ?? null,
-        tenantId: readString(receiveTarget.tenantId) ?? null,
+        teamId: readNonEmptyString(receiveTarget.teamId) ?? null,
+        tenantId: readNonEmptyString(receiveTarget.tenantId) ?? null,
       };
 
       if (initialMessage !== undefined) {
@@ -380,15 +383,13 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
         }
       }
 
-      return send(input.message, {
-        auth: input.auth,
-        continuationToken: teamsContinuationToken({
+      return from(
+        teamsContinuationToken({
           conversationId,
           replyToActivityId,
           tenantId: state.tenantId,
         }),
-        state,
-      });
+      ).send(input.message, { auth: input.auth, state });
     },
 
     events: mergedEvents,
@@ -458,7 +459,7 @@ function buildTeamsHandle(input: {
     state.replyToActivityId = posted.id;
     const conversationId = state.conversationId;
     if (conversationId) {
-      input.session?.setContinuationToken(
+      input.session?.continuation?.rekey(
         teamsContinuationToken({
           conversationId,
           replyToActivityId: posted.id,
@@ -565,21 +566,18 @@ async function verifyInbound(
 
 async function dispatchMessage(input: {
   readonly activity: TeamsMessageActivity;
+  readonly from: ChannelFrom<TeamsChannelState>;
+  readonly resolveSession: ChannelResolveSession;
   readonly config: TeamsChannelConfig;
   readonly filesPolicy: TeamsFilesPolicy;
   readonly onMessage: NonNullable<TeamsChannelConfig["onMessage"]>;
-  readonly resolveActiveSession: (options: {
-    readonly continuationToken: string;
-  }) => Promise<{ readonly sessionId: string } | undefined>;
-  readonly send: SendFn<TeamsChannelState>;
 }): Promise<void> {
   const state = stateFromActivity(input.activity);
   const binding = buildTeamsBinding({ config: input.config, state });
   const continuationToken = stateToken(state);
   const ctx: TeamsInboundMessageContext = {
     ...binding,
-    isSubscribed: async () =>
-      (await input.resolveActiveSession({ continuationToken })) !== undefined,
+    isSubscribed: async () => (await input.resolveSession(continuationToken)) !== undefined,
   };
 
   let result: TeamsInboundResult;
@@ -607,17 +605,11 @@ async function dispatchMessage(input: {
   const channelContext = result.context ?? [];
 
   try {
-    await input.send(
-      {
-        message: turnMessage,
-        context: [formatTeamsContextBlock(inboundContext), ...channelContext],
-      },
-      {
-        auth: result.auth,
-        continuationToken,
-        state,
-      },
-    );
+    await input.from(continuationToken).send(turnMessage, {
+      auth: result.auth,
+      context: [formatTeamsContextBlock(inboundContext), ...channelContext],
+      state,
+    });
   } catch (error) {
     log.error("Teams message delivery failed", { error });
   }
@@ -625,9 +617,9 @@ async function dispatchMessage(input: {
 
 async function handleInvoke(input: {
   readonly activity: TeamsInvokeActivity;
+  readonly from: ChannelFrom<TeamsChannelState>;
   readonly config: TeamsChannelConfig;
   readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
-  readonly send: SendFn<TeamsChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
   if (isTeamsInputResponseActivity(input.activity)) {
@@ -636,7 +628,7 @@ async function handleInvoke(input: {
         activity: input.activity,
         config: input.config,
         onInputResponse: input.onInputResponse,
-        send: input.send,
+        from: input.from,
       }),
     );
     return Response.json(teamsInvokeResponse());
@@ -652,9 +644,9 @@ async function handleInvoke(input: {
 
 async function dispatchInputResponses(input: {
   readonly activity: TeamsInvokeActivity | TeamsMessageActivity;
+  readonly from: ChannelFrom<TeamsChannelState>;
   readonly config: TeamsChannelConfig;
   readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
-  readonly send: SendFn<TeamsChannelState>;
 }): Promise<void> {
   const inputResponses = deriveTeamsInputResponses(input.activity as TeamsActivity);
   if (inputResponses.length === 0) return;
@@ -669,14 +661,9 @@ async function dispatchInputResponses(input: {
   }
   if (result === null) return;
   try {
-    await input.send(
-      { inputResponses },
-      {
-        auth: result.auth,
-        continuationToken: resolveInputContinuationToken(input.activity, state),
-        state,
-      },
-    );
+    await input.from(resolveInputContinuationToken(input.activity, state)).respond(inputResponses, {
+      auth: result.auth,
+    });
   } catch (error) {
     log.error("Teams input response delivery failed", { error });
   }
@@ -785,8 +772,4 @@ function mergeChannelData(
 
 function teamsOk(): Response {
   return new Response("ok", { status: 200 });
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

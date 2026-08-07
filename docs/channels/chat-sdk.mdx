@@ -97,7 +97,24 @@ bot.onNewMention(async (thread, message) => {
 });
 ```
 
-`options` accepts `{ thread, auth?, title?, mode?, callback?, adapterName? }`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn.
+`options` accepts `{ thread, auth?, title?, mode?, callback?, adapterName?, turnPolicy? }`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn.
+
+### Experimental steering
+
+By default, a message sent while an eve turn is active waits for the next turn. Pass `turnPolicy: "experimental-steer"` to cancel the active turn before sending the new message:
+
+```ts
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, {
+    thread,
+    turnPolicy: "experimental-steer",
+  });
+});
+```
+
+This is cancellation-backed steering: the interrupted turn emits `turn.cancelled`, and the replacement message starts a new turn with a new turn ID. Partial output and completed side effects from the interrupted turn are not rolled back. If no turn is active, the message is sent normally. Use the default `turnPolicy: "queue"` when every turn should finish in order.
+
+This policy controls overlapping eve turns. Chat SDK's separate `concurrency` option controls overlapping webhook handlers; use `concurrency: "concurrent"` when each inbound message should reach the experimental steering path immediately.
 
 ### Delivery
 
@@ -160,14 +177,13 @@ chatSdkChannel({
 
 ### Proactive sessions
 
-Start a session without an inbound webhook through `channel.receive({ message, target, auth })` — from a schedule `run` handler, or `args.receive(channel, ...)` from another channel. The target is a serialized Chat SDK thread, or `{ threadId, adapterName }` when you only have a provider-native thread id:
+Start a session without an inbound webhook through `to(channel, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(channel, target).send(message, { auth })` from another channel. The target is a serialized Chat SDK thread, or `{ threadId, adapterName }` when you only have a provider-native thread id:
 
 ```ts
-await channel.receive({
-  message: "Your weekly digest is ready.",
-  target: { adapterName: "resend", threadId: "resend:user@example.com" },
-  auth: null,
-});
+await to(channel, { adapterName: "resend", threadId: "resend:user@example.com" }).send(
+  "Your weekly digest is ready.",
+  { auth: null },
+);
 ```
 
 ### Attachments

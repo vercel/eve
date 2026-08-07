@@ -181,6 +181,25 @@ cron: "0 8 * * *"
 Send the user a daily weather
 digest for their saved cities.`,
   },
+  {
+    label: "Evals",
+    name: "evals/",
+    fileName: "evals/weather/brooklyn-forecast.eval.ts",
+    lang: "typescript",
+    NavIcon: IconFileText,
+    description:
+      "Evals run the agent through real sessions and score the result, so you can catch regressions as it evolves.",
+    code: `import { defineEval } from "eve/evals";
+import { includes } from "eve/evals/expect";
+
+export default defineEval({
+  async test(t) {
+    await t.send("What is the weather in Brooklyn?");
+    t.succeeded();
+    t.check(t.reply, includes("Sunny"));
+  },
+});`,
+  },
 ];
 
 export async function FileTree() {
@@ -226,7 +245,7 @@ export async function FileTree() {
         items={items}
         heading={
           <div className="mx-auto max-w-5xl">
-            <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40">
+            <h2 className="text-center text-heading-32 text-gray-1000 sm:text-heading-40">
               Your{" "}
               <span className="relative -top-[0.08em] ml-1 inline-flex items-center gap-[0.16em] rounded-lg bg-gray-200 px-3 py-[0.04em] pr-4 align-baseline font-[450]!">
                 <IconFolderOpen aria-hidden className="size-[0.58em] text-gray-900" />

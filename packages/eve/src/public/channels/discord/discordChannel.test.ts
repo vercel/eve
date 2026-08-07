@@ -8,7 +8,8 @@ import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-chann
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   DISCORD_HITL_FREEFORM_TEXT_INPUT_ID,
   renderInputRequestComponents,
@@ -45,9 +46,9 @@ const stubAlsContext = (() => {
 
 function callEvent(
   adapter: ChannelAdapter,
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   ctx: any,
-): Promise<HandleMessageStreamEvent> {
+): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
@@ -73,11 +74,11 @@ function captureAccessor(initialContinuationToken: string): {
   };
 }
 
-function makeEvent<T extends HandleMessageStreamEvent["type"]>(
+function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
   type: T,
   data: unknown,
-): HandleMessageStreamEvent {
-  return { type, data } as HandleMessageStreamEvent;
+): UnstampedMessageStreamEvent {
+  return { type, data } as UnstampedMessageStreamEvent;
 }
 
 function testKeys(): { privateKey: KeyObject; publicKeyHex: string } {
@@ -122,16 +123,17 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected discord channel to define a POST route.");
   }
-  const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
-    getSession: vi.fn() as any,
+    attachSession: vi.fn() as any,
+    ...mockChannelContext(send),
+    to: vi.fn() as any,
     params: {},
     requestIp: null,
-    send,
     waitUntil,
-  } as any);
+  });
 
   let drained = 0;
   while (drained < waitUntil.mock.calls.length) {
@@ -200,15 +202,15 @@ describe("discordChannel() inbound route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ type: 5 });
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect((payload as { context: string[] }).context[0]).toContain("<discord_context>");
-    expect(String((payload as { message: string }).message)).toContain("hello discord");
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect((input as { context: string[] }).context[0]).toContain("<discord_context>");
+    expect(String((input as { message: string }).message)).toContain("hello discord");
+    expect(continuationToken).toBe("C01:I01");
+    expect(input).toMatchObject({
       auth: {
         authenticator: "discord-interaction",
         principalId: "discord:G01:U01",
       },
-      continuationToken: "C01:I01",
       state: {
         applicationId: "APP1",
         channelId: "C01",
@@ -262,6 +264,7 @@ describe("discordChannel() inbound route", () => {
     const { privateKey, publicKeyHex } = testKeys();
     const components = renderInputRequestComponents({
       action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
+      kind: "question",
       options: [{ id: "approve", label: "Approve" }],
       prompt: "Approve?",
       requestId: "call_1",
@@ -286,10 +289,10 @@ describe("discordChannel() inbound route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ type: 6 });
     expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "approve", requestId: "call_1" }] },
+      "C01:M01",
       expect.objectContaining({
         auth: null,
-        continuationToken: "C01:M01",
+        inputResponses: [{ optionId: "approve", requestId: "call_1" }],
       }),
     );
   });
@@ -299,6 +302,7 @@ describe("discordChannel() inbound route", () => {
     const components = renderInputRequestComponents({
       action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
       allowFreeform: true,
+      kind: "question",
       prompt: "Explain",
       requestId: "call_1",
     });
@@ -358,9 +362,9 @@ describe("discordChannel() inbound route", () => {
       type: 4,
     });
     expect(submit.send).toHaveBeenCalledWith(
-      { inputResponses: [{ requestId: "call_1", text: "freeform answer" }] },
+      "C01:M01",
       expect.objectContaining({
-        continuationToken: "C01:M01",
+        inputResponses: [{ requestId: "call_1", text: "freeform answer" }],
       }),
     );
   });
@@ -515,7 +519,7 @@ describe("discordChannel() default event handlers", () => {
 
   it("receive starts a proactive channel session", async () => {
     const channel = discordChannel({ credentials: { botToken: "bot-token" } });
-    const send = vi.fn().mockResolvedValue({ continuationToken: "C01:", id: "s1" });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await channel.receive!(
       {
@@ -523,12 +527,14 @@ describe("discordChannel() default event handlers", () => {
         auth: null,
         message: "start",
       },
-      { send },
+      {
+        ...mockChannelContext(send),
+      },
     );
 
-    expect(send).toHaveBeenCalledWith("start", {
+    expect(send).toHaveBeenCalledWith("C01:", {
       auth: null,
-      continuationToken: "C01:",
+      message: "start",
       state: {
         applicationId: null,
         channelId: "C01",

@@ -1,9 +1,9 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "web_search";
 
-function providerRequestsPrecedeResults(events: readonly HandleMessageStreamEvent[]): boolean {
+function providerRequestsPrecedeResults(events: readonly MessageStreamEvent[]): boolean {
   const requestIndexByCallId = new Map<string, number>();
   const resultIndexByCallId = new Map<string, number>();
   let requestCount = 0;
@@ -41,13 +41,15 @@ function providerRequestsPrecedeResults(events: readonly HandleMessageStreamEven
 }
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Provider tools smoke: gateway web search answers a current-events question.",
   async test(t) {
     const turn = await t.send(
       [
         "Important date context: the 2026 NBA Finals have absolutely already been played, and a champion has been crowned.",
         "Do not claim the event is in the future, even if your internal knowledge incorrectly places the current date in 2025.",
-        `Call ${TOOL_NAME} to verify who won the 2026 NBA Finals, then answer with the winning team.`,
+        `Use the \`${TOOL_NAME}\` tool to verify who won the 2026 NBA Finals, then answer with the winning team.`,
+        "Do not answer from memory; call the tool before answering.",
       ].join("\n"),
     );
 

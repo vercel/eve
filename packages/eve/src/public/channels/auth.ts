@@ -8,6 +8,7 @@
 import { decodeJwt } from "#compiled/jose/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { authenticateHttpBasicStrategy } from "#runtime/governance/auth/http-basic.js";
 import { authenticateJwtEcdsaStrategy } from "#runtime/governance/auth/jwt-ecdsa.js";
@@ -658,82 +659,28 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
 }
 
 /**
- * Returns an {@link AuthFn} that authenticates requests during local
- * development, keyed on the request URL's hostname (not the host process).
- * A hostname is treated as loopback when it is `localhost` or any
- * `*.localhost` subdomain (RFC 6761 routes the `.localhost` TLD to
- * loopback), any IPv4 in `127.0.0.0/8`, or the IPv6 loopback `::1`.
+ * Returns an {@link AuthFn} that authenticates a synthetic `local-dev`
+ * principal while the process is a local development server, and returns
+ * `null` everywhere else so the {@link routeAuth} walk falls through to the
+ * next entry.
  *
- * Matching requests get a synthetic principal with `principalType:
- * "local-dev"`. Every other request returns `null`, skipping to the next
- * entry under {@link routeAuth}, which makes `[vercelOidc(), localDev()]`
- * the canonical "Vercel OIDC when present, open on localhost otherwise" pattern.
- *
- * The check is not based on bare `process.env.VERCEL`: a deployment
- * outside Vercel (Fly, Railway, raw container) leaves `VERCEL` unset and
- * would then accept every public request. The one process-level exception
- * is `vercel dev`, detected by `VERCEL=1` and `VERCEL_ENV=development`
- * together. Only the local `vercel dev` server sets that pair (preview and
- * production report `VERCEL_ENV=preview`/`production`), so it opens the
- * dev server (which may serve over a non-loopback host) without opening a
- * real deployment.
- *
- * Caveat: this assumes a sane edge in front of public origins. An origin
- * that trusts an attacker-controlled `Host` header (no CDN, no normalizing
- * reverse proxy) lets an attacker spoof `Host: localhost` and reach
- * `localDev()`. Layer a real authenticator on such deployments.
+ * A process counts as a local development server when it is `eve dev`
+ * (`EVE_DEV=1`) or `vercel dev` (`VERCEL=1` with `VERCEL_ENV=development`).
+ * This is a property of the deployment, never of the inbound request, so no
+ * request header (for example `Host`) can flip the decision. A production
+ * deployment (`eve start`, a Vercel deployment, or any container host) sets
+ * neither flag, so `localDev()` authenticates nothing there. Layer a real
+ * authenticator on those hosts.
  */
 export function localDev(): AuthFn<Request> {
-  return (request) => {
-    if (process.env.VERCEL && process.env.VERCEL_ENV === "development") {
-      return LOCAL_DEV_SESSION_AUTH_CONTEXT;
-    }
-    if (!isLoopbackRequest(request)) {
-      return null;
-    }
-    return LOCAL_DEV_SESSION_AUTH_CONTEXT;
-  };
+  return () => (isLocalDevelopmentServer() ? LOCAL_DEV_SESSION_AUTH_CONTEXT : null);
 }
 
-/**
- * Hostnames {@link localDev} treats as loopback, in addition to the
- * `*.localhost` wildcard and the `127.0.0.0/8` range. `0.0.0.0` is
- * intentionally excluded — it is the "all interfaces" sentinel, not a
- * loopback address, and requests claiming it as their host generally
- * originate from somewhere else on the network.
- *
- * Node's `URL.hostname` preserves brackets around IPv6 addresses (the
- * WHATWG-serialized form), so the IPv6 loopback is recognized as the
- * literal `"[::1]"` rather than `"::1"`.
- */
-const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set(["localhost", "[::1]"]);
-
-/**
- * `127.0.0.0/8` is the full IPv4 loopback block — every `127.x.x.x`
- * address resolves to the same machine, and dev tools sometimes bind
- * to addresses other than `127.0.0.1` for multi-instance setups.
- */
-const LOOPBACK_IPV4_PREFIX = /^127\./;
-
-/** Returns whether a request URL names a loopback host accepted by {@link localDev}. */
-export function isLoopbackRequest(request: Request): boolean {
-  let hostname: string;
-  try {
-    hostname = new URL(request.url).hostname;
-  } catch {
-    return false;
-  }
-  if (LOOPBACK_HOSTNAMES.has(hostname)) {
+function isLocalDevelopmentServer(): boolean {
+  if (process.env.VERCEL && process.env.VERCEL_ENV === "development") {
     return true;
   }
-  if (LOOPBACK_IPV4_PREFIX.test(hostname)) {
-    return true;
-  }
-  // RFC 6761: the entire `.localhost` TLD is reserved for loopback.
-  if (hostname.endsWith(".localhost")) {
-    return true;
-  }
-  return false;
+  return isEveDevEnvironment();
 }
 
 const ANONYMOUS_SESSION_AUTH_CONTEXT: SessionAuthContext = {
@@ -1000,7 +947,7 @@ export function vercelOidc(opts: VerifyVercelOidcOptions = {}): AuthFn<Request> 
       const token = extractBearerToken(request.headers.get("authorization"));
       const currentVercelProject =
         opts.currentVercelProject ??
-        (token !== null && isLocalDevelopmentVercelOidcRequest(request)
+        (token !== null && isLocalDevelopmentVercelOidc()
           ? await resolveVercelOidcCurrentProject(request)
           : undefined);
       const result = await verifyVercelOidc(
@@ -1013,12 +960,12 @@ export function vercelOidc(opts: VerifyVercelOidcOptions = {}): AuthFn<Request> 
   );
 }
 
-function isLocalDevelopmentVercelOidcRequest(request: Request): boolean {
+function isLocalDevelopmentVercelOidc(): boolean {
   if (process.env.VERCEL_ENV === "development") return true;
   if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
     return false;
   }
-  return isLoopbackRequest(request);
+  return isEveDevEnvironment();
 }
 
 /**

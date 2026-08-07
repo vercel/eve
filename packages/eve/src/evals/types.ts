@@ -1,8 +1,13 @@
 import type { LanguageModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
-import type { CancelSessionResult, SendTurnInput, SessionState } from "#client/types.js";
+import type { RuntimeIdentity, MessageStreamEvent } from "#protocol/message.js";
+import type {
+  CancelSessionResult,
+  ClientSessionState,
+  SendTurnInput,
+  SendTurnOptions,
+} from "#client/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
@@ -82,10 +87,10 @@ export interface EveEvalDerivedFacts {
  */
 export interface EveEvalSessionResult {
   readonly derived: EveEvalDerivedFacts;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly primary: boolean;
   readonly sessionId?: string;
-  readonly state: SessionState;
+  readonly state: ClientSessionState | undefined;
 }
 
 /**
@@ -107,7 +112,7 @@ export interface EveEvalTaskResult {
    */
   readonly status: "completed" | "failed" | "waiting";
   /** The captured stream events from the run. */
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   /** Lines written through `t.log` while the eval ran. */
   readonly logs?: readonly string[];
   /** Facts extracted from the stream (tool calls, message counts, etc.). */
@@ -134,13 +139,25 @@ export interface EveEvalTaskResult {
 export type AssertionSeverity = "gate" | "soft";
 
 /**
+ * A rich value-assertion evaluation. Built-in assertions use this to retain a
+ * concise failure reason and structured evidence alongside the numeric score.
+ */
+export interface AssertionEvaluation {
+  /** Normalized 0–1 score. */
+  readonly score: number;
+  /** Concise human-readable reason, shown when the assertion fails. */
+  readonly message?: string;
+  /** Structured diagnostic evidence retained by artifacts and reporters. */
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+/**
  * A value-level assertion produced by the builders in `eve/evals/expect`
  * (e.g. `includes`, `equals`, `similarity`) and applied to an explicit value
  * via `t.check(value, assertion)`. Boolean assertions score exactly 0 or 1.
  *
  * The chainable `gate`/`soft`/`atLeast` return a new assertion with the
- * severity or threshold overridden, so the threshold rides on the assertion
- * itself rather than a detached map.
+ * severity or threshold overridden.
  */
 export interface Assertion {
   readonly name: string;
@@ -148,6 +165,8 @@ export interface Assertion {
   /** Minimum passing score. `undefined` on a soft assertion = tracked only. */
   readonly threshold?: number;
   score(value: unknown): number | Promise<number>;
+  /** Rich evaluation used by `t.check` and `t.require`; custom assertions may omit it. */
+  evaluate?(value: unknown): AssertionEvaluation | Promise<AssertionEvaluation>;
   gate(threshold?: number): Assertion;
   soft(threshold?: number): Assertion;
   atLeast(threshold: number): Assertion;
@@ -155,14 +174,17 @@ export interface Assertion {
 
 /**
  * Handle to a recorded assertion, returned by every `t` assertion method.
- * Chain `gate`/`soft`/`atLeast` to override the recorded severity or
- * threshold. Recorded assertions are finalized by the runner; use `t.require`
- * or a `require*` lookup when later control flow depends on a passing result.
+ * Chain `gate`/`soft`/`atLeast` to override the recorded severity or threshold,
+ * and `label` to distinguish repeated assertion families. Recorded assertions
+ * are finalized by the runner; use `t.require` or a `require*` lookup when
+ * later control flow depends on a passing result.
  */
 export interface AssertionHandle {
   gate(threshold?: number): this;
   soft(threshold?: number): this;
   atLeast(threshold: number): this;
+  /** Adds a stable human-readable label to this recorded assertion. */
+  label(label: string): this;
 }
 
 /**
@@ -195,18 +217,18 @@ export interface EveEvalAssertions {
   maxToolCalls(max: number): AssertionHandle;
   calledSubagent(name: string, options?: EveEvalSubagentCallMatchOptions): AssertionHandle;
   noFailedActions(): AssertionHandle;
-  event<TType extends HandleMessageStreamEvent["type"]>(
+  event<TType extends MessageStreamEvent["type"]>(
     type: TType,
     options?: Omit<Extract<EveEvalEventMatch, { type: TType }>, "type">,
   ): AssertionHandle;
-  notEvent<TType extends HandleMessageStreamEvent["type"]>(
+  notEvent<TType extends MessageStreamEvent["type"]>(
     type: TType,
     options?: Omit<Extract<EveEvalEventMatch, { type: TType }>, "type" | "count">,
   ): AssertionHandle;
   eventOrder(matchers: readonly EveEvalEventMatch[]): AssertionHandle;
   eventsSatisfy(
     label: string,
-    predicate: (events: readonly HandleMessageStreamEvent[]) => boolean,
+    predicate: (events: readonly MessageStreamEvent[]) => boolean,
   ): AssertionHandle;
 }
 
@@ -218,11 +240,11 @@ export interface EveEvalOutputAssertions {
 
 /** Typed stream event returned by {@link EveEvalLiveTurn.waitForEvent}. */
 export type EveEvalStreamEvent<
-  TType extends HandleMessageStreamEvent["type"] = HandleMessageStreamEvent["type"],
-> = Extract<HandleMessageStreamEvent, { type: TType }>;
+  TType extends MessageStreamEvent["type"] = MessageStreamEvent["type"],
+> = Extract<MessageStreamEvent, { type: TType }>;
 
 /** Matcher options for waiting until one live turn emits a specific event. */
-export type EveEvalWaitForEventOptions<TType extends HandleMessageStreamEvent["type"]> = Omit<
+export type EveEvalWaitForEventOptions<TType extends MessageStreamEvent["type"]> = Omit<
   Extract<EveEvalEventMatch, { type: TType }>,
   "count" | "type"
 >;
@@ -235,7 +257,7 @@ export type EveEvalWaitForEventOptions<TType extends HandleMessageStreamEvent["t
  */
 export interface EveEvalLiveTurn {
   /** Events observed on this turn so far. */
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   /** Session driver that started or owns this turn. */
   readonly session: EveEvalSession;
   /** Durable session id available as soon as the turn is accepted or attached. */
@@ -245,7 +267,7 @@ export interface EveEvalLiveTurn {
   /** Wait for the turn boundary and return the recorded immutable result. */
   result(): Promise<EveEvalTurn>;
   /** Wait until the live stream emits one typed event matching `options`. */
-  waitForEvent<TType extends HandleMessageStreamEvent["type"]>(
+  waitForEvent<TType extends MessageStreamEvent["type"]>(
     type: TType,
     options?: EveEvalWaitForEventOptions<TType>,
   ): Promise<EveEvalStreamEvent<TType>>;
@@ -254,11 +276,11 @@ export interface EveEvalLiveTurn {
 /** Operations and state shared by the primary eval context and independent sessions. */
 export interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   /** Input requests left pending by the last parked turn. */
   readonly pendingInputRequests: readonly InputRequest[];
   /** Serializable cursor for resuming this session. */
-  readonly state: SessionState;
+  readonly state: ClientSessionState | undefined;
   /** eve session id after the first successful send. */
   readonly sessionId: string | undefined;
   /** Request cooperative cancellation of this session's active turn. */
@@ -266,13 +288,13 @@ export interface EveEvalSessionDriver {
   /** Require exactly one pending input request matching `filter`, or abort dependent control flow. */
   requireInputRequest(filter?: EveEvalInputRequestMatchOptions): InputRequest;
   /** Resolve specific pending requests and run the resumed turn. */
-  respond(...responses: InputResponse[]): Promise<EveEvalTurn>;
+  respond(responses: readonly InputResponse[], options?: SendTurnOptions): Promise<EveEvalTurn>;
   /** Resolve every pending request with the same option id. */
   respondAll(optionId: string): Promise<EveEvalTurn>;
   /** Send one turn through this session. */
-  send(input: SendTurnInput): Promise<EveEvalTurn>;
-  /** Start one turn and return as soon as its session is accepted. */
-  start(input: SendTurnInput): Promise<EveEvalLiveTurn>;
+  send(message: SendTurnInput["message"], options?: SendTurnOptions): Promise<EveEvalTurn>;
+  /** Start one text turn and return as soon as its session is accepted. */
+  start(message: string, options?: SendTurnOptions): Promise<EveEvalLiveTurn>;
   /** Send one text turn with a local file attached as a data URL. */
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
 }
@@ -286,7 +308,7 @@ export interface EveEvalSession
  */
 export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions {
   readonly data: unknown;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly inputRequests: readonly InputRequest[];
   readonly message: string | undefined;
   readonly sessionId: string;
@@ -416,8 +438,8 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
    * Attach to a pre-existing session and consume one turn boundary.
    *
    * When that boundary is `session.waiting`, the attached session recovers
-   * the current continuation token from the stream, so `session.send(...)`
-   * and `session.respond(...)` continue the same durable session.
+   * the exact session ID, so `session.send(...)` and `session.respond(...)`
+   * continue the same durable session.
    */
   attachSession(
     sessionId: string,

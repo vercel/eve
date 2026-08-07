@@ -21,11 +21,10 @@ process.env.EVE_TUI_UNICODE = "1";
 
 run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   const client = new Client({ host: target.baseUrl });
-  const session = client.session();
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    session,
+    client,
     screen,
     userInput: input,
     name: "TUI smoke",
@@ -98,9 +97,9 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   }
 
   // The turn is complete; wait until the runner is back at the prompt so
-  // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
-  // turn and returns to the prompt (Claude Code's two-step exit).
+  // Two idle Ctrl+C presses exit; mid-stream Ctrl+C cancels cooperatively.
   await screen.waitForIdlePrompt(30_000);
+  input.ctrlC();
   input.ctrlC();
   await runPromise;
 });

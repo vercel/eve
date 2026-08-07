@@ -245,9 +245,21 @@ describe("classifyModelCallError", () => {
     const fetchFailed = new Error("fetch failed");
     expect(classifyModelCallError(fetchFailed)).toBe("retry");
 
+    for (const code of ["UND_ERR_BODY_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT"]) {
+      const timeout = new TypeError("request aborted", {
+        cause: Object.assign(new Error("undici timeout"), { code }),
+      });
+      expect(classifyModelCallError(timeout)).toBe("retry");
+    }
+
+    expect(classifyModelCallError(new TypeError("terminated"))).toBe("retry");
+
     // The old substring policy is gone: prose that merely mentions a
     // network token no longer forces a retry loop.
     expect(classifyModelCallError(new Error("network configuration invalid"))).toBe("recoverable");
+    expect(classifyModelCallError(new Error("provider terminated the request"))).toBe(
+      "recoverable",
+    );
   });
 
   it("falls back to recoverable for unknown errors so the session parks instead of dying", () => {

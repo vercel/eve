@@ -5,6 +5,7 @@ const TOOL_NAME = "gate";
 
 /** Regression reproduction for https://github.com/vercel/eve/issues/533. */
 export default defineEval({
+  tags: ["real-model"],
   description:
     "HITL repro (#533): a separate approval response executes an authored always-gated tool.",
   async test(t) {
@@ -17,10 +18,12 @@ export default defineEval({
 
     // This sends only `inputResponses` in a separate turn. No user message or
     // channel context follows the tool approval response in the model input.
-    const approved = await t.respond({
-      optionId: "approve",
-      requestId: approval.requestId,
-    });
+    const approved = await t.respond([
+      {
+        optionId: "approve",
+        requestId: approval.requestId,
+      },
+    ]);
 
     approved.expectOk();
     approved.event("action.result", {

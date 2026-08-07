@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { isNonEmptyString, isObject, isPlainRecord, isThenable } from "#shared/guards.js";
+import {
+  isNonEmptyString,
+  isObject,
+  isPlainRecord,
+  isThenable,
+  readNonEmptyString,
+} from "#shared/guards.js";
 
 describe("isObject", () => {
   it("accepts plain objects", () => {
@@ -59,6 +65,7 @@ describe("isNonEmptyString", () => {
     expect(isNonEmptyString("a")).toBe(true);
     expect(isNonEmptyString(" ")).toBe(true);
     expect(isNonEmptyString("multi word")).toBe(true);
+    expect(readNonEmptyString("value")).toBe("value");
   });
 
   it("rejects empty strings, non-strings, and nullish values", () => {
@@ -67,5 +74,6 @@ describe("isNonEmptyString", () => {
     expect(isNonEmptyString(undefined)).toBe(false);
     expect(isNonEmptyString(0)).toBe(false);
     expect(isNonEmptyString(["a"])).toBe(false);
+    expect(readNonEmptyString("")).toBeUndefined();
   });
 });
