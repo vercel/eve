@@ -156,12 +156,6 @@ export function createSessionDeliveryHook(
         throw new Error("Cannot consume a public delivery before it resolves.");
       }
 
-      if (
-        !offeredRead.result.done &&
-        offeredRead.result.value.kind === "approval-candidate-expiry"
-      ) {
-        approvalCandidateExpired = true;
-      }
       if (!offeredRead.result.done && offeredRead.result.value.kind === "session-timeout") {
         sessionTimedOut = true;
       }

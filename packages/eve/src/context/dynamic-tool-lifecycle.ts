@@ -355,7 +355,10 @@ async function resolveToolsFromEvent(
 // Dispatch: route to the scope-appropriate durable key
 // ---------------------------------------------------------------------------
 
-const resolvedStepCoordinates = new WeakMap<ContextContainer, string>();
+const resolvedStepTools = new WeakMap<
+  ContextContainer,
+  { readonly coordinate: string; readonly tools: readonly HarnessToolDefinition[] }
+>();
 
 /**
  * Dispatches a stream event to dynamic tool resolvers. Each
@@ -377,7 +380,11 @@ export async function resolveStepDynamicTools(input: {
     typeof data?.turnId === "string" && typeof data.stepIndex === "number"
       ? `${data.turnId}:${String(data.stepIndex)}`
       : undefined;
-  if (coordinate !== undefined && resolvedStepCoordinates.get(input.ctx) === coordinate) return;
+  const cached = resolvedStepTools.get(input.ctx);
+  if (coordinate !== undefined && cached?.coordinate === coordinate) {
+    input.ctx.setVirtualContext(LiveStepToolsKey, cached.tools);
+    return;
+  }
 
   const matching = input.resolvers.filter((resolver) =>
     resolver.eventNames.includes("step.started"),
@@ -387,7 +394,9 @@ export async function resolveStepDynamicTools(input: {
       ? { liveTools: [] }
       : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
   input.ctx.setVirtualContext(LiveStepToolsKey, liveTools);
-  if (coordinate !== undefined) resolvedStepCoordinates.set(input.ctx, coordinate);
+  if (coordinate !== undefined) {
+    resolvedStepTools.set(input.ctx, { coordinate, tools: liveTools });
+  }
 }
 
 export async function dispatchDynamicToolEvent(input: {

@@ -656,6 +656,7 @@ describe("workflowEntry", () => {
       signalKind: "approval-candidate-expiry",
     });
     expect(expiryControl.rekey).toHaveBeenCalledWith("http:test");
+    expect(dispatchTurnStep).toHaveBeenCalledTimes(2);
     expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
       kind: "deliver",
       payloads: [],

@@ -730,6 +730,24 @@ describe("dispatchDynamicToolEvent", () => {
     expect(getToken).toHaveBeenCalledOnce();
   });
 
+  it("restores cached step tools after virtual context is cleared", async () => {
+    const ctx = createCtx();
+    const resolver = createResolver("api", ["step.started"], () => ({
+      query: createReplayableTool("cached"),
+    }));
+    const event = {
+      type: "step.started",
+      data: { stepIndex: 1, turnId: "turn-1" },
+    } as UnstampedMessageStreamEvent;
+
+    await dispatchDynamicToolEvent({ ctx, event, messages: [], resolvers: [resolver] });
+    ctx.clearVirtualContext();
+    expect(buildDynamicTools(ctx)).toEqual([]);
+
+    await dispatchDynamicToolEvent({ ctx, event, messages: [], resolvers: [resolver] });
+    expect(buildDynamicTools(ctx)[0]?.description).toBe("cached");
+  });
+
   it("replaces tools from the same resolver slug (last write wins)", async () => {
     const ctx = createCtx();
     let callCount = 0;

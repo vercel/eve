@@ -112,7 +112,10 @@ import {
 } from "#harness/input-extraction.js";
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { coordinateApprovalDelivery } from "#harness/approval-delivery-coordinator.js";
+import {
+  coordinateApprovalDelivery,
+  shouldPrepareApprovalPolicyTools,
+} from "#harness/approval-delivery-coordinator.js";
 import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-context.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
@@ -683,32 +686,30 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ? { ...effectiveStepInput, message: staleConversion.displayMessage }
         : effectiveStepInput;
 
-    let coordinated = await coordinateApprovalDelivery({
-      session,
-      stepInput: effectiveStepInput,
-    });
-    if (coordinated.kind === "policy-work-required") {
-      const approvalContext = contextStorage.getStore();
-      if (approvalContext !== undefined && config.resolveStepDynamicTools !== undefined) {
-        await config.resolveStepDynamicTools({
-          ctx: approvalContext,
-          event: createStepStartedEvent({
-            sequence: emissionState.sequence,
-            stepIndex: emissionState.stepIndex,
-            turnId: emissionState.turnId,
-          }),
-          messages: resolvedRuntimeActions.messages,
-        });
-      }
-      coordinated = await coordinateApprovalDelivery({
-        session: coordinated.session,
-        stepInput: coordinated.stepInput,
-        tools: buildResponseAuthorizationTools({
-          authoredTools: config.tools,
-          context: approvalContext,
+    const approvalContext = contextStorage.getStore();
+    if (
+      approvalContext !== undefined &&
+      config.resolveStepDynamicTools !== undefined &&
+      shouldPrepareApprovalPolicyTools({ session, stepInput: effectiveStepInput })
+    ) {
+      await config.resolveStepDynamicTools({
+        ctx: approvalContext,
+        event: createStepStartedEvent({
+          sequence: emissionState.sequence,
+          stepIndex: emissionState.stepIndex,
+          turnId: emissionState.turnId,
         }),
+        messages: resolvedRuntimeActions.messages,
       });
     }
+    const coordinated = await coordinateApprovalDelivery({
+      session,
+      stepInput: effectiveStepInput,
+      tools: buildResponseAuthorizationTools({
+        authoredTools: config.tools,
+        context: approvalContext,
+      }),
+    });
     session = coordinated.session;
     if (emit !== undefined) {
       for (const message of coordinated.feedback) {

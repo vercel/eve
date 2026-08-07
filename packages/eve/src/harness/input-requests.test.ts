@@ -13,7 +13,10 @@ import {
   markApprovalCandidateAuthorizationRequired,
 } from "#harness/approval-candidates.js";
 import { setPendingAuthorization } from "#harness/authorization.js";
-import { coordinateApprovalDelivery } from "#harness/approval-delivery-coordinator.js";
+import {
+  coordinateApprovalDelivery,
+  shouldPrepareApprovalPolicyTools,
+} from "#harness/approval-delivery-coordinator.js";
 import {
   clearPendingSessionLimitPrompt,
   consumeDeferredStepInput,
@@ -892,7 +895,7 @@ describe("coordinateApprovalDelivery", () => {
   async function completeApprovalDelivery(input: Parameters<typeof coordinateApprovalDelivery>[0]) {
     let result = await coordinateApprovalDelivery(input);
     for (let pass = 0; pass < 4; pass += 1) {
-      if (result.kind !== "continue-coordination" && result.kind !== "policy-work-required") break;
+      if (result.kind !== "continue-coordination") break;
       result = await coordinateApprovalDelivery({
         ...input,
         session: result.session,
@@ -973,6 +976,7 @@ describe("coordinateApprovalDelivery", () => {
           { auth: null, response: { optionId: "approve", requestId: "approval-1" } },
         ],
       },
+      tools: new Map(),
     });
 
     expect(result.feedback).toEqual(["Authentication is required to respond to this approval."]);
@@ -1221,6 +1225,31 @@ describe("coordinateApprovalDelivery", () => {
     expect(
       resolvePendingInput({ session: result.session, stepInput: result.stepInput }).outcome,
     ).toBe("unresolved");
+  });
+
+  it("does not prepare policy tools before ingesting a delivered approval response", () => {
+    const pending = pendingSession();
+    const responder = {
+      attributes: {},
+      authenticator: "slack-webhook",
+      principalId: "U1",
+      principalType: "user",
+    } as const;
+    const created = createApprovalCandidate({
+      candidateIdPrefix: "candidate-existing",
+      createdAt: 10,
+      expiresAt: Date.now() + 1_000,
+      requestId: "approval-1",
+      responder,
+      state: pending.state,
+    });
+
+    expect(
+      shouldPrepareApprovalPolicyTools({
+        session: { ...pending, state: created.state },
+        stepInput: { inputResponses: [{ optionId: "cancel", requestId: "approval-1" }] },
+      }),
+    ).toBe(false);
   });
 
   it("processes Cancel before running an existing candidate authorizer", async () => {

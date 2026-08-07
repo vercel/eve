@@ -41,11 +41,7 @@ const APPROVAL_CANDIDATE_TTL_MS = 10 * 60_000;
 export interface ApprovalDeliveryResult {
   readonly challenges: readonly AuthorizationChallenge[];
   readonly feedback: readonly string[];
-  readonly kind:
-    | "continue"
-    | "continue-coordination"
-    | "policy-work-required"
-    | "authorization-required";
+  readonly kind: "continue" | "continue-coordination" | "authorization-required";
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
 }
@@ -68,12 +64,45 @@ export interface ApprovalDeliveryResult {
  * creation commit before long-running policy execution. Candidate results also
  * commit before lifecycle events are projected by the next stack layer.
  */
+/** Returns whether this invocation should prepare tools for persisted policy work. */
+export function shouldPrepareApprovalPolicyTools(input: {
+  readonly now?: number;
+  readonly session: HarnessSession;
+  readonly stepInput?: StepInput;
+}): boolean {
+  const batch = getPendingInputBatch(input.session.state);
+  const responses = [
+    ...(input.stepInput?.attributedInputResponses ?? []).map(({ response }) => response),
+    ...(input.stepInput?.inputResponses ?? []),
+  ];
+  if (
+    batch?.requests.some(
+      (request) =>
+        isApprovalRequest(request) &&
+        responses.some((response) => response.requestId === request.requestId),
+    )
+  ) {
+    return false;
+  }
+
+  const now = input.now ?? Date.now();
+  return getApprovalAuditState(input.session.state).activeCandidates.some(
+    (candidate) =>
+      candidate.expiresAt > now &&
+      (candidate.status === "pending" ||
+        (candidate.authorizationChallenges?.some(
+          (challenge) => getAuthorizationResult(challenge.name) !== undefined,
+        ) ??
+          false)),
+  );
+}
+
 export async function coordinateApprovalDelivery(input: {
   readonly now?: number;
   readonly runtimeRevision?: string;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
-  readonly tools?: HarnessToolMap;
+  readonly tools: HarnessToolMap;
 }): Promise<ApprovalDeliveryResult> {
   const now = input.now ?? Date.now();
   const expiredChallengeNames = getApprovalAuditState(input.session.state)
@@ -191,10 +220,6 @@ export async function coordinateApprovalDelivery(input: {
 
   // Candidates are persisted in an earlier pass. Run pending candidates and
   // resume only authorization-required candidates whose callback arrived.
-  if (candidatesAtStart.some(candidateReadyForPolicyWork) && input.tools === undefined) {
-    return deliveryResult(session, remainingStepInput, "policy-work-required");
-  }
-
   const parkedChallengeNames = new Set(
     getPendingAuthorization(session.state)?.challenges.map((challenge) => challenge.name) ?? [],
   );
@@ -225,7 +250,7 @@ export async function coordinateApprovalDelivery(input: {
       request,
       responder: candidate.responder,
       session,
-      tools: input.tools!,
+      tools: input.tools,
     });
     session = processed.session;
     didCommit ||= processed.didCommit;
@@ -240,16 +265,6 @@ export async function coordinateApprovalDelivery(input: {
         challenges.length > 0 ? "authorization-required" : "continue",
         challenges,
       );
-}
-
-function candidateReadyForPolicyWork(candidate: ActiveApprovalCandidate): boolean {
-  return (
-    candidate.status === "pending" ||
-    (candidate.authorizationChallenges?.some(
-      (challenge) => getAuthorizationResult(challenge.name) !== undefined,
-    ) ??
-      false)
-  );
 }
 
 async function authorizeCandidate(input: {
