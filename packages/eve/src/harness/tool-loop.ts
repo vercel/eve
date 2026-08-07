@@ -115,6 +115,7 @@ import { createToolResultMessagePartFromToolError } from "#harness/action-result
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-context.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
+import { materializeExecutionDeniedToolResultsForModel } from "#harness/model-call-messages.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
 import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
 import { resolveParentLineage } from "#harness/parent-lineage.js";
@@ -877,7 +878,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       systemMessages.push({ role: "system", content: CONDITIONAL_DELIVERY_INSTRUCTION });
     }
 
-    const modelMessages = nonSystemMessages;
+    // Persisted history may carry `execution-denied` tool-result outputs
+    // (authoritative for UI/telemetry via action.result). Providers only
+    // accept the AI SDK `ToolResultOutput` union on this boundary — see
+    // model-call-messages.ts for the exact down-projection rule.
+    // Session history is not mutated.
+    const modelMessages = materializeExecutionDeniedToolResultsForModel(nonSystemMessages);
 
     const prepareModelCallInput = (extraSystemNote?: string) => {
       const extraSystemEntry: SystemModelMessage[] = extraSystemNote
