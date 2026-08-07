@@ -175,6 +175,8 @@ export type SessionCommand =
       readonly payload: DeliverPayload;
       readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
+      /** Replay-stable identity for one task-owned child delivery. */
+      readonly taskDeliveryId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
   | { readonly kind: "cancel"; readonly turnId?: string }
