@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   projectParkedAgentHandles,
+  renderAgentViewsSnippet,
   renderAgentsSnippet,
   resolveAgentsAnnouncement,
 } from "#harness/handles/prompt.js";
@@ -67,6 +68,26 @@ describe("projectParkedAgentHandles / renderAgentsSnippet", () => {
     expect(snippet).not.toContain(parkedRemoteHandle.address.continuationToken);
     expect(snippet).not.toContain("URL_SENTINEL");
     expect(snippet).not.toContain("CALLBACK_SENTINEL");
+  });
+});
+
+describe("renderAgentViewsSnippet", () => {
+  it("keeps task-owned agents visible with derived busy state", () => {
+    const snippet = renderAgentViewsSnippet([
+      {
+        availability: "busy",
+        id: identity.id,
+        name: identity.name,
+        taskId: "task_123",
+        taskStatus: "input_required",
+      },
+    ]);
+
+    expect(snippet).toContain(
+      `<agent id="${identity.id}" name="research" availability="busy" taskId="task_123" taskStatus="input_required">(busy)</agent>`,
+    );
+    expect(snippet).not.toContain("SESSION_ID_SENTINEL");
+    expect(snippet).not.toContain("CONTINUATION_TOKEN_SENTINEL");
   });
 });
 

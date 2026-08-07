@@ -57,12 +57,53 @@ export async function runProxySubagentEventStep(input: {
   });
 }
 
+/** Emits a task request whose proxy routes were committed by a prior step. */
+export async function emitRecordedTaskInputRequestStep(input: {
+  readonly hookPayload: SubagentInputRequestHookPayload;
+  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<ProxySubagentEventResult> {
+  "use step";
+
+  const durableSession = await readDurableSession(input.sessionState);
+  const ctx = await deserializeContext(input.serializedContext);
+  return emitProxiedSubagentEvent({
+    ctx,
+    durableSession,
+    hookPayload: input.hookPayload,
+    parentWritable: input.parentWritable,
+    recordProxyInputRequests: false,
+  });
+}
+
+/** Emits a task authorization event after its ownership was validated. */
+export async function emitRecordedTaskAuthorizationEventStep(input: {
+  readonly hookPayload: SubagentAuthorizationEventHookPayload;
+  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<ProxySubagentEventResult> {
+  "use step";
+
+  const durableSession = await readDurableSession(input.sessionState);
+  const ctx = await deserializeContext(input.serializedContext);
+  return emitProxiedSubagentEvent({
+    ctx,
+    durableSession,
+    hookPayload: input.hookPayload,
+    parentWritable: input.parentWritable,
+    recordProxyInputRequests: false,
+  });
+}
+
 /** Applies one proxied child event to an already-hydrated parent context. */
 export async function emitProxiedSubagentEvent(input: {
   readonly ctx: ContextContainer;
   readonly durableSession: DurableSession;
   readonly hookPayload: SubagentEventHookPayload;
   readonly parentWritable: WritableStream<Uint8Array>;
+  readonly recordProxyInputRequests?: boolean;
 }): Promise<ProxySubagentEventResult> {
   const { ctx } = input;
   const adapter = ctx.require(ChannelKey);
@@ -110,7 +151,11 @@ export async function emitProxiedSubagentEvent(input: {
 
   setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
 
-  if (proxyEntries !== undefined && input.hookPayload.kind === "subagent-input-request") {
+  if (
+    input.recordProxyInputRequests !== false &&
+    proxyEntries !== undefined &&
+    input.hookPayload.kind === "subagent-input-request"
+  ) {
     scopedSession = upsertProxyInputRequests({
       entries: proxyEntries,
       forChildContinuationToken: input.hookPayload.childContinuationToken,

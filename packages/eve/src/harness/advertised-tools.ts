@@ -2,6 +2,7 @@ import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { AGENT_TOOL_NAME } from "#runtime/framework-tools/agent.js";
+import { TASK_TOOL_NAMES } from "#runtime/framework-tools/tasks.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import {
   ensureWorkflowContinuationSecurity,
@@ -162,15 +163,29 @@ function shouldHideDelegationTool(
   definition: HarnessToolDefinition,
   session: AdvertisedToolSession,
 ): boolean {
-  if (
-    definition.name !== AGENT_TOOL_NAME ||
-    definition.runtimeAction?.kind !== "subagent-call" ||
-    definition.runtimeAction.nodeId !== ROOT_RUNTIME_AGENT_NODE_ID
-  ) {
-    return false;
+  if (isRootOnlyFrameworkTool(definition)) {
+    return session.rootSessionId !== undefined || resolveSubagentDepth(session).currentDepth > 0;
   }
 
-  return session.rootSessionId !== undefined || resolveSubagentDepth(session).currentDepth > 0;
+  return false;
+}
+
+/**
+ * Tools that only a root session may see. The `agent` self-delegation
+ * tool and the `experimental.tasks` controls are injected from the root
+ * node's config, which self-delegated children share — session shape is
+ * the only signal that separates the root from its children.
+ */
+function isRootOnlyFrameworkTool(definition: HarnessToolDefinition): boolean {
+  if (
+    definition.name === AGENT_TOOL_NAME &&
+    definition.runtimeAction?.kind === "subagent-call" &&
+    definition.runtimeAction.nodeId === ROOT_RUNTIME_AGENT_NODE_ID
+  ) {
+    return true;
+  }
+
+  return TASK_TOOL_NAMES.has(definition.name);
 }
 
 function isToolDefinitionList(

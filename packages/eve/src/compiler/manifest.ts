@@ -429,6 +429,7 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
     experimental: z
       .object({
         subagentPersistentSessions: z.boolean().optional(),
+        tasks: z.boolean().optional(),
         workflow: compiledAgentWorkflowDefinitionSchema.optional(),
       })
       .strict()
@@ -834,6 +835,7 @@ export function createCompiledAgentNodeManifest(input: {
           ? undefined
           : {
               subagentPersistentSessions: input.config.experimental.subagentPersistentSessions,
+              tasks: input.config.experimental.tasks,
               workflow:
                 input.config.experimental.workflow === undefined
                   ? undefined

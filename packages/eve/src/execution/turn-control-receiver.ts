@@ -21,19 +21,28 @@ export class TurnControlReceiver {
   private readonly commandInbox: SessionCommandInbox;
   private readonly control: Hook<TurnControlPayload>;
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
+  private readonly expectedTurnId: string;
+  private readonly cancelledTaskIds: Set<string>;
+  private readonly seenTaskDeliveries: Set<string>;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
 
   constructor(input: {
     readonly bufferedDeliveries: DeliverHookPayload[];
     readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+    readonly cancelledTaskIds?: Set<string>;
     readonly commandInbox: SessionCommandInbox;
+    readonly expectedTurnId: string;
+    readonly seenTaskDeliveries?: Set<string>;
     readonly token: string;
   }) {
     this.bufferedDeliveries = input.bufferedDeliveries;
     this.bufferedSessionControls = input.bufferedSessionControls;
+    this.cancelledTaskIds = input.cancelledTaskIds ?? new Set();
     this.commandInbox = input.commandInbox;
+    this.seenTaskDeliveries = input.seenTaskDeliveries ?? new Set();
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
+    this.expectedTurnId = input.expectedTurnId;
   }
 
   /** Token passed to the turn workflow so it can publish control messages. */
@@ -72,6 +81,7 @@ export class TurnControlReceiver {
     command: SessionInboxPayload,
   ): Promise<TurnDriverAction | undefined> {
     if (command.kind === "send") {
+      if (!this.acceptTaskDelivery(command)) return undefined;
       this.bufferedDeliveries.push(commandToDelivery(command));
       return undefined;
     }
@@ -84,8 +94,15 @@ export class TurnControlReceiver {
       return undefined;
     }
     if (command.kind === "cancel") {
+      if (command.taskId !== undefined) this.discardTaskDeliveries(command.taskId);
+      const turnId =
+        command.taskId !== undefined &&
+        command.turnId !== undefined &&
+        command.turnId !== this.expectedTurnId
+          ? undefined
+          : command.turnId;
       await forwardTurnCancellationStep({
-        payload: command.turnId === undefined ? {} : { turnId: command.turnId },
+        payload: turnId === undefined ? {} : { turnId },
         token: turnCancellationHookToken(this.control.token),
       });
       return undefined;
@@ -105,7 +122,9 @@ export class TurnControlReceiver {
     payload: Extract<TurnControlPayload, { readonly kind: "turn-result" }>,
   ): void {
     if (payload.bufferedDeliveries !== undefined) {
-      this.bufferedDeliveries.unshift(...payload.bufferedDeliveries);
+      this.bufferedDeliveries.unshift(
+        ...payload.bufferedDeliveries.filter((delivery) => !this.shouldDiscard(delivery)),
+      );
     }
   }
 
@@ -193,6 +212,7 @@ export class TurnControlReceiver {
 
       this.commandInbox.consumeNext();
       if (winner.value.value.kind === "send") {
+        if (!this.acceptTaskDelivery(winner.value.value)) continue;
         delivery = commandToDelivery(winner.value.value);
         continue;
       }
@@ -234,7 +254,7 @@ export class TurnControlReceiver {
       if (winner.kind === "command") {
         const terminal = await this.handleSessionCommand(winner.command);
         if (terminal !== undefined) {
-          this.bufferedDeliveries.unshift(outstanding);
+          if (!this.shouldDiscard(outstanding)) this.bufferedDeliveries.unshift(outstanding);
           return terminal;
         }
         continue;
@@ -247,17 +267,48 @@ export class TurnControlReceiver {
       }
 
       if (payload.kind === "turn-delivery-cancelled" && payload.requestId === requestId) {
-        this.bufferedDeliveries.unshift(outstanding);
+        if (!this.shouldDiscard(outstanding)) this.bufferedDeliveries.unshift(outstanding);
         return undefined;
       }
 
       if (payload.kind === "turn-result") {
-        this.bufferedDeliveries.unshift(outstanding);
+        if (!this.shouldDiscard(outstanding)) this.bufferedDeliveries.unshift(outstanding);
       }
 
       const terminal = this.readTerminalControl(payload);
       if (terminal !== undefined) return terminal;
     }
+  }
+
+  private acceptTaskDelivery(command: Extract<SessionCommand, { readonly kind: "send" }>): boolean {
+    const deliveryId = command.taskDeliveryId ?? command.caller?.taskId;
+    if (deliveryId === undefined) return true;
+    if (
+      [...this.cancelledTaskIds].some(
+        (taskId) => deliveryId === taskId || deliveryId.startsWith(`${taskId}:`),
+      )
+    ) {
+      return false;
+    }
+    if (this.seenTaskDeliveries.has(deliveryId)) return false;
+    this.seenTaskDeliveries.add(deliveryId);
+    return true;
+  }
+
+  private discardTaskDeliveries(taskId: string): void {
+    this.cancelledTaskIds.add(taskId);
+    const kept = this.bufferedDeliveries.filter((delivery) => !this.shouldDiscard(delivery));
+    this.bufferedDeliveries.splice(0, this.bufferedDeliveries.length, ...kept);
+  }
+
+  private shouldDiscard(delivery: DeliverHookPayload): boolean {
+    const deliveryId = delivery.taskDeliveryId ?? delivery.caller?.taskId;
+    return (
+      deliveryId !== undefined &&
+      [...this.cancelledTaskIds].some(
+        (taskId) => deliveryId === taskId || deliveryId.startsWith(`${taskId}:`),
+      )
+    );
   }
 }
 
@@ -274,5 +325,6 @@ function commandToDelivery(
     kind: "deliver",
     payloads: [command.payload],
     requestId: command.requestId,
+    taskDeliveryId: command.taskDeliveryId,
   };
 }

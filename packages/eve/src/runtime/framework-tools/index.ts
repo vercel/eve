@@ -8,6 +8,7 @@ import {
   createSkillToolDefinition,
   SKILL_TOOL_DEFINITION,
 } from "#runtime/framework-tools/skill.js";
+import { TASK_TOOL_DEFINITIONS } from "#runtime/framework-tools/tasks.js";
 import { TODO_TOOL_DEFINITION } from "#runtime/framework-tools/todo.js";
 import { WEB_FETCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-fetch.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
@@ -60,6 +61,7 @@ const REGISTERED_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
 const ALL_FRAMEWORK_TOOLS: readonly ResolvedToolDefinition[] = [
   ...REGISTERED_FRAMEWORK_TOOLS,
   AGENT_TOOL_DEFINITION,
+  ...TASK_TOOL_DEFINITIONS,
 ];
 
 /**

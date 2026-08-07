@@ -266,6 +266,34 @@ describe("normalizeAgentDefinition", () => {
       ),
     ).toThrow('"experimental.subagentPersistentSessions" must be a boolean.');
   });
+
+  it("accepts a boolean tasks flag", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: {
+          tasks: true,
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.tasks).toBe(true);
+  });
+
+  it("rejects non-boolean tasks values", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            tasks: "yes",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"experimental.tasks" must be a boolean.');
+  });
 });
 
 describe("normalizeScheduleDefinition", () => {

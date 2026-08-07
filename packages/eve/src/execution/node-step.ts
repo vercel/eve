@@ -22,6 +22,10 @@ import {
   AGENT_TOOL_NAME,
   isImplicitAgentToolAvailable,
 } from "#runtime/framework-tools/agent.js";
+import {
+  createTaskToolHarnessDefinitions,
+  isTaskToolAvailable,
+} from "#runtime/framework-tools/tasks.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
@@ -108,6 +112,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
     persistentSubagentSessions:
+      input.node.agent.config?.experimental?.tasks === true ||
       input.node.agent.config?.experimental?.subagentPersistentSessions === true,
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
@@ -214,6 +219,7 @@ export function createNodeHarnessTools(input: {
     tools.set(AGENT_TOOL_NAME, {
       description: AGENT_TOOL_DESCRIPTION,
       inputSchema:
+        input.node.agent.config?.experimental?.tasks === true ||
         input.node.agent.config?.experimental?.subagentPersistentSessions === true
           ? PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA
           : SUBAGENT_TOOL_INPUT_SCHEMA,
@@ -224,6 +230,20 @@ export function createNodeHarnessTools(input: {
         subagentName: AGENT_TOOL_NAME,
       },
     });
+  }
+
+  const tasksEnabled = input.node.agent.config?.experimental?.tasks === true;
+  for (const definition of createTaskToolHarnessDefinitions()) {
+    if (
+      isTaskToolAvailable({
+        disabledFrameworkTools: input.node.agent.disabledFrameworkTools,
+        hasAuthoredTool: tools.has(definition.name),
+        tasksEnabled,
+        toolName: definition.name,
+      })
+    ) {
+      tools.set(definition.name, definition);
+    }
   }
 
   return tools;

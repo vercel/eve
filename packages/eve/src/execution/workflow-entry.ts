@@ -13,6 +13,7 @@ import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import {
   notifyDelegatedParentStep,
+  notifyTaskTurnStartedStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#execution/delegated-parent-notification.js";
@@ -33,6 +34,7 @@ import { emitTerminalSessionFailureStep } from "#execution/terminal-session-fail
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
@@ -221,6 +223,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     // channel still sees a terminal event.
     if (crashCleanupState.lastSessionState !== undefined) {
       await terminateChildSessionsStep({
+        serializedContext: input.serializedContext,
         sessionState: crashCleanupState.lastSessionState,
       });
     }
@@ -307,6 +310,8 @@ async function runDriverLoop(input: {
 
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
+  const cancelledTaskIds = new Set<string>();
+  const seenTaskDeliveries = new Set<string>();
   const commandInbox = createSessionCommandInbox();
   const stableCommandToken = sessionCommandHookToken(input.sessionState.sessionId);
   await commandInbox.claimStable(stableCommandToken);
@@ -325,9 +330,19 @@ async function runDriverLoop(input: {
     readonly serializedContext: Record<string, unknown>;
     readonly sessionState: DurableSessionState;
   }): Promise<TurnDriverAction> => {
+    const caller = input.crashCleanupState.caller;
+    if (caller?.taskId !== undefined) {
+      seenTaskDeliveries.add(caller.taskId);
+      await notifyTaskTurnStartedStep({
+        caller,
+        childSessionId: args.sessionState.sessionId,
+        childTurnId: activeTurnId(args.sessionState.emissionState),
+      });
+    }
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
       bufferedSessionControls,
+      cancelledTaskIds,
       capabilities: input.capabilities,
       commandInbox,
       controlToken: nextTurnControlToken(),
@@ -335,6 +350,7 @@ async function runDriverLoop(input: {
       mode: input.mode,
       parentWritable: input.driverWritable,
       serializedContext: args.serializedContext,
+      seenTaskDeliveries,
       sessionState: args.sessionState,
     });
     await disposeSettledTurnControl?.();
@@ -347,8 +363,10 @@ async function runDriverLoop(input: {
       try {
         await commandInbox.rekeyContinuation(input.sessionState.continuationToken);
       } catch (error) {
-        // A concurrent create may start multiple candidates before one owns
-        // the shared alias. The loser exits before dispatching its first turn.
+        // A concurrent create can start two candidate runs before either
+        // publishes the shared continuation alias. The runtime adopts the
+        // alias owner; the losing candidate must exit before its first turn
+        // instead of emitting a second session failure for the same create.
         if (!isHookConflictError(error)) throw error;
         return { kind: "result", result: { output: "" } };
       }
@@ -443,10 +461,19 @@ async function runDriverLoop(input: {
       const next = await nextTurnDelivery({
         bufferedDeliveries,
         bufferedSessionControls,
+        cancelledTaskIds,
         commandInbox,
         driverWritable: input.driverWritable,
+        serializedContext: action.serializedContext,
+        seenTaskDeliveries,
         sessionState: action.sessionState,
       });
+      action = {
+        ...action,
+        serializedContext: next.serializedContext,
+        sessionState: next.sessionState,
+      };
+      input.crashCleanupState.lastSessionState = action.sessionState;
 
       if (next.kind === "expired") {
         return {
@@ -457,7 +484,10 @@ async function runDriverLoop(input: {
       }
 
       if (next.kind === "reset") {
-        await terminateChildSessionsStep({ sessionState: action.sessionState });
+        await terminateChildSessionsStep({
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
         return { kind: "result", result: { output: "" } };
       }
 
@@ -510,7 +540,7 @@ async function runDriverLoop(input: {
           requestId: next.deliver.requestId,
         },
         serializedContext: action.serializedContext,
-        sessionState: action.sessionState,
+        sessionState: next.sessionState,
       });
       input.crashCleanupState.lastSessionState = action.sessionState;
     }
@@ -533,6 +563,7 @@ async function finalizeExpiredSession(input: {
   readonly sessionState: DurableSessionState;
 }): Promise<WorkflowEntryResult> {
   await terminateChildSessionsStep({
+    serializedContext: input.serializedContext,
     sessionState: input.sessionState,
   });
   await emitTerminalSessionCompletionStep({
@@ -570,6 +601,7 @@ async function finalizeDone(input: {
   const failed = input.action.isError === true;
 
   await terminateChildSessionsStep({
+    serializedContext,
     sessionState: input.action.sessionState,
   });
   if (input.mode === "task") {
@@ -578,14 +610,14 @@ async function finalizeDone(input: {
       output: failed ? undefined : output,
       serializedContext,
       status: failed ? "failed" : "completed",
-      usage: failed ? undefined : input.action.usage,
+      usage: input.action.usage,
     });
     await notifyDelegatedParentStep({
       result: failed
         ? createDelegatedSubagentErrorResult(serializedContext, output)
         : createDelegatedSubagentSuccessResult(serializedContext, output),
       serializedContext,
-      usage: failed ? undefined : input.action.usage,
+      usage: input.action.usage,
     });
   } else {
     const settled: {

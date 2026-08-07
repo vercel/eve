@@ -760,12 +760,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = continuation.session;
 
     if (config.persistentSubagentSessions === true) {
-      const announcement = resolveAgentsAnnouncement({
-        messages,
-        store: getAgentHandleStore(session.state),
-      });
-      if (announcement !== undefined) {
-        messages.push({ content: announcement, role: "assistant" });
+      const store = getAgentHandleStore(session.state);
+      if (store?.handles.some((handle) => handle.phase === "addressed") !== true) {
+        const announcement = resolveAgentsAnnouncement({ messages, store });
+        if (announcement !== undefined) {
+          messages.push({ content: announcement, role: "assistant" });
+        }
       }
     }
 

@@ -39,6 +39,28 @@ describe("upsertProxyInputRequests", () => {
     });
   });
 
+  it("round-trips task ownership without exposing malformed ownership as an unscoped route", () => {
+    const next = upsertProxyInputRequests({
+      entries: [
+        ["req-1", { childContinuationToken: "child-a", kind: "question", taskId: "task-1" }],
+      ],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+    expect(getProxyInputRequests(next.state).get("req-1")).toEqual({
+      childContinuationToken: "child-a",
+      kind: "question",
+      taskId: "task-1",
+    });
+    expect(
+      getProxyInputRequests({
+        "eve.runtime.proxyInputRequests": {
+          "req-1": { childContinuationToken: "child-a", kind: "question", taskId: 42 },
+        },
+      }).size,
+    ).toBe(0);
+  });
+
   it("replaces prior entries for the same child continuation token", () => {
     let session = upsertProxyInputRequests({
       entries: [["req-1", { childContinuationToken: "child-a", kind: "question" }]],

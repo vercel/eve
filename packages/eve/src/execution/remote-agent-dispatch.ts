@@ -18,6 +18,7 @@ import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
+import { readTaskIdFromCommandToken } from "#tasks/task-id.js";
 
 const CreateSessionResponseSchema = z.object({
   // Older eve deployments do not return a continuationToken. Their children
@@ -51,6 +52,12 @@ export async function startRemoteAgentSession(input: {
   /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
   /**
+   * Replay-stable identity of this create attempt. A retried dispatch step
+   * re-sends the same value, letting the receiver return the child it already
+   * created instead of starting a second one.
+   */
+  readonly operationId?: string;
+  /**
    * Whether the dispatching agent opted into
    * `experimental.subagentPersistentSessions`. Persistent remote children run
    * in conversation mode so their sessions accept follow-up messages.
@@ -73,18 +80,21 @@ export async function startRemoteAgentSession(input: {
     callback: {
       callId: string;
       subagentName: string;
+      taskId?: string;
       token: string;
       url: string;
     };
     forwardedPrincipal?: ForwardedPrincipal;
     message: string;
     mode: "conversation" | "task";
+    operationId?: string;
     outputSchema?: object;
   } = {
     capabilities: {},
     callback: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
+      taskId: readTaskIdFromCommandToken(callbackToken),
       token: callbackToken,
       url: createWorkflowCallbackUrl(
         input.callbackBaseUrl,
@@ -102,6 +112,9 @@ export async function startRemoteAgentSession(input: {
   };
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
+  }
+  if (input.operationId !== undefined) {
+    requestBody.operationId = input.operationId;
   }
 
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
@@ -154,6 +167,7 @@ export async function continueRemoteAgentSession(input: {
   readonly callback: {
     readonly callId: string;
     readonly subagentName: string;
+    readonly taskId?: string;
     readonly token: string;
     readonly url: string;
   };
@@ -257,9 +271,15 @@ function buildForwardedPrincipalField(input: {
 export async function cancelRemoteAgentTurn(input: {
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly sessionId: string;
+  readonly taskId?: string;
+  readonly turnId?: string;
 }): Promise<CancelTurnResult> {
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
   const response = await fetch(createRemoteAgentCancelTurnUrl(input.remote, input.sessionId), {
+    body:
+      input.turnId === undefined && input.taskId === undefined
+        ? undefined
+        : JSON.stringify({ taskId: input.taskId, turnId: input.turnId }),
     headers,
     method: "POST",
   });

@@ -272,6 +272,51 @@ describe("createNodeHarnessTools", () => {
 
     expect(tools.has("agent")).toBe(false);
   });
+
+  it("does not inject task tools without experimental.tasks", () => {
+    const tools = createNodeHarnessTools({ node: createTestNode() });
+
+    for (const name of ["task_peek", "task_cancel", "task_send", "task_sleep"]) {
+      expect(tools.has(name)).toBe(false);
+    }
+  });
+
+  it("injects the task tools when experimental.tasks is on", () => {
+    const node = createTestNode();
+    const tools = createNodeHarnessTools({
+      node: {
+        ...node,
+        agent: {
+          ...node.agent,
+          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
+        },
+      },
+    });
+
+    for (const name of ["task_peek", "task_cancel", "task_send"]) {
+      expect(tools.get(name)?.runtimeAction).toEqual({ kind: "task-control" });
+      expect(tools.get(name)?.execute).toBeUndefined();
+    }
+    expect(tools.get("task_sleep")?.execute).toBeDefined();
+    expect(tools.get("task_sleep")?.runtimeAction).toBeUndefined();
+  });
+
+  it("respects disableTool for individual task tools", () => {
+    const node = createTestNode();
+    const tools = createNodeHarnessTools({
+      node: {
+        ...node,
+        agent: {
+          ...node.agent,
+          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
+          disabledFrameworkTools: ["task_cancel"],
+        },
+      },
+    });
+
+    expect(tools.has("task_peek")).toBe(true);
+    expect(tools.has("task_cancel")).toBe(false);
+  });
 });
 
 describe("createExecutionNodeStep", () => {

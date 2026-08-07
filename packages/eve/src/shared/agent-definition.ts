@@ -204,6 +204,13 @@ export interface AgentExperimentalDefinition {
    */
   readonly subagentPersistentSessions?: boolean;
   /**
+   * Runs this agent's delegated subagent calls as durable background tasks.
+   * The originating tool call returns a task receipt immediately and the
+   * model manages the work through the `task_*` framework tools. Implies
+   * persistent-session children for subagent dispatch. Root agents only.
+   */
+  readonly tasks?: boolean;
+  /**
    * Durable Workflow runtime configuration. Root agents may use this to select
    * the Workflow world backing sessions and runs.
    */

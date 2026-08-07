@@ -44,6 +44,22 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
   });
 
+  it("explains task-derived busy agents when tasks imply persistent sessions", () => {
+    const turnAgent = createResolvedRuntimeTurnAgent({
+      agent: createResolvedAgentForTest({
+        config: {
+          experimental: { tasks: true },
+          name: "test-agent",
+        } as ResolvedAgent["config"],
+      }),
+      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      tools: [],
+    });
+
+    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("availability=busy"));
+    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("taskId"));
+  });
+
   it("omits the messaging instruction when an authored tool named agent shadows the framework tool", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({

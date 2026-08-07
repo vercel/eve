@@ -114,6 +114,6 @@ describe("runtime agent framework tools", () => {
       { kind: "subagent" },
     ]);
     const runtimeAction = createNodeHarnessTools({ node: graph.root }).get("agent")?.runtimeAction;
-    expect(runtimeAction?.subagentName).toBe("agent");
+    expect(runtimeAction).toMatchObject({ kind: "subagent-call", subagentName: "agent" });
   });
 });

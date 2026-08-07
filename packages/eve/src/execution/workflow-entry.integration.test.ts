@@ -497,7 +497,7 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it("fails a competing continuation owner before its first turn", async () => {
+  it("exits a competing continuation owner before its first turn", async () => {
     const runtime = createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
     const continuationToken = "http:workflow-entry-hook-owner";
 
@@ -528,20 +528,8 @@ describe("workflowEntry integration", () => {
           }),
         },
       ]);
-      const contenderStream = captureTurnEvents(contender);
-
       try {
-        const contenderEvents = await contenderStream.nextTurn();
-
-        expect(contenderEvents.at(-1)?.type).toBe("session.failed");
-        expect(
-          contenderEvents.some(
-            (event) => event.type === "message.completed" || event.type === "turn.started",
-          ),
-        ).toBe(false);
-        await expect(contender.returnValue).rejects.toThrow(
-          /Agent workflow failed\. Inspect the private session trace for details\./,
-        );
+        await expect(contender.returnValue).resolves.toEqual({ output: "" });
 
         await resumeHook(continuationToken, {
           kind: "send",
@@ -558,7 +546,6 @@ describe("workflowEntry integration", () => {
           ),
         ).toBe(true);
       } finally {
-        contenderStream.dispose();
         ownerStream.dispose();
         await owner.cancel();
       }

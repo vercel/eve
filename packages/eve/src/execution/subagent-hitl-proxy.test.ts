@@ -85,6 +85,40 @@ describe("routeDeliverPayload", () => {
     expect(routed.forSelf).toBeUndefined();
   });
 
+  it("keeps one task response batch atomic and marks it for its task run", () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        ["req-a", { childContinuationToken: "child-a", kind: "tool-approval", taskId: "task-1" }],
+        ["req-b", { childContinuationToken: "child-a", kind: "question", taskId: "task-1" }],
+      ],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+
+    const routed = routeDeliverPayload({
+      payload: {
+        inputResponses: [
+          { optionId: "approve", requestId: "req-a" },
+          { text: "west", requestId: "req-b" },
+        ],
+      },
+      state: session.state,
+    });
+
+    expect(routed.forChildren).toEqual([
+      {
+        childContinuationToken: "child-a",
+        payload: {
+          inputResponses: [
+            { optionId: "approve", requestId: "req-a" },
+            { text: "west", requestId: "req-b" },
+          ],
+        },
+        taskId: "task-1",
+      },
+    ]);
+  });
+
   it("asks the parent to cancel after routing Stop to a descendant session-limit request", () => {
     const session = upsertProxyInputRequests({
       entries: [["req-limit", { childContinuationToken: "child-a", kind: "session-limit" }]],

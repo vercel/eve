@@ -7,6 +7,11 @@ import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import { agentTurnOutcomeSchema, type AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import type { JsonValue } from "#shared/json.js";
 import { tokenUsageSchema, type TokenUsage } from "#shared/token-usage.js";
+import type {
+  TaskInboundAuthorizationEvent,
+  TaskInboundInputRequest,
+  TaskInboundTurnStarted,
+} from "#tasks/types.js";
 
 export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
 
@@ -29,6 +34,32 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
 type SessionCallbackPayload =
   | {
       readonly callId: string;
+      readonly childContinuationToken: string;
+      readonly childSessionId: string;
+      readonly event: TaskInboundInputRequest["event"];
+      readonly kind: "task.input-requested";
+      readonly subagentName: string;
+      readonly taskId: string;
+    }
+  | {
+      readonly callId: string;
+      readonly childContinuationToken: string;
+      readonly childSessionId: string;
+      readonly event: TaskInboundAuthorizationEvent["event"];
+      readonly kind: "task.authorization";
+      readonly subagentName: string;
+      readonly taskId: string;
+    }
+  | {
+      readonly callId: string;
+      readonly kind: "turn.started";
+      readonly sessionId: string;
+      readonly subagentName: string;
+      readonly taskId: string;
+      readonly turnId: string;
+    }
+  | {
+      readonly callId: string;
       readonly kind: "session.completed";
       readonly output: JsonValue;
       readonly sessionId?: string;
@@ -42,6 +73,7 @@ type SessionCallbackPayload =
       readonly kind: "session.failed";
       readonly sessionId?: string;
       readonly subagentName: string;
+      readonly usage?: TokenUsage;
     }
   | {
       readonly callId: string;
@@ -101,6 +133,28 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }
 
+  const taskEvent = projectTaskEvent(body);
+  if (taskEvent instanceof Response) return taskEvent;
+  if (taskEvent !== undefined) {
+    try {
+      await resumeHook(token, taskEvent);
+    } catch {
+      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+    }
+    return Response.json({ ok: true }, { status: 202 });
+  }
+
+  const started = projectTaskTurnStarted(body);
+  if (started instanceof Response) return started;
+  if (started !== undefined) {
+    try {
+      await resumeHook(token, started);
+    } catch {
+      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+    }
+    return Response.json({ ok: true }, { status: 202 });
+  }
+
   const result = projectSessionCallbackResult(body);
   if (result instanceof Response) {
     return result;
@@ -116,6 +170,68 @@ export async function handleSessionCallbackRequest(
   }
 
   return Response.json({ ok: true }, { status: 202 });
+}
+
+function projectTaskEvent(
+  value: unknown,
+): TaskInboundInputRequest | TaskInboundAuthorizationEvent | Response | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const payload = value as Partial<SessionCallbackPayload>;
+  if (payload.kind !== "task.input-requested" && payload.kind !== "task.authorization") {
+    return undefined;
+  }
+  if (
+    typeof payload.callId !== "string" ||
+    typeof payload.childContinuationToken !== "string" ||
+    typeof payload.childSessionId !== "string" ||
+    typeof payload.subagentName !== "string" ||
+    typeof payload.taskId !== "string" ||
+    payload.event === undefined
+  ) {
+    return Response.json({ error: "Invalid task event callback.", ok: false }, { status: 400 });
+  }
+  if (payload.kind === "task.input-requested") {
+    return {
+      callId: payload.callId,
+      childContinuationToken: payload.childContinuationToken,
+      childSessionId: payload.childSessionId,
+      event: payload.event as TaskInboundInputRequest["event"],
+      kind: "subagent-input-request",
+      subagentName: payload.subagentName,
+    };
+  }
+  return {
+    callId: payload.callId,
+    childSessionId: payload.childSessionId,
+    event: payload.event as TaskInboundAuthorizationEvent["event"],
+    kind: "subagent-authorization-event",
+    subagentName: payload.subagentName,
+  };
+}
+
+function projectTaskTurnStarted(value: unknown): TaskInboundTurnStarted | Response | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const payload = value as Partial<SessionCallbackPayload>;
+  if (payload.kind !== "turn.started") return undefined;
+  if (
+    typeof payload.sessionId !== "string" ||
+    payload.sessionId.length === 0 ||
+    typeof payload.taskId !== "string" ||
+    payload.taskId.length === 0 ||
+    typeof payload.turnId !== "string" ||
+    payload.turnId.length === 0
+  ) {
+    return Response.json(
+      { error: "Invalid task turn-start callback.", ok: false },
+      { status: 400 },
+    );
+  }
+  return {
+    childSessionId: payload.sessionId,
+    childTurnId: payload.turnId,
+    kind: "task-child-turn-started",
+    taskId: payload.taskId,
+  };
 }
 
 function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResult | Response {

@@ -22,6 +22,8 @@ import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
+import type { TaskInboundTurnStarted } from "#tasks/types.js";
+import { readTaskIdFromCommandToken } from "#tasks/task-id.js";
 
 const log = createLogger("execution.delegated-parent-notification");
 
@@ -60,7 +62,7 @@ export async function notifyDelegatedParentStep(input: {
   // are the turn's usage delta; the terminal envelope carries them so the
   // parent folds spend from the outcome alone.
   const result =
-    input.usage === undefined || input.result.isError === true
+    input.usage === undefined
       ? input.result
       : {
           ...input.result,
@@ -129,6 +131,42 @@ export async function notifyTurnCallerStep(input: {
   await resumeSettledTurnHook(input.caller.replyTo.token, result);
 }
 
+/** Binds a durable task to the exact child turn before execution starts. */
+export async function notifyTaskTurnStartedStep(input: {
+  readonly caller: TurnCaller | undefined;
+  readonly childSessionId: string;
+  readonly childTurnId: string;
+}): Promise<void> {
+  "use step";
+
+  const taskId = input.caller?.taskId;
+  if (input.caller === undefined || taskId === undefined) return;
+  const payload: TaskInboundTurnStarted = {
+    childSessionId: input.childSessionId,
+    childTurnId: input.childTurnId,
+    kind: "task-child-turn-started",
+    taskId,
+  };
+  if (input.caller.replyTo.kind === "hook") {
+    await resumeHook(input.caller.replyTo.token, payload);
+    return;
+  }
+  const response = await postSessionCallbackRequest({
+    body: {
+      callId: input.caller.callId,
+      kind: "turn.started",
+      sessionId: input.childSessionId,
+      subagentName: input.caller.subagentName,
+      taskId,
+      turnId: input.childTurnId,
+    },
+    url: input.caller.replyTo.url,
+  });
+  if (!response.ok) {
+    throw new Error(`Task turn-start callback failed with HTTP ${response.status}.`);
+  }
+}
+
 function createSettledTurnResult(input: {
   readonly caller: TurnCaller;
   readonly lifecycle: AgentTurnOutcome["kind"];
@@ -193,6 +231,7 @@ export async function resolveInitialTurnCallerStep(input: {
       callId: parsed.callback.callId,
       replyTo: { kind: "callback", url: parsed.callback.url },
       subagentName: parsed.callback.subagentName,
+      taskId: parsed.callback.taskId ?? readTaskIdFromCommandToken(parsed.callback.token),
     };
   }
 
@@ -206,6 +245,7 @@ export async function resolveInitialTurnCallerStep(input: {
     callId: adapter.state.callId,
     replyTo: { kind: "hook", token: adapter.state.parentContinuationToken },
     subagentName: adapter.state.subagentName,
+    taskId: readTaskIdFromCommandToken(adapter.state.parentContinuationToken),
   };
 }
 

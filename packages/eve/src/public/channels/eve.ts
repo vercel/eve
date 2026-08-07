@@ -524,7 +524,14 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           if (agent === undefined) {
             throw new Error("Missing route agent.");
           }
-          result = await agent.cancelTurn({ sessionId, turnId: body.turnId });
+          const cancelInput: {
+            readonly sessionId: string;
+            taskId?: string;
+            turnId?: string;
+          } = { sessionId };
+          if (body.taskId !== undefined) cancelInput.taskId = body.taskId;
+          if (body.turnId !== undefined) cancelInput.turnId = body.turnId;
+          result = await agent.cancelTurn(cancelInput);
         } catch (error) {
           const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
           return Response.json(
@@ -843,6 +850,7 @@ function parseContinueBody(payload: Record<string, unknown>): ParsedContinueBody
 }
 
 interface ParsedCancelTurnBody {
+  taskId?: string;
   turnId?: string;
 }
 
@@ -897,16 +905,23 @@ async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody |
   }
 
   const turnId = (payload as { turnId?: unknown }).turnId;
-  if (turnId === undefined) {
-    return {};
-  }
-  if (typeof turnId !== "string" || turnId.length === 0) {
+  const taskId = (payload as { taskId?: unknown }).taskId;
+  if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
     return Response.json(
       { error: "Expected 'turnId' to be a non-empty string.", ok: false },
       { status: 400 },
     );
   }
-  return { turnId };
+  if (taskId !== undefined && (typeof taskId !== "string" || taskId.length === 0)) {
+    return Response.json(
+      { error: "Expected 'taskId' to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
+  const result: ParsedCancelTurnBody = {};
+  if (typeof taskId === "string") result.taskId = taskId;
+  if (typeof turnId === "string") result.turnId = turnId;
+  return result;
 }
 
 function createSendPayload(

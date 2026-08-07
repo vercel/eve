@@ -138,13 +138,13 @@ originating call returns the same task and never dispatches twice.
 Carry the six flows over the task contract for local and remote children alike, then let
 `experimental.tasks` route the two subagent runtime-action kinds into delegated execution:
 
-| Flow                       | Carrier                                                           |
-| -------------------------- | ----------------------------------------------------------------- |
-| Terminal result or failure | `task.update` command to the task run, terminal snapshot          |
-| Input request / approval   | `task.update` with `input_required` plus the outstanding batch    |
-| Authorization event        | `task.authorization` through the task binding                     |
-| Input response             | Parent-session HITL proxy, routed directly to the blocked child   |
-| Cancellation               | `task_cancel`: commit `cancelled`, then propagate executor abort  |
+| Flow                       | Carrier                                                          |
+| -------------------------- | ---------------------------------------------------------------- |
+| Terminal result or failure | `task.update` command to the task run, terminal snapshot         |
+| Input request / approval   | `task.update` with `input_required` plus the outstanding batch   |
+| Authorization event        | `task.authorization` through the task binding                    |
+| Input response             | Parent-session HITL proxy, routed directly to the blocked child  |
+| Cancellation               | `task_cancel`: commit `cancelled`, then propagate executor abort |
 
 Concretely:
 

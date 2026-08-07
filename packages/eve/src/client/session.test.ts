@@ -967,4 +967,43 @@ describe("ClientSession", () => {
       streamIndex: 2,
     });
   });
+
+  it("hands the cursor from an aborted idle follow to the next send", async () => {
+    const streamStartIndices: Array<string | null> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      if ((init?.method ?? "GET") === "POST") return createAcceptedResponse();
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      streamStartIndices.push(new URL(url).searchParams.get("startIndex"));
+      return createStreamResponse([
+        { type: "turn.started", data: {} },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:test", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession({
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 0,
+    });
+    const idleAbort = new AbortController();
+
+    vi.useFakeTimers();
+    try {
+      for await (const event of session.stream({ signal: idleAbort.signal })) {
+        if (event.type === "session.waiting") idleAbort.abort();
+      }
+
+      expect(session.state.streamIndex).toBe(2);
+      expect(await collectEventTypes(await session.send("follow up"))).toEqual([
+        "turn.started",
+        "session.waiting",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(streamStartIndices).toEqual([null, "2"]);
+  });
 });

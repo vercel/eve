@@ -97,7 +97,7 @@ export type AgentAddress =
 /**
  * Durable ownership record for one delegated child.
  *
- * The store owns the full nonterminal lifecycle:
+ * Outside tasks mode, the store owns the full nonterminal lifecycle:
  *
  * - `starting` — the parent committed intent to start; the child may or
  *   may not exist yet.
@@ -105,7 +105,9 @@ export type AgentAddress =
  * - `parked` — the child is idle and resumable; only this phase is
  *   model-visible.
  *
- * A terminal child has no handle: settlement deletes it.
+ * A terminal child has no legacy handle: settlement deletes it. Tasks mode
+ * instead keeps an `addressed` record whose availability is derived from the
+ * tasks bound to its persistent child session.
  */
 export type AgentHandle =
   | {
@@ -125,6 +127,12 @@ export type AgentHandle =
       readonly identity: AgentIdentity;
       readonly address: AgentAddress;
       readonly lastStatus: string;
+    }
+  | {
+      /** Persistent task-mode identity and routing, with no execution claim. */
+      readonly phase: "addressed";
+      readonly identity: AgentIdentity;
+      readonly address: AgentAddress;
     };
 
 /** Lifecycle phase of a delegated agent handle. */
@@ -206,6 +214,11 @@ const agentHandleSchema: z.ZodType<AgentHandle> = z.discriminatedUnion("phase", 
     identity: identitySchema,
     lastStatus: z.string().max(MAX_STATUS_LENGTH),
     phase: z.literal("parked"),
+  }),
+  z.strictObject({
+    address: addressSchema,
+    identity: identitySchema,
+    phase: z.literal("addressed"),
   }),
 ]);
 

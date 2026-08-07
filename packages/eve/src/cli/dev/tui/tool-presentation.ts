@@ -123,6 +123,37 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     singularNoun: "file",
     pluralNoun: "files",
   },
+  task_cancel: {
+    verb: "Cancel",
+    pastVerb: "Cancelled",
+    argKey: "taskIds",
+    extractItem: taskIdsArg,
+    singularNoun: "task",
+    pluralNoun: "tasks",
+  },
+  task_peek: {
+    verb: "Check",
+    pastVerb: "Checked",
+    argKey: "taskIds",
+    extractItem: taskIdsArg,
+    singularNoun: "task",
+    pluralNoun: "tasks",
+  },
+  task_send: {
+    verb: "Send",
+    pastVerb: "Sent",
+    argKey: "taskId",
+    singularNoun: "task",
+    pluralNoun: "tasks",
+  },
+  task_sleep: {
+    verb: "Pause",
+    pastVerb: "Paused",
+    argKey: "seconds",
+    extractItem: sleepSecondsArg,
+    singularNoun: "pause",
+    pluralNoun: "pauses",
+  },
   web_fetch: {
     verb: "Fetch",
     pastVerb: "Fetched",
@@ -359,6 +390,24 @@ function webSearchActionArg(input: unknown): string | undefined {
  * renders verbatim in aggregated rows, so a model-controlled value must lose
  * its terminal controls here, not at the render call sites.
  */
+/** Joins a `taskIds: string[]` argument into one salient line. */
+function taskIdsArg(input: unknown): string | undefined {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const value = (input as Record<string, unknown>).taskIds;
+  if (!Array.isArray(value)) return undefined;
+  const ids = value.filter((id): id is string => typeof id === "string");
+  if (ids.length === 0) return undefined;
+  return salientLine(ids.join(", "));
+}
+
+/** Formats a `seconds: number` argument as a duration. */
+function sleepSecondsArg(input: unknown): string | undefined {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const value = (input as Record<string, unknown>).seconds;
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return `${String(value)}s`;
+}
+
 function salientArg(input: unknown, key: string): string | undefined {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
   const value = (input as Record<string, unknown>)[key];

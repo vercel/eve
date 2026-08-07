@@ -14,6 +14,9 @@ const PARALLEL_ACTION_INSTRUCTION =
 const AGENT_MESSAGING_INSTRUCTION =
   "Agent messaging\nAgents you have already delegated to stay available after they answer. The system-message `<agents>` list is only a record of those existing agents — their `agentId`, name, and latest status. It does not limit which subagent tools you can call: your tool list is the source of truth, and any subagent tool can always be called without `agentId` to start a new agent, including when the `<agents>` list is empty or absent. Pass `agentId` to the same subagent tool only to continue one of those existing agents' sessions.";
 
+const TASK_AGENT_MESSAGING_INSTRUCTION =
+  "Agent messaging\nAgents you have already delegated to remain visible in the system-message `<agents>` list. `availability=busy` means the listed task still owns that agent session: use task_peek, task_send, or task_cancel with its taskId instead of starting a continuation. `availability=available` means no nonterminal task owns the session, so you may pass agentId to the same subagent tool to continue it. Calling a subagent without agentId always starts a new agent session.";
+
 /**
  * Input for composing the base authored instructions prompt for one
  * resolved agent.
@@ -27,6 +30,7 @@ interface ComposeRuntimeBasePromptInput {
    * continuation and the `<agents>` listing.
    */
   persistentSubagentSessions?: boolean;
+  tasksEnabled?: boolean;
   skills?: readonly ResolvedSkillDefinition[];
   subagentsAvailable?: boolean;
   toolsAvailable?: boolean;
@@ -43,7 +47,7 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
     ...createWorkspacePromptBlocks(input.workspaceSpec),
     ...(input.toolsAvailable ? [PARALLEL_ACTION_INSTRUCTION] : []),
     ...(input.subagentsAvailable && input.persistentSubagentSessions
-      ? [AGENT_MESSAGING_INSTRUCTION]
+      ? [input.tasksEnabled ? TASK_AGENT_MESSAGING_INSTRUCTION : AGENT_MESSAGING_INSTRUCTION]
       : []),
     ...createConnectionsPromptBlocks(input.connections),
     ...createSkillsPromptBlocks(input.skills),

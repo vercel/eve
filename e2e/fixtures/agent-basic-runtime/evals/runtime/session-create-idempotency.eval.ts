@@ -50,13 +50,7 @@ export default defineEval({
 
     const probe = `CREATE-ONCE-PROBE-${crypto.randomUUID()}`;
     const liveProbe = t.target.watchTurn(first.sessionId, { startIndex: firstTurn.events.length });
-    await continueSession(
-      t.target,
-      PRINCIPAL_A,
-      first.sessionId,
-      first.continuationToken,
-      probe,
-    );
+    await continueSession(t.target, PRINCIPAL_A, first.sessionId, first.continuationToken, probe);
     const probeTurn = await liveProbe.result();
     probeTurn.expectOk();
     probeTurn.event("message.received", { count: 1, data: { message: probe } });

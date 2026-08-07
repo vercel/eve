@@ -76,6 +76,37 @@ describe("startRemoteAgentSession", () => {
     vi.unstubAllEnvs();
   });
 
+  it("carries a replay-stable operation id so the receiver can create once", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { continuationToken: "remote-token", ok: true, sessionId: "remote-session" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      operationId: "operation-1",
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+      operationId: "operation-1",
+    });
+  });
+
   it("posts the formatted subagent message and callback metadata", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -676,6 +707,26 @@ describe("cancelRemoteAgentTurn", () => {
       authorization: "Bearer second",
       "x-static": "yes",
     });
+  });
+
+  it("sends the observed child turn guard", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ ok: true, sessionId: "child-1", status: "accepted" }, { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await cancelRemoteAgentTurn({
+      remote: createRemoteAgent(),
+      sessionId: "child-1",
+      turnId: "turn_child_7",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://remote.example.com/eve/v1/session/child-1/cancel",
+      expect.objectContaining({ body: JSON.stringify({ turnId: "turn_child_7" }), method: "POST" }),
+    );
   });
 
   it("preserves a prefixed remote base path on cancel-turn requests", async () => {

@@ -370,7 +370,12 @@ async function waitForRuntimeActionResults(input: {
         auth: value.delivery.auth,
         parentWritable: input.cursor.parentWritable,
         payloads: value.delivery.payloads,
+        serializedContext: input.cursor.serializedContext,
         sessionState: input.cursor.sessionState,
+      });
+      await input.cursor.adopt({
+        serializedContext: routed.serializedContext ?? input.cursor.serializedContext,
+        sessionState: routed.sessionState ?? input.cursor.sessionState,
       });
       if (routed.kind === "cancel-turn") {
         return routed.kind;

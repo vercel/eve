@@ -14,12 +14,14 @@ import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import { deriveAgentId, getAgentHandleStore } from "#harness/handles/store.js";
 import {
   confirmAgentStarted,
+  confirmTaskAgentAddress,
   prepareAgentContinuation,
   prepareAgentStart,
 } from "#harness/handles/transitions.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 const CHILD_SESSION_ID = "local-child-123456789012";
 const CHILD_CONTINUATION_TOKEN = "subagent:private-token";
@@ -76,6 +78,29 @@ function createParkedSession(): HarnessSession {
   });
 }
 
+describe("runtime action batch identity", () => {
+  it("rejects duplicate call ids before persisting the batch", () => {
+    const action = {
+      callId: "duplicate-call",
+      description: "research subagent",
+      input: { message: "go" },
+      kind: "subagent-call" as const,
+      name: "researcher",
+      nodeId: "subagents/researcher",
+      subagentName: "researcher",
+    };
+
+    expect(() =>
+      setPendingRuntimeActionBatch({
+        actions: [action, { ...action, name: "other", subagentName: "other" }],
+        event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+        responseMessages: [],
+        session: createParkedSession(),
+      }),
+    ).toThrow('duplicate callId "duplicate-call"');
+  });
+});
+
 /** Parked session whose call-1 child is owned by a running agent handle. */
 function createSessionWithRunningChild(): HarnessSession {
   const prepared = prepareAgentStart(createParkedSession(), {
@@ -102,7 +127,72 @@ function createSessionWithRunningChild(): HarnessSession {
   });
 }
 
+function createSessionWithTaskAddress(): HarnessSession {
+  const prepared = prepareAgentStart(createParkedSession(), {
+    identity: {
+      id: deriveAgentId("researcher", OPERATION_ID),
+      name: "researcher",
+      nodeId: "subagents/researcher",
+    },
+    operation: {
+      callId: "call-1",
+      id: OPERATION_ID,
+      kind: "start",
+      parentTurnId: "turn_0",
+    },
+    target: { continuationToken: CHILD_CONTINUATION_TOKEN, kind: "agent/local" },
+  });
+  return confirmTaskAgentAddress(prepared, {
+    address: {
+      continuationToken: CHILD_CONTINUATION_TOKEN,
+      kind: "agent/local",
+      sessionId: CHILD_SESSION_ID,
+    },
+    operationId: OPERATION_ID,
+  });
+}
+
 describe("resolvePendingRuntimeActions", () => {
+  it("marks a working task receipt as backgrounded on subagent.completed", async () => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    const taskId = "task_0123456789abcdef";
+
+    const resolved = await resolvePendingRuntimeActions({
+      emit: async (event) => {
+        events.push(event);
+      },
+      session: createSessionWithTaskAddress(),
+      stepInput: {
+        runtimeActionResults: [
+          {
+            backgroundTask: { status: "working", taskId },
+            callId: "call-1",
+            kind: "subagent-result",
+            origin: "child",
+            outcome: {
+              kind: "parked",
+              result: { kind: "succeeded", output: "delegated" },
+              usageDelta: ZERO_USAGE,
+            },
+            output: {
+              agentId: deriveAgentId("researcher", OPERATION_ID),
+              status: "working",
+              taskId,
+            },
+            subagentName: "researcher",
+          },
+        ],
+      },
+    });
+
+    expect(events.find((event) => event.type === "subagent.completed")).toMatchObject({
+      data: { backgroundTask: { status: "working", taskId } },
+    });
+    expect(getAgentHandleStore(resolved.session.state)?.handles).toEqual([
+      expect.objectContaining({ phase: "addressed" }),
+    ]);
+  });
+
   it("settles the running handle terminally and deletes it with the batch", async () => {
     const session = createSessionWithRunningChild();
 

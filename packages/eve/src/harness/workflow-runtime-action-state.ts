@@ -36,15 +36,21 @@ export function buildRuntimeActionFromWorkflowInterrupt(
     };
   }
 
-  return {
-    callId,
-    description: "",
-    input: toolInput,
-    kind: "subagent-call",
-    name: toolName,
-    nodeId: runtimeAction.nodeId,
-    subagentName: runtimeAction.subagentName,
-  };
+  if (runtimeAction.kind === "subagent-call") {
+    return {
+      callId,
+      description: "",
+      input: toolInput,
+      kind: "subagent-call",
+      name: toolName,
+      nodeId: runtimeAction.nodeId,
+      subagentName: runtimeAction.subagentName,
+    };
+  }
+
+  // Dynamic workflows only interrupt on delegation tools; task controls
+  // never enter a workflow sandbox.
+  throw new Error(`Workflow runtime actions cannot carry "${runtimeAction.kind}" tools.`);
 }
 
 /** Returns every pending runtime-action interrupt in deterministic ledger order. */

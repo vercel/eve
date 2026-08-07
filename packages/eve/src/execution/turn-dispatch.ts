@@ -5,6 +5,7 @@ import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import { dispatchTurnStep } from "#execution/workflow-steps.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 
 /** One settled turn: its terminal driver action plus deferred hook cleanup. */
 export interface DispatchedTurn {
@@ -25,18 +26,23 @@ export async function dispatchAndAwaitTurn(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly capabilities?: SessionCapabilities;
+  readonly cancelledTaskIds?: Set<string>;
   readonly controlToken: string;
   readonly delivery: HookPayload;
   readonly commandInbox: SessionCommandInbox;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
+  readonly seenTaskDeliveries?: Set<string>;
   readonly sessionState: DurableSessionState;
 }): Promise<DispatchedTurn> {
   const control = new TurnControlReceiver({
     bufferedDeliveries: input.bufferedDeliveries,
     bufferedSessionControls: input.bufferedSessionControls,
+    cancelledTaskIds: input.cancelledTaskIds,
     commandInbox: input.commandInbox,
+    expectedTurnId: activeTurnId(input.sessionState.emissionState),
+    seenTaskDeliveries: input.seenTaskDeliveries ?? new Set(),
     token: input.controlToken,
   });
 
