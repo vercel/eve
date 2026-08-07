@@ -108,6 +108,8 @@ export interface InternalAgentCompactionDefinition {
    * When omitted, eve uses the active turn model for the summary call.
    */
   model?: InternalAgentModelDefinition;
+  /** Instructions used to generate the compaction summary. */
+  prompt?: string;
   /**
    * Fraction of the primary model context window that triggers compaction.
    *
@@ -137,6 +139,13 @@ export interface PublicAgentCompactionDefinition {
    * When omitted, eve uses the active turn model for the summary call.
    */
   readonly model?: PublicAgentStaticModelDefinition;
+  /**
+   * Instructions used to generate the compaction summary.
+   *
+   * When omitted, eve uses its default handoff-summary prompt. The conversation
+   * transcript and previous checkpoint are supplied separately by the harness.
+   */
+  readonly prompt?: string;
   /**
    * Fraction of the primary model context window that triggers compaction.
    *

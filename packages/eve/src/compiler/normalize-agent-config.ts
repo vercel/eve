@@ -66,17 +66,18 @@ export async function compileAgentConfig(
     sourcePath: configModulePath,
     value: authoredModel,
   });
-  const compaction: {
-    model?: CompiledRuntimeModelReference;
-    thresholdPercent?: number;
-  } = {};
+  const {
+    model: authoredCompactionModel,
+    modelContextWindowTokens: compactionModelContextWindowTokens,
+    ...authoredCompaction
+  } = definition.compaction ?? {};
+  const compaction: Mutable<NonNullable<CompiledAgentDefinition["compaction"]>> = {
+    ...authoredCompaction,
+  };
 
   const compiledConfig: {
     build?: CompiledAgentDefinition["build"];
-    compaction: {
-      model?: CompiledRuntimeModelReference;
-      thresholdPercent?: number;
-    };
+    compaction: NonNullable<CompiledAgentDefinition["compaction"]>;
     description?: string;
     dynamicModel?: CompiledAgentDefinition["dynamicModel"];
     experimental?: CompiledAgentDefinition["experimental"];
@@ -148,20 +149,16 @@ export async function compileAgentConfig(
     };
   }
 
-  if (definition.compaction?.model !== undefined) {
+  if (authoredCompactionModel !== undefined) {
     compaction.model = await normalizeAuthoredModelReference({
       modelCatalog: context.modelCatalog,
       purpose: "the compaction summary model",
-      contextWindowTokens: definition.compaction.modelContextWindowTokens,
+      contextWindowTokens: compactionModelContextWindowTokens,
       providerOptions: definition.modelOptions?.providerOptions,
       source: configModule,
       sourcePath: configModulePath,
-      value: definition.compaction.model,
+      value: authoredCompactionModel,
     });
-  }
-
-  if (definition.compaction?.thresholdPercent !== undefined) {
-    compaction.thresholdPercent = definition.compaction.thresholdPercent;
   }
 
   return compiledConfig;

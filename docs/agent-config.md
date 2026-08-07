@@ -117,6 +117,20 @@ export default defineAgent({
 });
 ```
 
+Set `prompt` when a checkpoint must preserve domain-specific context. It replaces eve's default summary instructions. eve still supplies the previous checkpoint and conversation transcript:
+
+```ts title="agent/agent.ts" {3,8}
+import { defineAgent } from "eve";
+
+const compactionPrompt = `Create a handoff summary for the next model.
+Preserve unresolved customer questions and exact quoted requirements.`;
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  compaction: { prompt: compactionPrompt },
+});
+```
+
 See [Default harness](./concepts/default-harness#compaction) for how the loop applies it.
 
 ## Runtime limits

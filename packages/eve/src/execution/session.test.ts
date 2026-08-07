@@ -15,9 +15,7 @@ function createTestTurnAgent(overrides?: Partial<RuntimeTurnAgent>): RuntimeTurn
   return {
     id: "test-agent",
     instructions: ["You are a helpful assistant.", "Be concise."],
-    compactionModel: {
-      id: "summary-model",
-    },
+    compaction: { model: { id: "summary-model" } },
     model: { id: "test-model" },
     tools: [
       {
@@ -46,6 +44,18 @@ describe("createCompactionConfig", () => {
     ).toEqual({
       recentWindowSize: 10,
       threshold: 180_000,
+    });
+  });
+
+  it("preserves an authored compaction prompt", () => {
+    expect(
+      createCompactionConfig({
+        prompt: "Preserve every unresolved customer question.",
+      }),
+    ).toEqual({
+      prompt: "Preserve every unresolved customer question.",
+      recentWindowSize: 10,
+      threshold: 100_000,
     });
   });
 
@@ -161,19 +171,61 @@ describe("createSession", () => {
     });
   });
 
-  it("honors compactionOverrides.thresholdPercent", () => {
+  it("honors the turn agent compaction threshold", () => {
     const session = createSession({
-      compactionOverrides: { thresholdPercent: 0.5 },
       continuationToken: "root-token",
       sessionId: "sess-root",
       turnAgent: createTestTurnAgent({
-        model: { id: "test-model", contextWindowTokens: 200_000 },
+        compaction: { thresholdPercent: 0.5 },
+        model: { contextWindowTokens: 200_000, id: "test-model" },
       }),
     });
 
     expect(session.compaction).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+    });
+  });
+
+  it("rebuilds the compaction prompt while preserving durable accounting", () => {
+    const created = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent({ compaction: { prompt: "Initial prompt" } }),
+    });
+    const session = {
+      ...created,
+      compaction: {
+        ...created.compaction,
+        lastKnownInputTokens: 500,
+        lastKnownPromptMessageCount: 2,
+      },
+    };
+
+    const durable = projectToDurableSession(session);
+    const hydrated = hydrateDurableSession({
+      durable,
+      turnAgent: createTestTurnAgent({ compaction: { prompt: "Hydrated prompt" } }),
+    });
+    const refreshed = refreshSessionFromTurnAgent({
+      session: hydrated,
+      turnAgent: createTestTurnAgent({ compaction: { prompt: "Updated prompt" } }),
+    });
+
+    expect(created.compaction.prompt).toBe("Initial prompt");
+    expect(durable.compaction).toEqual({
+      lastKnownInputTokens: 500,
+      lastKnownPromptMessageCount: 2,
+    });
+    expect(hydrated.compaction).toMatchObject({
+      lastKnownInputTokens: 500,
+      lastKnownPromptMessageCount: 2,
+      prompt: "Hydrated prompt",
+    });
+    expect(refreshed.compaction).toMatchObject({
+      lastKnownInputTokens: 500,
+      lastKnownPromptMessageCount: 2,
+      prompt: "Updated prompt",
     });
   });
 
@@ -187,9 +239,7 @@ describe("createSession", () => {
     const refreshed = refreshSessionFromTurnAgent({
       session,
       turnAgent: createTestTurnAgent({
-        compactionModel: {
-          id: "updated-summary-model",
-        },
+        compaction: { model: { id: "updated-summary-model" } },
       }),
     });
 
@@ -445,9 +495,6 @@ describe("refreshSessionFromTurnAgent", () => {
       }),
     });
     const refreshed = refreshSessionFromTurnAgent({
-      compactionOverrides: {
-        thresholdPercent: 0.5,
-      },
       session: {
         ...session,
         compaction: {
@@ -457,6 +504,7 @@ describe("refreshSessionFromTurnAgent", () => {
         },
       },
       turnAgent: createTestTurnAgent({
+        compaction: { thresholdPercent: 0.5 },
         model: { contextWindowTokens: 200_000, id: "updated-model" },
       }),
     });

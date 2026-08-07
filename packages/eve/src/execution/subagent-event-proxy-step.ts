@@ -69,9 +69,6 @@ export async function emitProxiedSubagentEvent(input: {
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
     durable: input.durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });

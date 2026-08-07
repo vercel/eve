@@ -628,10 +628,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
           session = {
             ...compacted.session,
-            compaction: {
-              recentWindowSize: compacted.session.compaction.recentWindowSize,
-              threshold: compacted.session.compaction.threshold,
-            },
+            compaction: resetCompactionAccounting(compacted.session.compaction),
             history: compacted.messages,
           };
         } catch (error) {
@@ -2563,27 +2560,31 @@ function parkOnWorkflowInterrupt(input: {
   return { next: null, session: setHarnessEmissionState(parkedSession, input.emissionState) };
 }
 
+function resetCompactionAccounting(current: CompactionConfig): CompactionConfig {
+  const {
+    lastKnownInputTokens: _lastKnownInputTokens,
+    lastKnownPromptMessageCount: _lastKnownPromptMessageCount,
+    ...config
+  } = current;
+  return config;
+}
+
 function createNextCompactionConfig(
   current: CompactionConfig,
   promptMessages: readonly ModelMessage[],
   result: HarnessStepResult,
 ): CompactionConfig {
-  const next: {
-    lastKnownInputTokens?: number;
-    lastKnownPromptMessageCount?: number;
-    recentWindowSize: number;
-    threshold: number;
-  } = {
-    recentWindowSize: current.recentWindowSize,
-    threshold: current.threshold,
-  };
+  const next = resetCompactionAccounting(current);
 
-  if (result.usage?.inputTokens !== undefined) {
-    next.lastKnownInputTokens = result.usage.inputTokens;
-    next.lastKnownPromptMessageCount = promptMessages.length;
+  if (result.usage?.inputTokens === undefined) {
+    return next;
   }
 
-  return next;
+  return {
+    ...next,
+    lastKnownInputTokens: result.usage.inputTokens,
+    lastKnownPromptMessageCount: promptMessages.length,
+  };
 }
 
 /**

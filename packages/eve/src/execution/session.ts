@@ -26,6 +26,7 @@ export function createCompactionConfig(
     readonly contextWindowTokens?: number;
     readonly lastKnownInputTokens?: number;
     readonly lastKnownPromptMessageCount?: number;
+    readonly prompt?: string;
     readonly thresholdPercent?: number;
   } = {},
 ) {
@@ -35,10 +36,18 @@ export function createCompactionConfig(
       ? FALLBACK_COMPACTION_THRESHOLD
       : Math.max(1, Math.floor(input.contextWindowTokens * thresholdPercent));
 
-  const config = {
+  const config: {
+    prompt?: string;
+    recentWindowSize: number;
+    threshold: number;
+  } = {
     recentWindowSize: DEFAULT_COMPACTION_RECENT_WINDOW_SIZE,
     threshold,
   };
+
+  if (input.prompt !== undefined) {
+    config.prompt = input.prompt;
+  }
 
   if (input.lastKnownInputTokens !== undefined) {
     return {
@@ -53,9 +62,6 @@ export function createCompactionConfig(
 
 export interface CreateSessionInput {
   readonly continuationToken: string;
-  readonly compactionOverrides?: {
-    readonly thresholdPercent?: number;
-  };
   /**
    * Optional root session id passed in by the runtime when this
    * session is a delegated subagent child. `undefined` for top-level
@@ -79,7 +85,7 @@ export function createSession(input: CreateSessionInput): HarnessSession {
     -readonly [K in keyof HarnessSession]: HarnessSession[K];
   } = {
     agent: {
-      compactionModelReference: turnAgent.compactionModel,
+      compactionModelReference: turnAgent.compaction?.model,
       dynamicModelDefaultReference:
         turnAgent.dynamicModel === undefined ? undefined : turnAgent.model,
       modelReference: turnAgent.model,
@@ -89,7 +95,8 @@ export function createSession(input: CreateSessionInput): HarnessSession {
     },
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model.contextWindowTokens,
-      thresholdPercent: input.compactionOverrides?.thresholdPercent,
+      prompt: turnAgent.compaction?.prompt,
+      thresholdPercent: turnAgent.compaction?.thresholdPercent,
     }),
     continuationToken: input.continuationToken,
     history: [],
@@ -121,14 +128,11 @@ export function createSession(input: CreateSessionInput): HarnessSession {
 export function refreshSessionFromTurnAgent(input: {
   readonly session: HarnessSession;
   readonly turnAgent: RuntimeTurnAgent;
-  readonly compactionOverrides?: {
-    readonly thresholdPercent?: number;
-  };
 }): HarnessSession {
   return {
     ...input.session,
     agent: {
-      compactionModelReference: input.turnAgent.compactionModel,
+      compactionModelReference: input.turnAgent.compaction?.model,
       dynamicModelDefaultReference:
         input.turnAgent.dynamicModel === undefined ? undefined : input.turnAgent.model,
       modelReference: input.turnAgent.model,
@@ -140,7 +144,8 @@ export function refreshSessionFromTurnAgent(input: {
       contextWindowTokens: input.turnAgent.model.contextWindowTokens,
       lastKnownInputTokens: input.session.compaction.lastKnownInputTokens,
       lastKnownPromptMessageCount: input.session.compaction.lastKnownPromptMessageCount,
-      thresholdPercent: input.compactionOverrides?.thresholdPercent,
+      prompt: input.turnAgent.compaction?.prompt,
+      thresholdPercent: input.turnAgent.compaction?.thresholdPercent,
     }),
   };
 }
@@ -235,9 +240,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
 export function hydrateDurableSession(input: {
   readonly durable: DurableSession;
   readonly turnAgent: RuntimeTurnAgent;
-  readonly compactionOverrides?: {
-    readonly thresholdPercent?: number;
-  };
 }): HarnessSession {
   const { durable, turnAgent } = input;
   const tools = createSessionToolDefinitions(turnAgent);
@@ -246,7 +248,7 @@ export function hydrateDurableSession(input: {
     -readonly [K in keyof HarnessSession]: HarnessSession[K];
   } = {
     agent: {
-      compactionModelReference: turnAgent.compactionModel,
+      compactionModelReference: turnAgent.compaction?.model,
       dynamicModelDefaultReference:
         turnAgent.dynamicModel === undefined ? undefined : turnAgent.model,
       modelReference: turnAgent.model,
@@ -258,7 +260,8 @@ export function hydrateDurableSession(input: {
       contextWindowTokens: turnAgent.model.contextWindowTokens,
       lastKnownInputTokens: durable.compaction?.lastKnownInputTokens,
       lastKnownPromptMessageCount: durable.compaction?.lastKnownPromptMessageCount,
-      thresholdPercent: input.compactionOverrides?.thresholdPercent,
+      prompt: turnAgent.compaction?.prompt,
+      thresholdPercent: turnAgent.compaction?.thresholdPercent,
     }),
     continuationToken: durable.continuationToken,
     history: durable.history,

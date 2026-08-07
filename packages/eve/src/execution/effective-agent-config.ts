@@ -7,7 +7,6 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 
 export interface EffectiveAgentRuntime {
   readonly limits?: AgentLimitsDefinition;
-  readonly thresholdPercent?: number;
   readonly turnAgent: RuntimeTurnAgent;
 }
 
@@ -25,17 +24,15 @@ export function resolveEffectiveAgentRuntimeFromConfig(
   if (config === undefined) {
     return {
       limits: bundle.resolvedAgent.config.limits,
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
       turnAgent: bundle.turnAgent,
     };
   }
 
   return {
     limits: config.limits,
-    thresholdPercent: config.compaction?.thresholdPercent,
     turnAgent: {
       ...bundle.turnAgent,
-      compactionModel: config.compaction?.model,
+      compaction: config.compaction,
       dynamicModel: undefined,
       model: config.model,
       outputSchema: config.outputSchema,

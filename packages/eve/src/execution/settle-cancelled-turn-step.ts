@@ -64,9 +64,6 @@ export async function settleCancelledTurnStep(input: {
   const instrumentation = getInstrumentationRuntime();
 
   let session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });

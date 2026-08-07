@@ -20,13 +20,14 @@ const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
  */
 type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
 
-// Static envelope estimate stays valid because createCompactionPrompt bounds
-// its transcript to the caller's threshold budget, so the summarization call
-// itself never grows past threshold + envelope + checkpoint.
-const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
-  { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
-  { content: COMPACTION_PROMPT_ENVELOPE.prompt, role: "user" },
-] satisfies ModelMessage[]);
+// Include the active prompt envelope in the trigger count. The transcript is
+// bounded separately by createCompactionPrompt.
+function getCompactionPromptOverheadTokens(config: CompactionConfig): number {
+  return estimateTokens([
+    { content: config.prompt ?? COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
+    { content: COMPACTION_PROMPT_ENVELOPE.prompt, role: "user" },
+  ] satisfies ModelMessage[]);
+}
 
 /**
  * Best available input-token count: the model-reported count from the last
@@ -63,7 +64,8 @@ export function shouldCompact(
 ): boolean {
   return (
     messages.length > 0 &&
-    getInputTokenCount(messages, config) + COMPACTION_PROMPT_OVERHEAD_TOKENS > config.threshold
+    getInputTokenCount(messages, config) + getCompactionPromptOverheadTokens(config) >
+      config.threshold
   );
 }
 
@@ -162,7 +164,7 @@ function evaluateThreshold(
   config: CompactionConfig,
   ruler: "estimate" | "should-compact",
 ): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
-  const overhead = ruler === "should-compact" ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0;
+  const overhead = ruler === "should-compact" ? getCompactionPromptOverheadTokens(config) : 0;
   const estimatedTokens = estimateTokens(messages) + overhead;
   return {
     estimatedTokens,
@@ -210,7 +212,8 @@ export async function compactMessages(
     const summaryPrompt = createCompactionPrompt({
       messages: older,
       previousCheckpoint,
-      transcriptBudgetTokens: config.threshold,
+      systemPrompt: config.prompt,
+      inputBudgetTokens: config.threshold,
     });
 
     const result = await generateText({

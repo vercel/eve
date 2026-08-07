@@ -194,6 +194,31 @@ describe("shouldCompact", () => {
     ).toBe(true);
   });
 
+  it("accounts for a custom prompt in the compaction threshold", () => {
+    const messages: ModelMessage[] = [{ content: "Continue the investigation.", role: "user" }];
+    const customPrompt = "Preserve every customer requirement. ".repeat(200);
+    const activeInputTokens = getInputTokenCount(messages, config);
+    const customEnvelopeTokens = estimateTokens([
+      { content: customPrompt, role: "system" },
+      { content: COMPACTION_PROMPT_ENVELOPE.prompt, role: "user" },
+    ] satisfies ModelMessage[]);
+
+    expect(
+      shouldCompact(messages, {
+        ...config,
+        prompt: customPrompt,
+        threshold: activeInputTokens + customEnvelopeTokens,
+      }),
+    ).toBe(false);
+    expect(
+      shouldCompact(messages, {
+        ...config,
+        prompt: customPrompt,
+        threshold: activeInputTokens + customEnvelopeTokens - 1,
+      }),
+    ).toBe(true);
+  });
+
   it("does not compact an empty history based on prompt overhead alone", () => {
     expect(shouldCompact([], { ...config, threshold: 0 })).toBe(false);
   });
@@ -554,11 +579,12 @@ describe("compactMessages: forced summary", () => {
       text: "forced checkpoint",
     } as Awaited<ReturnType<typeof generateText>>);
     const messages = [user("old message"), assistant("old reply")];
+    const prompt = "Preserve every unresolved customer question.";
 
     const result = await compactMessages(
       messages,
       {} as Parameters<typeof compactMessages>[1],
-      { recentWindowSize: 10, threshold: ROOMY },
+      { prompt, recentWindowSize: 10, threshold: ROOMY },
       undefined,
       undefined,
       undefined,
@@ -567,6 +593,7 @@ describe("compactMessages: forced summary", () => {
     );
 
     expect(generateText).toHaveBeenCalledOnce();
+    expect(generateText).toHaveBeenCalledWith(expect.objectContaining({ system: prompt }));
     expect(result).toContainEqual({ content: "forced checkpoint", role: "assistant" });
   });
 });

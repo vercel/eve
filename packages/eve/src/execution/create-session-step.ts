@@ -56,9 +56,6 @@ export async function createSessionStep(input: {
   // delegating parent: a child may narrow what its parent granted, never widen
   // it. Root runs have no inherited limits, so their configured values apply.
   const session = createSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
     continuationToken: input.continuationToken,
     limits: {
       // Inherited token limits are the parent's remaining quota share at

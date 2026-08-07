@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { COMPACTION_PROMPT_ENVELOPE, createCompactionPrompt } from "#harness/compaction-prompt.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 
 describe("createCompactionPrompt", () => {
   it("preserves the previous checkpoint without applying transcript truncation", () => {
@@ -16,6 +17,20 @@ describe("createCompactionPrompt", () => {
     expect(result.system).toBe(COMPACTION_PROMPT_ENVELOPE.system);
     expect(result.prompt).toContain(`<previous-checkpoint>\n${previousCheckpoint}`);
     expect(result.prompt).toContain(markerAfterTextLimit);
+  });
+
+  it("uses a custom system prompt without changing the transcript envelope", () => {
+    const result = createCompactionPrompt({
+      messages: [{ content: "New evidence", role: "user" }],
+      previousCheckpoint: undefined,
+      systemPrompt: "Preserve every unresolved customer question.",
+    });
+
+    expect(result.system).toBe("Preserve every unresolved customer question.");
+    expect(result.prompt).toContain("<previous-checkpoint>");
+    expect(result.prompt).toContain("Conversation transcript:");
+    expect(result.prompt).not.toContain("Make completed work explicit");
+    expect(result.prompt).not.toContain("Preserve exact file paths");
   });
 
   it("passes tool payloads to the summarizer raw so it can judge what matters", () => {
@@ -164,6 +179,28 @@ describe("createCompactionPrompt", () => {
     expect(result.prompt.split(taskTail)).toHaveLength(3);
   });
 
+  it("includes the custom system prompt in the input budget", () => {
+    const systemPrompt = "Preserve domain state. ".repeat(200);
+    const result = createCompactionPrompt({
+      messages: [
+        { content: `${"old evidence ".repeat(800)}OLD_TAIL`, role: "user" },
+        { content: `${"new evidence ".repeat(800)}NEW_TAIL`, role: "user" },
+      ],
+      previousCheckpoint: undefined,
+      systemPrompt,
+      inputBudgetTokens: 2_500,
+    });
+
+    expect(
+      estimateTokens([
+        { content: result.system, role: "system" },
+        { content: result.prompt, role: "user" },
+      ]),
+    ).toBeLessThanOrEqual(2_500);
+    expect(result.prompt).not.toContain("OLD_TAIL");
+    expect(result.prompt).not.toContain("NEW_TAIL");
+  });
+
   it("degrades the oldest conversational text first under budget pressure", () => {
     const oldest = `${"oldest message padding. ".repeat(400)}OLDEST_TAIL_MARKER`;
     const newest = `${"newest message padding. ".repeat(400)}NEWEST_TAIL_MARKER`;
@@ -174,7 +211,7 @@ describe("createCompactionPrompt", () => {
         { content: newest, role: "user" },
       ],
       // Fits one full entry plus a degraded one, but not both full.
-      transcriptBudgetTokens: 3_500,
+      inputBudgetTokens: 3_500,
       previousCheckpoint: undefined,
     });
 

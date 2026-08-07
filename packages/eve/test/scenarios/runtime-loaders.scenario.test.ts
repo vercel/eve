@@ -291,6 +291,7 @@ describe("runtime compiled artifact loaders", () => {
         '  model: "openai/gpt-5.4",',
         "  compaction: {",
         '    model: "openai/gpt-5.4-mini",',
+        '    prompt: "Preserve exact customer requirements.",',
         "    thresholdPercent: 0.75,",
         "  },",
         "};",
@@ -316,6 +317,7 @@ describe("runtime compiled artifact loaders", () => {
           contextWindowTokens: expect.any(Number),
           id: "openai/gpt-5.4-mini",
         },
+        prompt: "Preserve exact customer requirements.",
         thresholdPercent: 0.75,
       },
       model: {

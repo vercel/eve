@@ -7,7 +7,9 @@ The default harness is eve's built-in agent loop. It manages model calls, compac
 
 ## Compaction
 
-The harness keeps a long session from overflowing the model's context window. Before comparing the conversation with `thresholdPercent` (`0.9` by default), it adds the estimated fixed envelope of the checkpoint prompt used for compaction. It then summarizes the older turns and keeps going. The prompt asks the compaction model to distinguish completed progress and decisions from remaining work and to retain the constraints, preferences, data, and references needed to continue. When eve compacts again, it passes the previous checkpoint separately and without the transcript's per-message truncation, then replaces it with the updated checkpoint. The summary uses the active turn model unless you override it. Tune when and how it kicks in under [`compaction`](../agent-config#compaction) in `agent.ts`:
+The harness keeps a long session from overflowing the model's context window. Before comparing the conversation with `thresholdPercent` (`0.9` by default), it adds the estimated checkpoint prompt envelope. It then summarizes the older turns and continues the session.
+
+The default prompt preserves completed progress, decisions, remaining work, constraints, data, and references. You can replace those instructions with `compaction.prompt`. eve supplies the previous checkpoint and conversation transcript separately. The summary uses the active turn model unless you override it. Configure these settings under [`compaction`](../agent-config#compaction) in `agent.ts`:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({

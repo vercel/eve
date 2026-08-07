@@ -151,6 +151,28 @@ function createResolvedInstructionsDefinition(
   };
 }
 
+function createResolvedModelReference(
+  model: CompiledAgentNodeManifest["config"]["model"],
+): ResolvedAgent["config"]["model"] {
+  return model.source === undefined
+    ? {
+        contextWindowTokens: model.contextWindowTokens,
+        id: model.id,
+        providerOptions: model.providerOptions,
+      }
+    : {
+        contextWindowTokens: model.contextWindowTokens,
+        id: model.id,
+        providerOptions: model.providerOptions,
+        source: {
+          exportName: model.source.exportName,
+          logicalPath: model.source.logicalPath,
+          sourceId: model.source.sourceId,
+          sourceKind: "module",
+        },
+      };
+}
+
 function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): ResolvedAgent["config"] {
   const config: {
     compaction?: ResolvedAgent["config"]["compaction"];
@@ -163,59 +185,16 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     source?: ResolvedAgent["config"]["source"];
     limits?: ResolvedAgent["config"]["limits"];
   } = {
-    model:
-      manifest.config.model.source === undefined
-        ? {
-            id: manifest.config.model.id,
-            contextWindowTokens: manifest.config.model.contextWindowTokens,
-            providerOptions: manifest.config.model.providerOptions,
-          }
-        : {
-            contextWindowTokens: manifest.config.model.contextWindowTokens,
-            id: manifest.config.model.id,
-            providerOptions: manifest.config.model.providerOptions,
-            source: {
-              exportName: manifest.config.model.source.exportName,
-              sourceKind: "module" as const,
-              logicalPath: manifest.config.model.source.logicalPath,
-              sourceId: manifest.config.model.source.sourceId,
-            },
-          },
+    model: createResolvedModelReference(manifest.config.model),
     name: manifest.config.name,
   };
 
   if (manifest.config.compaction !== undefined) {
-    const compaction: {
-      model?: ResolvedAgent["config"]["model"];
-      thresholdPercent?: number;
-    } = {};
-
-    if (manifest.config.compaction.model !== undefined) {
-      compaction.model =
-        manifest.config.compaction.model.source === undefined
-          ? {
-              contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
-              id: manifest.config.compaction.model.id,
-              providerOptions: manifest.config.compaction.model.providerOptions,
-            }
-          : {
-              contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
-              id: manifest.config.compaction.model.id,
-              providerOptions: manifest.config.compaction.model.providerOptions,
-              source: {
-                exportName: manifest.config.compaction.model.source.exportName,
-                sourceKind: "module" as const,
-                logicalPath: manifest.config.compaction.model.source.logicalPath,
-                sourceId: manifest.config.compaction.model.source.sourceId,
-              },
-            };
-    }
-
-    if (manifest.config.compaction.thresholdPercent !== undefined) {
-      compaction.thresholdPercent = manifest.config.compaction.thresholdPercent;
-    }
-
-    config.compaction = compaction;
+    const { model, ...compaction } = manifest.config.compaction;
+    config.compaction = {
+      ...compaction,
+      model: model === undefined ? undefined : createResolvedModelReference(model),
+    };
   }
 
   if (manifest.config.dynamicModel !== undefined) {

@@ -72,9 +72,6 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   }
 
   const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });

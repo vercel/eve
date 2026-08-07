@@ -296,7 +296,11 @@ function normalizeAgentCompactionDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["compaction"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["model", "modelContextWindowTokens", "thresholdPercent"], message);
+  expectOnlyKnownKeys(
+    record,
+    ["model", "modelContextWindowTokens", "prompt", "thresholdPercent"],
+    message,
+  );
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["compaction"]>> = {};
 
   if (record.model !== undefined) {
@@ -313,6 +317,10 @@ function normalizeAgentCompactionDefinition(
       record.modelContextWindowTokens,
       message,
     );
+  }
+
+  if (record.prompt !== undefined) {
+    normalizedDefinition.prompt = expectString(record.prompt, message);
   }
 
   if (record.thresholdPercent !== undefined) {

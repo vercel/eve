@@ -399,6 +399,7 @@ const compiledAgentWorkflowDefinitionSchema = z
 const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompactionDefinition> = z
   .object({
     model: compiledRuntimeModelReferenceSchema.optional(),
+    prompt: z.string().optional(),
     thresholdPercent: z.number().finite().min(0).max(1).optional(),
   })
   .strict();
@@ -816,11 +817,11 @@ export function createCompiledAgentNodeManifest(input: {
                   : [...input.config.build.externalDependencies],
             },
       compaction: {
+        ...input.config.compaction,
         model:
           input.config.compaction?.model === undefined
             ? undefined
             : cloneCompiledRuntimeModelReference(input.config.compaction.model),
-        thresholdPercent: input.config.compaction?.thresholdPercent,
       },
       description: input.config.description,
       dynamicModel:

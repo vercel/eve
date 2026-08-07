@@ -123,6 +123,7 @@ function expectStepFn(value: StepNext): StepFn {
 
 describe("tool-loop structured compaction accounting", () => {
   it("compacts before the continuation step when structured tool results were appended", async () => {
+    const compactionPrompt = "Preserve every unresolved customer question. ".repeat(20);
     vi.mocked(generateText).mockResolvedValue({
       text: "summary",
     } as Awaited<ReturnType<typeof generateText>>);
@@ -205,6 +206,7 @@ describe("tool-loop structured compaction accounting", () => {
     const first = await runStep(
       createTestSession({
         compaction: {
+          prompt: compactionPrompt,
           recentWindowSize: 10,
           threshold: 500,
         },
@@ -216,11 +218,15 @@ describe("tool-loop structured compaction accounting", () => {
     expect(first.session.compaction).toMatchObject({
       lastKnownInputTokens: 100,
       lastKnownPromptMessageCount: 1,
+      prompt: compactionPrompt,
     });
 
     const second = await expectStepFn(first.next)(first.session);
 
     expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(generateText)).toHaveBeenCalledWith(
+      expect.objectContaining({ system: compactionPrompt }),
+    );
     expect(second.session.history[0]).toEqual({
       content: "Summary of our conversation so far:",
       role: "user",

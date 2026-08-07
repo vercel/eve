@@ -15,6 +15,12 @@ export const COMPACTION_RESUMPTION_MESSAGE = "Continue.";
 export const TODO_COMPACTION_PRESERVATION_LABEL =
   "[Your task list was preserved across context compaction]";
 
+const COMPACTION_CHECKPOINT_PROMPT = `Update the previous checkpoint with the newer information in the conversation. If there is no previous checkpoint, create one from the conversation.
+
+Make completed work explicit so the next model does not repeat it. Keep completed work separate from current and remaining work, and do not describe completed work as pending unless later messages show it must be redone. Preserve exact file paths, function names, commands, error messages, identifiers, and measured values when they are needed to continue.
+
+Large tool outputs are the main thing to compress: reduce each to the findings the next model needs — what was searched or read, what it established, and the exact identifiers involved — rather than reproducing the output. The next model cannot see the originals, so nothing it would need to act on may be lost.`;
+
 const COMPACTION_SYSTEM_PROMPT = `You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
 
 Include:
@@ -24,13 +30,9 @@ Include:
 - What remains to be done, with clear next steps
 - Any critical data, examples, or references needed to continue
 
-Be concise, structured, and focused on helping the next LLM seamlessly continue the work. Write in the same language as the conversation. Do not continue the conversation, answer its questions, or invent facts. Only output the handoff summary.`;
+Be concise, structured, and focused on helping the next LLM seamlessly continue the work. Write in the same language as the conversation. Do not continue the conversation, answer its questions, or invent facts. Only output the handoff summary.
 
-const COMPACTION_CHECKPOINT_PROMPT = `Update the previous checkpoint with the newer information in the conversation. If there is no previous checkpoint, create one from the conversation.
-
-Make completed work explicit so the next model does not repeat it. Keep completed work separate from current and remaining work, and do not describe completed work as pending unless later messages show it must be redone. Preserve exact file paths, function names, commands, error messages, identifiers, and measured values when they are needed to continue.
-
-Large tool outputs are the main thing to compress: reduce each to the findings the next model needs — what was searched or read, what it established, and the exact identifiers involved — rather than reproducing the output. The next model cannot see the originals, so nothing it would need to act on may be lost.`;
+${COMPACTION_CHECKPOINT_PROMPT}`;
 
 // Fallback cap for conversational text, applied oldest-first only when the
 // rendered transcript exceeds the caller's token budget.
@@ -56,29 +58,31 @@ export const COMPACTION_PROMPT_ENVELOPE = {
  * Builds the compaction model input from framework-owned checkpoint state and
  * older messages.
  *
- * Conversational text is rendered verbatim. When `transcriptBudgetTokens` is
- * set and the rendered prompt exceeds it, conversational text is capped at
+ * Conversational text is rendered verbatim. When `inputBudgetTokens` is
+ * set and the combined system and user input exceeds it, conversational text is capped at
  * {@link DEGRADED_TEXT_LIMIT} starting from the oldest entries until the
- * prompt fits; the previous checkpoint is never truncated.
+ * input fits; the previous checkpoint is never truncated.
  */
 export function createCompactionPrompt(input: {
   readonly messages: readonly ModelMessage[];
   readonly previousCheckpoint: string | undefined;
-  readonly transcriptBudgetTokens?: number;
+  readonly systemPrompt?: string;
+  readonly inputBudgetTokens?: number;
 }): CompactionPrompt {
   const entries = input.messages.map((message) => ({
     content: renderCompactionMessageContent(message),
     role: message.role,
   }));
 
-  degradeOversizedTranscript(input, entries);
+  const system = input.systemPrompt ?? COMPACTION_SYSTEM_PROMPT;
+  degradeOversizedTranscript({ ...input, systemPrompt: system }, entries);
 
   return {
     prompt: formatCompactionPrompt({
       previousCheckpoint: input.previousCheckpoint?.trim() ?? "(none)",
       transcript: formatCompactionTranscript(entries),
     }),
-    system: COMPACTION_SYSTEM_PROMPT,
+    system,
   };
 }
 
@@ -93,11 +97,12 @@ function degradeOversizedTranscript(
   input: {
     readonly messages: readonly ModelMessage[];
     readonly previousCheckpoint: string | undefined;
-    readonly transcriptBudgetTokens?: number;
+    readonly systemPrompt: string;
+    readonly inputBudgetTokens?: number;
   },
   entries: { content: string; role: ModelMessage["role"] }[],
 ): void {
-  const budget = input.transcriptBudgetTokens;
+  const budget = input.inputBudgetTokens;
   if (budget === undefined) {
     return;
   }
@@ -106,7 +111,11 @@ function degradeOversizedTranscript(
     previousCheckpoint: input.previousCheckpoint?.trim() ?? "(none)",
     transcript: formatCompactionTranscript(entries),
   });
-  let excessTokens = estimateTokens(fullPrompt) - budget;
+  let excessTokens =
+    estimateTokens([
+      { content: input.systemPrompt, role: "system" },
+      { content: fullPrompt, role: "user" },
+    ]) - budget;
 
   for (let index = 0; index < entries.length && excessTokens > 0; index += 1) {
     const entry = entries[index];
@@ -136,9 +145,7 @@ ${input.previousCheckpoint}
 <conversation>
 Conversation transcript:
 ${input.transcript}
-</conversation>
-
-${COMPACTION_CHECKPOINT_PROMPT}`;
+</conversation>`;
 }
 
 function formatCompactionTranscript(messages: readonly CompactionTranscriptEntry[]): string {

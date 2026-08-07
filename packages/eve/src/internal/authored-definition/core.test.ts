@@ -76,6 +76,20 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('"compaction.model" does not support defineDynamic');
   });
 
+  it("accepts a custom compaction prompt", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        compaction: {
+          prompt: "Preserve every unresolved customer question.",
+        },
+        model: "openai/gpt-5.5",
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.compaction?.prompt).toBe("Preserve every unresolved customer question.");
+  });
+
   it("rejects unsupported reasoning effort", () => {
     expect(() =>
       normalizeAgentDefinition(

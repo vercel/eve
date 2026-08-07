@@ -12,6 +12,7 @@ import { serializeOutputSchema } from "#shared/tool-schema.js";
 export interface DynamicSubagentAgentConfig {
   readonly compaction?: {
     readonly model?: DynamicSubagentModelReference;
+    readonly prompt?: string;
     readonly thresholdPercent?: number;
   };
   readonly description: string;
@@ -65,23 +66,21 @@ export function normalizeDynamicSubagentAgentConfig(input: {
   };
 
   if (definition.compaction !== undefined) {
-    const compaction: {
-      model?: DynamicSubagentModelReference;
-      thresholdPercent?: number;
-    } = {};
-    if (definition.compaction.model !== undefined) {
-      compaction.model = normalizeModelReference({
-        contextWindowTokens: definition.compaction.modelContextWindowTokens,
-        model: definition.compaction.model,
-        name: input.name,
-        providerOptions: definition.modelOptions?.providerOptions,
-      });
-    }
-    if (definition.compaction.thresholdPercent !== undefined) {
-      compaction.thresholdPercent = definition.compaction.thresholdPercent;
-    }
-    config.compaction = compaction;
+    const { model, modelContextWindowTokens, ...compaction } = definition.compaction;
+    config.compaction = {
+      ...compaction,
+      model:
+        model === undefined
+          ? undefined
+          : normalizeModelReference({
+              contextWindowTokens: modelContextWindowTokens,
+              model,
+              name: input.name,
+              providerOptions: definition.modelOptions?.providerOptions,
+            }),
+    };
   }
+
   if (definition.limits !== undefined) {
     config.limits = definition.limits;
   }
