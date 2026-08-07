@@ -53,6 +53,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
 const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
+const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 
@@ -73,6 +74,7 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   WORKFLOW_ENTRY_NAME,
   TURN_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
+  TASK_RUN_WORKFLOW_NAME,
 ]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
@@ -107,6 +109,11 @@ export const turnWorkflowReference = {
 /** Stable workflow reference for session deadline timers. */
 export const sessionTimeoutWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${SESSION_TIMEOUT_WORKFLOW_NAME}`,
+};
+
+/** Stable workflow reference for durable task runs (`experimental.tasks`). */
+export const taskRunWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${TASK_RUN_WORKFLOW_NAME}`,
 };
 
 /**
