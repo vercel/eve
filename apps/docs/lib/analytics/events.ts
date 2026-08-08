@@ -15,6 +15,7 @@ export const analyticsEvents = {
   templatesSearched: "Searched templates",
   templateDemoOpened: "Opened template demo",
   templateSetupCopied: "Copied template setup prompt",
+  templateSourceOpened: "Opened template source",
 } as const;
 
 export type AnalyticsEventName = (typeof analyticsEvents)[keyof typeof analyticsEvents];
