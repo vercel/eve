@@ -163,7 +163,7 @@ export default defineMcpClientConnection({
 
 export default defineAgent({
   description: "Investigate questions",
-  model: "openai/gpt-5.4",
+  model: "xai/grok-4.5",
 });`,
   },
   {
