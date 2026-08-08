@@ -131,7 +131,7 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
                 <dt className="font-medium text-gray-1000 text-label-14">Owner</dt>
                 <dd className="mt-2 text-copy-14">
                   <a
-                    className="font-medium text-gray-1000 underline underline-offset-4"
+                    className="font-medium text-gray-900 underline decoration-gray-400 underline-offset-4 transition-colors hover:text-gray-1000 hover:decoration-gray-1000"
                     href={`https://github.com/${entry.githubOwner}`}
                     rel="noopener noreferrer"
                     target="_blank"
@@ -144,7 +144,7 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
                 <dt className="font-medium text-gray-1000 text-label-14">Repository</dt>
                 <dd className="mt-2 text-copy-14">
                   <a
-                    className="break-words font-medium text-gray-1000 underline underline-offset-4"
+                    className="break-words font-medium text-gray-900 underline decoration-gray-400 underline-offset-4 transition-colors hover:text-gray-1000 hover:decoration-gray-1000"
                     href={entry.sourceHref}
                     rel="noopener noreferrer"
                     target="_blank"
