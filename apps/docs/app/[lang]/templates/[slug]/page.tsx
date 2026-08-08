@@ -112,7 +112,7 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
         </header>
 
         <section aria-label="Filesystem" className="mt-8">
-          <FileViewer files={highlightedFiles} sourceRevisionHref={entry.sourceRevisionHref} />
+          <FileViewer files={highlightedFiles} />
         </section>
 
         <section
@@ -212,7 +212,6 @@ const highlightFile = async (file: TemplateFile): Promise<HighlightedTemplateFil
       ),
     },
   }),
-  contents: file.contents,
   language: file.language,
   relativePath: file.relativePath,
 });
