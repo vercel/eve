@@ -161,4 +161,48 @@ describe("getTodoCompactionMessage", () => {
   it("returns undefined when no state has been set", () => {
     expect(callHook(undefined)).toBeUndefined();
   });
+
+  it("returns undefined when every item is completed", () => {
+    expect(
+      callHook({
+        items: [
+          { content: "Fix bug", priority: "high", status: "completed" },
+          { content: "Write tests", priority: "medium", status: "completed" },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when every item is cancelled", () => {
+    expect(
+      callHook({
+        items: [{ content: "Dropped task", priority: "low", status: "cancelled" }],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined for a terminal-only list mixing completed and cancelled", () => {
+    expect(
+      callHook({
+        items: [
+          { content: "Fix bug", priority: "high", status: "completed" },
+          { content: "Dropped task", priority: "low", status: "cancelled" },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("preserves the full list while any item is still active", () => {
+    const message = callHook({
+      items: [
+        { content: "Fix bug", priority: "high", status: "completed" },
+        { content: "In flight task", priority: "medium", status: "in_progress" },
+      ],
+    });
+
+    expect(message).toBeDefined();
+    const text = String(message?.content ?? "");
+    expect(text).toContain("[x] [high] Fix bug");
+    expect(text).toContain("[ ] [medium] In flight task");
+  });
 });
