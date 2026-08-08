@@ -4,9 +4,6 @@ import { estimateTokens } from "#harness/token-estimate.js";
 
 export const COMPACTION_CHECKPOINT_MARKER = "Summary of our conversation so far:";
 
-/** Synthetic resumption prompt used when no real user message can be replayed. */
-export const COMPACTION_RESUMPTION_MESSAGE = "Continue.";
-
 /**
  * Label line of the framework-injected todo preservation message. Owned here
  * so compaction can recognize the message as synthetic when picking a user

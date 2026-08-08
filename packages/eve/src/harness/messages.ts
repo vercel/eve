@@ -4,6 +4,9 @@ import type { DeliverPayload, SessionAuthContext, TurnCaller } from "#channel/ty
 import type { InputResponse } from "#runtime/input/types.js";
 import type { StepInput } from "#harness/types.js";
 
+/** Synthetic user turn used to resume provider-incompatible assistant-final history. */
+export const MODEL_RESUMPTION_MESSAGE = "Continue.";
+
 /**
  * Merges two {@link StepInput} values into one.
  *

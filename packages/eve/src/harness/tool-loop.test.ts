@@ -4651,6 +4651,29 @@ describe("createToolLoopHarness", () => {
       }
     });
 
+    it("guards a resumed model call whose history ends on assistant reasoning", async () => {
+      setupMockAgent(successResult);
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+
+      await runStep(
+        createTestSession({
+          history: [
+            {
+              content: [{ text: "", type: "reasoning" }],
+              role: "assistant",
+            },
+          ],
+        }),
+      );
+
+      const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value;
+      if (agent === undefined) {
+        throw new Error("ToolLoopAgent mock did not return an instance.");
+      }
+      const messages = vi.mocked(agent.generate).mock.calls[0]?.[0]?.messages;
+      expect(messages?.at(-1)).toEqual({ content: "Continue.", role: "user" });
+    });
+
     it("offers conditional delivery on an empty-response retry for a scheduled turn", async () => {
       setupFirstThenAgent(emptyResult, successResult);
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});

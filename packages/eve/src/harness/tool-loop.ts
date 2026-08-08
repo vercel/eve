@@ -133,7 +133,11 @@ import {
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/stale-input-responses.js";
 import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
-import { normalizeUserContent, resolveAssistantStepText } from "#harness/messages.js";
+import {
+  MODEL_RESUMPTION_MESSAGE,
+  normalizeUserContent,
+  resolveAssistantStepText,
+} from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
   type AuthorizationSignal,
@@ -949,8 +953,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // cached prompt prefix valid, and handleStepResult rebuilds history
       // from the step's prompt messages, so the note exists only on this
       // call's wire request.
-      const callMessages = opts.trailingUserNote
-        ? [...modelMessages, { role: "user" as const, content: opts.trailingUserNote }]
+      const trailingUserNote =
+        opts.trailingUserNote ??
+        (modelMessages.at(-1)?.role === "assistant" ? MODEL_RESUMPTION_MESSAGE : undefined);
+      const callMessages = trailingUserNote
+        ? [...modelMessages, { role: "user" as const, content: trailingUserNote }]
         : modelMessages;
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
       const advertisedHarnessTools = getAdvertisedTools({
