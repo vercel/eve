@@ -241,6 +241,7 @@ describe("workflowEntry integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          idempotencyKey: "delivery-initial",
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -280,7 +281,23 @@ describe("workflowEntry integration", () => {
         });
         await expect(
           workflowRuntime.dispatchContinuation({
-            command: { auth: null, kind: "send", payload: { message: "follow up" } },
+            command: {
+              auth: null,
+              idempotencyKey: "delivery-initial",
+              kind: "send",
+              payload: { message: "duplicate initial" },
+            },
+            continuationToken,
+          }),
+        ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
+        await expect(
+          workflowRuntime.dispatchContinuation({
+            command: {
+              auth: null,
+              idempotencyKey: "delivery-follow-up",
+              kind: "send",
+              payload: { message: "follow up" },
+            },
             continuationToken,
           }),
         ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
@@ -296,6 +313,43 @@ describe("workflowEntry integration", () => {
               event.data.message?.includes("follow up") === true,
           ),
         ).toBe(true);
+        expect(
+          secondTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("duplicate initial") === true,
+          ),
+        ).toBe(false);
+
+        await workflowRuntime.dispatchContinuation({
+          command: {
+            auth: null,
+            idempotencyKey: "delivery-follow-up",
+            kind: "send",
+            payload: { message: "duplicate follow up" },
+          },
+          continuationToken,
+        });
+        await workflowRuntime.dispatchContinuation({
+          command: { auth: null, kind: "send", payload: { message: "unkeyed follow up" } },
+          continuationToken,
+        });
+
+        const thirdTurn = await stream.nextTurn();
+        expect(
+          thirdTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("unkeyed follow up") === true,
+          ),
+        ).toBe(true);
+        expect(
+          thirdTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("duplicate follow up") === true,
+          ),
+        ).toBe(false);
       } finally {
         stream.dispose();
         await run.cancel();

@@ -2,6 +2,7 @@ import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#chan
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import type { ChannelIdempotencyGuard } from "#execution/channel-idempotency.js";
 import { dispatchTurnStep } from "#execution/workflow-steps.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -28,6 +29,7 @@ export async function dispatchAndAwaitTurn(input: {
   readonly controlToken: string;
   readonly delivery: HookPayload;
   readonly commandInbox: SessionCommandInbox;
+  readonly idempotency: ChannelIdempotencyGuard;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
@@ -37,6 +39,7 @@ export async function dispatchAndAwaitTurn(input: {
     bufferedDeliveries: input.bufferedDeliveries,
     bufferedSessionControls: input.bufferedSessionControls,
     commandInbox: input.commandInbox,
+    idempotency: input.idempotency,
     token: input.controlToken,
   });
 

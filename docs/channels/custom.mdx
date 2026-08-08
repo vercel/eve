@@ -318,6 +318,28 @@ defineChannel<{ ref: string | null }>({
 
 At the next workflow boundary, the runtime claims the new park hook before releasing the old token. If another active session already owns the new token, the re-keying session fails instead of taking it over. After a successful re-key, inbound deliveries still addressed to the old token are dropped, so coordinate with your senders to use the new token.
 
+## Retry-safe delivery
+
+Webhook providers may retry the same request after a timeout or process restart. Pass the
+provider's stable delivery ID as `idempotencyKey` so the session starts at most one turn for that
+delivery:
+
+```ts
+await from(continuationToken).send(body.message, {
+  auth,
+  idempotencyKey: body.deliveryId,
+});
+```
+
+The key is scoped to the session addressed by `from(...)`. eve durably retains the 1,024 most
+recently accepted keys for that session in insertion order; a retry whose key is still retained
+returns the session without starting another turn. Unkeyed sends keep their existing behavior.
+This deduplicates retries, not different deliveries, and does not provide FIFO ordering for bursts.
+
+The built-in Slack channel supplies the verified Events API `event_id` automatically. Custom web
+channels should use their provider's request or delivery identifier rather than generating a new
+key for each retry.
+
 ## File uploads
 
 `from(address).send()` accepts a `message` containing `string | UserContent`, while

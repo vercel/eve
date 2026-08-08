@@ -67,7 +67,6 @@ import {
 } from "#public/channels/upload-policy.js";
 import { verifySlackRequest, type SlackWebhookVerifier } from "#public/channels/slack/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
-import { markEventHandled } from "./utils.js";
 
 export type {
   SlackRespondOptions,
@@ -656,10 +655,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         : constrainAuthorizationRequired(authorizationRequiredOverride),
   };
 
-  // Set of events we've already handled on this process.
-  // Light weight dedup mechanism - not reliable across multiple invocations.
-  const handledEvents = new Set<string>();
-
   return defineChannel<
     SlackChannelState,
     SlackChannelContext,
@@ -698,10 +693,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         const body = await verifyInbound(req, config.credentials);
         if (body === null) return new Response("unauthorized", { status: 401 });
 
-        if (shouldDropSlackHttpTimeoutRetry(req.headers)) {
-          return new Response("ok");
-        }
-
         const contentType = req.headers.get("content-type") ?? "";
         if (contentType.includes("application/x-www-form-urlencoded")) {
           return handleInteractionPost(body, { from, resolveSession, waitUntil }, { config });
@@ -713,7 +704,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           waitUntil,
           config,
           uploadPolicy,
-          handledEvents,
           headers: req.headers,
         });
       }),
@@ -740,6 +730,8 @@ async function receiveOnSlack(
   deps: {
     readonly from: ChannelFrom<SlackChannelState>;
     readonly credentials: SlackChannelCredentials | undefined;
+    /** Provider delivery id for an inbound event-triggered send. */
+    readonly idempotencyKey?: string;
     /** Slack team id seeded into session state, when the trigger carried one. */
     readonly teamId?: string;
     /** Slack user id seeded into session state, when the trigger carried one. */
@@ -784,6 +776,7 @@ async function receiveOnSlack(
 
   return deps.from(slackContinuationToken(channelId, continuationThreadTs)).send(input.message, {
     auth: input.auth,
+    idempotencyKey: deps.idempotencyKey,
     state: {
       channelId,
       threadTs: threadTs || null,
@@ -815,11 +808,6 @@ export function constrainAuthorizationRequired(
     );
 }
 
-function shouldDropSlackHttpTimeoutRetry(headers: Headers): boolean {
-  const retryNum = Number(headers.get("x-slack-retry-num") ?? "0");
-  return retryNum >= 1 && headers.get("x-slack-retry-reason") === "http_timeout";
-}
-
 /**
  * Handles an inbound non-interactivity Slack POST: parses the JSON envelope,
  * answers URL verification, selects one authored specific handler, generic
@@ -834,7 +822,6 @@ async function handleEventPost(input: {
   readonly waitUntil: (task: Promise<unknown>) => void;
   readonly config: SlackChannelConfig;
   readonly uploadPolicy: UploadPolicy;
-  readonly handledEvents: Set<string>;
 }): Promise<Response> {
   const { config } = input;
   let payload;
@@ -857,6 +844,7 @@ async function handleEventPost(input: {
   if (envelope === null) return new Response("ok");
   const appId = typeof envelope.api_app_id === "string" ? envelope.api_app_id : undefined;
   const botUserId = slackEventBotUserId(envelope);
+  const idempotencyKey = envelope.event_id;
 
   // Handler precedence, in fall-through order:
   // 1) an authored mention/DM handler for its own event kind,
@@ -878,6 +866,7 @@ async function handleEventPost(input: {
             resolveSession: input.resolveSession,
             credentials: config.credentials,
             handler,
+            idempotencyKey,
             kind,
             message,
             threadContext: config.threadContext,
@@ -894,6 +883,7 @@ async function handleEventPost(input: {
             resolveSession: input.resolveSession,
             credentials: config.credentials,
             handler,
+            idempotencyKey,
             kind,
             message,
             threadContext: config.threadContext,
@@ -921,6 +911,7 @@ async function handleEventPost(input: {
             resolveSession: input.resolveSession,
             credentials: config.credentials,
             handler: config.onMessage!,
+            idempotencyKey,
             kind: "channel_message",
             message,
             threadContext: config.threadContext,
@@ -941,25 +932,12 @@ async function handleEventPost(input: {
         credentials: config.credentials,
         envelope,
         handler: onEvent,
+        idempotencyKey,
       });
   }
 
   dispatch ??= builtinDefault;
   if (dispatch === null) return new Response("ok");
-
-  const eventId = envelope.event_id;
-  if (eventId) {
-    if (input.handledEvents.has(eventId)) {
-      log.warn("received a duplicate event", {
-        event_id: eventId,
-        event_time: envelope.event_time,
-        retry_num: payload.retry?.num ?? "(null)",
-        retry_reason: payload.retry?.reason ?? "(null)",
-      });
-      return new Response("ok");
-    }
-    markEventHandled(eventId, input.handledEvents);
-  }
 
   input.waitUntil(dispatch());
   return new Response("ok");
@@ -985,6 +963,7 @@ async function dispatchSlackMessage(input: {
   readonly resolveSession: ChannelResolveSession;
   readonly credentials: SlackChannelCredentials | undefined;
   readonly handler: NonNullable<SlackChannelConfig["onMessage"]>;
+  readonly idempotencyKey: string | undefined;
   readonly kind: "app_mention" | "channel_message" | "direct_message";
   readonly message: SlackMessage;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
@@ -1047,6 +1026,7 @@ async function dispatchSlackMessage(input: {
   await deliverSlackMessage({
     credentials: input.credentials,
     kind: input.kind,
+    idempotencyKey: input.idempotencyKey,
     message: input.message,
     result,
     sessionOperations,
@@ -1063,6 +1043,7 @@ async function dispatchSlackEvent(input: {
   readonly credentials: SlackChannelCredentials | undefined;
   readonly envelope: SlackEventEnvelope;
   readonly handler: NonNullable<SlackChannelConfig["onEvent"]>;
+  readonly idempotencyKey: string | undefined;
 }): Promise<void> {
   const eventTeamId = input.envelope.event.team_id;
   const teamId =
@@ -1090,6 +1071,7 @@ async function dispatchSlackEvent(input: {
         {
           from: input.from,
           credentials: input.credentials,
+          idempotencyKey: input.idempotencyKey,
           teamId,
           ...(typeof input.envelope.event.user === "string"
             ? { triggeringUserId: input.envelope.event.user }
@@ -1143,6 +1125,7 @@ async function deliverSlackMessage(input: {
   readonly sessionOperations: SlackSessionOperations;
   readonly credentials: SlackChannelCredentials | undefined;
   readonly kind: string;
+  readonly idempotencyKey: string | undefined;
   readonly message: SlackMessage;
   readonly result: Exclude<SlackInboundResult, null>;
   readonly thread: SlackThread;
@@ -1180,10 +1163,15 @@ async function deliverSlackMessage(input: {
     const channelContext = input.result.context ?? [];
     const sendOptions: SlackSendOptions =
       channelContext.length === 0
-        ? { auth: input.result.auth, title: message.markdown }
+        ? {
+            auth: input.result.auth,
+            idempotencyKey: input.idempotencyKey,
+            title: message.markdown,
+          }
         : {
             auth: input.result.auth,
             context: channelContext,
+            idempotencyKey: input.idempotencyKey,
             title: message.markdown,
           };
 

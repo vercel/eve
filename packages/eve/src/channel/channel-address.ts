@@ -22,6 +22,7 @@ import type { RunMode } from "#shared/run-mode.js";
 interface BaseChannelAddressDeliveryOptions {
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
+  readonly idempotencyKey?: string;
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly mode?: RunMode;
   readonly title?: string;
@@ -80,6 +81,7 @@ export function createChannelAddress<TState = undefined>(input: {
       const caller = sessionCallbackToTurnCaller(options.callback);
       const commandWithoutCaller = {
         auth: options.auth,
+        idempotencyKey: options.idempotencyKey,
         kind: "send" as const,
         payload: {
           ...payload,
@@ -123,6 +125,7 @@ export function createChannelAddress<TState = undefined>(input: {
         channelName: input.channelName,
         continuationToken: namespacedToken,
         initiatorAuth: options.initiatorAuth,
+        idempotencyKey: options.idempotencyKey,
         input: {
           context: payload.context,
           message: serializeUrlFilePartsInMessage(payload.message) ?? "",

@@ -7,6 +7,7 @@ import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.j
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
+import type { ChannelIdempotencyGuard } from "#execution/channel-idempotency.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
@@ -20,6 +21,7 @@ export class TurnControlReceiver {
   private readonly bufferedDeliveries: DeliverHookPayload[];
   private readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   private readonly commandInbox: SessionCommandInbox;
+  private readonly idempotency: ChannelIdempotencyGuard;
   private readonly control: Hook<TurnControlPayload>;
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
@@ -28,11 +30,13 @@ export class TurnControlReceiver {
     readonly bufferedDeliveries: DeliverHookPayload[];
     readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
     readonly commandInbox: SessionCommandInbox;
+    readonly idempotency: ChannelIdempotencyGuard;
     readonly token: string;
   }) {
     this.bufferedDeliveries = input.bufferedDeliveries;
     this.bufferedSessionControls = input.bufferedSessionControls;
     this.commandInbox = input.commandInbox;
+    this.idempotency = input.idempotency;
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
   }
@@ -73,11 +77,14 @@ export class TurnControlReceiver {
     command: SessionInboxPayload,
   ): Promise<TurnDriverAction | undefined> {
     if (command.kind === "deliver") {
+      if (!this.idempotency.accept(command.idempotencyKey)) return undefined;
       this.bufferedDeliveries.push(command);
       return undefined;
     }
     if (command.kind === "send") {
-      this.bufferedDeliveries.push(sendCommandToDelivery(command));
+      const delivery = sendCommandToDelivery(command);
+      if (!this.idempotency.accept(delivery.idempotencyKey)) return undefined;
+      this.bufferedDeliveries.push(delivery);
       return undefined;
     }
     if (command.kind === "clear" || command.kind === "compact") {
@@ -198,11 +205,14 @@ export class TurnControlReceiver {
 
       this.commandInbox.consumeNext();
       if (winner.value.value.kind === "deliver") {
-        delivery = winner.value.value;
+        if (this.idempotency.accept(winner.value.value.idempotencyKey)) {
+          delivery = winner.value.value;
+        }
         continue;
       }
       if (winner.value.value.kind === "send") {
-        delivery = sendCommandToDelivery(winner.value.value);
+        const candidate = sendCommandToDelivery(winner.value.value);
+        if (this.idempotency.accept(candidate.idempotencyKey)) delivery = candidate;
         continue;
       }
       const terminal = await this.handleSessionCommand(winner.value.value);

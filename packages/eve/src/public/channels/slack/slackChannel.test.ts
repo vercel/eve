@@ -35,6 +35,7 @@ import {
   type SlackAuthorizationEventContext,
   type SlackChannelState,
   type SlackEventContext,
+  type SlackInboundEventContext,
 } from "#public/channels/slack/slackChannel.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 
@@ -1221,7 +1222,7 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(reset.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]!);
   });
 
-  it("drops Slack http_timeout retries without dispatching", async () => {
+  it("processes Slack http_timeout retries with the event idempotency key", async () => {
     const onAppMention = vi.fn().mockReturnValue({ auth: null });
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
@@ -1242,9 +1243,10 @@ describe("slackChannel() inbound mention pipeline", () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("ok");
-    expect(onAppMention).not.toHaveBeenCalled();
-    expect(waitUntil).not.toHaveBeenCalled();
-    expect(send).not.toHaveBeenCalled();
+    expect(onAppMention).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![1]).toMatchObject({ idempotencyKey: expect.stringMatching(/^Ev/) });
   });
 
   it("processes the original Slack delivery when retry num is 0", async () => {
@@ -1293,7 +1295,7 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it("drops a redelivery of an already-handled event_id", async () => {
+  it("passes the same idempotency key for redelivered event_ids", async () => {
     const onAppMention = vi.fn().mockReturnValue({ auth: null });
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
@@ -1309,8 +1311,11 @@ describe("slackChannel() inbound mention pipeline", () => {
     const second = await firePost(channel, buildSignedRequest({ body }));
     expect(second.response.status).toBe(200);
     expect(await second.response.text()).toBe("ok");
-    expect(onAppMention).toHaveBeenCalledTimes(1);
-    expect(second.send).not.toHaveBeenCalled();
+    expect(onAppMention).toHaveBeenCalledTimes(2);
+    expect(second.send).toHaveBeenCalledTimes(1);
+    expect(first.send.mock.calls[0]![1].idempotencyKey).toBe(
+      second.send.mock.calls[0]![1].idempotencyKey,
+    );
   });
 
   it("keeps Slack attribution in the message and authored context separate", async () => {
@@ -1801,6 +1806,7 @@ describe("slackChannel() generic Events API pipeline", () => {
 
     expect(send).toHaveBeenCalledWith("C01:1700000000.000001", {
       auth: null,
+      idempotencyKey: expect.stringMatching(/^Ev/),
       message: "follow up",
       state: {
         channelId: "C01",
@@ -1979,8 +1985,13 @@ describe("slackChannel() generic Events API pipeline", () => {
     expect(onEvent.mock.calls[0]![1]).toMatchObject({ bot_id: "B01", type: "message" });
   });
 
-  it("deduplicates generic events by event_id", async () => {
-    const onEvent = vi.fn();
+  it("passes event_id through sends from generic event handlers", async () => {
+    const onEvent = vi.fn(async (ctx: SlackInboundEventContext) => {
+      await ctx.send("reaction", {
+        auth: null,
+        target: { channelId: "C01", threadTs: "1700000000.000001" },
+      });
+    });
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       onEvent,
@@ -1990,10 +2001,12 @@ describe("slackChannel() generic Events API pipeline", () => {
       { eventId: "Ev_duplicate" },
     );
 
-    await firePost(channel, buildSignedRequest({ body }));
-    await firePost(channel, buildSignedRequest({ body }));
+    const first = await firePost(channel, buildSignedRequest({ body }));
+    const second = await firePost(channel, buildSignedRequest({ body }));
 
-    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledTimes(2);
+    expect(first.send.mock.calls[0]![1].idempotencyKey).toBe("Ev_duplicate");
+    expect(second.send.mock.calls[0]![1].idempotencyKey).toBe("Ev_duplicate");
   });
 
   it("acks and logs handler failures without starting a turn", async () => {

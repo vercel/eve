@@ -28,6 +28,7 @@ describe("createChannelOperations", () => {
 
     const session = await from("C1:T1").send("hello", {
       auth: null,
+      idempotencyKey: "delivery-1",
       title: "Support thread",
     });
     await session.clear();
@@ -35,6 +36,7 @@ describe("createChannelOperations", () => {
     expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
       command: {
         auth: null,
+        idempotencyKey: "delivery-1",
         kind: "send",
         payload: { message: "hello" },
         requestId: undefined,

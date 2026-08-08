@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
+import { createChannelIdempotencyGuard } from "#execution/channel-idempotency.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
@@ -43,6 +44,7 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox,
+      idempotency: createChannelIdempotencyGuard(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",
@@ -77,6 +79,7 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox,
+      idempotency: createChannelIdempotencyGuard(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",
@@ -139,6 +142,7 @@ describe("dispatchAndAwaitTurn", () => {
           value: { kind: "send", payload: { message: "later delivery" } },
         }),
       }),
+      idempotency: createChannelIdempotencyGuard(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",
@@ -177,6 +181,7 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries,
       bufferedSessionControls: [],
       commandInbox: createCommandInbox(),
+      idempotency: createChannelIdempotencyGuard(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",
@@ -203,6 +208,7 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox: createCommandInbox(),
+      idempotency: createChannelIdempotencyGuard(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",

@@ -2,6 +2,7 @@ import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import type { ChannelIdempotencyGuard } from "#execution/channel-idempotency.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 
@@ -40,6 +41,7 @@ export async function nextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly commandInbox: SessionCommandInbox;
+  readonly idempotency: ChannelIdempotencyGuard;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
 }): Promise<NextTurnInstruction> {
@@ -48,6 +50,7 @@ export async function nextTurnDelivery(input: {
       bufferedDeliveries: input.bufferedDeliveries,
       bufferedSessionControls: input.bufferedSessionControls,
       commandInbox: input.commandInbox,
+      idempotency: input.idempotency,
     });
 
     if (nextAction.kind !== "delivery") {
@@ -83,6 +86,7 @@ async function waitForNextSessionAction(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly commandInbox: SessionCommandInbox;
+  readonly idempotency: ChannelIdempotencyGuard;
 }): Promise<NextSessionAction> {
   const pendingSessionControl = input.bufferedSessionControls.shift();
   if (pendingSessionControl !== undefined) {
@@ -121,10 +125,13 @@ async function waitForNextSessionAction(input: {
     }
 
     if (first.value.kind === "deliver") {
+      if (!input.idempotency.accept(first.value.idempotencyKey)) continue;
       return { delivery: first.value, kind: "delivery" };
     }
 
-    return { delivery: sendCommandToDelivery(first.value), kind: "delivery" };
+    const delivery = sendCommandToDelivery(first.value);
+    if (!input.idempotency.accept(delivery.idempotencyKey)) continue;
+    return { delivery, kind: "delivery" };
   }
 }
 
