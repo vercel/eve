@@ -50,7 +50,12 @@ function formatTodoSummary(state: TodoState): string | undefined {
  */
 export function getTodoCompactionMessage(): ModelMessage | undefined {
   const state = loadContext().get(TodoStateKey);
-  if (state === undefined || state.items.length === 0) return undefined;
+  if (
+    state === undefined ||
+    !state.items.some((item) => item.status === "pending" || item.status === "in_progress")
+  ) {
+    return undefined;
+  }
   const summary = formatTodoSummary(state);
   if (summary === undefined) return undefined;
   return { content: summary, role: "user" };
