@@ -1,4 +1,4 @@
-import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
+import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,
@@ -31,7 +31,6 @@ import { createSessionStep } from "#execution/create-session-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
-import { disposeHook } from "#execution/hook-ownership.js";
 import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
@@ -291,13 +290,39 @@ async function runDriverLoop(input: {
   readonly sessionState: DurableSessionState;
   readonly sessionTimeoutDeadline?: Date;
 }): Promise<DriverLoopOutcome> {
-  // Per-session auth hook. Created before any turns so it exists
-  // when authorization.required events trigger OAuth callbacks.
-  // getHookUrl() builds callback URLs with this token.
-  const authHook = createHook<HookPayload>({
-    token: `${input.sessionState.sessionId}:auth`,
-  });
-  const authIterator: AsyncIterator<HookPayload> = authHook[Symbol.asyncIterator]();
+  // Payloads collected for a multi-challenge authorization park accumulate
+  // across intervening turns until every expected callback has reported.
+  const collectedAuthPayloads: DeliverPayload[] = [];
+  /**
+   * Waits for the authorization callback(s) of an open challenge while
+   * ordinary session activity stays live: callbacks and session reads
+   * surface through the inbox in one arrival order, which keeps this wait
+   * deterministic under workflow replay. Returns the callback payloads once
+   * all `expected` challenges have reported, or `undefined` when session
+   * activity should be handled first — that un-consumed read is picked up
+   * immediately by the regular parked-delivery path.
+   */
+  const awaitAuthorizationResume = async (
+    expected: number,
+  ): Promise<DeliverPayload[] | undefined> => {
+    commandInbox.setAuthorizationWindow(true);
+    try {
+      while (bufferedDeliveries.length === 0 && bufferedSessionControls.length === 0) {
+        const { result, source } = await commandInbox.nextWithSource();
+        if (source !== "authorization") return undefined;
+
+        commandInbox.consumeNext();
+        if (!result.done && result.value.kind === "deliver") {
+          collectedAuthPayloads.push(...result.value.payloads);
+        }
+        if (!result.done && collectedAuthPayloads.length < expected) continue;
+        return collectedAuthPayloads.splice(0);
+      }
+      return undefined;
+    } finally {
+      commandInbox.setAuthorizationWindow(false);
+    }
+  };
   // Fast descendant resumes can start the next turn before the prior
   // control hook disposal is persisted by the Workflow SDK, so each
   // turn needs its own session-scoped token.
@@ -310,6 +335,12 @@ async function runDriverLoop(input: {
   const commandInbox = createSessionCommandInbox();
   const stableCommandToken = sessionCommandHookToken(input.sessionState.sessionId);
   await commandInbox.claimStable(stableCommandToken);
+  // Per-session authorization-callback hook. Claimed before any turns so it
+  // exists when authorization.required events trigger OAuth callbacks;
+  // getHookUrl() builds callback URLs with this token (see authHookToken —
+  // inlined here because the workflow driver body cannot import the
+  // harness module).
+  await commandInbox.claimAuthorization(`${input.sessionState.sessionId}:auth`);
   const sessionTimeout =
     input.sessionTimeoutDeadline === undefined
       ? undefined
@@ -395,27 +426,25 @@ async function runDriverLoop(input: {
       }
 
       if (action.authorizationNames && action.authorizationNames.length > 0) {
-        const expected = action.authorizationNames.length;
-        const allPayloads: DeliverPayload[] = [];
-
-        while (allPayloads.length < expected) {
-          const next = await authIterator.next();
-          if (next.done) break;
-          if (next.value.kind === "deliver") {
-            allPayloads.push(...next.value.payloads);
-          }
+        // An open authorization challenge must not wedge the session:
+        // ordinary deliveries keep starting normal turns while the
+        // challenge waits for its callback. Buffered activity and inbox
+        // reads drain through the regular parked path below; only when
+        // the session is otherwise quiet does the driver wait on the
+        // callback — racing it against an inbox peek so whichever
+        // arrives first wins. The pending challenge survives intervening
+        // turns because every park re-derives `authorizationNames` from
+        // durable session state.
+        const authPayloads = await awaitAuthorizationResume(action.authorizationNames.length);
+        if (authPayloads !== undefined) {
+          action = await runTurn({
+            delivery: { kind: "deliver", payloads: authPayloads },
+            serializedContext: action.serializedContext,
+            sessionState: action.sessionState,
+          });
+          input.crashCleanupState.lastSessionState = action.sessionState;
+          continue;
         }
-
-        action = await runTurn({
-          delivery: {
-            kind: "deliver",
-            payloads: allPayloads,
-          },
-          serializedContext: action.serializedContext,
-          sessionState: action.sessionState,
-        });
-        input.crashCleanupState.lastSessionState = action.sessionState;
-        continue;
       }
 
       // `settled` rides the typed park arm exclusively; `run-step` preserves
@@ -511,10 +540,6 @@ async function runDriverLoop(input: {
     await disposeSettledTurnControl?.();
     await sessionTimeout?.dispose();
     await commandInbox.dispose();
-    // Dispose without closing the iterator: a session cancelled while
-    // awaiting authorization can leave a durable read in flight, and an
-    // async iterator only honors `return()` after that read settles.
-    await disposeHook(authHook);
   }
 }
 

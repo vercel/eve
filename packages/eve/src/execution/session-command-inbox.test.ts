@@ -139,7 +139,107 @@ describe("createSessionCommandInbox", () => {
     expect(stable.return).not.toHaveBeenCalled();
     expect(alias.return).not.toHaveBeenCalled();
   });
+
+  it("stashes authorization callbacks while the window is closed", async () => {
+    const sessionRead = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(
+      createMockHook({ reads: [sessionRead.promise], token: "stable" }),
+      createMockHook({
+        reads: [Promise.resolve(resolved(authCallback("weather")))],
+        token: "session:auth",
+      }),
+    );
+    const inbox = createSessionCommandInbox();
+    await inbox.claimStable("stable");
+    await inbox.claimAuthorization("session:auth");
+
+    // The callback resolves first, but only session activity surfaces.
+    const pending = inbox.nextWithSource();
+    sessionRead.resolve(resolved(send("while closed")));
+    await expect(pending).resolves.toEqual({
+      result: resolved(send("while closed")),
+      source: "session",
+    });
+    inbox.consumeNext();
+
+    inbox.setAuthorizationWindow(true);
+    await expect(inbox.nextWithSource()).resolves.toEqual({
+      result: resolved(authCallback("weather")),
+      source: "authorization",
+    });
+    inbox.consumeNext();
+    inbox.setAuthorizationWindow(false);
+    await inbox.dispose();
+  });
+
+  it("re-stashes an unconsumed authorization read when the window closes", async () => {
+    installHooks(
+      createMockHook({ reads: [Promise.resolve(resolved(send("first")))], token: "stable" }),
+      createMockHook({
+        reads: [Promise.resolve(resolved(authCallback("weather")))],
+        token: "session:auth",
+      }),
+    );
+    const inbox = createSessionCommandInbox();
+    await inbox.claimStable("stable");
+    await inbox.claimAuthorization("session:auth");
+
+    // Window open: the session read arrives first and is offered; the
+    // callback read resolves behind it and waits enqueued.
+    inbox.setAuthorizationWindow(true);
+    await expect(inbox.nextWithSource()).resolves.toEqual({
+      result: resolved(send("first")),
+      source: "session",
+    });
+    inbox.setAuthorizationWindow(false);
+    inbox.consumeNext();
+
+    // Window closed: the stashed callback never surfaces as session activity.
+    const closedRead = inbox.nextWithSource();
+    let settled = false;
+    void closedRead.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    // Reopening surfaces the same stashed callback exactly once.
+    inbox.setAuthorizationWindow(true);
+    await expect(closedRead).resolves.toEqual({
+      result: resolved(authCallback("weather")),
+      source: "authorization",
+    });
+    inbox.consumeNext();
+    await inbox.dispose();
+  });
+
+  it("disposes the authorization hook with the inbox", async () => {
+    const auth = createMockHook({ token: "session:auth" });
+    installHooks(createMockHook({ token: "stable" }), auth);
+    const inbox = createSessionCommandInbox();
+
+    await inbox.claimStable("stable");
+    await inbox.claimAuthorization("session:auth");
+    await inbox.dispose();
+
+    expect(auth.dispose).toHaveBeenCalledOnce();
+    expect(auth.return).not.toHaveBeenCalled();
+  });
 });
+
+function authCallback(connectionName: string): SessionInboxPayload {
+  return {
+    kind: "deliver",
+    payloads: [
+      {
+        authorizationCallback: {
+          callback: { method: "GET", params: { code: "abc" } },
+          connectionName,
+        },
+      },
+    ],
+  };
+}
 
 interface MockHook {
   readonly dispose: ReturnType<typeof vi.fn>;

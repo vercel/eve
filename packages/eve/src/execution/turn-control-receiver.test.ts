@@ -202,6 +202,7 @@ function createCommandInbox(
 ): SessionCommandInbox {
   const queue = [...values];
   return {
+    claimAuthorization: vi.fn(),
     claimStable: vi.fn(),
     consumeNext: vi.fn(),
     next: vi.fn(() => {
@@ -210,7 +211,11 @@ function createCommandInbox(
         ? new Promise<IteratorResult<SessionInboxPayload>>(() => {})
         : Promise.resolve({ done: false, value });
     }),
+    nextWithSource: vi.fn(() =>
+      Promise.reject(new Error("nextWithSource is not modeled by this test inbox.")),
+    ),
     rekeyContinuation: vi.fn(),
+    setAuthorizationWindow: vi.fn(),
     ...overrides,
   };
 }

@@ -55,81 +55,97 @@ function buildSerializedContext(overrides: {
   return context;
 }
 
-describe("workflowEntry integration", () => {
-  it("resumes normal follow-ups after an interactive authorization callback", async () => {
-    let completeCalls = 0;
-    const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
-      principalType: "user",
-      async getToken(): Promise<TokenResult> {
-        throw new ConnectionAuthorizationRequiredError("weather");
-      },
-      async startAuthorization({ callbackUrl }) {
+interface WeatherAuthRuntime {
+  completeCalls(): number;
+  runtime: ReturnType<typeof createTestRuntime>;
+}
+
+/**
+ * A get_weather tool behind an interactive authorization: getToken always
+ * requires sign-in, and completeAuthorization mints `weather-token` from the
+ * `oauth-code` callback. Shared by the callback-resume and
+ * challenge-stays-open driver tests.
+ */
+function createWeatherAuthRuntime(agentName: string): WeatherAuthRuntime {
+  let completeCalls = 0;
+  const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
+    principalType: "user",
+    async getToken(): Promise<TokenResult> {
+      throw new ConnectionAuthorizationRequiredError("weather");
+    },
+    async startAuthorization({ callbackUrl }) {
+      return {
+        challenge: {
+          displayName: "Weather",
+          instructions: "Sign in to continue.",
+          url: `https://idp.example/authorize?callback=${encodeURIComponent(callbackUrl)}`,
+        },
+        resume: { nonce: "weather-nonce" },
+      };
+    },
+    async completeAuthorization({ callback, resume }): Promise<TokenResult> {
+      completeCalls += 1;
+      expect(callback.params.code).toBe("oauth-code");
+      expect(resume).toEqual({ nonce: "weather-nonce" });
+      return { token: "weather-token" };
+    },
+  };
+  const getWeatherTool: ResolvedToolDefinition = {
+    description: "Get the current weather for a city.",
+    execute: createToolExecuteWithAuth({
+      scope: "get_weather",
+      async execute(rawInput, rawCtx) {
+        const ctx = rawCtx as ToolContext;
+        const token = await ctx.getToken(weatherAuth, {
+          authKey: "weather",
+          displayName: "Weather",
+        });
+        const city =
+          typeof rawInput === "object" &&
+          rawInput !== null &&
+          typeof (rawInput as { city?: unknown }).city === "string"
+            ? (rawInput as { city: string }).city
+            : "Lisbon";
         return {
-          challenge: {
-            displayName: "Weather",
-            instructions: "Sign in to continue.",
-            url: `https://idp.example/authorize?callback=${encodeURIComponent(callbackUrl)}`,
-          },
-          resume: { nonce: "weather-nonce" },
+          city,
+          condition: "Sunny",
+          summary: `authorized with ${token.token}`,
+          temperatureF: 72,
         };
       },
-      async completeAuthorization({ callback, resume }): Promise<TokenResult> {
-        completeCalls += 1;
-        expect(callback.params.code).toBe("oauth-code");
-        expect(resume).toEqual({ nonce: "weather-nonce" });
-        return { token: "weather-token" };
+    }),
+    inputSchema: toInputSchema({
+      additionalProperties: false,
+      properties: {
+        city: { type: "string" },
       },
-    };
-    const getWeatherTool: ResolvedToolDefinition = {
-      description: "Get the current weather for a city.",
-      execute: createToolExecuteWithAuth({
-        scope: "get_weather",
-        async execute(rawInput, rawCtx) {
-          const ctx = rawCtx as ToolContext;
-          const token = await ctx.getToken(weatherAuth, {
-            authKey: "weather",
-            displayName: "Weather",
-          });
-          const city =
-            typeof rawInput === "object" &&
-            rawInput !== null &&
-            typeof (rawInput as { city?: unknown }).city === "string"
-              ? (rawInput as { city: string }).city
-              : "Lisbon";
-          return {
-            city,
-            condition: "Sunny",
-            summary: `authorized with ${token.token}`,
-            temperatureF: 72,
-          };
-        },
-      }),
-      inputSchema: toInputSchema({
-        additionalProperties: false,
-        properties: {
-          city: { type: "string" },
-        },
-        required: ["city"],
-        type: "object",
-      }),
-      logicalPath: "tools/get_weather.ts",
-      name: "get_weather",
-      sourceId: "tools/get_weather.ts",
-      sourceKind: "module",
-    };
-    const runtime = createTestRuntime({
-      agent: { name: "workflow-entry-auth-followup" },
-      tools: [getWeatherTool],
-    });
-    const manifestTool = runtime.manifest.tools.find((tool) => tool.name === getWeatherTool.name);
-    if (manifestTool === undefined) {
-      throw new Error("Expected get_weather to be present in the test manifest.");
-    }
-    runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
-      default: {
-        execute: getWeatherTool.execute,
-      },
-    };
+      required: ["city"],
+      type: "object",
+    }),
+    logicalPath: "tools/get_weather.ts",
+    name: "get_weather",
+    sourceId: "tools/get_weather.ts",
+    sourceKind: "module",
+  };
+  const runtime = createTestRuntime({
+    agent: { name: agentName },
+    tools: [getWeatherTool],
+  });
+  const manifestTool = runtime.manifest.tools.find((tool) => tool.name === getWeatherTool.name);
+  if (manifestTool === undefined) {
+    throw new Error("Expected get_weather to be present in the test manifest.");
+  }
+  runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
+    default: {
+      execute: getWeatherTool.execute,
+    },
+  };
+  return { completeCalls: () => completeCalls, runtime };
+}
+
+describe("workflowEntry integration", () => {
+  it("resumes normal follow-ups after an interactive authorization callback", async () => {
+    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-auth-followup");
     const continuationToken = "http:workflow-entry-auth-followup";
 
     await runtime.run(async () => {
@@ -188,7 +204,7 @@ describe("workflowEntry integration", () => {
         );
         const completed = filterEventsByType(authorizedTurn, "authorization.completed");
 
-        expect(completeCalls).toBe(1);
+        expect(completeCalls()).toBe(1);
         expect(authorizedTurn.at(-1)?.type).toBe("session.waiting");
         expect(completed).toHaveLength(1);
         expect(completed[0]?.data).toMatchObject({
@@ -225,6 +241,115 @@ describe("workflowEntry integration", () => {
             (event) =>
               event.type === "message.completed" &&
               event.data.message?.includes("follow up after auth") === true,
+          ),
+        ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("runs ordinary deliveries while an authorization challenge stays open", async () => {
+    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-auth-open");
+    const continuationToken = "http:workflow-entry-auth-open";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+          serializedContext: buildSerializedContext({
+            auth: {
+              attributes: {},
+              authenticator: "test-idp",
+              issuer: "test-idp",
+              principalId: "user-1",
+              principalType: "user",
+            },
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+
+      const stream = captureEvents(run);
+
+      try {
+        await stream.nextUntil(
+          "initial auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+
+        // An ordinary message while the challenge is open runs as a normal
+        // turn instead of queueing behind the callback.
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        await resumeHook(continuationToken, {
+          kind: "send",
+          payload: { message: "Quick status note while I sign in." },
+        });
+
+        const interveningTurn = await stream.nextUntil(
+          "intervening message turn",
+          (event) => event.type === "session.waiting",
+        );
+        expect(
+          interveningTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("Quick status note while I sign in.") === true,
+          ),
+        ).toBe(true);
+        expect(filterEventsByType(interveningTurn, "authorization.completed")).toHaveLength(0);
+        expect(completeCalls()).toBe(0);
+
+        // The callback still lands on the retained read and closes the
+        // challenge exactly once.
+        await resumeHook(`${run.runId}:auth`, {
+          kind: "deliver",
+          payloads: [
+            {
+              authorizationCallback: {
+                callback: {
+                  method: "GET",
+                  params: { code: "oauth-code" },
+                },
+                connectionName: "weather",
+              },
+            },
+          ],
+        });
+
+        const callbackTurn = await stream.nextUntil(
+          "authorization callback turn",
+          (event) => event.type === "session.waiting",
+        );
+        const completed = filterEventsByType(callbackTurn, "authorization.completed");
+        expect(completed).toHaveLength(1);
+        expect(completed[0]?.data).toMatchObject({
+          name: "weather",
+          outcome: "authorized",
+        });
+
+        // The granted authorization serves the next explicit tool request.
+        // (No waitForHook here: it only reports never-received hooks, and
+        // the continuation hook already received the intervening message.)
+        await resumeHook(continuationToken, {
+          kind: "send",
+          payload: { message: "Use the get_weather tool to check the weather in Lisbon." },
+        });
+
+        const toolTurn = await stream.nextUntil(
+          "post-authorization tool turn",
+          (event) => event.type === "session.waiting",
+        );
+        expect(completeCalls()).toBe(1);
+        expect(
+          toolTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("Used local weather tool for Lisbon") === true &&
+              event.data.message.includes("authorized with weather-token"),
           ),
         ).toBe(true);
       } finally {
