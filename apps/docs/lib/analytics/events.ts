@@ -13,7 +13,6 @@ export const analyticsEvents = {
   templateFilterSelected: "Selected template filter",
   templateOpened: "Opened template",
   templatesSearched: "Searched templates",
-  templateDeployOpened: "Opened template deploy",
   templateDemoOpened: "Opened template demo",
   templateSetupCopied: "Copied template setup prompt",
 } as const;

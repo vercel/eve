@@ -13,7 +13,6 @@ export interface TemplateFile {
 
 export interface TemplateEntry {
   category: TemplateCategory;
-  deployHref?: string;
   demoHref?: string;
   description: string;
   files: TemplateFile[];

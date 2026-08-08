@@ -101,7 +101,6 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
             <div className="mt-6">
               <TemplateActions
                 demoHref={entry.demoHref}
-                deployHref={entry.deployHref}
                 setupPrompt={entry.setupPrompt}
                 template={entry.slug}
               />

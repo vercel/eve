@@ -1,6 +1,5 @@
 "use client";
 
-import { SiVercel } from "@icons-pack/react-simple-icons";
 import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
@@ -9,17 +8,11 @@ import { analyticsEvents } from "@/lib/analytics/events";
 
 interface TemplateActionsProps {
   demoHref?: string;
-  deployHref?: string;
   setupPrompt: string;
   template: string;
 }
 
-export const TemplateActions = ({
-  demoHref,
-  deployHref,
-  setupPrompt,
-  template,
-}: TemplateActionsProps) => {
+export const TemplateActions = ({ demoHref, setupPrompt, template }: TemplateActionsProps) => {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -63,23 +56,6 @@ export const TemplateActions = ({
           )}
         </span>
       </Button>
-      {deployHref ? (
-        <Button
-          asChild
-          className="w-full justify-center font-medium text-label-14 sm:w-auto"
-          variant="outline"
-        >
-          <a
-            href={deployHref}
-            onClick={() => track(analyticsEvents.templateDeployOpened, { template })}
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            <SiVercel aria-hidden="true" className="size-4" />
-            Deploy
-          </a>
-        </Button>
-      ) : null}
       {demoHref ? (
         <Button
           asChild
