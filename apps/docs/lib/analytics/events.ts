@@ -13,8 +13,9 @@ export const analyticsEvents = {
   templateFilterSelected: "Selected template filter",
   templateOpened: "Opened template",
   templatesSearched: "Searched templates",
+  templateDeployOpened: "Opened template deploy",
+  templateDemoOpened: "Opened template demo",
   templateSetupCopied: "Copied template setup prompt",
-  templateSourceOpened: "Opened template source",
 } as const;
 
 export type AnalyticsEventName = (typeof analyticsEvents)[keyof typeof analyticsEvents];

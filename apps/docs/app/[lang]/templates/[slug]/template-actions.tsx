@@ -1,19 +1,25 @@
 "use client";
 
-import { SiGithub } from "@icons-pack/react-simple-icons";
+import { SiVercel } from "@icons-pack/react-simple-icons";
 import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { analyticsEvents } from "@/lib/analytics/events";
 
 interface TemplateActionsProps {
+  demoHref?: string;
+  deployHref?: string;
   setupPrompt: string;
-  sourceHref: string;
   template: string;
 }
 
-export const TemplateActions = ({ setupPrompt, sourceHref, template }: TemplateActionsProps) => {
+export const TemplateActions = ({
+  demoHref,
+  deployHref,
+  setupPrompt,
+  template,
+}: TemplateActionsProps) => {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -57,21 +63,40 @@ export const TemplateActions = ({ setupPrompt, sourceHref, template }: TemplateA
           )}
         </span>
       </Button>
-      <Button
-        asChild
-        className="w-full justify-center font-medium text-label-14 sm:w-auto"
-        variant="outline"
-      >
-        <a
-          href={sourceHref}
-          onClick={() => track(analyticsEvents.templateSourceOpened, { template })}
-          rel="noopener noreferrer"
-          target="_blank"
+      {deployHref ? (
+        <Button
+          asChild
+          className="w-full justify-center font-medium text-label-14 sm:w-auto"
+          variant="outline"
         >
-          <SiGithub aria-hidden="true" className="size-4" />
-          View GitHub
-        </a>
-      </Button>
+          <a
+            href={deployHref}
+            onClick={() => track(analyticsEvents.templateDeployOpened, { template })}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <SiVercel aria-hidden="true" className="size-4" />
+            Deploy
+          </a>
+        </Button>
+      ) : null}
+      {demoHref ? (
+        <Button
+          asChild
+          className="w-full justify-center font-medium text-label-14 sm:w-auto"
+          variant="outline"
+        >
+          <a
+            href={demoHref}
+            onClick={() => track(analyticsEvents.templateDemoOpened, { template })}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <ExternalLinkIcon aria-hidden="true" className="size-4" />
+            View Demo
+          </a>
+        </Button>
+      ) : null}
       <span aria-live="polite" className="sr-only">
         {copied ? "Setup prompt copied to clipboard." : ""}
       </span>

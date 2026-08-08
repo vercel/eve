@@ -100,8 +100,9 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
             <p className="max-w-[520px] text-copy-16 text-gray-900">{entry.description}</p>
             <div className="mt-6">
               <TemplateActions
+                demoHref={entry.demoHref}
+                deployHref={entry.deployHref}
                 setupPrompt={entry.setupPrompt}
-                sourceHref={entry.sourceHref}
                 template={entry.slug}
               />
             </div>
@@ -115,10 +116,46 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
           <FileViewer files={highlightedFiles} />
         </section>
 
-        <section aria-label="README" className="mt-16">
-          <div className="max-w-[760px]">
+        <section
+          aria-label="Template documentation"
+          className="mt-16 grid gap-10 lg:grid-cols-[minmax(0,760px)_minmax(0,1fr)] lg:gap-16"
+        >
+          <div>
             <TemplateReadme readme={entry.readme} sourceRevisionHref={entry.sourceRevisionHref} />
           </div>
+          <aside className="order-first lg:order-none" aria-labelledby="github-heading">
+            <h2 className="m-0 text-heading-24 text-gray-1000" id="github-heading">
+              GitHub
+            </h2>
+            <dl className="mt-6 grid grid-cols-2 gap-6 sm:flex sm:flex-wrap lg:grid lg:grid-cols-1">
+              <div>
+                <dt className="font-medium text-gray-1000 text-label-14">Owner</dt>
+                <dd className="mt-2 text-copy-14">
+                  <a
+                    className="text-blue-700 no-underline hover:underline"
+                    href={`https://github.com/${entry.githubOwner}`}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    {entry.githubOwner}
+                  </a>
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-1000 text-label-14">Repository</dt>
+                <dd className="mt-2 text-copy-14">
+                  <a
+                    className="break-words text-blue-700 no-underline hover:underline"
+                    href={entry.sourceHref}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    {entry.githubRepo}
+                  </a>
+                </dd>
+              </div>
+            </dl>
+          </aside>
         </section>
       </main>
     </>

@@ -43,6 +43,8 @@ describe("composeTemplateEntries", () => {
     expect(entry.sourceRevisionHref).toBe(
       "https://github.com/vercel-labs/example/tree/0123456789abcdef0123456789abcdef01234567",
     );
+    expect(entry.githubOwner).toBe("vercel-labs");
+    expect(entry.githubRepo).toBe("example");
     expect(entry.readme).toBe(generated.templates.example.readme);
     expect(entry.files).toEqual(generated.templates.example.files);
     expect(entry).not.toHaveProperty("github");
