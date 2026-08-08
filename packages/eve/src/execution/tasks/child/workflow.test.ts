@@ -3,7 +3,7 @@ import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import {
-  appendTaskSnapshotStep,
+  appendTaskViewStep,
   deliverTaskInputResponsesStep,
   wakeTaskAuthorizationParentStep,
   wakeTaskInputRequestParentStep,
@@ -28,7 +28,7 @@ vi.mock("../../hook-ownership.js", async (importOriginal) => ({
 }));
 
 vi.mock("./steps.js", () => ({
-  appendTaskSnapshotStep: vi.fn(),
+  appendTaskViewStep: vi.fn(),
   deliverTaskInputResponsesStep: vi.fn(),
   wakeTaskAuthorizationParentStep: vi.fn(),
   wakeTaskInputRequestParentStep: vi.fn(),
@@ -67,11 +67,11 @@ function mockCommandHook(payloads: readonly TaskRunInboundPayload[]): void {
 }
 
 function appendedStatuses(): readonly string[] {
-  return vi.mocked(appendTaskSnapshotStep).mock.calls.map(([input]) => input.view.status);
+  return vi.mocked(appendTaskViewStep).mock.calls.map(([input]) => input.view.status);
 }
 
 describe("taskRunWorkflow", () => {
-  it("publishes the initial snapshot, applies commands, and stops at terminal", async () => {
+  it("publishes the initial view, applies commands, and stops at terminal", async () => {
     mockCommandHook([
       {
         command: {
@@ -96,7 +96,7 @@ describe("taskRunWorkflow", () => {
     expect(disposeHook).toHaveBeenCalledTimes(1);
   });
 
-  it("skips snapshots for rejected and noop commands", async () => {
+  it("skips views for rejected and noop commands", async () => {
     mockCommandHook([
       { command: { kind: "answered", requestIds: ["req-1"] }, kind: "task-command" }, // noop on working
       { command: { kind: "cancel" }, kind: "task-command" },
@@ -123,7 +123,7 @@ describe("taskRunWorkflow", () => {
       parentContinuationToken: "parent-session-token",
     });
 
-    expect(appendTaskSnapshotStep).not.toHaveBeenCalled();
+    expect(appendTaskViewStep).not.toHaveBeenCalled();
     expect(disposeHook).not.toHaveBeenCalled();
   });
 
@@ -274,7 +274,7 @@ describe("taskRunWorkflow", () => {
     expect(appendedStatuses()).toEqual(["working", "input_required", "input_required"]);
     expect(wakeTaskAuthorizationParentStep).toHaveBeenCalledTimes(1);
     expect(vi.mocked(wakeTaskAuthorizationParentStep).mock.invocationCallOrder[0]).toBeGreaterThan(
-      vi.mocked(appendTaskSnapshotStep).mock.invocationCallOrder[2] ?? 0,
+      vi.mocked(appendTaskViewStep).mock.invocationCallOrder[2] ?? 0,
     );
   });
 
@@ -350,8 +350,7 @@ describe("taskRunWorkflow", () => {
     );
     const firstInputWakeOrder =
       vi.mocked(wakeTaskInputRequestParentStep).mock.invocationCallOrder[0] ?? 0;
-    const firstInputAppendOrder =
-      vi.mocked(appendTaskSnapshotStep).mock.invocationCallOrder[2] ?? 0;
+    const firstInputAppendOrder = vi.mocked(appendTaskViewStep).mock.invocationCallOrder[2] ?? 0;
     expect(firstInputAppendOrder).toBeLessThan(firstInputWakeOrder);
   });
 });
@@ -396,7 +395,7 @@ describe("taskRunWorkflow answered input", () => {
     });
     expect(appendedStatuses()).toEqual(["working", "input_required", "working", "completed"]);
     const deliveryOrder = vi.mocked(deliverTaskInputResponsesStep).mock.invocationCallOrder[0] ?? 0;
-    const unblockOrder = vi.mocked(appendTaskSnapshotStep).mock.invocationCallOrder[2] ?? 0;
+    const unblockOrder = vi.mocked(appendTaskViewStep).mock.invocationCallOrder[2] ?? 0;
     expect(deliveryOrder).toBeLessThan(unblockOrder);
   });
 
@@ -442,7 +441,7 @@ describe("taskRunWorkflow answered input", () => {
       answer: answer("q1", "unknown"),
       requestIds: ["q1"],
     });
-    const blockedAgain = vi.mocked(appendTaskSnapshotStep).mock.calls[2]?.[0].view;
+    const blockedAgain = vi.mocked(appendTaskViewStep).mock.calls[2]?.[0].view;
     expect(blockedAgain?.status).toBe("input_required");
     expect(blockedAgain?.inputRequests).toEqual([{ prompt: "q2", requestId: "q2" }]);
   });

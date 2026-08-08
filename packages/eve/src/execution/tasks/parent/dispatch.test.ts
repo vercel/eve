@@ -6,7 +6,7 @@ import {
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
 import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
-import { readLatestTaskSnapshot, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
+import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
@@ -14,7 +14,7 @@ import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
 
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
-  readLatestTaskSnapshot: vi.fn(),
+  readLatestTaskView: vi.fn(),
   sendTaskCommand: vi.fn(),
 }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
@@ -85,7 +85,7 @@ describe("task cancellation identity", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(sendTaskCommand).mockResolvedValue("delivered");
-    vi.mocked(readLatestTaskSnapshot).mockResolvedValue({
+    vi.mocked(readLatestTaskView).mockResolvedValue({
       metadata: {
         agentId: "agent-1",
         kind: "subagent",
@@ -142,7 +142,7 @@ describe("task cancellation identity", () => {
   );
 
   it("uses task-scoped cancellation before child-turn identity arrives", async () => {
-    vi.mocked(readLatestTaskSnapshot).mockResolvedValue({
+    vi.mocked(readLatestTaskView).mockResolvedValue({
       metadata: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" },
       status: "cancelled",
       taskId: "task-1",
@@ -178,7 +178,7 @@ describe("task cancellation identity", () => {
 
   it("fails instead of reporting success when cancellation does not commit", async () => {
     vi.useFakeTimers();
-    vi.mocked(readLatestTaskSnapshot).mockResolvedValue({
+    vi.mocked(readLatestTaskView).mockResolvedValue({
       metadata: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" },
       status: "working",
       taskId: "task-1",

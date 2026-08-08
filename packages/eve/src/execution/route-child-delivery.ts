@@ -11,7 +11,7 @@ import {
 } from "#execution/subagent-event-proxy-step.js";
 import {
   acceptTaskAuthorizationEventStep,
-  recordTerminalTaskSnapshotsStep,
+  recordTerminalTaskViewsStep,
   recordTaskInputRequestStep,
 } from "#execution/tasks/parent/hitl-proxy-steps.js";
 
@@ -36,10 +36,10 @@ export async function routeDeliverToChildren(input: {
   let serializedContext = input.serializedContext;
   let sessionState = input.sessionState;
 
-  if ((payload.task?.snapshots?.length ?? 0) > 0) {
-    sessionState = await recordTerminalTaskSnapshotsStep({
+  if ((payload.task?.views?.length ?? 0) > 0) {
+    sessionState = await recordTerminalTaskViewsStep({
       sessionState,
-      snapshots: payload.task?.snapshots ?? [],
+      views: payload.task?.views ?? [],
     });
   }
 

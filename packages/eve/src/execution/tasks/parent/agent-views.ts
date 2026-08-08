@@ -4,7 +4,7 @@ import { formatAgentStatus, getAgentHandleStore } from "#harness/handles/store.j
 import { readTaskViews } from "#execution/tasks/parent/control-shared.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 
-/** Derives model-visible task-agent availability from authoritative task snapshots. */
+/** Derives model-visible task-agent availability from authoritative task views. */
 export async function readTaskAgentViews(session: HarnessSession): Promise<readonly AgentView[]> {
   const addresses = (getAgentHandleStore(session.state)?.handles ?? []).filter(
     (handle) => handle.phase === "addressed",

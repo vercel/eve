@@ -8,7 +8,7 @@ import type {
 import { isTerminalTaskStatus, readTaskInputRequestId } from "#tasks/types.js";
 
 /**
- * Outcome of applying one command to a task snapshot.
+ * Outcome of applying one command to a task view.
  *
  * - `accepted`: the state changed; the new view must be appended.
  * - `noop`: the command is recognized and benign (idempotent cancel,
@@ -39,7 +39,7 @@ export type TaskTransitionResult =
  * transitions.
  */
 /**
- * Builds the settled snapshot for one terminal command, carrying the
+ * Builds the settled view for one terminal command, carrying the
  * child's lifecycle verdict and reported usage when present. Usage is
  * retention-only: nothing folds it into parent budgets yet.
  */

@@ -317,6 +317,16 @@ export interface SubagentCalledStreamEvent {
     sequence: number;
     name: string;
     remote?: {
+      /**
+       * Key to the authored credential functions (`auth`/`headers`) for this
+       * remote child, resolved at stream-proxy time by
+       * `resolveRemoteAgentStreamHeaders`. Static subagent → the node id in
+       * `subagentRegistry.subagentsByNodeId`; dynamic subagent → its
+       * `credentialsStepId` in the step registry. The event stores this key —
+       * never resolved header values — because tokens expire and this event
+       * is persisted and streamed to clients. Absent when the remote child
+       * has no authored credentials.
+       */
       resolverId?: string;
       url: string;
     };

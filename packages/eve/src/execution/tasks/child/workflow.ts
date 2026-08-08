@@ -2,7 +2,7 @@ import { createHook } from "#compiled/@workflow/core/index.js";
 
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
-  appendTaskSnapshotStep,
+  appendTaskViewStep,
   deliverTaskInputResponsesStep,
   wakeTaskAuthorizationParentStep,
   wakeTaskInputRequestParentStep,
@@ -27,7 +27,7 @@ import {
 export interface TaskRunWorkflowInput {
   /** Private continuation token; a routing credential, never model-visible. */
   readonly continuationToken: string;
-  /** The creation snapshot, normally `working`. */
+  /** The creation view, normally `working`. */
   readonly initialView: TaskView;
   /** Parent session delivery token used to wake the task's owning parent. */
   readonly parentContinuationToken: string;
@@ -46,7 +46,7 @@ function isTaskRunFinished(view: TaskView, dispatchAcknowledged: boolean): boole
  *
  * Consumes commands and child wire payloads over its private hook,
  * applies the pure transition function, and appends a full `TaskView`
- * snapshot per accepted command to its `eve.task` run stream. Competing
+ * per accepted command to its `eve.task` run stream. Competing
  * completion, cancellation, and input transitions serialize here;
  * rejected commands (for example a late child result after `cancelled`)
  * change nothing.
@@ -56,7 +56,7 @@ function isTaskRunFinished(view: TaskView, dispatchAcknowledged: boolean): boole
  * session. A parked parent starts a turn; an active turn observes the
  * delivery at its next safe boundary. Nothing else wakes the parent.
  *
- * The run ends when the task reaches a terminal status. Its snapshot
+ * The run ends when the task reaches a terminal status. Its view
  * stream stays readable, so terminal tasks remain peekable; the
  * disposed hook makes any later command fail loudly instead of queueing
  * against a finished task.
@@ -87,7 +87,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     let pendingInputRequest: TaskInboundInputRequest | undefined;
     let pendingAuthorizationEvent: TaskInboundAuthorizationEvent | undefined;
     let dispatchAcknowledged = false;
-    await appendTaskSnapshotStep({ view });
+    await appendTaskViewStep({ view });
 
     while (!isTaskRunFinished(view, dispatchAcknowledged)) {
       const next = await iterator.next();
@@ -123,7 +123,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         !isTerminalTaskStatus(view.status) && isTerminalTaskStatus(result.view.status);
       const becameReady = !isReadyTaskStatus(view.status) && isReadyTaskStatus(result.view.status);
       view = result.view;
-      await appendTaskSnapshotStep({ view });
+      await appendTaskViewStep({ view });
       if (pendingAuthorizationEvent !== undefined && dispatchAcknowledged) {
         await wakeTaskAuthorizationParentStep({
           request: pendingAuthorizationEvent,

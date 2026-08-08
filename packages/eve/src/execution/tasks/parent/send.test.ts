@@ -9,7 +9,7 @@ import {
   failDelegatedDispatch,
   settleDelegatedDispatch,
 } from "#execution/tasks/parent/delegate.js";
-import { readLatestTaskSnapshot } from "#execution/tasks/parent/run-parent.js";
+import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { executeTaskSend } from "#execution/tasks/parent/send.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
@@ -29,7 +29,7 @@ vi.mock("#execution/tasks/parent/delegate.js", () => ({
 }));
 
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
-  readLatestTaskSnapshot: vi.fn(),
+  readLatestTaskView: vi.fn(),
   sendTaskCommand: vi.fn(),
 }));
 
@@ -37,7 +37,7 @@ const agentId = "ag_research:abcdef123456";
 const metadata = { agentId, kind: "subagent" as const, mode: "local" as const, name: "research" };
 
 function task(taskId: string, status: TaskStatus): TaskView {
-  // Cast on purpose: mock snapshots omit the per-status payload fields the
+  // Cast on purpose: mock views omit the per-status payload fields the
   // TaskView union requires (e.g. lastOutput on completed).
   return { metadata, status, taskId } as TaskView;
 }
@@ -102,7 +102,7 @@ describe("task_send persistent-agent admission", () => {
 
   it("starts a new task on the same address after terminal work", async () => {
     const session = createSession();
-    vi.mocked(readLatestTaskSnapshot).mockResolvedValue(task("task_terminal", "completed"));
+    vi.mocked(readLatestTaskView).mockResolvedValue(task("task_terminal", "completed"));
     vi.mocked(beginDelegatedTask).mockResolvedValue({
       continuationToken: "task-token-new",
       createdByTurnId: "turn-2",
@@ -146,7 +146,7 @@ describe("task_send persistent-agent admission", () => {
 
   it("rejects a follow-up while another nonterminal task owns the agent", async () => {
     const session = createSession(true);
-    vi.mocked(readLatestTaskSnapshot).mockImplementation(async ({ taskRunId }) =>
+    vi.mocked(readLatestTaskView).mockImplementation(async ({ taskRunId }) =>
       taskRunId === "run-active"
         ? task("task_active", "input_required")
         : task("task_terminal", "completed"),
@@ -170,7 +170,7 @@ describe("task_send persistent-agent admission", () => {
 
   it("rejects a second same-batch follow-up even if the first task already completed", async () => {
     const session = createSession(true, "turn-2");
-    vi.mocked(readLatestTaskSnapshot).mockImplementation(async ({ taskRunId }) =>
+    vi.mocked(readLatestTaskView).mockImplementation(async ({ taskRunId }) =>
       taskRunId === "run-active"
         ? task("task_active", "completed")
         : task("task_terminal", "completed"),
@@ -194,7 +194,7 @@ describe("task_send persistent-agent admission", () => {
   it("reserves the addressed agent before an ambiguous delivery", async () => {
     const current = createSession();
     const reserved = createSession(true, "turn-2");
-    vi.mocked(readLatestTaskSnapshot).mockResolvedValue(task("task_terminal", "completed"));
+    vi.mocked(readLatestTaskView).mockResolvedValue(task("task_terminal", "completed"));
     vi.mocked(beginDelegatedTask).mockResolvedValue({
       continuationToken: "task-token-new",
       createdByTurnId: "turn-2",

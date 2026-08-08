@@ -38,10 +38,7 @@ import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-s
 import { defineTool } from "#public/definitions/tool.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
-import {
-  readLatestTaskSnapshot,
-  sendTaskInboundPayload,
-} from "#execution/tasks/parent/run-parent.js";
+import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import {
@@ -65,7 +62,7 @@ vi.mock("./durable-session-store.js", async (importOriginal) => {
   };
 });
 vi.mock("./tasks/parent/run-parent.js", () => ({
-  readLatestTaskSnapshot: vi.fn(),
+  readLatestTaskView: vi.fn(),
   sendTaskInboundPayload: vi.fn(),
 }));
 
@@ -217,7 +214,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  vi.mocked(readLatestTaskSnapshot).mockReset();
+  vi.mocked(readLatestTaskView).mockReset();
   vi.mocked(sendTaskInboundPayload).mockReset();
   vi.mocked(sendTaskInboundPayload).mockResolvedValue("delivered");
 });
@@ -430,7 +427,7 @@ describe("recordTaskInputRequestStep", () => {
       },
     });
     installSessionStoreMocks([session]);
-    vi.mocked(readLatestTaskSnapshot).mockResolvedValue({
+    vi.mocked(readLatestTaskView).mockResolvedValue({
       metadata: {
         agentId: "agent-1",
         kind: "subagent",
@@ -463,7 +460,7 @@ describe("recordTaskInputRequestStep", () => {
   it("rejects cross-session and stale batches without recording a route", async () => {
     const session = createStubSession();
     installSessionStoreMocks([session, session]);
-    vi.mocked(readLatestTaskSnapshot).mockResolvedValue(undefined);
+    vi.mocked(readLatestTaskView).mockResolvedValue(undefined);
 
     const result = await recordTaskInputRequestStep({
       hookPayload,

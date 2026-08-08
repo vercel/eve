@@ -1,8 +1,5 @@
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
-import {
-  isFinishedTaskRunTarget,
-  readLatestTaskSnapshot,
-} from "#execution/tasks/parent/run-parent.js";
+import { isFinishedTaskRunTarget, readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import { taskViewsToJson } from "#tasks/json.js";
@@ -39,7 +36,7 @@ export function lookupTaskEntries(
   return unknown.length > 0 ? { kind: "unknown", unknown } : { entries, kind: "found" };
 }
 
-/** Reads the latest snapshot of every entry, defaulting to `working`. */
+/** Reads the latest view of every entry, defaulting to `working`. */
 export async function readTaskViews(
   entries: readonly SessionTaskIndexEntry[],
 ): Promise<TaskView[]> {
@@ -49,17 +46,17 @@ export async function readTaskViews(
 export async function readTaskView(entry: SessionTaskIndexEntry): Promise<TaskView> {
   try {
     return (
-      (await readLatestTaskSnapshot({ taskRunId: entry.taskRunId })) ?? createPendingTaskView(entry)
+      (await readLatestTaskView({ taskRunId: entry.taskRunId })) ?? createPendingTaskView(entry)
     );
   } catch (error) {
-    if (isFinishedTaskRunTarget(error) && entry.terminalSnapshot !== undefined) {
-      return entry.terminalSnapshot;
+    if (isFinishedTaskRunTarget(error) && entry.terminalView !== undefined) {
+      return entry.terminalView;
     }
     throw error;
   }
 }
 
-/** The view of a run that has not published its first snapshot yet. */
+/** The placeholder view for a run that has not published anything yet. */
 export function createPendingTaskView(entry: SessionTaskIndexEntry): TaskView {
   return {
     metadata: entry.metadata,

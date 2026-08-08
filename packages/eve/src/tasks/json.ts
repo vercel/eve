@@ -43,23 +43,23 @@ const taskViewJsonSchema = z.discriminatedUnion("status", [
 ]);
 
 /**
- * Model-visible task snapshot, inferred from {@link taskViewJsonSchema}.
+ * Model-visible task view, inferred from {@link taskViewJsonSchema}.
  *
  * This is the public projection of `TaskView` (#tasks/types.js), not a
- * replacement for it: the durable snapshot additionally carries private
+ * replacement for it: the durable view additionally carries private
  * `executor` and `usage`, and its module must stay zod-free because it is
  * bundled into workflow bodies.
  */
 export type TaskViewJson = z.infer<typeof taskViewJsonSchema>;
 
-/** Projects a task snapshot into the JSON value carried by tool results. */
+/** Projects a task view into the JSON value carried by tool results. */
 export function taskViewToJson(view: TaskView): TaskViewJson {
   // `satisfies` couples the schema to `TaskView` at compile time; the runtime
   // parse strips the private fields structural typing would let through.
   return taskViewJsonSchema.parse(view satisfies TaskViewJson);
 }
 
-/** Projects many snapshots into one `{ tasks }` tool output. */
+/** Projects many views into one `{ tasks }` tool output. */
 export function taskViewsToJson(views: readonly TaskView[]): JsonValue {
   return { tasks: views.map((view) => taskViewToJson(view)) };
 }

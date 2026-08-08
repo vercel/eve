@@ -147,13 +147,17 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
       // A pending runtime-action batch (model-driven `park` or dynamic-workflow
       // interrupt) is resolved in-line so the turn stays alive across the wait;
-      // the two arms differ only in their dispatch path.
+      // the arms differ only in their dispatch path: the workflow adapter for
+      // interrupt-sourced batches, and the task-mode sibling when the agent
+      // runs `experimental.tasks`.
       if (pendingActionKeys !== undefined) {
         await cursor.adopt(result);
         const dispatch =
           result.action === "dispatch-workflow-runtime-actions"
             ? dispatchWorkflowRuntimeActionsStep
-            : dispatchRuntimeActionsStep;
+            : result.action === "park" && result.tasksEnabled
+              ? dispatchTaskStep
+              : dispatchRuntimeActionsStep;
         const dispatchResult = await dispatch({
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
           parentContinuationToken: inbox.token,

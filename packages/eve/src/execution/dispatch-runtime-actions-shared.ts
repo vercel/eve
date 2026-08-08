@@ -252,6 +252,12 @@ export async function emitSubagentCalled(input: {
         remote:
           outcome.address.kind === "agent/remote"
             ? {
+                // The proxy route re-resolves outbound auth from this key via
+                // resolveRemoteAgentStreamHeaders: a node id lands in
+                // subagentRegistry.subagentsByNodeId (static definition), a
+                // credentialsStepId lands in the step registry (dynamic
+                // definition). Both sides of this ternary must stay in sync
+                // with that lookup order.
                 resolverId:
                   dynamicRemoteAgent === undefined
                     ? action.nodeId

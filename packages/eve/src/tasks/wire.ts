@@ -16,7 +16,7 @@ import { TASK_AUTHORIZATION_REQUEST_ID, readTaskUsage } from "#tasks/types.js";
  * - `authorization.required` also blocks the task (the child cannot
  *   proceed without the parent's user) under a reserved request id, and
  *   `authorization.completed` clears exactly that id. Authorization
- *   payloads never enter the snapshot — only the fact that the child is
+ *   payloads never enter the view — only the fact that the child is
  *   blocked does.
  *
  * `input-response` is deliberately absent: the run must forward the
@@ -36,7 +36,7 @@ export function translateTaskInboundPayload(
       if (result === undefined) return undefined;
       if (result.outcome !== undefined) {
         // Usage retention: the settled outcome's `usageDelta` survives into
-        // the terminal command so the snapshot keeps the child's spend.
+        // the terminal command so the view keeps the child's spend.
         const usage = readTaskUsage(result.outcome.usageDelta);
         switch (result.outcome.result.kind) {
           case "succeeded":

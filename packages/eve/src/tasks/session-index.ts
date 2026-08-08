@@ -21,14 +21,14 @@ export const SESSION_TASKS_STATE_KEY = "eve.tasks";
  *
  * `continuationToken` is the private routing credential for the task run's
  * inbound hook. It must never render into model context, history, task
- * snapshots, or compaction summaries — the model addresses tasks by
+ * views, or compaction summaries — the model addresses tasks by
  * `taskId` only, and lookup verifies ownership through this index.
  */
 export interface SessionTaskIndexEntry {
   readonly taskId: string;
   readonly taskRunId: string;
   /** Immutable fallback once the owning workflow run expires. */
-  readonly terminalSnapshot?: TaskView;
+  readonly terminalView?: TaskView;
   readonly continuationToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
@@ -64,7 +64,7 @@ const taskViewBaseShape = {
 };
 
 /**
- * Terminal snapshots only, on purpose: the index caches a snapshot solely as
+ * Terminal views only, on purpose: the index caches a view solely as
  * the expired-run fallback, and the discriminated arms encode the terminal
  * status/output invariants structurally (strict objects reject
  * `inputRequests` and mismatched outputs).
@@ -91,7 +91,7 @@ const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictOb
   operationId: z.string().min(1),
   taskId: z.string().min(1),
   taskRunId: z.string().min(1),
-  terminalSnapshot: taskViewSchema.optional(),
+  terminalView: taskViewSchema.optional(),
 });
 
 const sessionTaskIndexSchema = z
@@ -108,11 +108,11 @@ const sessionTaskIndexSchema = z
     (index) =>
       index.tasks.every(
         (entry) =>
-          entry.terminalSnapshot === undefined ||
-          (entry.terminalSnapshot.taskId === entry.taskId &&
-            sameTaskMetadata(entry.terminalSnapshot.metadata, entry.metadata)),
+          entry.terminalView === undefined ||
+          (entry.terminalView.taskId === entry.taskId &&
+            sameTaskMetadata(entry.terminalView.metadata, entry.metadata)),
       ),
-    { message: "Cached terminal snapshots must match their task index entry." },
+    { message: "Cached terminal views must match their task index entry." },
   );
 
 interface SessionTaskIndex {
@@ -141,26 +141,26 @@ export function getSessionTaskIndex(
   return parsed.data.tasks;
 }
 
-/** Caches one terminal snapshot beside its task-run address. */
-export function cacheTerminalTaskSnapshot(
+/** Caches one terminal view beside its task-run address. */
+export function cacheTerminalTaskView(
   state: SessionStateMap | undefined,
-  snapshot: TaskView,
+  view: TaskView,
 ): SessionStateMap | undefined {
-  if (!isValidTerminalSnapshot(snapshot)) {
-    throw new Error(`Cannot cache invalid terminal task "${snapshot.taskId}".`);
+  if (!isValidTerminalView(view)) {
+    throw new Error(`Cannot cache invalid terminal task "${view.taskId}".`);
   }
   const entries = getSessionTaskIndex(state);
-  const index = entries.findIndex((entry) => entry.taskId === snapshot.taskId);
+  const index = entries.findIndex((entry) => entry.taskId === view.taskId);
   if (index < 0) return state;
-  if (!sameTaskMetadata(entries[index]!.metadata, snapshot.metadata)) {
-    throw new Error(`Task snapshot metadata does not match index entry "${snapshot.taskId}".`);
+  if (!sameTaskMetadata(entries[index]!.metadata, view.metadata)) {
+    throw new Error(`Task view metadata does not match index entry "${view.taskId}".`);
   }
   const tasks = [...entries];
-  tasks[index] = { ...tasks[index]!, terminalSnapshot: snapshot };
+  tasks[index] = { ...tasks[index]!, terminalView: view };
   return { ...state, [SESSION_TASKS_STATE_KEY]: { tasks } };
 }
 
-function isValidTerminalSnapshot(view: TaskView): boolean {
+function isValidTerminalView(view: TaskView): boolean {
   if (view.inputRequests !== undefined) return false;
   switch (view.status) {
     case "completed":

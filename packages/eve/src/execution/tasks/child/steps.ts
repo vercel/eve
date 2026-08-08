@@ -17,7 +17,7 @@ import { createLogger } from "#internal/logging.js";
 import { walkCauseChain } from "#shared/errors.js";
 import {
   isTerminalTaskStatus,
-  TASK_SNAPSHOT_STREAM_NAMESPACE,
+  TASK_VIEW_STREAM_NAMESPACE,
   type TaskInboundAnswerInput,
   type TaskInboundAuthorizationEvent,
   type TaskInboundInputRequest,
@@ -27,14 +27,14 @@ import {
 const log = createLogger("execution.tasks.run");
 
 /**
- * Appends one full task snapshot to the owning task run's `eve.task`
+ * Appends one full task view to the owning task run's `eve.task`
  * stream. Only the task run workflow calls this, which is what makes
  * the run the single writer readers can trust without re-validating.
  */
-export async function appendTaskSnapshotStep(input: { readonly view: TaskView }): Promise<void> {
+export async function appendTaskViewStep(input: { readonly view: TaskView }): Promise<void> {
   "use step";
 
-  const writable = getWritable<TaskView>({ namespace: TASK_SNAPSHOT_STREAM_NAMESPACE });
+  const writable = getWritable<TaskView>({ namespace: TASK_VIEW_STREAM_NAMESPACE });
   const writer = writable.getWriter();
   try {
     await writer.write(input.view);
@@ -103,10 +103,10 @@ export async function wakeTaskParentStep(input: {
 }): Promise<void> {
   "use step";
 
-  const payload: { message: string; task?: { snapshots: readonly TaskView[] } } = {
+  const payload: { message: string; task?: { views: readonly TaskView[] } } = {
     message: formatTaskNotification(input.view),
   };
-  if (isTerminalTaskStatus(input.view.status)) payload.task = { snapshots: [input.view] };
+  if (isTerminalTaskStatus(input.view.status)) payload.task = { views: [input.view] };
   const command: SessionCommand = {
     kind: "send",
     payload,
@@ -160,7 +160,7 @@ export async function wakeTaskInputRequestParentStep(input: {
  * Forwards answered input to the blocked child.
  *
  * The task run performs this itself so the child unblocks and the
- * snapshot leaves `input_required` under one durable decision. Returns
+ * view leaves `input_required` under one durable decision. Returns
  * `unreachable` when the child hook is already gone, which leaves the
  * outstanding batch untouched rather than reporting a task as working
  * when nothing received the answer.

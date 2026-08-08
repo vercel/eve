@@ -552,7 +552,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       taskRunId: "task-run-active",
     });
     installContext(session, undefined, true);
-    vi.spyOn(taskRunControl, "readLatestTaskSnapshot").mockResolvedValue({
+    vi.spyOn(taskRunControl, "readLatestTaskView").mockResolvedValue({
       metadata: {
         agentId: addressedHandle.identity.id,
         kind: "subagent",

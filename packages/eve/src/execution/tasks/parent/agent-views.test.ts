@@ -5,14 +5,14 @@ import {
   readTaskAgentViews,
 } from "#execution/tasks/parent/agent-views.js";
 import { findActiveTaskForAgent } from "#execution/tasks/parent/control-shared.js";
-import { readLatestTaskSnapshot } from "#execution/tasks/parent/run-parent.js";
+import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
 import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
 import type { TaskStatus, TaskView } from "#tasks/types.js";
 
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
-  readLatestTaskSnapshot: vi.fn(),
+  readLatestTaskView: vi.fn(),
 }));
 
 const metadata = {
@@ -58,7 +58,7 @@ function createSession(taskRunIds: readonly string[]): HarnessSession {
 }
 
 function task(taskId: string, status: TaskStatus): TaskView {
-  // Cast on purpose: mock snapshots omit the per-status payload fields the
+  // Cast on purpose: mock views omit the per-status payload fields the
   // TaskView union requires (e.g. lastOutput on completed).
   return { metadata, status, taskId } as TaskView;
 }
@@ -67,7 +67,7 @@ describe("task-derived agent availability", () => {
   beforeEach(() => vi.resetAllMocks());
 
   it("renders a nonterminal task as busy and a terminal task as available", async () => {
-    vi.mocked(readLatestTaskSnapshot)
+    vi.mocked(readLatestTaskView)
       .mockResolvedValueOnce(task("task_0", "working"))
       .mockResolvedValueOnce(task("task_0", "completed"));
     const session = createSession(["run-0"]);
@@ -93,7 +93,7 @@ describe("task-derived agent availability", () => {
   });
 
   it("finds the active task used for continuation admission", async () => {
-    vi.mocked(readLatestTaskSnapshot).mockResolvedValue(task("task_0", "input_required"));
+    vi.mocked(readLatestTaskView).mockResolvedValue(task("task_0", "input_required"));
 
     await expect(
       findActiveTaskForAgent(createSession(["run-0"]), metadata.agentId),
@@ -103,7 +103,7 @@ describe("task-derived agent availability", () => {
   });
 
   it("appends the busy projection without exposing routing coordinates", async () => {
-    vi.mocked(readLatestTaskSnapshot).mockResolvedValue(task("task_0", "working"));
+    vi.mocked(readLatestTaskView).mockResolvedValue(task("task_0", "working"));
 
     const next = await appendTaskAgentAnnouncement(createSession(["run-0"]));
     const announcement = next.history.at(-1)?.content;
@@ -115,7 +115,7 @@ describe("task-derived agent availability", () => {
   });
 
   it("rejects two nonterminal tasks bound to one child agent", async () => {
-    vi.mocked(readLatestTaskSnapshot)
+    vi.mocked(readLatestTaskView)
       .mockResolvedValueOnce(task("task_0", "working"))
       .mockResolvedValueOnce(task("task_1", "input_required"));
 

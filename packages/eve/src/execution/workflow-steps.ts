@@ -137,6 +137,12 @@ export type DurableStepResult =
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingRuntimeActionKeys?: readonly string[];
+      /**
+       * Selects the dispatch step for `pendingRuntimeActionKeys`:
+       * `dispatchTaskStep` when the agent runs `experimental.tasks`,
+       * `dispatchRuntimeActionsStep` otherwise (including when absent).
+       */
+      readonly tasksEnabled?: boolean;
       readonly sleepDurationMs?: number;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;

@@ -1,6 +1,13 @@
+/**
+ * Delegation policy for the subagent dispatch path: derives task identity,
+ * builds metadata and the parked-tool-call receipt, records the session
+ * index, and defines failure semantics for an unacknowledged dispatch.
+ * Task-run transport (start/command/view) lives in `run-parent.ts`, which
+ * this module composes and which other non-delegation callers share.
+ */
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
 import {
-  readLatestTaskSnapshot,
+  readLatestTaskView,
   sendTaskCommand,
   sendTaskCommandToOwner,
   startTaskRun,
@@ -145,7 +152,7 @@ export async function acknowledgeDelegatedTasksStep(input: {
       retryUnreachable: { attempts: 20, delayMs: 250 },
     });
     if (owner !== undefined) continue;
-    const view = await readLatestTaskSnapshot({ taskRunId: task.taskRunId });
+    const view = await readLatestTaskView({ taskRunId: task.taskRunId });
     if (view !== undefined && isTerminalTaskStatus(view.status)) continue;
     throw new Error(`Task run "${task.taskId}" did not accept its readiness command.`);
   }

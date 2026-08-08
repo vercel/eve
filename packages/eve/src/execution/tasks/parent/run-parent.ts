@@ -14,7 +14,7 @@ import {
 import { getRun, resumeHook } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
 import {
-  TASK_SNAPSHOT_STREAM_NAMESPACE,
+  TASK_VIEW_STREAM_NAMESPACE,
   isReadyTaskStatus,
   type TaskCommand,
   type TaskCommandHookPayload,
@@ -22,12 +22,17 @@ import {
   type TaskView,
 } from "#tasks/types.js";
 
-const TASK_SNAPSHOT_READ_TIMEOUT_MS = 10_000;
+const TASK_VIEW_READ_TIMEOUT_MS = 10_000;
 
 /**
- * Node-side controls for durable task runs. Every export must be called
- * from inside a `"use step"` body; none of these are steps themselves so
- * dispatch and tool steps can compose them inside one durable boundary.
+ * Node-side controls for durable task runs — the generic transport layer.
+ * This module only speaks `TaskCommand`/`TaskView`; it knows nothing about
+ * subagents, receipts, or the session index. Caller-specific policy (e.g.
+ * subagent delegation in `delegate.ts`) composes these primitives.
+ *
+ * Every export must be called from inside a `"use step"` body; none of
+ * these are steps themselves so dispatch and tool steps can compose them
+ * inside one durable boundary.
  */
 
 /** Starts the durable run owning one task's lifecycle. */
@@ -50,7 +55,7 @@ export async function waitForTaskCommandOwner(input: {
  *
  * `unreachable` means the hook is not resumable — either the run
  * already finished and disposed it (the task is terminal; read the
- * final snapshot) or, right after creation, the freshly started run has
+ * final view) or, right after creation, the freshly started run has
  * not registered it yet. Senders racing that startup window pass
  * `retryUnreachable`; senders addressing an established task treat
  * `unreachable` as the terminal signal.
@@ -121,18 +126,18 @@ export async function sendTaskInboundPayload(input: {
 }
 
 /**
- * Reads the latest snapshot a task run has published, or `undefined`
- * when the run has not committed its first snapshot yet (the caller
+ * Reads the latest view a task run has published, or `undefined`
+ * when the run has not committed its first view yet (the caller
  * already holds the creation receipt, which is `working`).
  *
- * Snapshots are trusted without re-validation: the task run is the
+ * Views are trusted without re-validation: the task run is the
  * single writer and every write passed the transition function.
  */
-export async function readLatestTaskSnapshot(input: {
+export async function readLatestTaskView(input: {
   readonly taskRunId: string;
 }): Promise<TaskView | undefined> {
   const stream = getRun<unknown>(input.taskRunId).getReadable<TaskView>({
-    namespace: TASK_SNAPSHOT_STREAM_NAMESPACE,
+    namespace: TASK_VIEW_STREAM_NAMESPACE,
     startIndex: -1,
   });
   const tailIndex = await stream.getTailIndex();
@@ -141,28 +146,28 @@ export async function readLatestTaskSnapshot(input: {
     if (tailIndex < 0) {
       return undefined;
     }
-    const result = await readWithTimeout(reader, "latest task snapshot");
+    const result = await readWithTimeout(reader, "latest task view");
     return result;
   } finally {
-    await reader.cancel("eve task snapshot read complete").catch(() => {});
+    await reader.cancel("eve task view read complete").catch(() => {});
     reader.releaseLock();
   }
 }
 
 /**
- * Waits until a task run publishes a ready snapshot — terminal or
+ * Waits until a task run publishes a ready view — terminal or
  * `input_required` — starting from the latest published state. Returns
  * immediately when the task is already ready.
  *
- * Unlike {@link readLatestTaskSnapshot} this read has no timeout; the
+ * Unlike {@link readLatestTaskView} this read has no timeout; the
  * caller owns cancellation by racing this promise (for example against
  * turn cancellation) and abandoning it.
  */
-export async function waitForReadyTaskSnapshot(input: {
+export async function waitForReadyTaskView(input: {
   readonly taskRunId: string;
 }): Promise<TaskView> {
   const stream = getRun<unknown>(input.taskRunId).getReadable<TaskView>({
-    namespace: TASK_SNAPSHOT_STREAM_NAMESPACE,
+    namespace: TASK_VIEW_STREAM_NAMESPACE,
     startIndex: -1,
   });
   const reader = stream.getReader();
@@ -171,7 +176,7 @@ export async function waitForReadyTaskSnapshot(input: {
       const { done, value } = await reader.read();
       if (done || value === undefined) {
         throw new Error(
-          `Task run "${input.taskRunId}" closed its snapshot stream without a ready snapshot.`,
+          `Task run "${input.taskRunId}" closed its view stream without a ready view.`,
         );
       }
       if (isReadyTaskStatus(value.status)) {
@@ -179,7 +184,7 @@ export async function waitForReadyTaskSnapshot(input: {
       }
     }
   } finally {
-    await reader.cancel("eve task snapshot wait complete").catch(() => {});
+    await reader.cancel("eve task view wait complete").catch(() => {});
     reader.releaseLock();
   }
 }
@@ -193,11 +198,11 @@ async function readWithTimeout(
     const result = await Promise.race([
       reader.read().then((read) => ({ kind: "read" as const, read })),
       new Promise<{ readonly kind: "timeout" }>((resolve) => {
-        timeout = setTimeout(() => resolve({ kind: "timeout" }), TASK_SNAPSHOT_READ_TIMEOUT_MS);
+        timeout = setTimeout(() => resolve({ kind: "timeout" }), TASK_VIEW_READ_TIMEOUT_MS);
       }),
     ]);
     if (result.kind === "timeout") {
-      throw new Error(`Timed out reading ${what} after ${TASK_SNAPSHOT_READ_TIMEOUT_MS}ms.`);
+      throw new Error(`Timed out reading ${what} after ${TASK_VIEW_READ_TIMEOUT_MS}ms.`);
     }
     if (result.read.done) {
       return undefined;

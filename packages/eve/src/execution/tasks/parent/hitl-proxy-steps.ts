@@ -1,7 +1,7 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import { readLatestTaskSnapshot } from "#execution/tasks/parent/run-parent.js";
+import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import {
   toProxyInputRequestEntries,
   upsertProxyInputRequestState,
@@ -9,7 +9,7 @@ import {
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import { removeTaskAgentAddressFromState } from "#harness/handles/transitions.js";
 import { isInputRequest } from "#runtime/input/types.js";
-import { cacheTerminalTaskSnapshot, findSessionTaskEntry } from "#tasks/session-index.js";
+import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
 import type { TaskView } from "#tasks/types.js";
 
@@ -39,7 +39,7 @@ export async function recordTaskInputRequestStep(input: {
   // provenance rests on the sessionId match above plus the strict view
   // checks below; the child-advertised token is only used as the answer
   // route, never as an identity anchor.
-  const view = await readLatestTaskSnapshot({ taskRunId: entry.taskRunId });
+  const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
   const eventRequestIds = input.hookPayload.event.requests.map((request) => request.requestId);
   const viewRequestIds =
     view?.inputRequests?.map((request) =>
@@ -109,26 +109,26 @@ export async function acceptTaskAuthorizationEventStep(input: {
   ) {
     return false;
   }
-  const view = await readLatestTaskSnapshot({ taskRunId: entry.taskRunId });
+  const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
   return (
     view?.executor?.childSessionId === input.hookPayload.childSessionId &&
     view.metadata.agentId === entry.metadata.agentId
   );
 }
 
-/** Caches terminal task snapshots before their workflow runs can expire. */
-export async function recordTerminalTaskSnapshotsStep(input: {
+/** Caches terminal task views before their workflow runs can expire. */
+export async function recordTerminalTaskViewsStep(input: {
   readonly sessionState: DurableSessionState;
-  readonly snapshots: readonly TaskView[];
+  readonly views: readonly TaskView[];
 }): Promise<DurableSessionState> {
   "use step";
 
   const durableSession = await readDurableSession(input.sessionState);
   let state = durableSession.state;
-  for (const snapshot of input.snapshots) {
-    state = cacheTerminalTaskSnapshot(state, snapshot);
-    if (snapshot.executor?.lifecycle === "terminal") {
-      state = removeTaskAgentAddressFromState(state, snapshot.metadata.agentId);
+  for (const view of input.views) {
+    state = cacheTerminalTaskView(state, view);
+    if (view.executor?.lifecycle === "terminal") {
+      state = removeTaskAgentAddressFromState(state, view.metadata.agentId);
     }
   }
   if (state === durableSession.state) return input.sessionState;

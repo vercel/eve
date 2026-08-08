@@ -10,7 +10,7 @@ import { sendTaskCommandToOwner } from "#execution/tasks/parent/run-parent.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
-  readLatestTaskSnapshot: vi.fn(),
+  readLatestTaskView: vi.fn(),
   sendTaskCommandToOwner: vi.fn(),
 }));
 

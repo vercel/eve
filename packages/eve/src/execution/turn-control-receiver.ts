@@ -315,13 +315,7 @@ export class TurnControlReceiver {
   ): boolean {
     const deliveryId = command.taskDeliveryId ?? command.caller?.taskId;
     if (deliveryId === undefined) return true;
-    if (
-      [...this.cancelledTaskIds].some(
-        (taskId) => deliveryId === taskId || deliveryId.startsWith(`${taskId}:`),
-      )
-    ) {
-      return false;
-    }
+    if (this.originatesFromCancelledTask(deliveryId)) return false;
     if (this.seenTaskDeliveries.has(deliveryId)) return false;
     this.seenTaskDeliveries.add(deliveryId);
     return true;
@@ -333,15 +327,24 @@ export class TurnControlReceiver {
     this.bufferedDeliveries.splice(0, this.bufferedDeliveries.length, ...kept);
   }
 
-  private shouldDiscard(delivery: DeliverHookPayload): boolean {
-    const deliveryId = delivery.taskDeliveryId ?? delivery.caller?.taskId;
-    return (
-      deliveryId !== undefined &&
-      [...this.cancelledTaskIds].some(
-        (taskId) => deliveryId === taskId || deliveryId.startsWith(`${taskId}:`),
-      )
+  private originatesFromCancelledTask(deliveryId: string): boolean {
+    return [...this.cancelledTaskIds].some((taskId) =>
+      deliveryOriginatesFromTask(deliveryId, taskId),
     );
   }
+
+  private shouldDiscard(delivery: DeliverHookPayload): boolean {
+    const deliveryId = delivery.taskDeliveryId ?? delivery.caller?.taskId;
+    return deliveryId !== undefined && this.originatesFromCancelledTask(deliveryId);
+  }
+}
+
+/**
+ * Task delivery ids are either a bare task id (the `caller.taskId` fallback)
+ * or `${taskId}:${discriminator}` as minted in tasks/child/steps.ts.
+ */
+function deliveryOriginatesFromTask(deliveryId: string, taskId: string): boolean {
+  return deliveryId === taskId || deliveryId.startsWith(`${taskId}:`);
 }
 
 function deliveryHasMessage(delivery: DeliverHookPayload): boolean {

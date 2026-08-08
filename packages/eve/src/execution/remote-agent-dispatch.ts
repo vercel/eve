@@ -376,7 +376,18 @@ export function resolveRemoteAgentForAction(input: {
   return definition;
 }
 
-/** Resolves authored outbound headers for a server-authored remote child event. */
+/**
+ * Resolves authored outbound headers for a server-authored remote child event.
+ *
+ * `resolverId` is the key persisted on the `subagent.called` event (see
+ * `SubagentCalledStreamEvent`): it identifies the authored credential
+ * functions, never their resolved values. Lookup order mirrors how dispatch
+ * chose the key — first as a subagent node id (static remote definition),
+ * then as a `credentialsStepId` in the step registry (dynamic remote
+ * definition). The matched static definition must still agree with the
+ * event's `name`/`url`, so a stale or mismatched key fails closed rather
+ * than minting headers for the wrong upstream.
+ */
 export async function resolveRemoteAgentStreamHeaders(input: {
   readonly bundle: CompiledRuntimeAgentBundle;
   readonly name: string;
