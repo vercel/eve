@@ -14,15 +14,18 @@ import {
 import { type ReactNode, useMemo, useState } from "react";
 import type { TemplateFile } from "@/lib/templates/data";
 import { cn } from "@/lib/utils";
+import { TemplateReadme } from "./template-readme";
 
 export interface HighlightedTemplateFile {
   code: ReactNode;
+  contents: string;
   language: TemplateFile["language"];
   relativePath: string;
 }
 
 interface FileViewerProps {
   files: HighlightedTemplateFile[];
+  sourceRevisionHref: string;
 }
 
 interface CategoryStyle {
@@ -54,6 +57,19 @@ const categoryOrder = [
 
 const treeRowClassName =
   "min-h-8 w-full touch-manipulation rounded-sm px-2 text-left font-mono text-[13px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-700 motion-reduce:transition-none md:min-h-7";
+
+const parseMarkdownPreview = (contents: string): { body: string; description?: string } => {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(contents);
+  if (!frontmatter) {
+    return { body: contents };
+  }
+
+  const description = /^description:\s*(.+)$/m.exec(frontmatter[1] ?? "")?.[1]?.trim();
+  return {
+    body: contents.slice(frontmatter[0].length),
+    description: description?.replace(/^(["'])(.*)\1$/, "$2"),
+  };
+};
 
 interface FileEntry {
   file: HighlightedTemplateFile;
@@ -114,10 +130,11 @@ const buildTree = (files: HighlightedTemplateFile[]): TreeNode[] => {
   });
 };
 
-export const FileViewer = ({ files }: FileViewerProps) => {
+export const FileViewer = ({ files, sourceRevisionHref }: FileViewerProps) => {
   const tree = useMemo(() => buildTree(files), [files]);
   const initialPath = files[0]?.relativePath ?? null;
   const [selectedPath, setSelectedPath] = useState<string | null>(initialPath);
+  const [showMarkdownSource, setShowMarkdownSource] = useState(false);
   const [openFolders, setOpenFolders] = useState<ReadonlySet<string>>(() => {
     const initial = new Set<string>();
     const parts = initialPath?.split("/");
@@ -127,6 +144,8 @@ export const FileViewer = ({ files }: FileViewerProps) => {
     return initial;
   });
   const selected = files.find((sourceFile) => sourceFile.relativePath === selectedPath);
+  const markdownPreview =
+    selected?.language === "markdown" ? parseMarkdownPreview(selected.contents) : null;
 
   const selectFolder = (folder: FolderNode) => {
     setOpenFolders((current) => new Set(current).add(folder.key));
@@ -245,12 +264,63 @@ export const FileViewer = ({ files }: FileViewerProps) => {
           <code className="truncate text-copy-13-mono text-gray-1000">
             {selected?.relativePath ?? ""}
           </code>
-          <span className="shrink-0 rounded-sm bg-gray-alpha-200 px-2 py-1 text-gray-900 text-label-12-mono">
-            {selected?.language ?? ""}
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="rounded-sm bg-gray-alpha-200 px-2 py-1 text-gray-900 text-label-12-mono">
+              {selected?.language ?? ""}
+            </span>
+            {selected?.language === "markdown" ? (
+              <div
+                aria-label="Markdown view"
+                className="flex rounded-md bg-gray-alpha-200 p-0.5"
+                role="group"
+              >
+                <button
+                  aria-pressed={!showMarkdownSource}
+                  className={cn(
+                    "rounded-sm px-2 py-1 text-label-12 transition-colors",
+                    showMarkdownSource
+                      ? "text-gray-900 hover:text-gray-1000"
+                      : "bg-background-100 font-medium text-gray-1000",
+                  )}
+                  onClick={() => setShowMarkdownSource(false)}
+                  type="button"
+                >
+                  Preview
+                </button>
+                <button
+                  aria-pressed={showMarkdownSource}
+                  className={cn(
+                    "rounded-sm px-2 py-1 text-label-12 transition-colors",
+                    showMarkdownSource
+                      ? "bg-background-100 font-medium text-gray-1000"
+                      : "text-gray-900 hover:text-gray-1000",
+                  )}
+                  onClick={() => setShowMarkdownSource(true)}
+                  type="button"
+                >
+                  Source
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
         <div className="max-h-[560px] min-h-80 overflow-auto md:min-h-[420px] [&>div]:mb-0">
-          {selected?.code ?? null}
+          {selected?.language === "markdown" && !showMarkdownSource ? (
+            <div className="mx-auto w-full max-w-[720px] p-6 sm:p-8">
+              {markdownPreview?.description ? (
+                <div className="mb-6 border-gray-alpha-400 border-l pl-4">
+                  <p className="mb-1 font-medium text-gray-1000 text-label-13">Description</p>
+                  <p className="m-0 text-copy-14 text-gray-900">{markdownPreview.description}</p>
+                </div>
+              ) : null}
+              <TemplateReadme
+                readme={markdownPreview?.body ?? selected.contents}
+                sourceRevisionHref={sourceRevisionHref}
+              />
+            </div>
+          ) : (
+            (selected?.code ?? null)
+          )}
         </div>
       </div>
     </div>
