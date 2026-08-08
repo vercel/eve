@@ -309,6 +309,8 @@ Start a session without an inbound message through `ctx.to(slack, target).send(m
 
 Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [File uploads](./custom#file-uploads) for the `fetchFile` contract.
 
+Private file downloads require the Slack bot token's `files:read` scope. Add the scope and reinstall the Slack app before sending attachments. If Slack returns an HTML sign-in page instead of file bytes, eve rejects the response with this remediation instead of staging the page as an attachment.
+
 ## What to read next
 
 - [Channels overview](./overview): the channel contract and every built-in channel
