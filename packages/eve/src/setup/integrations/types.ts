@@ -11,6 +11,12 @@ export interface IntegrationSetupContext {
   readonly signal?: AbortSignal;
   readonly force?: boolean;
   readonly yes?: boolean;
+  /**
+   * True when the caller has no terminal: prompts resolve from keyed answers
+   * or refuse, and one-time interactive prerequisites (Vercel project
+   * linking) are completed separately instead of opening a flow.
+   */
+  readonly headless?: boolean;
 }
 
 /** Outcome from one registry-owned integration setup flow. */

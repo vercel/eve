@@ -66,6 +66,9 @@ describe("Discord setup", () => {
       expect.stringContaining('connectDiscordCredentials("discord/agent")'),
       { force: undefined },
     );
+    expect(effects.ensureVercelProject).toHaveBeenCalledWith(
+      expect.objectContaining({ headless: undefined }),
+    );
   });
 
   it("prefills the command name and description", async () => {
@@ -98,6 +101,33 @@ describe("Discord setup", () => {
           detected: "Ask the eve agent",
         }),
       ]),
+    );
+  });
+
+  it("hands headless runs keyed answers and a headless Vercel-link prerequisite", async () => {
+    const effects = deps();
+
+    await expect(
+      setupDiscord(
+        {
+          appRoot: "/project",
+          environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
+          headless: true,
+          ui: createIntegrationSetupUi({
+            asker: asker({
+              "discord-bot-token": "bot-token",
+              "discord-command-name": "ask",
+              "discord-command-description": "Ask the eve agent",
+            }),
+            prompter: createFakePrompter().prompter,
+          }),
+        },
+        effects,
+      ),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(effects.ensureVercelProject).toHaveBeenCalledWith(
+      expect.objectContaining({ headless: true }),
     );
   });
 
