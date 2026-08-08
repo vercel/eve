@@ -20,7 +20,7 @@ import {
 import type { HarnessSession } from "#harness/types.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 import { recordSessionTask } from "#tasks/session-index.js";
-import * as taskRunControl from "#execution/tasks/run-parent.js";
+import * as taskRunControl from "#execution/tasks/parent/run-parent.js";
 import {
   AuthKey,
   CapabilitiesKey,

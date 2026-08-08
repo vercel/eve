@@ -2,7 +2,7 @@ import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
-import { sendTaskInboundPayload } from "#execution/tasks/run-parent.js";
+import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
@@ -50,20 +50,21 @@ export async function routeProxiedDeliverStep(input: {
     // child raised after this one.
     if (forChild.taskId !== undefined) {
       const entry = findSessionTaskEntry(durableSession.state, forChild.taskId);
-      const delivery =
-        entry === undefined
-          ? "unreachable"
-          : await sendTaskInboundPayload({
-              continuationToken: entry.continuationToken,
-              payload: {
-                auth: input.auth,
-                childContinuationToken: forChild.childContinuationToken,
-                childResponseUrl: forChild.childResponseUrl,
-                inputResponses: forChild.payload.inputResponses,
-                kind: "input-response",
-                taskId: forChild.taskId,
-              },
-            });
+      if (entry === undefined) {
+        strandedResponses.push(...forChild.payload.inputResponses);
+        continue;
+      }
+      const delivery = await sendTaskInboundPayload({
+        continuationToken: entry.continuationToken,
+        payload: {
+          auth: input.auth,
+          childContinuationToken: forChild.childContinuationToken,
+          childResponseUrl: forChild.childResponseUrl,
+          inputResponses: forChild.payload.inputResponses,
+          kind: "input-response",
+          taskId: forChild.taskId,
+        },
+      });
       if (delivery === "unreachable") strandedResponses.push(...forChild.payload.inputResponses);
       continue;
     }
@@ -80,17 +81,22 @@ export async function routeProxiedDeliverStep(input: {
     serializedContext: input.serializedContext ?? {},
     sessionState: input.sessionState,
   };
-  // Answers to a task that finished mid-flight rejoin the parent-local
-  // remainder, where the model sees them as stale rather than silently
-  // vanishing.
-  const remainder =
-    strandedResponses.length === 0
-      ? routed.forSelf
-      : ({
-          ...routed.forSelf,
-          inputResponses: [...(routed.forSelf?.inputResponses ?? []), ...strandedResponses],
-        } satisfies DeliverPayload);
+  const remainder = mergeStrandedResponses(routed.forSelf, strandedResponses);
   return routed.parentAction === undefined
     ? { ...context, kind: "continue", remainder }
     : { ...context, ...routed.parentAction };
+}
+
+// Answers to a task that finished mid-flight rejoin the parent-local
+// remainder, where the model sees them as stale rather than silently
+// vanishing.
+function mergeStrandedResponses(
+  forSelf: DeliverPayload | undefined,
+  strandedResponses: readonly InputResponse[],
+): DeliverPayload | undefined {
+  if (strandedResponses.length === 0) return forSelf;
+  return {
+    ...forSelf,
+    inputResponses: [...(forSelf?.inputResponses ?? []), ...strandedResponses],
+  } satisfies DeliverPayload;
 }

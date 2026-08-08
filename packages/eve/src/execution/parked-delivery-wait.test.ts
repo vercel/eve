@@ -9,6 +9,7 @@ import type {
   SessionInboxSource,
 } from "#execution/session-command-inbox.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 
 vi.mock("./route-child-delivery.js", () => ({
@@ -106,8 +107,7 @@ function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelive
     bufferedSessionControls: [],
     commandInbox: inbox,
     driverWritable: new WritableStream<Uint8Array>(),
-    serializedContext: {},
-    sessionState,
+    stateCursor: new SessionStateCursor({ serializedContext: {}, sessionState }),
   };
 }
 
@@ -225,6 +225,7 @@ describe("nextTurnDelivery routing", () => {
       sessionId: "session",
       version: 1,
     } as const;
+    const routedSessionState = { ...sessionState, hasProxyInputRequests: false };
     vi.mocked(routeDeliverToChildren)
       .mockResolvedValueOnce({
         kind: "continue",
@@ -236,7 +237,7 @@ describe("nextTurnDelivery routing", () => {
         kind: "continue",
         remainder: { message: "ordinary" },
         serializedContext: {},
-        sessionState,
+        sessionState: routedSessionState,
       });
     const commands = [
       { kind: "send" as const, payload: { inputResponses: [{ requestId: "task-request" }] } },
@@ -256,16 +257,17 @@ describe("nextTurnDelivery routing", () => {
       setAuthorizationWindow: vi.fn(),
     };
 
+    const stateCursor = new SessionStateCursor({ serializedContext: {}, sessionState });
     const result = await nextTurnDelivery({
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox,
       driverWritable: new WritableStream<Uint8Array>(),
-      serializedContext: {},
-      sessionState,
+      stateCursor,
     });
 
     expect(result).toMatchObject({ kind: "turn", remainder: { message: "ordinary" } });
     expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
+    expect(stateCursor.sessionState).toBe(routedSessionState);
   });
 });

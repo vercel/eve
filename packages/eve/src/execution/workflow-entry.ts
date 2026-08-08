@@ -26,6 +26,7 @@ import {
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
+import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
@@ -322,19 +323,10 @@ async function runDriverLoop(input: {
    */
   const nextParkedActivity = async (park: {
     readonly expectedAttemptIds: readonly string[];
-    readonly serializedContext: Record<string, unknown>;
-    readonly sessionState: DurableSessionState;
   }): Promise<
-    | {
-        readonly kind: "authorization-resume";
-        readonly payloads: DeliverPayload[];
-        readonly serializedContext: Record<string, unknown>;
-        readonly sessionState: DurableSessionState;
-      }
+    | { readonly kind: "authorization-resume"; readonly payloads: DeliverPayload[] }
     | Exclude<NextTurnInstruction, { kind: "authorization" }>
   > => {
-    let serializedContext = park.serializedContext;
-    let sessionState = park.sessionState;
     const expectedAttemptIds = new Set(park.expectedAttemptIds);
     for (const attemptId of collectedAuthPayloads.keys()) {
       if (!expectedAttemptIds.has(attemptId)) collectedAuthPayloads.delete(attemptId);
@@ -349,7 +341,7 @@ async function runDriverLoop(input: {
           collectedAuthPayloads.get(attemptId)!,
         );
         collectedAuthPayloads.clear();
-        return { kind: "authorization-resume", payloads, serializedContext, sessionState };
+        return { kind: "authorization-resume", payloads };
       }
 
       const next = await nextTurnDelivery({
@@ -361,13 +353,10 @@ async function runDriverLoop(input: {
         deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,
         driverWritable: input.driverWritable,
         seenTaskDeliveries,
-        serializedContext,
-        sessionState,
+        stateCursor,
       });
       sessionState = next.sessionState;
       if (next.kind !== "authorization") return next;
-      serializedContext = next.serializedContext;
-      sessionState = next.sessionState;
 
       for (const payload of next.payloads) {
         const callback = payload["authorizationCallback"] as
@@ -384,7 +373,7 @@ async function runDriverLoop(input: {
       if (next.closed) {
         const payloads = [...collectedAuthPayloads.values()];
         collectedAuthPayloads.clear();
-        return { kind: "authorization-resume", payloads, serializedContext, sessionState };
+        return { kind: "authorization-resume", payloads };
       }
     }
   };
@@ -416,25 +405,29 @@ async function runDriverLoop(input: {
           token: stableCommandToken,
         });
 
+  // Durable state accumulated across turns and the parked waits between
+  // them. Turn results and settle/routing steps are adopted here, so the
+  // loop never threads `serializedContext`/`sessionState` pairs by hand.
+  const stateCursor = new SessionStateCursor({
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+  });
+
   // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
-  const runTurn = async (args: {
-    readonly delivery: HookPayload;
-    readonly serializedContext: Record<string, unknown>;
-    readonly sessionState: DurableSessionState;
-  }): Promise<TurnDriverAction> => {
+  const runTurn = async (delivery: HookPayload): Promise<TurnDriverAction> => {
     const caller = input.crashCleanupState.caller;
     if (caller?.taskId !== undefined) {
       seenTaskDeliveries.add(caller.taskId);
       await notifyTaskTurnStartedStep({
         caller,
-        childSessionId: args.sessionState.sessionId,
-        childTurnId: activeTurnId(args.sessionState.emissionState),
+        childSessionId: stateCursor.sessionState.sessionId,
+        childTurnId: activeTurnId(stateCursor.sessionState.emissionState),
       });
     }
     const serializedContext = await bindTurnCallerContextStep({
       caller,
-      serializedContext: args.serializedContext,
+      serializedContext: stateCursor.serializedContext,
     });
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
@@ -443,15 +436,17 @@ async function runDriverLoop(input: {
       capabilities: input.capabilities,
       commandInbox,
       controlToken: nextTurnControlToken(),
-      delivery: args.delivery,
+      delivery,
       mode: input.mode,
       parentWritable: input.driverWritable,
       serializedContext,
       seenTaskDeliveries,
-      sessionState: args.sessionState,
+      sessionState: stateCursor.sessionState,
     });
     await disposeSettledTurnControl?.();
     disposeSettledTurnControl = turn.dispose;
+    stateCursor.adoptState(turn.action);
+    input.crashCleanupState.lastSessionState = stateCursor.sessionState;
     return turn.action;
   };
 
@@ -470,12 +465,7 @@ async function runDriverLoop(input: {
     }
     await sessionTimeout?.start();
 
-    let action: TurnDriverAction = await runTurn({
-      delivery: input.initialInput,
-      serializedContext: input.serializedContext,
-      sessionState: input.sessionState,
-    });
-    input.crashCleanupState.lastSessionState = action.sessionState;
+    let action: TurnDriverAction = await runTurn(input.initialInput);
 
     while (true) {
       if (action.kind === "done") {
@@ -499,30 +489,26 @@ async function runDriverLoop(input: {
       if (action.cancelled === true) {
         const settled = await settleCancelledTurnStep({
           parentWritable: input.driverWritable,
-          serializedContext: action.serializedContext,
-          sessionState: action.sessionState,
+          serializedContext: stateCursor.serializedContext,
+          sessionState: stateCursor.sessionState,
         });
-        action = {
-          ...action,
-          serializedContext: settled.serializedContext,
-          sessionState: settled.sessionState,
-        };
+        stateCursor.adoptState(settled);
         const cancelledCaller = {
           caller: input.crashCleanupState.caller,
-          sessionId: action.sessionState.sessionId,
+          sessionId: stateCursor.sessionState.sessionId,
         };
         await notifyCancelledTaskCallerStep(
           settled.usage === undefined
             ? cancelledCaller
             : { ...cancelledCaller, usage: settled.usage },
         );
-        input.crashCleanupState.lastSessionState = action.sessionState;
+        input.crashCleanupState.lastSessionState = stateCursor.sessionState;
       }
 
       // Channel-created sessions may rekey their dynamic alias. Sessions
       // without one remain reachable through the stable command inbox only.
-      if (action.sessionState.continuationToken) {
-        await commandInbox.rekeyContinuation(action.sessionState.continuationToken);
+      if (stateCursor.sessionState.continuationToken) {
+        await commandInbox.rekeyContinuation(stateCursor.sessionState.continuationToken);
       }
 
       // `settled` rides the typed park arm exclusively; `run-step` preserves
@@ -532,7 +518,7 @@ async function runDriverLoop(input: {
         await notifyTurnCallerStep({
           caller: input.crashCleanupState.caller,
           lifecycle: "parked",
-          sessionId: action.sessionState.sessionId,
+          sessionId: stateCursor.sessionState.sessionId,
           settled,
         });
         input.crashCleanupState.caller = undefined;
@@ -545,52 +531,38 @@ async function runDriverLoop(input: {
       // waits for its callback, and the callback surfaces through the same
       // parked wait as everything else. The pending challenge survives
       // intervening turns because every park re-derives
-      // `authorizationNames` from durable session state.
+      // `authorizationAttemptIds` from durable session state.
       const next = await nextParkedActivity({
         expectedAttemptIds: action.authorizationAttemptIds ?? [],
-        serializedContext: action.serializedContext,
-        sessionState: action.sessionState,
       });
-      action = {
-        ...action,
-        serializedContext: next.serializedContext,
-        sessionState: next.sessionState,
-      };
-      input.crashCleanupState.lastSessionState = action.sessionState;
+      input.crashCleanupState.lastSessionState = stateCursor.sessionState;
 
       if (next.kind === "authorization-resume") {
         action = await runTurn({
-          delivery: { kind: "deliver", payloads: next.payloads },
-          serializedContext: action.serializedContext,
-          sessionState: action.sessionState,
+          kind: "deliver",
+          payloads: next.payloads,
         });
-        input.crashCleanupState.lastSessionState = action.sessionState;
         continue;
       }
 
       if (next.kind === "expired") {
         return {
           kind: "expired",
-          serializedContext: action.serializedContext,
-          sessionState: action.sessionState,
+          serializedContext: stateCursor.serializedContext,
+          sessionState: stateCursor.sessionState,
         };
       }
 
       if (next.kind === "reset") {
         await terminateChildSessionsStep({
-          serializedContext: action.serializedContext,
-          sessionState: action.sessionState,
+          serializedContext: stateCursor.serializedContext,
+          sessionState: stateCursor.sessionState,
         });
         return { kind: "result", result: { output: "" } };
       }
 
       if (next.kind === "clear" || next.kind === "compact") {
-        action = await runTurn({
-          delivery: { kind: next.kind },
-          serializedContext: action.serializedContext,
-          sessionState: action.sessionState,
-        });
-        input.crashCleanupState.lastSessionState = action.sessionState;
+        action = await runTurn({ kind: next.kind });
         continue;
       }
 
@@ -600,25 +572,21 @@ async function runDriverLoop(input: {
 
       if (next.kind === "cancel-turn") {
         await cancelDescendantTurnsStep({
-          serializedContext: action.serializedContext,
-          sessionState: action.sessionState,
+          serializedContext: stateCursor.serializedContext,
+          sessionState: stateCursor.sessionState,
         });
         const cancelled = await settleCancelledTurnStep({
           parentWritable: input.driverWritable,
-          serializedContext: action.serializedContext,
-          sessionState: action.sessionState,
+          serializedContext: stateCursor.serializedContext,
+          sessionState: stateCursor.sessionState,
         });
+        stateCursor.adoptState(cancelled);
         // Re-enter with `settled` cleared: the parked answer was already
         // delivered to its caller before this wait, so the next iteration
         // must not treat it as a fresh settlement.
-        action = {
-          ...action,
-          serializedContext: cancelled.serializedContext,
-          sessionState: cancelled.sessionState,
-          settled: undefined,
-        };
+        action = { ...action, settled: undefined };
         input.crashCleanupState.caller = undefined;
-        input.crashCleanupState.lastSessionState = action.sessionState;
+        input.crashCleanupState.lastSessionState = stateCursor.sessionState;
         continue;
       }
 
@@ -626,14 +594,11 @@ async function runDriverLoop(input: {
         input.crashCleanupState.caller = next.deliver.caller;
       }
       action = await runTurn({
-        delivery: {
-          ...next.remainder,
-          kind: "deliver",
-        },
-        serializedContext: action.serializedContext,
-        sessionState: next.sessionState,
+        auth: next.deliver.auth,
+        kind: "deliver",
+        payloads: [next.remainder],
+        requestId: next.deliver.requestId,
       });
-      input.crashCleanupState.lastSessionState = action.sessionState;
     }
   } finally {
     await disposeSettledTurnControl?.();

@@ -6,7 +6,7 @@ import type { SubagentAuthorizationEvent } from "#channel/types.js";
  *
  * A task is one durable unit of delegated work owned by a parent session.
  * The durable task run is the single writer for lifecycle transitions
- * (see `#execution/tasks/run-task-workflow.js`); every other path submits
+ * (see `#execution/tasks/child/workflow.js`); every other path submits
  * commands and reads snapshots. This module is dependency-free on
  * purpose: it is bundled into workflow bodies, which reject Node.js
  * builtins and heavyweight validators.

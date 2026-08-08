@@ -1,5 +1,8 @@
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
-import { isFinishedTaskRunTarget, readLatestTaskSnapshot } from "#execution/tasks/run-parent.js";
+import {
+  isFinishedTaskRunTarget,
+  readLatestTaskSnapshot,
+} from "#execution/tasks/parent/run-parent.js";
 import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import { taskViewsToJson } from "#tasks/json.js";

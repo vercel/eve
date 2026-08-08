@@ -5,15 +5,15 @@ import {
   cancelRemoteAgentTurn,
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
-import { executeTaskControlAction } from "#execution/tasks/dispatch.js";
-import { readLatestTaskSnapshot, sendTaskCommand } from "#execution/tasks/run-parent.js";
+import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
+import { readLatestTaskSnapshot, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
 
-vi.mock("#execution/tasks/run-parent.js", () => ({
+vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   readLatestTaskSnapshot: vi.fn(),
   sendTaskCommand: vi.fn(),
 }));

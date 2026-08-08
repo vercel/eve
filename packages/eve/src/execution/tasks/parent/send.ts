@@ -9,13 +9,13 @@ import {
   findActiveTaskForAgent,
   findTaskAgentAddress,
   readTaskView,
-} from "#execution/tasks/control-shared.js";
+} from "#execution/tasks/parent/control-shared.js";
 import {
   beginDelegatedTask,
   type DelegatedTask,
   failDelegatedDispatch,
   settleDelegatedDispatch,
-} from "#execution/tasks/delegate.js";
+} from "#execution/tasks/parent/delegate.js";
 import { AGENT_BUSY, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";

@@ -4,13 +4,16 @@ import {
   type RuntimeAgentHandleAction,
   type RuntimeSession,
 } from "#execution/agent-handle-dispatch.js";
-import { findActiveTaskForAgent, findTaskAgentAddress } from "#execution/tasks/control-shared.js";
+import {
+  findActiveTaskForAgent,
+  findTaskAgentAddress,
+} from "#execution/tasks/parent/control-shared.js";
 import {
   failDelegatedDispatch,
   settleDelegatedDispatch,
   type DelegatedTask,
-} from "#execution/tasks/delegate.js";
-import { describeTaskAgent } from "#execution/tasks/agent-identity.js";
+} from "#execution/tasks/parent/delegate.js";
+import { describeTaskAgent } from "#execution/tasks/parent/agent-identity.js";
 import { AGENT_BUSY, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
 import type { RuntimeSubagentDispatchFailure } from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";

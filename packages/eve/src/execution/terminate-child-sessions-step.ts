@@ -2,7 +2,7 @@ import { deserializeContext } from "#context/serialize.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { cancelOwnedTask } from "#execution/tasks/dispatch.js";
+import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
 import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";

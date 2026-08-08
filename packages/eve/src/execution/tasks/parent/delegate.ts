@@ -5,7 +5,7 @@ import {
   sendTaskCommandToOwner,
   startTaskRun,
   waitForTaskCommandOwner,
-} from "#execution/tasks/run-parent.js";
+} from "#execution/tasks/parent/run-parent.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";

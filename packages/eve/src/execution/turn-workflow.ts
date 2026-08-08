@@ -9,7 +9,8 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
-import { acknowledgeDelegatedTasksStep } from "#execution/tasks/delegate.js";
+import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
+import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import {
   migrateTurnWorkflowInput,

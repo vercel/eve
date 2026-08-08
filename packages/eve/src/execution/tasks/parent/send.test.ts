@@ -8,9 +8,9 @@ import {
   beginDelegatedTask,
   failDelegatedDispatch,
   settleDelegatedDispatch,
-} from "#execution/tasks/delegate.js";
-import { readLatestTaskSnapshot } from "#execution/tasks/run-parent.js";
-import { executeTaskSend } from "#execution/tasks/send.js";
+} from "#execution/tasks/parent/delegate.js";
+import { readLatestTaskSnapshot } from "#execution/tasks/parent/run-parent.js";
+import { executeTaskSend } from "#execution/tasks/parent/send.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -22,13 +22,13 @@ vi.mock("#execution/agent-handle-dispatch.js", async (importOriginal) => ({
   dispatchToTaskAgentAddress: vi.fn(),
 }));
 
-vi.mock("#execution/tasks/delegate.js", () => ({
+vi.mock("#execution/tasks/parent/delegate.js", () => ({
   beginDelegatedTask: vi.fn(),
   failDelegatedDispatch: vi.fn(),
   settleDelegatedDispatch: vi.fn(),
 }));
 
-vi.mock("#execution/tasks/run-parent.js", () => ({
+vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   readLatestTaskSnapshot: vi.fn(),
   sendTaskCommand: vi.fn(),
 }));

@@ -13,7 +13,7 @@ import {
   acceptTaskAuthorizationEventStep,
   recordTerminalTaskSnapshotsStep,
   recordTaskInputRequestStep,
-} from "#execution/tasks/hitl-proxy-steps.js";
+} from "#execution/tasks/parent/hitl-proxy-steps.js";
 
 /**
  * Coalesces inbound deliver payloads and routes any descendant-bound input

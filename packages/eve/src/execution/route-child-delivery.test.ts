@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { emitRecordedTaskInputRequestStep } from "#execution/subagent-event-proxy-step.js";
-import { recordTaskInputRequestStep } from "#execution/tasks/hitl-proxy-steps.js";
+import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 
 vi.mock("#execution/subagent-event-proxy-step.js", () => ({
   emitRecordedTaskInputRequestStep: vi.fn(),
 }));
-vi.mock("#execution/tasks/hitl-proxy-steps.js", () => ({
+vi.mock("#execution/tasks/parent/hitl-proxy-steps.js", () => ({
   recordTaskInputRequestStep: vi.fn(),
 }));
 vi.mock("#execution/proxied-deliver-step.js", () => ({

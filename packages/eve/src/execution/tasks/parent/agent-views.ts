@@ -1,7 +1,7 @@
 import type { HarnessSession } from "#harness/types.js";
 import { resolveAgentsAnnouncement, type AgentView } from "#harness/handles/prompt.js";
 import { formatAgentStatus, getAgentHandleStore } from "#harness/handles/store.js";
-import { readTaskViews } from "#execution/tasks/control-shared.js";
+import { readTaskViews } from "#execution/tasks/parent/control-shared.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 
 /** Derives model-visible task-agent availability from authoritative task snapshots. */

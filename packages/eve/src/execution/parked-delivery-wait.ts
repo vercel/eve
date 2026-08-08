@@ -1,8 +1,8 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 
 type NextSessionAction =
@@ -26,7 +26,7 @@ export interface AuthorizationCallbackInstruction {
 }
 
 /** What the parked driver should do with the next session activity. */
-type NextTurnOutcome =
+export type NextTurnInstruction =
   | { readonly kind: "clear" }
   | { readonly kind: "compact" }
   | { readonly kind: "expired" }
@@ -38,13 +38,7 @@ type NextTurnOutcome =
       readonly kind: "turn";
       readonly deliver: DeliverHookPayload;
       readonly remainder: DeliverPayload;
-      readonly sessionState: DurableSessionState;
     };
-
-export type NextTurnInstruction = NextTurnOutcome & {
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-};
 
 /**
  * Awaits the next delivery that requires driver action while the session
@@ -58,6 +52,9 @@ export type NextTurnInstruction = NextTurnOutcome & {
  * without producing a parent turn (no-op cancels, fully-routed descendant
  * deliveries) — so an open challenge's callback surfaces as an
  * `"authorization"` instruction no matter when it arrives.
+ *
+ * Routing steps mutate durable state; each transition is adopted into the
+ * caller-owned `stateCursor`, so returns carry only the instruction kind.
  */
 export async function nextTurnDelivery(input: {
   readonly awaitAuthorizationCallbacks?: boolean;
@@ -67,9 +64,8 @@ export async function nextTurnDelivery(input: {
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
   readonly seenTaskDeliveries?: Set<string>;
-  readonly sessionState: DurableSessionState;
+  readonly stateCursor: SessionStateCursor;
 }): Promise<NextTurnInstruction> {
   if (input.awaitAuthorizationCallbacks !== true) {
     return await awaitNextTurnDelivery(input);
@@ -90,12 +86,9 @@ async function awaitNextTurnDelivery(input: {
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
   readonly seenTaskDeliveries?: Set<string>;
-  readonly sessionState: DurableSessionState;
+  readonly stateCursor: SessionStateCursor;
 }): Promise<NextTurnInstruction> {
-  let sessionState = input.sessionState;
-  let serializedContext = input.serializedContext;
   const cancelledTaskIds = input.cancelledTaskIds ?? new Set<string>();
   const seenTaskDeliveries = input.seenTaskDeliveries ?? new Set<string>();
   while (true) {
@@ -109,30 +102,29 @@ async function awaitNextTurnDelivery(input: {
     });
 
     if (nextAction.kind === "authorization") {
-      return { ...nextAction, serializedContext, sessionState };
+      return nextAction;
     }
 
     if (nextAction.kind !== "delivery") {
-      return { kind: nextAction.kind, serializedContext, sessionState };
+      return { kind: nextAction.kind };
     }
 
     const deliver = nextAction.delivery;
     if (deliver === null) {
-      return { kind: "closed", serializedContext, sessionState };
+      return { kind: "closed" };
     }
 
     const routed = await routeDeliverToChildren({
       auth: deliver.auth,
       parentWritable: input.driverWritable,
       payloads: deliver.payloads,
-      serializedContext,
-      sessionState,
+      serializedContext: input.stateCursor.serializedContext,
+      sessionState: input.stateCursor.sessionState,
     });
-    serializedContext = routed.serializedContext ?? serializedContext;
-    sessionState = routed.sessionState ?? sessionState;
+    input.stateCursor.adoptState(routed);
 
     if (routed.kind === "cancel-turn") {
-      return { kind: "cancel-turn", serializedContext, sessionState };
+      return { kind: "cancel-turn" };
     }
 
     if (routed.remainder === undefined) {
@@ -140,13 +132,7 @@ async function awaitNextTurnDelivery(input: {
       continue;
     }
 
-    return {
-      deliver,
-      kind: "turn",
-      remainder: routed.remainder,
-      serializedContext,
-      sessionState,
-    };
+    return { deliver, kind: "turn", remainder: routed.remainder };
   }
 }
 

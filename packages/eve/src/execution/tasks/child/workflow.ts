@@ -7,7 +7,7 @@ import {
   wakeTaskAuthorizationParentStep,
   wakeTaskInputRequestParentStep,
   wakeTaskParentStep,
-} from "#execution/tasks/run-task.js";
+} from "#execution/tasks/child/steps.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
 import { translateTaskInboundPayload } from "#tasks/wire.js";
 import {

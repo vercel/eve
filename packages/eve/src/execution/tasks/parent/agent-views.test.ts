@@ -1,14 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { appendTaskAgentAnnouncement, readTaskAgentViews } from "#execution/tasks/agent-views.js";
-import { findActiveTaskForAgent } from "#execution/tasks/control-shared.js";
-import { readLatestTaskSnapshot } from "#execution/tasks/run-parent.js";
+import {
+  appendTaskAgentAnnouncement,
+  readTaskAgentViews,
+} from "#execution/tasks/parent/agent-views.js";
+import { findActiveTaskForAgent } from "#execution/tasks/parent/control-shared.js";
+import { readLatestTaskSnapshot } from "#execution/tasks/parent/run-parent.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
 import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
 import type { TaskStatus, TaskView } from "#tasks/types.js";
 
-vi.mock("#execution/tasks/run-parent.js", () => ({
+vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   readLatestTaskSnapshot: vi.fn(),
 }));
 

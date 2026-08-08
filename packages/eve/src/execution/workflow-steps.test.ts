@@ -38,8 +38,11 @@ import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-s
 import { defineTool } from "#public/definitions/tool.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
-import { readLatestTaskSnapshot, sendTaskInboundPayload } from "#execution/tasks/run-parent.js";
-import { recordTaskInputRequestStep } from "#execution/tasks/hitl-proxy-steps.js";
+import {
+  readLatestTaskSnapshot,
+  sendTaskInboundPayload,
+} from "#execution/tasks/parent/run-parent.js";
+import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import {
   dispatchTurnStep,
@@ -61,7 +64,7 @@ vi.mock("./durable-session-store.js", async (importOriginal) => {
     readDurableSession: vi.fn(),
   };
 });
-vi.mock("./tasks/run-parent.js", () => ({
+vi.mock("./tasks/parent/run-parent.js", () => ({
   readLatestTaskSnapshot: vi.fn(),
   sendTaskInboundPayload: vi.fn(),
 }));

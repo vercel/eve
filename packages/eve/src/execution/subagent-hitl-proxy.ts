@@ -60,21 +60,32 @@ export async function emitProxiedInputRequest(input: {
 // Downward deliver routing
 // ---------------------------------------------------------------------------
 
+/** One proxied-child bucket of a routed deliver payload. */
+export interface RoutedChildDelivery {
+  readonly childContinuationToken: string;
+  readonly childResponseUrl?: string;
+  readonly payload: { readonly inputResponses: readonly InputResponse[] };
+  /** Present when the child is owned by a task run, which delivers on the parent's behalf. */
+  readonly taskId?: string;
+}
+
 /**
  * Outcome of splitting one deliver payload by the session's proxy map.
  * `forSelf` is the parent-local remainder (or `undefined` when fully
  * routed); `forChildren` carries one entry per descendant token.
  */
 export interface RoutedDeliverPayload {
-  readonly forChildren: readonly {
-    readonly childContinuationToken: string;
-    readonly childResponseUrl?: string;
-    readonly payload: { readonly inputResponses: readonly InputResponse[] };
-    /** Present when the child is owned by a task run, which delivers on the parent's behalf. */
-    readonly taskId?: string;
-  }[];
+  readonly forChildren: readonly RoutedChildDelivery[];
   readonly forSelf: DeliverPayload | undefined;
   readonly parentAction: { readonly kind: "cancel-turn" } | undefined;
+}
+
+/** In-progress accumulation for one `forChildren` bucket. */
+interface ChildResponseBucket {
+  readonly childContinuationToken: string;
+  readonly childResponseUrl?: string;
+  readonly responses: InputResponse[];
+  readonly taskId?: string;
 }
 
 /** Splits a deliver payload into parent-local and proxied-child buckets. */
@@ -86,15 +97,7 @@ export function routeDeliverPayload(input: {
   const entries = getProxyInputRequests(input.state);
   const inputResponses = input.payload.inputResponses ?? [];
 
-  const responsesByChild = new Map<
-    string,
-    {
-      readonly childContinuationToken: string;
-      readonly childResponseUrl?: string;
-      readonly responses: InputResponse[];
-      taskId?: string;
-    }
-  >();
+  const responsesByChild = new Map<string, ChildResponseBucket>();
   const unroutedResponses: InputResponse[] = [];
   let parentAction: RoutedDeliverPayload["parentAction"];
 
@@ -117,38 +120,24 @@ export function routeDeliverPayload(input: {
     const existing = responsesByChild.get(bucketKey);
 
     if (existing === undefined) {
-      const bucket = {
+      responsesByChild.set(bucketKey, {
         childContinuationToken: route.childContinuationToken,
-        childResponseUrl: route.childResponseUrl,
         responses: [response],
-      } as {
-        readonly childContinuationToken: string;
-        readonly childResponseUrl?: string;
-        readonly responses: InputResponse[];
-        taskId?: string;
-      };
-      if (route.taskId !== undefined) bucket.taskId = route.taskId;
-      responsesByChild.set(bucketKey, bucket);
+        ...(route.childResponseUrl !== undefined && { childResponseUrl: route.childResponseUrl }),
+        ...(route.taskId !== undefined && { taskId: route.taskId }),
+      });
     } else {
       existing.responses.push(response);
     }
   }
 
-  const forChildren: RoutedDeliverPayload["forChildren"] = [...responsesByChild.values()].map(
-    ({ childContinuationToken, childResponseUrl, responses, taskId }) => {
-      const bucket: {
-        readonly childContinuationToken: string;
-        childResponseUrl?: string;
-        readonly payload: { readonly inputResponses: readonly InputResponse[] };
-        taskId?: string;
-      } = {
-        childContinuationToken,
-        payload: { inputResponses: responses },
-      };
-      if (childResponseUrl !== undefined) bucket.childResponseUrl = childResponseUrl;
-      if (taskId !== undefined) bucket.taskId = taskId;
-      return bucket;
-    },
+  const forChildren = [...responsesByChild.values()].map(
+    ({ childContinuationToken, childResponseUrl, responses, taskId }): RoutedChildDelivery => ({
+      childContinuationToken,
+      payload: { inputResponses: responses },
+      ...(childResponseUrl !== undefined && { childResponseUrl }),
+      ...(taskId !== undefined && { taskId }),
+    }),
   );
 
   // Preserve every non-`inputResponses` field on the original payload

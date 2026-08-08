@@ -1,7 +1,7 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import { readLatestTaskSnapshot } from "#execution/tasks/run-parent.js";
+import { readLatestTaskSnapshot } from "#execution/tasks/parent/run-parent.js";
 import {
   toProxyInputRequestEntries,
   upsertProxyInputRequestState,

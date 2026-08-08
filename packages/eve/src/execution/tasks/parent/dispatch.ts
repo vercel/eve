@@ -11,10 +11,10 @@ import {
   lookupTaskEntries,
   readTaskViews,
   readTaskView,
-} from "#execution/tasks/control-shared.js";
-import { executeTaskSend } from "#execution/tasks/send.js";
-import type { DelegatedTask } from "#execution/tasks/delegate.js";
-import { sendTaskCommand } from "#execution/tasks/run-parent.js";
+} from "#execution/tasks/parent/control-shared.js";
+import { executeTaskSend } from "#execution/tasks/parent/send.js";
+import type { DelegatedTask } from "#execution/tasks/parent/delegate.js";
+import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type {
@@ -37,7 +37,7 @@ export {
   failDelegatedDispatch,
   settleDelegatedDispatch,
   type DelegatedTask,
-} from "#execution/tasks/delegate.js";
+} from "#execution/tasks/parent/delegate.js";
 
 const log = createLogger("execution.tasks.dispatch");
 

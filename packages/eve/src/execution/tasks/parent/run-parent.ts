@@ -5,7 +5,7 @@ import {
   WorkflowRunNotFoundError,
 } from "#compiled/@workflow/errors/index.js";
 
-import type { TaskRunWorkflowInput } from "#execution/tasks/run-task-workflow.js";
+import type { TaskRunWorkflowInput } from "#execution/tasks/child/workflow.js";
 import {
   startWorkflowPreferLatest,
   taskRunWorkflowReference,

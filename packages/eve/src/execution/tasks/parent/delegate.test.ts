@@ -5,11 +5,11 @@ import {
   acknowledgeDelegatedTasksStep,
   settleDelegatedDispatch,
   type DelegatedTask,
-} from "#execution/tasks/delegate.js";
-import { sendTaskCommandToOwner } from "#execution/tasks/run-parent.js";
+} from "#execution/tasks/parent/delegate.js";
+import { sendTaskCommandToOwner } from "#execution/tasks/parent/run-parent.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 
-vi.mock("#execution/tasks/run-parent.js", () => ({
+vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   readLatestTaskSnapshot: vi.fn(),
   sendTaskCommandToOwner: vi.fn(),
 }));

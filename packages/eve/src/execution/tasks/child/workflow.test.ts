@@ -8,8 +8,8 @@ import {
   wakeTaskAuthorizationParentStep,
   wakeTaskInputRequestParentStep,
   wakeTaskParentStep,
-} from "#execution/tasks/run-task.js";
-import { taskRunWorkflow } from "#execution/tasks/run-task-workflow.js";
+} from "#execution/tasks/child/steps.js";
+import { taskRunWorkflow } from "#execution/tasks/child/workflow.js";
 import type {
   TaskCommandHookPayload,
   TaskInboundAnswerInput,
@@ -21,13 +21,13 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
 }));
 
-vi.mock("../hook-ownership.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../hook-ownership.js")>()),
+vi.mock("../../hook-ownership.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../hook-ownership.js")>()),
   claimHookOwnership: vi.fn(),
   disposeHook: vi.fn(),
 }));
 
-vi.mock("./run-task.js", () => ({
+vi.mock("./steps.js", () => ({
   appendTaskSnapshotStep: vi.fn(),
   deliverTaskInputResponsesStep: vi.fn(),
   wakeTaskAuthorizationParentStep: vi.fn(),
