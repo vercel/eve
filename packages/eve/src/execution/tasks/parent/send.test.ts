@@ -97,7 +97,7 @@ const action: RuntimeToolCallActionRequest = {
   toolName: "task_send",
 };
 
-describe("task_send persistent-agent admission", () => {
+describe("task_send persistent-agent availability", () => {
   beforeEach(() => vi.resetAllMocks());
 
   it("starts a new task on the same address after terminal work", async () => {
@@ -191,9 +191,9 @@ describe("task_send persistent-agent admission", () => {
     expect(dispatchToTaskAgentAddress).not.toHaveBeenCalled();
   });
 
-  it("reserves the addressed agent before an ambiguous delivery", async () => {
+  it("persists the continuation task before an ambiguous delivery", async () => {
     const current = createSession();
-    const reserved = createSession(true, "turn-2");
+    const persisted = createSession(true, "turn-2");
     vi.mocked(readLatestTaskView).mockResolvedValue(task("task_terminal", "completed"));
     vi.mocked(beginDelegatedTask).mockResolvedValue({
       continuationToken: "task-token-new",
@@ -205,7 +205,7 @@ describe("task_send persistent-agent admission", () => {
     });
     vi.mocked(settleDelegatedDispatch).mockResolvedValue({
       receipt: {} as never,
-      session: reserved,
+      session: persisted,
     });
     vi.mocked(dispatchToTaskAgentAddress).mockResolvedValue({
       kind: "error",
@@ -217,7 +217,7 @@ describe("task_send persistent-agent admission", () => {
         output: { code: "AGENT_UNREACHABLE", message: "response lost" },
         subagentName: "research",
       },
-      session: reserved,
+      session: persisted,
     });
 
     const result = await executeTaskSend({
@@ -231,9 +231,9 @@ describe("task_send persistent-agent admission", () => {
       vi.mocked(dispatchToTaskAgentAddress).mock.invocationCallOrder[0] ?? 0,
     );
     expect(dispatchToTaskAgentAddress).toHaveBeenCalledWith(
-      expect.objectContaining({ currentSession: reserved }),
+      expect.objectContaining({ currentSession: persisted }),
     );
     expect(result.result).toMatchObject({ isError: true, output: { taskId: "task_active" } });
-    expect(result.session).toBe(reserved);
+    expect(result.session).toBe(persisted);
   });
 });

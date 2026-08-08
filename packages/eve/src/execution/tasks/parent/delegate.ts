@@ -90,7 +90,7 @@ export async function beginDelegatedTask(input: {
 }
 
 /**
- * Settles a delegated dispatch that acknowledged a child: records the task
+ * Settles a delegated dispatch that acknowledged a child: persists the task
  * in the session index and returns the receipt that resolves the originating
  * tool call. Agent identity and routing remain in the persistent address
  * record; task state owns execution availability.

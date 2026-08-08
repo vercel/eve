@@ -152,12 +152,15 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       // runs `experimental.tasks`.
       if (pendingActionKeys !== undefined) {
         await cursor.adopt(result);
-        const dispatch =
-          result.action === "dispatch-workflow-runtime-actions"
-            ? dispatchWorkflowRuntimeActionsStep
-            : result.action === "park" && result.tasksEnabled
-              ? dispatchTaskStep
-              : dispatchRuntimeActionsStep;
+        const hasPendingTasks = result.action === "park" && result.tasksEnabled;
+        let dispatch;
+        if (result.action === "dispatch-workflow-runtime-actions") {
+          dispatch = dispatchWorkflowRuntimeActionsStep;
+        } else if (hasPendingTasks) {
+          dispatch = dispatchTaskStep;
+        } else {
+          dispatch = dispatchRuntimeActionsStep;
+        }
         const dispatchResult = await dispatch({
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
           parentContinuationToken: inbox.token,

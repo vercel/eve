@@ -92,7 +92,7 @@ describe("task-derived agent availability", () => {
     ]);
   });
 
-  it("finds the active task used for continuation admission", async () => {
+  it("finds the active task used for the continuation availability check", async () => {
     vi.mocked(readLatestTaskView).mockResolvedValue(task("task_0", "input_required"));
 
     await expect(

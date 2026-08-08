@@ -157,8 +157,8 @@ async function followUpTerminalTask(input: {
     parentTurnId: input.parentTurnId,
     session: input.session,
   });
-  // Reserve the addressed agent before the ambiguous delivery side effect.
-  const reserved = await settleDelegatedDispatch({
+  // Persist the task in the parent session before the ambiguous delivery side effect.
+  const persisted = await settleDelegatedDispatch({
     callId: action.callId,
     session: input.session,
     subagentName: handle.identity.name,
@@ -168,7 +168,7 @@ async function followUpTerminalTask(input: {
     action: continuation,
     agentId: handle.identity.id,
     bundle: input.bundle,
-    currentSession: reserved.session,
+    currentSession: persisted.session,
     parentToken: task.continuationToken,
   });
   if (outcome.kind === "error") {

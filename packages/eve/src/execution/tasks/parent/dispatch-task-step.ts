@@ -5,11 +5,11 @@
  * Same plan → dispatch → emit skeleton, but every delegation is wrapped in
  * the durable task lifecycle: the task record and its continuation token
  * exist *before* the child dispatch side effect (`beginDelegatedTask`),
- * continuations pass busy admission and reserve their receipt first, and
- * the task settles against the dispatch outcome. Children report through
- * their task's continuation token rather than the parent turn inbox, and
- * every start dispatches a conversation-mode (persistent) child so the
- * background task stays resumable.
+ * continuations pass the availability check and enter the parent session's
+ * task index first, and the task settles against the dispatch outcome.
+ * Children report through their task's continuation token rather than the
+ * parent turn inbox, and every start dispatches a conversation-mode
+ * (persistent) child so the background task stays resumable.
  *
  * Task-control calls (`task_peek` / `task_cancel` / `task_send`) execute
  * inline in this step, which holds the session ownership index and world
@@ -36,12 +36,12 @@ import {
   settleDelegatedDispatch,
 } from "#execution/tasks/parent/dispatch.js";
 import {
-  checkTaskContinuationAdmission,
+  checkTaskContinuationAvailability,
   describeTaskDispatch,
-  reserveTaskContinuation,
+  persistContinuationTaskInParentSession,
   settleTaskDispatchError,
-  type ReservedTaskContinuation,
-} from "#execution/tasks/parent/continuation-admission.js";
+  type PersistedContinuationTask,
+} from "#execution/tasks/parent/continuation-dispatch.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
 export async function dispatchTaskStep(
@@ -91,7 +91,7 @@ export async function dispatchTaskStep(
       }
 
       if (entry.kind === "resume") {
-        const busy = await checkTaskContinuationAdmission({
+        const busy = await checkTaskContinuationAvailability({
           action: entry.action,
           agentId: entry.agentId,
           parentStepIndex: batch.event.stepIndex,
@@ -117,15 +117,15 @@ export async function dispatchTaskStep(
         parentTurnId: batch.event.turnId,
         session: nextSession,
       });
-      let reservedContinuation: ReservedTaskContinuation | undefined;
+      let persistedContinuation: PersistedContinuationTask | undefined;
       if (entry.kind === "resume") {
-        reservedContinuation = await reserveTaskContinuation({
+        persistedContinuation = await persistContinuationTaskInParentSession({
           action: entry.action,
           agentId: entry.agentId,
           delegated,
           session: nextSession,
         });
-        nextSession = reservedContinuation?.session ?? nextSession;
+        nextSession = persistedContinuation?.session ?? nextSession;
       }
 
       let outcome: DispatchOutcome;
@@ -175,7 +175,7 @@ export async function dispatchTaskStep(
             agentId: entry.kind === "resume" ? entry.agentId : undefined,
             delegated,
             outcome,
-            reserved: reservedContinuation,
+            persisted: persistedContinuation,
             session: nextSession,
           }),
         );
@@ -183,8 +183,8 @@ export async function dispatchTaskStep(
         continue;
       }
 
-      if (reservedContinuation !== undefined) {
-        results.push(reservedContinuation.receipt);
+      if (persistedContinuation !== undefined) {
+        results.push(persistedContinuation.receipt);
       } else {
         const settled = await settleDelegatedDispatch({
           callId: outcome.callId,

@@ -18,7 +18,7 @@ import { AGENT_BUSY, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
 import type { RuntimeSubagentDispatchFailure } from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";
 
-export type ReservedTaskContinuation = Awaited<ReturnType<typeof settleDelegatedDispatch>>;
+export type PersistedContinuationTask = Awaited<ReturnType<typeof settleDelegatedDispatch>>;
 
 /** Describes task identity from the stored address when continuing an agent. */
 export function describeTaskDispatch(input: {
@@ -39,7 +39,7 @@ export function describeTaskDispatch(input: {
       };
 }
 
-export async function checkTaskContinuationAdmission(input: {
+export async function checkTaskContinuationAvailability(input: {
   readonly action: RuntimeAgentHandleAction;
   readonly agentId: string;
   readonly parentStepIndex: number;
@@ -61,12 +61,16 @@ export async function checkTaskContinuationAdmission(input: {
       });
 }
 
-export async function reserveTaskContinuation(input: {
+/**
+ * Persists the task's ownership and routing entry in the parent session's
+ * `eve.tasks` index and creates its parked tool-call receipt before dispatch.
+ */
+export async function persistContinuationTaskInParentSession(input: {
   readonly action: RuntimeAgentHandleAction;
   readonly agentId: string;
   readonly delegated: DelegatedTask | undefined;
   readonly session: RuntimeSession;
-}): Promise<ReservedTaskContinuation | undefined> {
+}): Promise<PersistedContinuationTask | undefined> {
   if (input.delegated === undefined) return undefined;
   const handle = findTaskAgentAddress(input.session, input.agentId);
   if (handle === undefined) return undefined;
@@ -82,19 +86,19 @@ export async function settleTaskDispatchError(input: {
   readonly agentId: string | undefined;
   readonly delegated: DelegatedTask | undefined;
   readonly outcome: Extract<DispatchOutcome, { readonly kind: "error" }>;
-  readonly reserved: ReservedTaskContinuation | undefined;
+  readonly persisted: PersistedContinuationTask | undefined;
   readonly session: RuntimeSession;
 }): Promise<RuntimeSubagentDispatchFailure> {
   const retainedAddress =
     input.agentId !== undefined && findTaskAgentAddress(input.session, input.agentId) !== undefined;
   const ambiguous =
-    input.reserved !== undefined &&
+    input.persisted !== undefined &&
     readErrorCode(input.outcome.result.output) === AGENT_UNREACHABLE &&
     retainedAddress;
   if (input.delegated !== undefined && !ambiguous) {
     await failDelegatedDispatch({ error: input.outcome.result.output, task: input.delegated });
   }
-  return input.reserved === undefined
+  return input.persisted === undefined
     ? input.outcome.result
     : {
         ...input.outcome.result,
