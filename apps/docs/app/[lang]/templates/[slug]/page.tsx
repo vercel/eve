@@ -117,7 +117,7 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
 
         <section
           aria-label="Template documentation"
-          className="mt-16 grid gap-10 lg:grid-cols-[minmax(0,760px)_minmax(0,1fr)] lg:gap-16"
+          className="mt-16 grid gap-10 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12"
         >
           <div>
             <TemplateReadme readme={entry.readme} sourceRevisionHref={entry.sourceRevisionHref} />
