@@ -21,13 +21,13 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
 }));
 
-vi.mock("../../hook-ownership.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../hook-ownership.js")>()),
+vi.mock("#execution/hook-ownership.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/hook-ownership.js")>()),
   claimHookOwnership: vi.fn(),
   disposeHook: vi.fn(),
 }));
 
-vi.mock("./steps.js", () => ({
+vi.mock("#execution/tasks/child/steps.js", () => ({
   appendTaskViewStep: vi.fn(),
   deliverTaskInputResponsesStep: vi.fn(),
   wakeTaskAuthorizationParentStep: vi.fn(),

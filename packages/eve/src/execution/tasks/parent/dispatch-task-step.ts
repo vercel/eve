@@ -141,7 +141,6 @@ export async function dispatchTaskStep(
             }),
             currentSession: nextSession,
             parentToken: delegated.continuationToken,
-            parentTurnId: batch.event.turnId,
           });
           break;
         case "start":
