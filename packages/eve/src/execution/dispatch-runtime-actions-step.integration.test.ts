@@ -5,6 +5,7 @@ import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatc
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import {
   getPendingRuntimeActionBatch,
   resolvePendingRuntimeActions,
@@ -237,7 +238,9 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       runId: "task-run-1",
     });
 
-    const result = await dispatchRuntimeActionsStep({
+    // Tasks-mode dispatch routes through dispatchTaskStep; the turn workflow
+    // never sends `experimental.tasks` agents to dispatchRuntimeActionsStep.
+    const result = await dispatchTaskStep({
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(),
       serializedContext: {},
@@ -563,7 +566,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       taskId: "task_active",
     });
 
-    const result = await dispatchRuntimeActionsStep({
+    const result = await dispatchTaskStep({
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(),
       serializedContext: {},
