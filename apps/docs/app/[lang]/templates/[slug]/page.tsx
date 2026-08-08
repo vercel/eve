@@ -126,12 +126,12 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
             <h2 className="m-0 text-heading-24 text-gray-1000" id="github-heading">
               GitHub
             </h2>
-            <dl className="mt-6 grid grid-cols-2 gap-6 sm:flex sm:flex-wrap lg:grid lg:grid-cols-1">
+            <dl className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-1">
               <div>
                 <dt className="font-medium text-gray-1000 text-label-14">Owner</dt>
                 <dd className="mt-2 text-copy-14">
                   <a
-                    className="font-medium text-gray-900 underline decoration-gray-400 underline-offset-4 transition-colors hover:text-gray-1000 hover:decoration-gray-1000"
+                    className="rounded-sm font-medium text-gray-900 underline decoration-gray-400 underline-offset-4 outline-none transition-colors hover:text-gray-1000 hover:decoration-gray-1000 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
                     href={`https://github.com/${entry.githubOwner}`}
                     rel="noopener noreferrer"
                     target="_blank"
@@ -144,8 +144,8 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
                 <dt className="font-medium text-gray-1000 text-label-14">Repository</dt>
                 <dd className="mt-2 text-copy-14">
                   <a
-                    className="break-words font-medium text-gray-900 underline decoration-gray-400 underline-offset-4 transition-colors hover:text-gray-1000 hover:decoration-gray-1000"
-                    href={entry.sourceHref}
+                    className="break-words rounded-sm font-medium text-gray-900 underline decoration-gray-400 underline-offset-4 outline-none transition-colors hover:text-gray-1000 hover:decoration-gray-1000 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
+                    href={`https://github.com/${entry.githubOwner}/${entry.githubRepo}`}
                     rel="noopener noreferrer"
                     target="_blank"
                   >
