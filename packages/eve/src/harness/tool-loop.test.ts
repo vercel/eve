@@ -7245,8 +7245,13 @@ describe("createToolLoopHarness", () => {
           },
           {
             output: {
-              type: "execution-denied",
-              reason: "Tool execution was denied.",
+              type: "error-json",
+              value: {
+                approval: { requestId: "approval-1", status: "denied" },
+                code: "TOOL_EXECUTION_DENIED",
+                message: "Tool execution was denied.",
+                tool: { result: "not_run" },
+              },
             },
             toolCallId: "call-1",
             toolName: "bash",

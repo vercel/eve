@@ -508,14 +508,14 @@ describe("resolvePendingInput", () => {
     expect(approved.has("vercel__list_projects")).toBe(false);
   });
 
-  it("emits a matching execution-denied tool-result when the user explicitly denies an approval", () => {
+  it("emits a provider-compatible error tool-result when the user explicitly denies an approval", () => {
     /*
      * AI SDK's `streamText` synthesizes an `execution-denied`
      * tool-result for the current turn only — on subsequent turns the
      * persisted `tool-approval-response` gets stripped during provider
      * prompt conversion, leaving the prior `tool_use` block
-     * unmatched. The harness must emit the matching tool-result
-     * itself so persisted history is replay-safe.
+     * unmatched. The harness must emit a provider-compatible result
+     * itself so persisted history is replay-safe across provider versions.
      */
     const session = setPendingInputBatch({
       requests: [
@@ -575,7 +575,15 @@ describe("resolvePendingInput", () => {
           type: "tool-approval-response",
         },
         {
-          output: { type: "execution-denied", reason: "Tool execution was denied." },
+          output: {
+            type: "error-json",
+            value: {
+              approval: { requestId: "approval-1", status: "denied" },
+              code: "TOOL_EXECUTION_DENIED",
+              message: "Tool execution was denied.",
+              tool: { result: "not_run" },
+            },
+          },
           toolCallId: "approval-call",
           toolName: "bash",
           type: "tool-result",

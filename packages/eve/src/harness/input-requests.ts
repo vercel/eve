@@ -545,6 +545,25 @@ function resolveApprovalOutcome(response: InputResponse | undefined): {
   };
 }
 
+/** Builds the shared denial payload for model history and `action.result`. */
+function createRejectedToolOutput(input: {
+  readonly reason: string | undefined;
+  readonly request: InputRequest;
+  readonly status: ApprovalTerminalStatus;
+}) {
+  return {
+    approval: {
+      requestId: input.request.requestId,
+      status: input.status,
+    },
+    code: TOOL_EXECUTION_DENIED_CODE,
+    message: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
+    tool: {
+      result: "not_run",
+    },
+  } as const;
+}
+
 /**
  * Builds one rejected `action.result` payload per denied tool-call approval so
  * the stream records denials that otherwise live only in model history.
@@ -573,17 +592,7 @@ function buildRejectedActionBatch(
       callId: request.action.callId,
       isError: true,
       kind: "tool-result",
-      output: {
-        approval: {
-          requestId: request.requestId,
-          status,
-        },
-        code: TOOL_EXECUTION_DENIED_CODE,
-        message: reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
-        tool: {
-          result: "not_run",
-        },
-      },
+      output: createRejectedToolOutput({ reason, request, status }),
       toolName: request.action.toolName,
     });
   }
@@ -619,7 +628,7 @@ function buildToolResponsePartsForRequest(
   }
 
   if (isApprovalRequest(request)) {
-    const { approved, reason } = resolveApprovalOutcome(response);
+    const { approved, reason, status } = resolveApprovalOutcome(response);
     const parts: ToolResponsePart[] = [
       {
         approvalId: request.requestId,
@@ -630,8 +639,8 @@ function buildToolResponsePartsForRequest(
     ];
     /*
      * On denial (explicit "deny" or auto-deny when the user continues
-     * without responding), splice in the matching `execution-denied`
-     * tool-result. AI SDK's `streamText` synthesizes this for the
+     * without responding), splice in a provider-compatible error result.
+     * AI SDK's `streamText` synthesizes an `execution-denied` result for the
      * current turn's `initialResponseMessages`, but that synthesis is
      * gated on the input messages' last entry being a tool message —
      * on subsequent turns (when a new user message is the tail of
@@ -639,11 +648,15 @@ function buildToolResponsePartsForRequest(
      * `tool-approval-response` is stripped during provider prompt
      * conversion. Without an own `tool-result` in history, the prior
      * `tool_use` block replays unmatched and some providers reject
-     * the request with 400.
+     * the request with 400. Persisting `error-json` also keeps older
+     * providers from dropping the unsupported `execution-denied` output.
      */
     if (!approved) {
       parts.push({
-        output: { type: "execution-denied", reason },
+        output: {
+          type: "error-json",
+          value: createRejectedToolOutput({ reason, request, status }),
+        },
         toolCallId: request.action.callId,
         toolName: request.action.toolName,
         type: "tool-result",
