@@ -10,10 +10,19 @@ type NextSessionAction =
   | { readonly kind: "compact" }
   | { readonly kind: "expired" }
   | { readonly kind: "reset" }
+  | AuthorizationCallbackInstruction
   | {
       readonly delivery: DeliverHookPayload | null;
       readonly kind: "delivery";
     };
+
+/** One authorization-callback read surfaced during a parked wait. */
+export interface AuthorizationCallbackInstruction {
+  readonly kind: "authorization";
+  /** True when the authorization hook closed; no further callbacks can arrive. */
+  readonly closed: boolean;
+  readonly payloads: readonly DeliverPayload[];
+}
 
 /** What the parked driver should do with the next session activity. */
 export type NextTurnInstruction =
@@ -23,6 +32,7 @@ export type NextTurnInstruction =
   | { readonly kind: "reset" }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }
+  | AuthorizationCallbackInstruction
   | {
       readonly kind: "turn";
       readonly deliver: DeliverHookPayload;
@@ -35,8 +45,34 @@ export type NextTurnInstruction =
  * no turn to run, so this keeps waiting until a delivery produces a parent
  * turn, a cancellation, expiry, or hook closure. The wait is unbounded by
  * design: a parked session lives until something addresses it.
+ *
+ * With `awaitAuthorizationCallbacks`, the inbox's authorization window stays
+ * open for the whole wait — including iterations that consume activity
+ * without producing a parent turn (no-op cancels, fully-routed descendant
+ * deliveries) — so an open challenge's callback surfaces as an
+ * `"authorization"` instruction no matter when it arrives.
  */
 export async function nextTurnDelivery(input: {
+  readonly awaitAuthorizationCallbacks?: boolean;
+  readonly bufferedDeliveries: DeliverHookPayload[];
+  readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly commandInbox: SessionCommandInbox;
+  readonly driverWritable: WritableStream<Uint8Array>;
+  readonly sessionState: DurableSessionState;
+}): Promise<NextTurnInstruction> {
+  if (input.awaitAuthorizationCallbacks !== true) {
+    return await awaitNextTurnDelivery(input);
+  }
+
+  input.commandInbox.setAuthorizationWindow(true);
+  try {
+    return await awaitNextTurnDelivery(input);
+  } finally {
+    input.commandInbox.setAuthorizationWindow(false);
+  }
+}
+
+async function awaitNextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly commandInbox: SessionCommandInbox;
@@ -49,6 +85,10 @@ export async function nextTurnDelivery(input: {
       bufferedSessionControls: input.bufferedSessionControls,
       commandInbox: input.commandInbox,
     });
+
+    if (nextAction.kind === "authorization") {
+      return nextAction;
+    }
 
     if (nextAction.kind !== "delivery") {
       return { kind: nextAction.kind };
@@ -97,8 +137,19 @@ async function waitForNextSessionAction(input: {
   }
 
   while (true) {
-    const first = await input.commandInbox.next();
+    const { result: first, source } = await input.commandInbox.nextWithSource();
     input.commandInbox.consumeNext();
+
+    if (source === "authorization") {
+      if (first.done) {
+        return { closed: true, kind: "authorization", payloads: [] };
+      }
+      return {
+        closed: false,
+        kind: "authorization",
+        payloads: first.value.kind === "deliver" ? first.value.payloads : [],
+      };
+    }
 
     if (first.done) {
       return { delivery: null, kind: "delivery" };

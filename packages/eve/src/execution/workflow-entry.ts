@@ -22,7 +22,7 @@ import {
 } from "#execution/delegated-parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
-import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
+import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
@@ -294,33 +294,44 @@ async function runDriverLoop(input: {
   // across intervening turns until every expected callback has reported.
   const collectedAuthPayloads: DeliverPayload[] = [];
   /**
-   * Waits for the authorization callback(s) of an open challenge while
-   * ordinary session activity stays live: callbacks and session reads
-   * surface through the inbox in one arrival order, which keeps this wait
-   * deterministic under workflow replay. Returns the callback payloads once
-   * all `expected` challenges have reported, or `undefined` when session
-   * activity should be handled first — that un-consumed read is picked up
-   * immediately by the regular parked-delivery path.
+   * Waits for the next parked-session activity. While an authorization
+   * challenge is open (`expected > 0`), callback reads surface through the
+   * same single FIFO wait as ordinary session activity — one arrival order,
+   * which keeps the wait deterministic under workflow replay — and keep
+   * surfacing across wait iterations that produce no parent turn (no-op
+   * cancels, fully-routed descendant deliveries). Callbacks accumulate
+   * across intervening turns; once every expected challenge has reported
+   * (or the hook closed), the collected payloads resume the challenge.
    */
-  const awaitAuthorizationResume = async (
-    expected: number,
-  ): Promise<DeliverPayload[] | undefined> => {
-    commandInbox.setAuthorizationWindow(true);
-    try {
-      while (bufferedDeliveries.length === 0 && bufferedSessionControls.length === 0) {
-        const { result, source } = await commandInbox.nextWithSource();
-        if (source !== "authorization") return undefined;
-
-        commandInbox.consumeNext();
-        if (!result.done && result.value.kind === "deliver") {
-          collectedAuthPayloads.push(...result.value.payloads);
-        }
-        if (!result.done && collectedAuthPayloads.length < expected) continue;
-        return collectedAuthPayloads.splice(0);
+  const nextParkedActivity = async (park: {
+    readonly expected: number;
+    readonly sessionState: DurableSessionState;
+  }): Promise<
+    | { readonly kind: "authorization-resume"; readonly payloads: DeliverPayload[] }
+    | Exclude<NextTurnInstruction, { kind: "authorization" }>
+  > => {
+    while (true) {
+      // A previous park can have collected every callback this park expects:
+      // the challenge set is re-derived from durable state and only shrinks
+      // through consumed callbacks, so resume without waiting.
+      if (park.expected > 0 && collectedAuthPayloads.length >= park.expected) {
+        return { kind: "authorization-resume", payloads: collectedAuthPayloads.splice(0) };
       }
-      return undefined;
-    } finally {
-      commandInbox.setAuthorizationWindow(false);
+
+      const next = await nextTurnDelivery({
+        awaitAuthorizationCallbacks: park.expected > 0,
+        bufferedDeliveries,
+        bufferedSessionControls,
+        commandInbox,
+        driverWritable: input.driverWritable,
+        sessionState: park.sessionState,
+      });
+      if (next.kind !== "authorization") return next;
+
+      collectedAuthPayloads.push(...next.payloads);
+      if (next.closed) {
+        return { kind: "authorization-resume", payloads: collectedAuthPayloads.splice(0) };
+      }
     }
   };
   // Fast descendant resumes can start the next turn before the prior
@@ -425,28 +436,6 @@ async function runDriverLoop(input: {
         await commandInbox.rekeyContinuation(action.sessionState.continuationToken);
       }
 
-      if (action.authorizationNames && action.authorizationNames.length > 0) {
-        // An open authorization challenge must not wedge the session:
-        // ordinary deliveries keep starting normal turns while the
-        // challenge waits for its callback. Buffered activity and inbox
-        // reads drain through the regular parked path below; only when
-        // the session is otherwise quiet does the driver wait on the
-        // callback — racing it against an inbox peek so whichever
-        // arrives first wins. The pending challenge survives intervening
-        // turns because every park re-derives `authorizationNames` from
-        // durable session state.
-        const authPayloads = await awaitAuthorizationResume(action.authorizationNames.length);
-        if (authPayloads !== undefined) {
-          action = await runTurn({
-            delivery: { kind: "deliver", payloads: authPayloads },
-            serializedContext: action.serializedContext,
-            sessionState: action.sessionState,
-          });
-          input.crashCleanupState.lastSessionState = action.sessionState;
-          continue;
-        }
-      }
-
       // `settled` rides the typed park arm exclusively; `run-step` preserves
       // the full StepResult so no state-key fallback exists anymore.
       const settled = action.settled;
@@ -462,13 +451,26 @@ async function runDriverLoop(input: {
         input.crashCleanupState.caller = undefined;
       }
 
-      const next = await nextTurnDelivery({
-        bufferedDeliveries,
-        bufferedSessionControls,
-        commandInbox,
-        driverWritable: input.driverWritable,
+      // An open authorization challenge must not wedge the session:
+      // ordinary deliveries keep starting normal turns while the challenge
+      // waits for its callback, and the callback surfaces through the same
+      // parked wait as everything else. The pending challenge survives
+      // intervening turns because every park re-derives
+      // `authorizationNames` from durable session state.
+      const next = await nextParkedActivity({
+        expected: action.authorizationNames?.length ?? 0,
         sessionState: action.sessionState,
       });
+
+      if (next.kind === "authorization-resume") {
+        action = await runTurn({
+          delivery: { kind: "deliver", payloads: next.payloads },
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
+        input.crashCleanupState.lastSessionState = action.sessionState;
+        continue;
+      }
 
       if (next.kind === "expired") {
         return {

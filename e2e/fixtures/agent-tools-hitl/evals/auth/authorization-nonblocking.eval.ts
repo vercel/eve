@@ -8,7 +8,6 @@ import type { EveEvalContext, EveEvalSession, EveEvalTurn } from "eve/evals";
  * covered deterministically by `workflow-entry.integration.test.ts`.
  */
 export default defineEval({
-  tags: ["real-model"],
   description: "An ordinary message runs while an authorization challenge stays open.",
   async test(t) {
     const parked = await t.send(

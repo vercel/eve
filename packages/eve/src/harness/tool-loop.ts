@@ -2186,6 +2186,14 @@ async function handleStepResult(input: {
           }),
         );
       }
+
+      // An authorization park is a between-turn wait like the input park
+      // above: the session keeps serving ordinary turns while the challenge
+      // is open, so the stream must close its turn boundary — clients wait
+      // on `session.waiting` and would otherwise hang on the parked turn.
+      if (config.mode === "conversation") {
+        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+      }
     }
 
     return {

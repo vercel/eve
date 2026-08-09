@@ -49,4 +49,29 @@ describe("createClientUrl", () => {
       "/api/eve/v1/session?token=secret",
     );
   });
+
+  it("splits a query string embedded in the route path instead of encoding it", () => {
+    expect(
+      createClientUrl(
+        "https://agent.example.com",
+        "/eve/v1/connections/auth-probe/callback/wrun_1%3Aauth?code=ok",
+      ),
+    ).toBe(
+      "https://agent.example.com/eve/v1/connections/auth-probe/callback/wrun_1%3Aauth?code=ok",
+    );
+  });
+
+  it("splits embedded route queries on same-origin proxy prefixes", () => {
+    expect(createClientUrl("/api", "/eve/v1/session/123/stream?startIndex=4")).toBe(
+      "/api/eve/v1/session/123/stream?startIndex=4",
+    );
+  });
+
+  it("prefers explicit search parameters over embedded route queries", () => {
+    expect(
+      createClientUrl("https://agent.example.com", "/eve/v1/session/123/stream?startIndex=stale", {
+        startIndex: "4",
+      }),
+    ).toBe("https://agent.example.com/eve/v1/session/123/stream?startIndex=4");
+  });
 });

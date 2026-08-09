@@ -183,6 +183,14 @@ describe("workflowEntry integration", () => {
           authorization: { displayName: "Weather" },
         });
 
+        // The authorization park closes its turn boundary so stream
+        // consumers do not hang on the parked turn.
+        const parkBoundary = await stream.nextUntil(
+          "authorization park boundary",
+          (event) => event.type === "session.waiting",
+        );
+        expect(parkBoundary.at(-1)?.type).toBe("session.waiting");
+
         await resumeHook(`${run.runId}:auth`, {
           kind: "deliver",
           payloads: [
@@ -280,6 +288,12 @@ describe("workflowEntry integration", () => {
           "initial auth-required event",
           (event) => event.type === "authorization.required",
         );
+        // Consume the park's own turn boundary so the next wait delimits
+        // the intervening message turn.
+        await stream.nextUntil(
+          "authorization park boundary",
+          (event) => event.type === "session.waiting",
+        );
 
         // An ordinary message while the challenge is open runs as a normal
         // turn instead of queueing behind the callback.
@@ -352,6 +366,88 @@ describe("workflowEntry integration", () => {
               event.data.message.includes("authorized with weather-token"),
           ),
         ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("completes the challenge after a no-op cancel consumed the parked wait", async () => {
+    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-auth-cancel");
+    const continuationToken = "http:workflow-entry-auth-cancel";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+          serializedContext: buildSerializedContext({
+            auth: {
+              attributes: {},
+              authenticator: "test-idp",
+              issuer: "test-idp",
+              principalId: "user-1",
+              principalType: "user",
+            },
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+
+      const stream = captureEvents(run);
+
+      try {
+        await stream.nextUntil(
+          "initial auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        await stream.nextUntil(
+          "authorization park boundary",
+          (event) => event.type === "session.waiting",
+        );
+
+        // A cancel with no active turn is consumed by the parked wait
+        // without producing a parent turn. The callback must still surface
+        // in the continued wait instead of stalling until unrelated
+        // session activity re-parks the driver.
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        await resumeHook(continuationToken, { kind: "cancel" });
+        // Let the driver consume the no-op cancel and re-enter the parked
+        // wait before the callback fires; back-to-back resumes could
+        // otherwise surface the callback in the first wait iteration and
+        // mask a wait that ignores callbacks after a consumed cancel.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+
+        await resumeHook(`${run.runId}:auth`, {
+          kind: "deliver",
+          payloads: [
+            {
+              authorizationCallback: {
+                callback: {
+                  method: "GET",
+                  params: { code: "oauth-code" },
+                },
+                connectionName: "weather",
+              },
+            },
+          ],
+        });
+
+        const callbackTurn = await stream.nextUntil(
+          "authorization callback turn",
+          (event) => event.type === "session.waiting",
+        );
+        const completed = filterEventsByType(callbackTurn, "authorization.completed");
+
+        expect(completeCalls()).toBe(1);
+        expect(completed).toHaveLength(1);
+        expect(completed[0]?.data).toMatchObject({
+          name: "weather",
+          outcome: "authorized",
+        });
+        expect(filterEventsByType(callbackTurn, "turn.cancelled")).toHaveLength(0);
       } finally {
         stream.dispose();
         await run.cancel();
