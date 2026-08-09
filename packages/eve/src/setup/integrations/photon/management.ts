@@ -40,20 +40,10 @@ const ErrorResponseSchema = z.object({
   message: z.unknown().optional(),
 });
 const PhoneRegistrationSchema = z.object({
-  assignedPhoneNumber: z.string().optional(),
-  phoneNumber: z.string().optional(),
-  data: z
-    .object({
-      assignedPhoneNumber: z.string().optional(),
-      phoneNumber: z.string().optional(),
-      user: z
-        .object({ assignedPhoneNumber: z.string().optional(), phoneNumber: z.string().optional() })
-        .optional(),
-    })
-    .optional(),
-  user: z
-    .object({ assignedPhoneNumber: z.string().optional(), phoneNumber: z.string().optional() })
-    .optional(),
+  data: z.object({ assignedPhoneNumber: z.string().min(1) }),
+});
+const DedicatedLineSchema = z.object({
+  data: z.object({ line: z.object({ phoneNumber: z.string().min(1) }) }),
 });
 
 interface DeviceCodeResponse {
@@ -88,7 +78,8 @@ export interface ProvisionPhotonProjectOptions {
 export interface UsePhotonProjectOptions {
   projectId: string;
   projectSecret: string;
-  phoneNumber: string;
+  dedicatedLine?: string;
+  phoneNumber?: string;
   deps?: PhotonManagementDeps;
 }
 
@@ -256,16 +247,25 @@ async function registerUser(
     await json(response, "phone registration"),
     "Photon returned an invalid phone registration response.",
   );
-  return (
-    body.data?.user?.phoneNumber ??
-    body.data?.user?.assignedPhoneNumber ??
-    body.data?.phoneNumber ??
-    body.data?.assignedPhoneNumber ??
-    body.user?.phoneNumber ??
-    body.user?.assignedPhoneNumber ??
-    body.phoneNumber ??
-    body.assignedPhoneNumber
+  return body.data.assignedPhoneNumber;
+}
+
+/** Returns the least-loaded dedicated iMessage line, when the project has one. */
+export async function findDedicatedPhotonLine(input: {
+  projectId: string;
+  projectSecret: string;
+  deps?: Pick<PhotonManagementDeps, "fetch">;
+}): Promise<string | undefined> {
+  const response = await (input.deps?.fetch ?? fetch)(
+    `${PHOTON_SPECTRUM_HOST}/projects/${encodeURIComponent(input.projectId)}/lines/route`,
+    { headers: basic(input.projectId, input.projectSecret) },
   );
+  if (response.status === 404) return undefined;
+  return parsePhotonResponse(
+    DedicatedLineSchema,
+    await json(response, "dedicated line lookup"),
+    "Photon returned an invalid dedicated line response.",
+  ).data.line.phoneNumber;
 }
 
 async function deleteProject(
@@ -310,23 +310,38 @@ export async function provisionPhotonProject(
 export async function usePhotonProject(
   options: UsePhotonProjectOptions,
 ): Promise<PhotonManagedProject> {
-  const phoneNumber = options.phoneNumber.trim();
-  const validationError = validatePhotonPhoneNumber(phoneNumber);
-  if (validationError !== null)
-    throw new Error(`Photon phone number is invalid. ${validationError}.`);
   const projectId = options.projectId.trim();
   const projectSecret = options.projectSecret.trim();
   if (!projectId || !projectSecret) {
     throw new Error("Photon project ID and project secret are required.");
   }
+  const dedicatedLine =
+    options.dedicatedLine ??
+    (await findDedicatedPhotonLine({
+      projectId,
+      projectSecret,
+      deps: options.deps,
+    }));
+  if (dedicatedLine !== undefined) {
+    return {
+      projectId,
+      projectSecret,
+      assignedPhoneNumber: dedicatedLine,
+      cleanup: async () => {},
+    };
+  }
+  if (options.phoneNumber === undefined) {
+    throw new Error("Photon phone number is required for projects without a dedicated line.");
+  }
+  const phoneNumber = options.phoneNumber.trim();
+  const validationError = validatePhotonPhoneNumber(phoneNumber);
+  if (validationError !== null)
+    throw new Error(`Photon phone number is invalid. ${validationError}.`);
   const assignedPhoneNumber = await registerUser(
     projectId,
     projectSecret,
     phoneNumber,
     options.deps ?? defaultDeps,
   );
-  const cleanup = async () => {};
-  return assignedPhoneNumber === undefined
-    ? { projectId, projectSecret, cleanup }
-    : { projectId, projectSecret, assignedPhoneNumber, cleanup };
+  return { projectId, projectSecret, assignedPhoneNumber, cleanup: async () => {} };
 }

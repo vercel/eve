@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import {
+  findDedicatedPhotonLine,
   provisionPhotonProject,
   usePhotonProject,
   validatePhotonPhoneNumber,
@@ -30,10 +31,7 @@ describe("Photon management provisioning", () => {
       .mockResolvedValueOnce(response({ id: "project-id" }))
       .mockResolvedValueOnce(response({ projectSecret: "project-secret" }))
       .mockResolvedValueOnce(
-        response({
-          succeed: true,
-          data: { user: { id: "user-id", assignedPhoneNumber: "+15550000000" } },
-        }),
+        response({ succeed: true, data: { assignedPhoneNumber: "+15550000000" } }),
       );
     const onAuthorization = vi.fn();
 
@@ -66,16 +64,11 @@ describe("Photon management provisioning", () => {
     });
   });
 
-  test("uses an existing project without dashboard authorization", async () => {
+  test("uses an existing project's dedicated line without registering the operator", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () =>
       response({
         succeed: true,
-        data: {
-          user: {
-            assignedPhoneNumber: "+15550000000",
-            phoneNumber: "+15551111111",
-          },
-        },
+        data: { line: { phoneNumber: "+15550000000" } },
       }),
     );
 
@@ -89,9 +82,49 @@ describe("Photon management provisioning", () => {
     ).resolves.toMatchObject({
       projectId: "project-id",
       projectSecret: "project-secret",
-      assignedPhoneNumber: "+15551111111",
+      assignedPhoneNumber: "+15550000000",
     });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://spectrum.photon.codes/projects/project-id/lines/route",
+      expect.objectContaining({ headers: expect.any(Object) }),
+    );
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  test("registers the operator on an existing shared project", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(response({ message: "No dedicated line" }, 404))
+      .mockResolvedValueOnce(
+        response({ succeed: true, data: { assignedPhoneNumber: "+15550000000" } }),
+      );
+
+    await expect(
+      usePhotonProject({
+        projectId: "project-id",
+        projectSecret: "project-secret",
+        phoneNumber: "+15551234567",
+        deps: { fetch, delay: vi.fn(async () => {}) },
+      }),
+    ).resolves.toMatchObject({ assignedPhoneNumber: "+15550000000" });
+    expect(fetch).toHaveBeenLastCalledWith(
+      "https://spectrum.photon.codes/projects/project-id/users/",
+      expect.objectContaining({
+        body: JSON.stringify({ type: "shared", phoneNumber: "+15551234567" }),
+      }),
+    );
+  });
+
+  test("returns no dedicated line when Photon reports none", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => response({}, 404));
+
+    await expect(
+      findDedicatedPhotonLine({
+        projectId: "project-id",
+        projectSecret: "project-secret",
+        deps: { fetch },
+      }),
+    ).resolves.toBeUndefined();
   });
 
   test.each([
