@@ -11,7 +11,7 @@ import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending
 import {
   getPendingInputBatches,
   queueDeferredStepInput,
-  setPendingInputBatches,
+  removePendingInputBatches,
 } from "#harness/pending-input-batches.js";
 import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
 import {
@@ -154,7 +154,7 @@ export function resolvePendingInput(input: {
       }
 
       const rejected = buildRejectedActionBatch(sole, []);
-      session = setPendingInputBatches(session, []);
+      session = removePendingInputBatches(session, [sole]);
 
       return {
         consumedMessage: resolvedStepInput.messageConsumed,
@@ -210,7 +210,7 @@ export function resolvePendingInput(input: {
     }
   }
 
-  session = setPendingInputBatches(session, openBatches);
+  session = removePendingInputBatches(session, resolvedBatches);
 
   // AI SDK collects approval responses only from the tail tool message.
   // Defer channel context and any follow-up message so the approval resolves
@@ -330,16 +330,15 @@ function compactStepInput(
  * because their tool calls still require resolution.
  */
 export function clearPendingSessionLimitPrompt(session: HarnessSession): HarnessSession {
-  const batches = getPendingInputBatches(session.state);
-  const kept = batches.filter(
+  const dropped = getPendingInputBatches(session.state).filter(
     (batch) =>
-      batch.requests.length === 0 ||
-      !batch.requests.every((request) => isSessionLimitContinuationRequest(request)),
+      batch.requests.length > 0 &&
+      batch.requests.every((request) => isSessionLimitContinuationRequest(request)),
   );
-  if (kept.length === batches.length) {
+  if (dropped.length === 0) {
     return session;
   }
-  return setPendingInputBatches(session, kept);
+  return removePendingInputBatches(session, dropped);
 }
 
 function hasUnansweredRequiredRequest(input: {

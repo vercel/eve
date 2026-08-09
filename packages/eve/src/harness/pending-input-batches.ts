@@ -81,7 +81,26 @@ export function getPendingInputBatches(
   return legacy === undefined ? [] : [legacy];
 }
 
-export function setPendingInputBatches(
+/**
+ * Removes the given batches (matched by identity from a prior
+ * {@link getPendingInputBatches} read) and keeps every other batch open.
+ *
+ * Removal is the only exported way to shrink the collection: a wholesale
+ * setter would reintroduce the overwrite hazard the collection exists to
+ * prevent — a writer clobbering batches it never resolved.
+ */
+export function removePendingInputBatches(
+  session: HarnessSession,
+  batches: readonly PendingInputBatch[],
+): HarnessSession {
+  const removed = new Set(batches);
+  return setPendingInputBatches(
+    session,
+    getPendingInputBatches(session.state).filter((batch) => !removed.has(batch)),
+  );
+}
+
+function setPendingInputBatches(
   session: HarnessSession,
   batches: readonly PendingInputBatch[],
 ): HarnessSession {
