@@ -109,7 +109,7 @@ semantics.
 
 The run picks back up exactly where it parked. Because the pause is durable, nothing is held in memory while it waits — the process can restart and the parked turn survives.
 
-For approval requests, unrelated follow-up text does not deny the tool call. eve keeps the approval pending and holds that text until the approval is answered, then replays it as the next message in the session.
+For approval requests, unrelated follow-up text does not deny the tool call — and it does not wait behind it either. The message runs as an ordinary turn while the approval stays pending and answerable; a later structured answer still resolves the original tool call. Text that exactly matches an option (like `approve`) still resolves the request directly.
 
 See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for the full event and resume contract that this builds on.
 

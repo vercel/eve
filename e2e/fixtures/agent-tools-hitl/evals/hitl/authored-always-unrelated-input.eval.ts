@@ -16,13 +16,16 @@ export default defineEval({
       toolName: TOOL_NAME,
     });
 
-    const unrelated = await t.send("Queue this unrelated note: ORBITAL-PINE-6C3R.");
+    const unrelated = await t.send(
+      "Note this unrelated marker and do not call any tools: ORBITAL-PINE-6C3R.",
+    );
 
+    // The unrelated message runs as an ordinary turn; the point of #533 is
+    // that it must not replay or resolve the unresolved authored tool call.
     unrelated.expectOk();
     unrelated.notEvent("action.result", {
       data: { result: { toolName: TOOL_NAME } },
     });
-    unrelated.notEvent("step.started");
     unrelated.event("session.waiting", { count: 1 });
 
     const approved = await t.respond([

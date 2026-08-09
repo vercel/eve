@@ -21,7 +21,7 @@ import { getAgentHandleStore } from "#harness/handles/store.js";
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import { setPendingInputBatch } from "#harness/input-requests.js";
+import { appendPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -1218,7 +1218,7 @@ describe("turnStep", () => {
     {
       name: "input batch",
       withPending: (session: HarnessSession): HarnessSession =>
-        setPendingInputBatch({
+        appendPendingInputBatch({
           requests: [
             {
               action: {

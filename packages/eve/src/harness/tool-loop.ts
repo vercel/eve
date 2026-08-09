@@ -129,7 +129,7 @@ import {
   hasDeferredStepInput,
   hasStepInput,
   resolvePendingInput,
-  setPendingInputBatch,
+  appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import {
   convertStaleResponsesToUserMessage,
@@ -769,16 +769,18 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // observability) never see the tool call resolve. Attributed to the turn
     // that requested approval via the parked batch's emit coordinates.
     if (emit && pending.rejectedActions) {
-      for (const result of pending.rejectedActions.results) {
-        await emit(
-          createActionResultEvent({
-            rejected: true,
-            result,
-            sequence: pending.rejectedActions.event.sequence,
-            stepIndex: pending.rejectedActions.event.stepIndex,
-            turnId: pending.rejectedActions.event.turnId,
-          }),
-        );
+      for (const rejectedBatch of pending.rejectedActions) {
+        for (const result of rejectedBatch.results) {
+          await emit(
+            createActionResultEvent({
+              rejected: true,
+              result,
+              sequence: rejectedBatch.event.sequence,
+              stepIndex: rejectedBatch.event.stepIndex,
+              turnId: rejectedBatch.event.turnId,
+            }),
+          );
+        }
       }
     }
 
@@ -2215,7 +2217,7 @@ async function handleStepResult(input: {
   // --- Park on input requests -----------------------------------------------
 
   if (inputRequests.length > 0) {
-    let parkedSession = setPendingInputBatch({
+    let parkedSession = appendPendingInputBatch({
       event: {
         sequence: emissionState.sequence,
         stepIndex: emissionState.stepIndex,

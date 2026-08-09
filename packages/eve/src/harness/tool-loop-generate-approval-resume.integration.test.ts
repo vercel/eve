@@ -2,7 +2,7 @@ import { jsonSchema, type LanguageModel, type ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-import { setPendingInputBatch } from "#harness/input-requests.js";
+import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 
@@ -52,7 +52,7 @@ function createPendingApprovalSession(history?: readonly ModelMessage[]): Harnes
     sessionId: "generate-approval-resume-session",
   };
 
-  return setPendingInputBatch({
+  return appendPendingInputBatch({
     requests: [
       {
         action: {

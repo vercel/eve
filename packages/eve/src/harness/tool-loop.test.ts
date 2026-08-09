@@ -39,9 +39,10 @@ import {
   requestAuthorization,
 } from "#harness/authorization.js";
 import {
+  getPendingInputRequestIds,
   hasDeferredStepInput,
   hasPendingInputBatch,
-  setPendingInputBatch,
+  appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
@@ -434,7 +435,7 @@ function finalOutputResult(text: string, structured: unknown): Record<string, un
 }
 
 function createPendingBashApprovalSession(): HarnessSession {
-  return setPendingInputBatch({
+  return appendPendingInputBatch({
     requests: [
       {
         action: {
@@ -485,7 +486,7 @@ function createPendingBashApprovalSession(): HarnessSession {
 }
 
 function createPendingProtectedActionApprovalSession(): HarnessSession {
-  return setPendingInputBatch({
+  return appendPendingInputBatch({
     requests: [
       {
         action: {
@@ -6190,10 +6191,10 @@ describe("createToolLoopHarness", () => {
     );
 
     const pendingResponseMessages = (
-      result.session.state?.["eve.runtime.pendingInputBatch"] as
-        | { responseMessages?: readonly ModelMessage[] }
+      result.session.state?.["eve.runtime.pendingInputBatches"] as
+        | readonly { responseMessages?: readonly ModelMessage[] }[]
         | undefined
-    )?.responseMessages;
+    )?.[0]?.responseMessages;
 
     expect(result.next).toBeNull();
     expect(pendingResponseMessages).toEqual([
@@ -7159,22 +7160,22 @@ describe("createToolLoopHarness", () => {
     expect(events.filter((event) => event.type === "action.result")).toHaveLength(1);
   });
 
-  it("queues a follow-up user message until the pending tool approval resolves", async () => {
+  it("runs a follow-up user message while the pending tool approval stays open", async () => {
     const generateCalls: unknown[] = [];
     const agentResults = [
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      },
       {
         finishReason: "stop",
         response: {
           messages: [{ content: "Okay, I will not run that command.", role: "assistant" }],
         },
         text: "Okay, I will not run that command.",
-        toolCalls: [],
-        toolResults: [],
-      },
-      {
-        finishReason: "stop",
-        response: { messages: [{ content: "Hello!", role: "assistant" }] },
-        text: "Hello!",
         toolCalls: [],
         toolResults: [],
       },
@@ -7208,7 +7209,7 @@ describe("createToolLoopHarness", () => {
       return this;
     } as MockAgentConstructor);
 
-    const session = setPendingInputBatch({
+    const session = appendPendingInputBatch({
       requests: [
         {
           action: {
@@ -7270,20 +7271,32 @@ describe("createToolLoopHarness", () => {
       ]),
     });
 
+    // The follow-up message runs as an ordinary turn: the model is called
+    // without the withheld approval batch, and the approval stays open.
     const firstResult = await createToolLoopHarness(config)(session, {
       message: "Hi instead.",
     });
 
     expect(firstResult.next).toBeNull();
-    expect(generateCalls).toEqual([]);
-    expect(hasDeferredStepInput(firstResult.session)).toBe(true);
+    expect(generateCalls).toHaveLength(1);
+    expect((generateCalls[0] as { role: string; content: unknown }[]).at(-1)).toEqual({
+      content: "Hi instead.",
+      role: "user",
+    });
+    expect(
+      (generateCalls[0] as { role: string }[]).every((message) => message.role !== "tool"),
+    ).toBe(true);
+    expect(hasDeferredStepInput(firstResult.session)).toBe(false);
+    expect(hasPendingInputBatch(firstResult.session.state)).toBe(true);
 
+    // The late denial still restores the withheld batch behind the
+    // intervening exchange and resolves it.
     const deniedResult = await createToolLoopHarness(config)(firstResult.session, {
       inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
     });
 
-    expect(typeof deniedResult.next).toBe("function");
-    expect(generateCalls[0]).toEqual([
+    expect(generateCalls).toHaveLength(2);
+    expect((generateCalls[1] as { role: string; content: unknown }[]).slice(-2)).toEqual([
       {
         content: [
           {
@@ -7321,22 +7334,308 @@ describe("createToolLoopHarness", () => {
         role: "tool",
       },
     ]);
-
-    const secondResult = await createToolLoopHarness(config)(deniedResult.session);
-
-    expect(secondResult.next).toBeNull();
-    expect((generateCalls[1] as { role: string; content: unknown }[]).at(-1)).toEqual({
+    expect((generateCalls[1] as { role: string; content: unknown }[])[0]).toEqual({
       content: "Hi instead.",
       role: "user",
     });
-    expect(secondResult.session.history.at(-2)).toEqual({
-      content: "Hi instead.",
-      role: "user",
-    });
-    expect(secondResult.session.history.at(-1)).toEqual({
-      content: "Hello!",
+    expect(hasPendingInputBatch(deniedResult.session.state)).toBe(false);
+    expect(deniedResult.session.history.at(-1)).toEqual({
+      content: "Okay, I will not run that command.",
       role: "assistant",
     });
+  });
+
+  it("parks a second input batch while an earlier approval stays open", async () => {
+    const generateCalls: Array<Array<{ role: string; content: unknown }>> = [];
+    const agentResults = [
+      {
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            {
+              content: [
+                { text: "Which color?", type: "text" },
+                {
+                  input: {
+                    options: [
+                      { id: "red", label: "Red" },
+                      { id: "blue", label: "Blue" },
+                    ],
+                    prompt: "Pick a color.",
+                  },
+                  toolCallId: "question-call",
+                  toolName: "ask_question",
+                  type: "tool-call",
+                },
+              ],
+              role: "assistant",
+            },
+          ],
+        },
+        text: "",
+        toolCalls: [
+          {
+            input: {
+              options: [
+                { id: "red", label: "Red" },
+                { id: "blue", label: "Blue" },
+              ],
+              prompt: "Pick a color.",
+            },
+            toolCallId: "question-call",
+            toolName: "ask_question",
+            type: "tool-call",
+          },
+        ],
+        toolResults: [],
+      },
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Red it is.", role: "assistant" }] },
+        text: "Red it is.",
+        toolCalls: [],
+        toolResults: [],
+      },
+      {
+        finishReason: "stop",
+        response: {
+          messages: [{ content: "Understood, not running it.", role: "assistant" }],
+        },
+        text: "Understood, not running it.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ] satisfies Record<string, unknown>[];
+    let instanceIndex = 0;
+
+    vi.mocked(ToolLoopAgent).mockImplementation(function (
+      this: MockAgentInstance,
+      settings: MockAgentSettings,
+    ) {
+      const result = agentResults[instanceIndex];
+      instanceIndex += 1;
+      if (result === undefined) {
+        throw new Error("ToolLoopAgent mock exhausted its scripted results.");
+      }
+      const { onStepFinish, prepareStep } = settings;
+      this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
+        if (prepareStep) {
+          await prepareStep({
+            messages: input.messages,
+            steps: [],
+            stepNumber: 0,
+            model: {},
+            context: undefined,
+          });
+        }
+        generateCalls.push(input.messages as Array<{ role: string; content: unknown }>);
+        if (onStepFinish) await onStepFinish(result);
+        return createMockGenerateResult(result);
+      });
+      return this;
+    } as MockAgentConstructor);
+
+    const session = appendPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "call-1",
+            input: { command: "rm -rf /tmp/demo" },
+            kind: "tool-call",
+            toolName: "bash",
+          },
+          allowFreeform: false,
+          display: "confirmation",
+          kind: "tool-approval",
+          options: [
+            { id: "approve", label: "Yes" },
+            { id: "deny", label: "No" },
+          ],
+          prompt: "Approve tool call: bash",
+          requestId: "approval-1",
+        },
+      ],
+      responseMessages: [
+        {
+          content: [
+            {
+              input: { command: "rm -rf /tmp/demo" },
+              toolCallId: "call-1",
+              toolName: "bash",
+              type: "tool-call",
+            },
+            {
+              approvalId: "approval-1",
+              toolCallId: "call-1",
+              type: "tool-approval-request",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      session: createTestSession({
+        agent: {
+          modelReference: { id: "test-model" },
+          system: "You are a test assistant.",
+          tools: [
+            { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
+            {
+              description: "Ask the user a question.",
+              name: "ask_question",
+              inputSchema: { type: "object" },
+            },
+          ],
+        },
+      }),
+    });
+    const config = createTestConfig("conversation", undefined, {
+      tools: new Map([
+        [
+          "bash",
+          {
+            description: "Run shell commands",
+            execute: vi.fn().mockResolvedValue("ok"),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "bash",
+          },
+        ],
+      ]),
+    });
+
+    // The intervening turn raises its own question batch; the approval batch
+    // must survive it instead of being overwritten.
+    const questionTurn = await createToolLoopHarness(config)(session, {
+      message: "Ask me which color to use.",
+    });
+    expect(questionTurn.next).toBeNull();
+    expect(getPendingInputRequestIds(questionTurn.session.state)).toEqual(
+      new Set(["approval-1", "question-call"]),
+    );
+
+    // Answering the question closes only its own batch.
+    const answered = await createToolLoopHarness(config)(questionTurn.session, {
+      inputResponses: [{ requestId: "question-call", optionId: "red" }],
+    });
+    expect(getPendingInputRequestIds(answered.session.state)).toEqual(new Set(["approval-1"]));
+    const answeredPrompt = generateCalls[1] ?? [];
+    expect(
+      answeredPrompt.some((message) => JSON.stringify(message.content).includes("question-call")),
+    ).toBe(true);
+    expect(
+      answeredPrompt.some((message) => JSON.stringify(message.content).includes("call-1")),
+    ).toBe(false);
+
+    // The original approval still resolves afterwards.
+    const denied = await createToolLoopHarness(config)(answered.session, {
+      inputResponses: [{ requestId: "approval-1", optionId: "deny" }],
+    });
+    expect(hasPendingInputBatch(denied.session.state)).toBe(false);
+    expect(denied.session.history.at(-1)).toEqual({
+      content: "Understood, not running it.",
+      role: "assistant",
+    });
+  });
+
+  it("releases a message wedged behind an approval by an earlier version", async () => {
+    const generateCalls: Array<Array<{ role: string; content: unknown }>> = [];
+    const stillHere = {
+      finishReason: "stop",
+      response: { messages: [{ content: "Still here!", role: "assistant" }] },
+      text: "Still here!",
+      toolCalls: [],
+      toolResults: [],
+    };
+    vi.mocked(ToolLoopAgent).mockImplementation(function (
+      this: MockAgentInstance,
+      settings: MockAgentSettings,
+    ) {
+      const { onStepFinish, prepareStep } = settings;
+      this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
+        if (prepareStep) {
+          await prepareStep({
+            messages: input.messages,
+            steps: [],
+            stepNumber: 0,
+            model: {},
+            context: undefined,
+          });
+        }
+        generateCalls.push(input.messages as Array<{ role: string; content: unknown }>);
+        if (onStepFinish) await onStepFinish(stillHere);
+        return createMockGenerateResult(stillHere);
+      });
+      return this;
+    } as MockAgentConstructor);
+
+    // A session wedged by the pre-collection deferral: the singleton batch
+    // key plus a message swallowed into the deferred step input.
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "test-model" },
+        system: "You are a test assistant.",
+        tools: [
+          { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
+        ],
+      },
+    });
+    const wedged = {
+      ...session,
+      state: {
+        "eve.runtime.deferredStepInput": { message: "Wedged hello." },
+        "eve.runtime.pendingInputBatch": {
+          requests: [
+            {
+              action: {
+                callId: "call-1",
+                input: { command: "rm -rf /tmp/demo" },
+                kind: "tool-call",
+                toolName: "bash",
+              },
+              allowFreeform: false,
+              display: "confirmation",
+              kind: "tool-approval",
+              options: [
+                { id: "approve", label: "Yes" },
+                { id: "deny", label: "No" },
+              ],
+              prompt: "Approve tool call: bash",
+              requestId: "approval-1",
+            },
+          ],
+          responseMessages: [
+            {
+              content: [
+                {
+                  input: { command: "rm -rf /tmp/demo" },
+                  toolCallId: "call-1",
+                  toolName: "bash",
+                  type: "tool-call",
+                },
+                {
+                  approvalId: "approval-1",
+                  toolCallId: "call-1",
+                  type: "tool-approval-request",
+                },
+              ],
+              role: "assistant",
+            },
+          ],
+        },
+      },
+    };
+
+    const result = await createToolLoopHarness(createTestConfig("conversation"))(wedged, {
+      message: "Are you there?",
+    });
+
+    // The wedged message finally runs as an ordinary turn; the approval
+    // stays open and answerable.
+    expect(generateCalls).toHaveLength(1);
+    const lastMessages = (generateCalls[0] ?? []).filter((message) => message.role === "user");
+    expect(JSON.stringify(lastMessages)).toContain("Wedged hello.");
+    expect(JSON.stringify(lastMessages)).toContain("Are you there?");
+    expect(hasDeferredStepInput(result.session)).toBe(false);
+    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
   it("consumes text approval shortcuts without appending them as user messages", async () => {
@@ -7373,7 +7672,7 @@ describe("createToolLoopHarness", () => {
       ? (settings: S) => ToolLoopAgent
       : never);
 
-    const session = setPendingInputBatch({
+    const session = appendPendingInputBatch({
       requests: [
         {
           action: {
@@ -7566,26 +7865,26 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("deferred message lands as last non-system message after explicit approval denial", async () => {
-    // Step 1: pending approval + user sends a follow-up message. The approval
-    // remains pending and the message is deferred. Step 2: the user denies the
-    // approval. Step 3: the deferred message is consumed and appears as the
-    // last message the model sees.
+  it("follow-up message precedes a late approval denial in committed history", async () => {
+    // Step 1: pending approval + user sends a follow-up message. The message
+    // runs as an ordinary turn while the approval stays open. Step 2: the
+    // user denies the approval; the withheld batch is restored behind the
+    // intervening exchange and resolves as denied.
     const generateCalls: Array<Array<{ role: string; content: unknown }>> = [];
     const agentResults = [
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Sure, here you go.", role: "assistant" }] },
+        text: "Sure, here you go.",
+        toolCalls: [],
+        toolResults: [],
+      },
       {
         finishReason: "stop",
         response: {
           messages: [{ content: "I will not run that command.", role: "assistant" }],
         },
         text: "I will not run that command.",
-        toolCalls: [],
-        toolResults: [],
-      },
-      {
-        finishReason: "stop",
-        response: { messages: [{ content: "Sure, here you go.", role: "assistant" }] },
-        text: "Sure, here you go.",
         toolCalls: [],
         toolResults: [],
       },
@@ -7621,7 +7920,7 @@ describe("createToolLoopHarness", () => {
       ? (settings: S) => ToolLoopAgent
       : never);
 
-    const session = setPendingInputBatch({
+    const session = appendPendingInputBatch({
       requests: [
         {
           action: {
@@ -7684,35 +7983,32 @@ describe("createToolLoopHarness", () => {
       ]),
     });
 
-    // Step 1: user sends "Do something else" while approval is pending.
-    // Approval remains pending; message is deferred.
+    // Step 1: the follow-up message runs immediately; the approval stays open.
     const firstResult = await createToolLoopHarness(config)(session, {
       message: "Do something else",
     });
     expect(firstResult.next).toBeNull();
-    expect(generateCalls).toEqual([]);
+    expect(generateCalls).toHaveLength(1);
+    expect(generateCalls[0]?.at(-1)).toEqual({ content: "Do something else", role: "user" });
+    expect(hasPendingInputBatch(firstResult.session.state)).toBe(true);
 
-    // Step 2: user denies the approval; the deferred message is NOT in this call.
+    // Step 2: the late denial restores the withheld batch behind the
+    // intervening exchange; the model sees the denial as the tail.
     const deniedResult = await createToolLoopHarness(config)(firstResult.session, {
       inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
     });
-    expect(typeof deniedResult.next).toBe("function");
-    const step2Last = generateCalls[0]?.at(-1);
-    expect(step2Last?.role).toBe("tool");
+    expect(generateCalls).toHaveLength(2);
+    expect(generateCalls[1]?.at(-1)?.role).toBe("tool");
 
-    // Step 3: harness consumes the deferred message.
-    const secondResult = await createToolLoopHarness(config)(deniedResult.session);
-    expect(secondResult.next).toBeNull();
-
-    // The deferred user message is the last message the model sees.
-    const step3Last = generateCalls[1]?.at(-1);
-    expect(step3Last).toEqual({ content: "Do something else", role: "user" });
-
-    // History reflects the full conversation.
-    expect(secondResult.session.history.at(-1)).toEqual({
-      content: "Sure, here you go.",
+    // Committed history keeps the intervening exchange before the batch.
+    const history = deniedResult.session.history;
+    expect(history[0]).toEqual({ content: "Do something else", role: "user" });
+    expect(history[1]).toEqual({ content: "Sure, here you go.", role: "assistant" });
+    expect(history.at(-1)).toEqual({
+      content: "I will not run that command.",
       role: "assistant",
     });
+    expect(hasPendingInputBatch(deniedResult.session.state)).toBe(false);
   });
 
   it("emits input.requested for ask_question and does not emit actions.requested", async () => {
@@ -7867,7 +8163,7 @@ describe("createToolLoopHarness", () => {
       ],
       prompt: "Which context should I use?",
     };
-    const session = setPendingInputBatch({
+    const session = appendPendingInputBatch({
       requests: [
         {
           action: {
@@ -7954,7 +8250,7 @@ describe("createToolLoopHarness", () => {
       ],
       prompt: "Which context should I use?",
     };
-    const session = setPendingInputBatch({
+    const session = appendPendingInputBatch({
       requests: [
         {
           action: {

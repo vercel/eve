@@ -7,17 +7,28 @@ import type {
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
 import { classifyInputRequest, isApprovalRequest } from "#harness/input-request-class.js";
-import { coalesceTurnInputs } from "#harness/messages.js";
+import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending-input-batches.js";
+import {
+  getPendingInputBatches,
+  queueDeferredStepInput,
+  setPendingInputBatches,
+} from "#harness/pending-input-batches.js";
 import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
 import {
   isSessionLimitContinuationRequest,
   resolveSessionLimitContinuation,
 } from "#harness/session-limit-continuation.js";
-import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
+import type { HarnessSession, StepInput } from "#harness/types.js";
 
-const PENDING_INPUT_BATCH_KEY = "eve.runtime.pendingInputBatch";
+export {
+  appendPendingInputBatch,
+  consumeDeferredStepInput,
+  getPendingInputRequestIds,
+  hasDeferredStepInput,
+  hasPendingInputBatch,
+} from "#harness/pending-input-batches.js";
+
 const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";
-const DEFERRED_STEP_INPUT_KEY = "eve.runtime.deferredStepInput";
 
 const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
 
@@ -26,25 +37,6 @@ const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution was denied.";
 const TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE = "Invalid approval response.";
 
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
-
-/**
- * Stream-emit coordinates carried so a parked batch's resolution can attribute
- * its events to the turn and step that requested the input.
- */
-interface PendingInputBatchEvent {
-  readonly sequence: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
-}
-
-/**
- * Serializable pending input batch stored on the session state.
- */
-interface PendingInputBatch {
-  readonly event?: PendingInputBatchEvent;
-  readonly requests: readonly InputRequest[];
-  readonly responseMessages: readonly ModelMessage[];
-}
 
 /**
  * Denied tool-call approvals from one resolved batch, ready for the caller to
@@ -69,66 +61,29 @@ export function hasStepInput(input?: StepInput): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Deferred step input
-// ---------------------------------------------------------------------------
-
-/**
- * Merges any queued follow-up input into the current step input and clears it
- * from session state.
- *
- * Used when the harness has to process a pending tool-approval response first
- * and defer the user's new message to the next internal model step.
- */
-export function consumeDeferredStepInput(input: {
-  readonly input?: StepInput;
-  readonly session: HarnessSession;
-}): {
-  readonly input?: StepInput;
-  readonly session: HarnessSession;
-} {
-  const deferredInput = getDeferredStepInput(input.session);
-
-  if (deferredInput === undefined) {
-    return input;
-  }
-
-  const session = clearDeferredStepInput(input.session);
-
-  if (input.input === undefined) {
-    return {
-      input: deferredInput,
-      session,
-    };
-  }
-
-  return {
-    input: coalesceTurnInputs(deferredInput, input.input),
-    session,
-  };
-}
-
-/**
- * Returns true when the session carries queued follow-up input for the next
- * internal harness step.
- */
-export function hasDeferredStepInput(session: HarnessSession): boolean {
-  return getDeferredStepInput(session) !== undefined;
-}
-
-// ---------------------------------------------------------------------------
 // Pending input resolution
 // ---------------------------------------------------------------------------
 
 /**
  * Resolves pending input at the start of a harness step.
  *
- * Each pending request is either `"required"` or `"dismissable"` — see
- * {@link classifyInputRequest}. While a required request is unanswered,
- * follow-up input is deferred instead of dismissing and recreating the
- * request; {@link consumeDeferredStepInput} replays it on the subsequent
- * step. Tool approval responses additionally resolve in isolation because
- * AI SDK cannot process an approval response and a new user message in the
- * same request.
+ * Pending requests live in ordered batches, one per parked assistant turn.
+ * A batch resolves as a unit when one delivery answers every `"required"`
+ * request in it (see {@link classifyInputRequest}); its withheld model
+ * output is then restored behind the current history. Responses that answer
+ * only part of a batch wait in the deferred step input until the rest
+ * arrives.
+ *
+ * A plain message never waits behind a tool approval: it runs as an
+ * ordinary turn while the approval batch stays open and answerable. Only a
+ * session-limit prompt still holds messages back — the budget gate must not
+ * run the model. A message behind a single question-only batch keeps its
+ * dismiss-and-continue behavior.
+ *
+ * Tool approval responses additionally resolve in isolation because AI SDK
+ * cannot process an approval response and a new user message in the same
+ * request; {@link consumeDeferredStepInput} replays the message on the
+ * subsequent step.
  */
 export function resolvePendingInput(input: {
   readonly history?: readonly ModelMessage[];
@@ -140,102 +95,161 @@ export function resolvePendingInput(input: {
   let session = input.session;
   const baseHistory = [...(input.history ?? session.history)];
 
-  const pendingBatch = getPendingInputBatch(session.state);
+  const batches = getPendingInputBatches(session.state);
 
-  // No pending batch -- pass through to the model call.
-  if (pendingBatch === undefined) {
+  // No pending batches -- pass through to the model call.
+  if (batches.length === 0) {
     return { outcome: "continue", messages: baseHistory, session };
   }
 
-  // Pending batch exists -- only resolve if we have actual responses.
-  const resolvedStepInput = resolveTextMessageInput(pendingBatch, stepInput);
+  // Text matching stays scoped to a single open batch: with several open,
+  // a bare option word is ambiguous, so it stays an ordinary message.
+  const resolvedStepInput: (StepInput & { readonly messageConsumed?: boolean }) | undefined =
+    batches.length === 1 ? resolveTextMessageInput(batches[0]!, stepInput) : stepInput;
   const responses = resolvedStepInput?.inputResponses ?? [];
-  const resolvesApprovalBatch = pendingBatch.requests.some((request) => isApprovalRequest(request));
 
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     return { outcome: "unresolved", messages: baseHistory, session };
   }
 
-  if (hasUnansweredRequiredRequest({ pendingBatch, responses })) {
-    session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
-    return { deferredMessage: true, outcome: "unresolved", messages: baseHistory, session };
-  }
+  const responseIds = new Set(responses.map((response) => response.requestId));
+  const resolvedBatches = batches.filter(
+    (batch) =>
+      batch.requests.some((request) => responseIds.has(request.requestId)) &&
+      !hasUnansweredRequiredRequest({ pendingBatch: batch, responses }),
+  );
+  const openBatches = batches.filter((batch) => !resolvedBatches.includes(batch));
+  const leftoverResponses = responses.filter((response) =>
+    openBatches.some((batch) =>
+      batch.requests.some((request) => request.requestId === response.requestId),
+    ),
+  );
+  const limitBlocked = openBatches.some((batch) =>
+    batch.requests.some((request) => isSessionLimitContinuationRequest(request)),
+  );
 
-  if (responses.length === 0 && resolvedStepInput?.message !== undefined) {
-    // A follow-up message arrived and every pending request is dismissable
-    // (a required one would have deferred above): mark the unanswered
-    // requests ignored so the model can continue with the message.
-    const toolParts = buildToolResponseParts(pendingBatch, []);
-    const messages: ModelMessage[] = [...baseHistory, ...pendingBatch.responseMessages];
-    if (toolParts.length > 0) {
-      messages.push({ content: toolParts, role: "tool" });
+  if (resolvedBatches.length === 0) {
+    if (limitBlocked) {
+      // The budget gate owns the session until its prompt is answered.
+      session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
+      return { deferredMessage: true, outcome: "unresolved", messages: baseHistory, session };
     }
 
-    const rejectedActions = buildRejectedActionBatch(pendingBatch, []);
-    session = clearPendingInputBatch(session);
+    if (resolvedStepInput?.message === undefined) {
+      // Partial responses wait for the rest of their batch;
+      // `consumeDeferredStepInput` coalesces them with the next delivery.
+      session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
+      return { outcome: "unresolved", messages: baseHistory, session };
+    }
 
+    const sole = batches.length === 1 ? batches[0] : undefined;
+    if (sole !== undefined && !sole.requests.some((request) => isApprovalRequest(request))) {
+      // A follow-up message behind a single question-only batch keeps its
+      // pre-collection behavior: mark the unanswered requests ignored so
+      // the model can continue with the message.
+      const toolParts = buildToolResponseParts(sole, []);
+      const messages: ModelMessage[] = [...baseHistory, ...sole.responseMessages];
+      if (toolParts.length > 0) {
+        messages.push({ content: toolParts, role: "tool" });
+      }
+
+      const rejected = buildRejectedActionBatch(sole, []);
+      session = setPendingInputBatches(session, []);
+
+      return {
+        consumedMessage: resolvedStepInput.messageConsumed,
+        outcome: "resolved",
+        messages,
+        rejectedActions: rejected === undefined ? undefined : [rejected],
+        session,
+      };
+    }
+
+    // The message runs as an ordinary turn; every batch stays open and
+    // answerable. Stray partial responses wait in the deferred input.
+    if (leftoverResponses.length > 0) {
+      session = queueDeferredStepInput(session, { inputResponses: leftoverResponses });
+    }
     return {
-      consumedMessage: resolvedStepInput?.messageConsumed,
-      outcome: "resolved",
-      messages,
-      rejectedActions,
+      consumedMessage: resolvedStepInput.messageConsumed,
+      outcome: "continue",
+      messages: baseHistory,
       session,
     };
   }
 
-  const limitContinuation = resolveSessionLimitContinuation({
-    requests: pendingBatch.requests,
-    responses,
-  });
+  let limitContinuation: { readonly granted: boolean } | undefined;
+  let resolvesApprovalBatch = false;
+  const messages: ModelMessage[] = [...baseHistory];
+  const rejectedActions: RejectedActionBatch[] = [];
 
-  // Record approved tools before clearing the batch.
-  session = recordApprovedTools({
-    pendingBatch,
-    resolveApprovalKey: input.resolveApprovalKey,
-    responses,
-    session,
-  });
+  for (const batch of resolvedBatches) {
+    resolvesApprovalBatch ||= batch.requests.some((request) => isApprovalRequest(request));
+    limitContinuation ??= resolveSessionLimitContinuation({
+      requests: batch.requests,
+      responses,
+    });
 
-  // Build tool result messages from responses.
-  const toolParts = buildToolResponseParts(pendingBatch, responses);
+    // Record approved tools before dropping the batch.
+    session = recordApprovedTools({
+      pendingBatch: batch,
+      resolveApprovalKey: input.resolveApprovalKey,
+      responses,
+      session,
+    });
 
-  const messages: ModelMessage[] = [...baseHistory, ...pendingBatch.responseMessages];
-  if (toolParts.length > 0) {
-    messages.push({ content: toolParts, role: "tool" });
+    const toolParts = buildToolResponseParts(batch, responses);
+    messages.push(...batch.responseMessages);
+    if (toolParts.length > 0) {
+      messages.push({ content: toolParts, role: "tool" });
+    }
+
+    const rejected = buildRejectedActionBatch(batch, responses);
+    if (rejected !== undefined) {
+      rejectedActions.push(rejected);
+    }
   }
 
-  const rejectedActions = buildRejectedActionBatch(pendingBatch, responses);
-  session = clearPendingInputBatch(session);
+  session = setPendingInputBatches(session, openBatches);
 
   // AI SDK collects approval responses only from the tail tool message.
   // Defer channel context and any follow-up message so the approval resolves
   // in isolation; `consumeDeferredStepInput` replays them on the next step.
-  if (resolvesApprovalBatch) {
-    const deferredInput: {
-      context?: StepInput["context"];
-      message?: StepInput["message"];
-    } = {};
+  // A message behind a still-open session-limit prompt defers the same way.
+  const deferredInput: {
+    context?: StepInput["context"];
+    inputResponses?: StepInput["inputResponses"];
+    message?: StepInput["message"];
+  } = {};
+  if (leftoverResponses.length > 0) {
+    deferredInput.inputResponses = leftoverResponses;
+  }
+  if (resolvesApprovalBatch || limitBlocked) {
     if ((resolvedStepInput?.context?.length ?? 0) > 0) {
       deferredInput.context = resolvedStepInput?.context;
     }
     if (resolvedStepInput?.message !== undefined) {
       deferredInput.message = resolvedStepInput.message;
     }
+  }
 
-    if (deferredInput.context !== undefined || deferredInput.message !== undefined) {
-      session = queueDeferredStepInput(session, deferredInput);
+  if (
+    deferredInput.context !== undefined ||
+    deferredInput.message !== undefined ||
+    deferredInput.inputResponses !== undefined
+  ) {
+    session = queueDeferredStepInput(session, deferredInput);
 
-      return {
-        consumedMessage: resolvedStepInput?.messageConsumed,
-        deferredContext: deferredInput.context === undefined ? undefined : true,
-        deferredMessage: deferredInput.message === undefined ? undefined : true,
-        limitContinuation,
-        outcome: "resolved",
-        messages,
-        rejectedActions,
-        session,
-      };
-    }
+    return {
+      consumedMessage: resolvedStepInput?.messageConsumed,
+      deferredContext: deferredInput.context === undefined ? undefined : true,
+      deferredMessage: deferredInput.message === undefined ? undefined : true,
+      limitContinuation,
+      outcome: "resolved",
+      messages,
+      rejectedActions: rejectedActions.length > 0 ? rejectedActions : undefined,
+      session,
+    };
   }
 
   return {
@@ -243,7 +257,7 @@ export function resolvePendingInput(input: {
     limitContinuation,
     outcome: "resolved",
     messages,
-    rejectedActions,
+    rejectedActions: rejectedActions.length > 0 ? rejectedActions : undefined,
     session,
   };
 }
@@ -316,14 +330,16 @@ function compactStepInput(
  * because their tool calls still require resolution.
  */
 export function clearPendingSessionLimitPrompt(session: HarnessSession): HarnessSession {
-  const pendingBatch = getPendingInputBatch(session.state);
-  if (pendingBatch === undefined || pendingBatch.requests.length === 0) {
+  const batches = getPendingInputBatches(session.state);
+  const kept = batches.filter(
+    (batch) =>
+      batch.requests.length === 0 ||
+      !batch.requests.every((request) => isSessionLimitContinuationRequest(request)),
+  );
+  if (kept.length === batches.length) {
     return session;
   }
-  if (!pendingBatch.requests.every((request) => isSessionLimitContinuationRequest(request))) {
-    return session;
-  }
-  return clearPendingInputBatch(session);
+  return setPendingInputBatches(session, kept);
 }
 
 function hasUnansweredRequiredRequest(input: {
@@ -342,115 +358,16 @@ type ResolvePendingInputResult = {
   readonly deferredContext?: boolean;
   readonly deferredMessage?: boolean;
   /**
-   * Present when the resolved batch answered a session-limit continuation
+   * Present when a resolved batch answered a session-limit continuation
    * prompt. The tool loop grants a fresh token budget window or terminates
    * the session based on `granted`.
    */
   readonly limitContinuation?: { readonly granted: boolean };
   readonly outcome: "resolved" | "continue" | "unresolved";
   readonly messages: ModelMessage[];
-  readonly rejectedActions?: RejectedActionBatch;
+  readonly rejectedActions?: readonly RejectedActionBatch[];
   readonly session: HarnessSession;
 };
-
-// ---------------------------------------------------------------------------
-// Pending batch management
-// ---------------------------------------------------------------------------
-
-/**
- * Returns true when the session is parked on a pending HITL batch
- * (tool approvals or `ask_question` prompts).
- */
-export function hasPendingInputBatch(state: SessionStateMap | undefined): boolean {
-  return getPendingInputBatch(state) !== undefined;
-}
-
-/**
- * Returns the request IDs in the currently pending HITL batch.
- */
-export function getPendingInputRequestIds(state: SessionStateMap | undefined): ReadonlySet<string> {
-  return new Set(getPendingInputBatch(state)?.requests.map((request) => request.requestId));
-}
-
-function getPendingInputBatch(state: SessionStateMap | undefined): PendingInputBatch | undefined {
-  const value = state?.[PENDING_INPUT_BATCH_KEY];
-
-  if (typeof value !== "object" || value === null) {
-    return undefined;
-  }
-
-  const batch = value as PendingInputBatch;
-
-  if (!Array.isArray(batch.requests) || !Array.isArray(batch.responseMessages)) {
-    return undefined;
-  }
-
-  return batch;
-}
-
-/**
- * Stores one pending HITL batch on the session until the user responds.
- */
-export function setPendingInputBatch(input: {
-  readonly event?: PendingInputBatchEvent;
-  readonly requests: readonly InputRequest[];
-  readonly responseMessages: readonly ModelMessage[];
-  readonly session: HarnessSession;
-}): HarnessSession {
-  const state = { ...input.session.state };
-  state[PENDING_INPUT_BATCH_KEY] = {
-    event: input.event,
-    requests: [...input.requests],
-    responseMessages: [...input.responseMessages],
-  } satisfies PendingInputBatch;
-
-  return { ...input.session, state };
-}
-
-function clearPendingInputBatch(session: HarnessSession): HarnessSession {
-  if (session.state?.[PENDING_INPUT_BATCH_KEY] === undefined) {
-    return session;
-  }
-
-  const state = { ...session.state };
-  delete state[PENDING_INPUT_BATCH_KEY];
-
-  return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
-}
-
-// ---------------------------------------------------------------------------
-// Deferred step input state
-// ---------------------------------------------------------------------------
-
-function getDeferredStepInput(session: HarnessSession): StepInput | undefined {
-  return session.state?.[DEFERRED_STEP_INPUT_KEY] as StepInput | undefined;
-}
-
-function queueDeferredStepInput(session: HarnessSession, input: StepInput): HarnessSession {
-  const existing = getDeferredStepInput(session);
-  const deferredInput = existing === undefined ? input : coalesceTurnInputs(existing, input);
-  const state = { ...session.state };
-  state[DEFERRED_STEP_INPUT_KEY] = deferredInput;
-
-  return {
-    ...session,
-    state,
-  };
-}
-
-function clearDeferredStepInput(session: HarnessSession): HarnessSession {
-  if (session.state?.[DEFERRED_STEP_INPUT_KEY] === undefined) {
-    return session;
-  }
-
-  const state = { ...session.state };
-  delete state[DEFERRED_STEP_INPUT_KEY];
-
-  return {
-    ...session,
-    state: Object.keys(state).length > 0 ? state : undefined,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Approval tracking
