@@ -257,14 +257,14 @@ async function registerUser(
     "Photon returned an invalid phone registration response.",
   );
   return (
-    body.data?.user?.assignedPhoneNumber ??
     body.data?.user?.phoneNumber ??
-    body.data?.assignedPhoneNumber ??
+    body.data?.user?.assignedPhoneNumber ??
     body.data?.phoneNumber ??
-    body.user?.assignedPhoneNumber ??
+    body.data?.assignedPhoneNumber ??
     body.user?.phoneNumber ??
-    body.assignedPhoneNumber ??
-    body.phoneNumber
+    body.user?.assignedPhoneNumber ??
+    body.phoneNumber ??
+    body.assignedPhoneNumber
   );
 }
 

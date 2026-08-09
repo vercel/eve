@@ -68,7 +68,15 @@ describe("Photon management provisioning", () => {
 
   test("uses an existing project without dashboard authorization", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () =>
-      response({ succeed: true, data: { user: { assignedPhoneNumber: "+15550000000" } } }),
+      response({
+        succeed: true,
+        data: {
+          user: {
+            assignedPhoneNumber: "+15550000000",
+            phoneNumber: "+15551111111",
+          },
+        },
+      }),
     );
 
     await expect(
@@ -81,7 +89,7 @@ describe("Photon management provisioning", () => {
     ).resolves.toMatchObject({
       projectId: "project-id",
       projectSecret: "project-secret",
-      assignedPhoneNumber: "+15550000000",
+      assignedPhoneNumber: "+15551111111",
     });
     expect(fetch).toHaveBeenCalledOnce();
   });
