@@ -650,6 +650,7 @@ export const { bot, channel, send } = chatSdkChannel({
     sendblue: createSendblueAdapter(),
   },
   state: createMemoryState(),
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
