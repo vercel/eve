@@ -27,9 +27,12 @@ export default defineEval({
     message.event("message.received", { count: 1 });
     message.event("message.completed", { count: 1 });
     message.messageIncludes(/OPEN-APPROVAL-MSG-OK/i);
+    // The parked call must not execute — and the intervening turn must not
+    // run any tool of its own either.
     message.notEvent("action.result", {
       data: { result: { toolName: "guarded-echo" } },
     });
+    message.usedNoTools();
     message.event("session.waiting", { count: 1 });
 
     // The approval still resolves afterwards and runs the tool once.
