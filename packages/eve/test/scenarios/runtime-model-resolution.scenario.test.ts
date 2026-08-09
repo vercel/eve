@@ -17,6 +17,12 @@ const createAppRoot = useTemporaryAppRoots();
 
 const APP_ROOT_OPTIONS = { packageName: "runtime-model-resolution-test-agent" } as const;
 
+// Kept out of `provider:`/`modelId:` literal form on purpose: the gateway mock
+// (test/setup/mock-ai-gateway.ts) scans test sources for those key/value pairs
+// and auto-adds them to the catalog, which would mask the catalog-miss case.
+const UNLISTED_PROVIDER = "offline-provider";
+const UNLISTED_MODEL_ID = "unlisted-model-42";
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -129,6 +135,57 @@ describe("runtime model resolution", () => {
     });
   });
 
+  it("compiles a direct-provider model the gateway catalog does not list (issue #317)", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-external-model-uncatalogued-",
+      APP_ROOT_OPTIONS,
+    );
+
+    await mkdir(join(agentRoot, "lib"), { recursive: true });
+    await writeFile(join(agentRoot, "lib", "model.ts"), createUnlistedModelModuleSource());
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      [
+        'import { unlistedModel } from "./lib/model.js";',
+        "",
+        "export default { model: unlistedModel };",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(join(agentRoot, "instructions.md"), "You are an offline-provider agent.\n");
+
+    // A direct-provider instance routes external, bypassing the AI Gateway, so a
+    // catalog miss must not fail the build: it compiles with an unknown context
+    // window and the runtime falls back to a default compaction threshold.
+    const result = await compileAgent({ startPath: appRoot });
+
+    expect(result.manifest.config.model).toMatchObject({
+      id: `${UNLISTED_PROVIDER}/${UNLISTED_MODEL_ID}`,
+      routing: { kind: "external", provider: UNLISTED_PROVIDER },
+      source: { sourceKind: "module", logicalPath: "agent.ts", sourceId: "agent.ts" },
+    });
+    expect(result.manifest.config.model.contextWindowTokens).toBeUndefined();
+
+    const compiledArtifactsSource = createAuthoredSourceRuntimeCompiledArtifactsSource(appRoot);
+    const bundle = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
+    const resolvedModel = await resolveRuntimeModelReference(bundle.turnAgent.model, {
+      moduleMap: bundle.moduleMap,
+      nodeId: bundle.nodeId,
+    });
+
+    if (typeof resolvedModel === "string") {
+      throw new Error("Expected a source-backed AI SDK model instance.");
+    }
+
+    expect(resolvedModel).toMatchObject({
+      modelId: UNLISTED_MODEL_ID,
+      provider: UNLISTED_PROVIDER,
+      specificationVersion: "v3",
+    });
+  });
+
   it("resolves a child model from the active child module-map scope", async () => {
     vi.stubEnv("NODE_ENV", "development");
 
@@ -186,6 +243,24 @@ describe("runtime model resolution", () => {
     });
   });
 });
+
+function createUnlistedModelModuleSource(): string {
+  return [
+    "export const unlistedModel = {",
+    '  specificationVersion: "v3",',
+    `  provider: ${JSON.stringify(UNLISTED_PROVIDER)},`,
+    `  modelId: ${JSON.stringify(UNLISTED_MODEL_ID)},`,
+    "  supportedUrls: {},",
+    "  async doGenerate() {",
+    '    throw new Error("not implemented");',
+    "  },",
+    "  async doStream() {",
+    '    throw new Error("not implemented");',
+    "  },",
+    "};",
+    "",
+  ].join("\n");
+}
 
 function createModelModuleSource(testMarker: string): string {
   return [

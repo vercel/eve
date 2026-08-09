@@ -59,7 +59,7 @@ export async function compileAgentConfig(
     : definition.model;
   const model = await normalizeAuthoredModelReference({
     modelCatalog: context.modelCatalog,
-    purpose: "the primary compaction trigger model",
+    purpose: "the agent model",
     contextWindowTokens: definition.modelContextWindowTokens,
     providerOptions: definition.modelOptions?.providerOptions,
     source: configModule,
@@ -254,19 +254,35 @@ async function normalizeAuthoredModelReference(input: {
     routing: classifyModelRouting(languageModel, input.providerOptions),
   };
 
-  if (input.contextWindowTokens === undefined) {
-    const providerResult = await input.modelCatalog.getByProviderModelId(
-      languageModel.provider,
-      languageModel.modelId,
-    );
+  // An author-provided context window always wins and skips the catalog.
+  if (input.contextWindowTokens !== undefined) {
+    return { ...sourceBackedModel, contextWindowTokens: input.contextWindowTokens };
+  }
 
-    if (providerResult) {
-      return {
-        ...sourceBackedModel,
-        id: providerResult.slug,
-        contextWindowTokens: providerResult.limits.contextWindowTokens,
-      };
-    }
+  const providerResult = await input.modelCatalog.getByProviderModelId(
+    languageModel.provider,
+    languageModel.modelId,
+  );
+
+  // External providers bypass the AI Gateway, so their model id need not exist
+  // in the gateway catalog. Adopt catalog context-window metadata when the
+  // model happens to be listed, but never rewrite the id to the gateway slug
+  // and never fail the build on a catalog miss — the runtime falls back to a
+  // default compaction threshold when the context window is unknown.
+  if (sourceBackedModel.routing.kind === "external") {
+    return providerResult === null
+      ? sourceBackedModel
+      : { ...sourceBackedModel, contextWindowTokens: providerResult.limits.contextWindowTokens };
+  }
+
+  // A gateway-routed instance must name a real gateway slug and carry known
+  // context-window metadata, so adopt the slug and require limits.
+  if (providerResult) {
+    return {
+      ...sourceBackedModel,
+      id: providerResult.slug,
+      contextWindowTokens: providerResult.limits.contextWindowTokens,
+    };
   }
 
   return await withCompiledRuntimeModelLimits(sourceBackedModel, input);
@@ -326,7 +342,7 @@ async function withCompiledRuntimeModelLimits(
 
   if (limits === null) {
     throw new Error(
-      `Cannot compile agent compaction because ${input.purpose} "${model.id}" does not have known AI Gateway context window metadata.`,
+      `Cannot resolve a context window for ${input.purpose} "${model.id}": it is not listed in the AI Gateway model catalog. Set modelContextWindowTokens to provide one explicitly.`,
     );
   }
 
