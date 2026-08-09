@@ -9460,7 +9460,7 @@ describe("createToolLoopHarness", () => {
       expect(result.session.state?.["eve.harness.turnTrace"]).toBeUndefined();
     });
 
-    it("continuation step restores parent trace context from session state", async () => {
+    it("continuation step restores the persisted parent as a remote trace context", async () => {
       // Step 1: tool call → continues
       setupMockAgent({
         finishReason: "tool-calls",
@@ -9518,6 +9518,7 @@ describe("createToolLoopHarness", () => {
 
       // Verify the stored span context was restored
       expect(wrapSpy).toHaveBeenCalledWith({
+        isRemote: true,
         traceId: storedTrace.traceId,
         spanId: storedTrace.spanId,
         traceFlags: storedTrace.traceFlags,
