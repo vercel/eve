@@ -162,6 +162,15 @@ for (const [index, item] of items.entries()) {
   }
   await access(join(docsRoot, expectedPath));
 
+  if (entry.slug === "chat-sdk-sendblue") {
+    const source = await readFile(join(docsRoot, expectedPath), "utf8");
+    if (!source.includes("streaming: false")) {
+      throw new Error(
+        `Registry item "${item.name}" must disable streaming because Sendblue does not support message editing.`,
+      );
+    }
+  }
+
   const adapterDependency = adapterDependenciesByCatalogSlug[entry.slug];
   if (entry.slug.startsWith("chat-sdk-") && adapterDependency === undefined) {
     throw new Error(`Registry item "${item.name}" has no adapter dependency mapping.`);

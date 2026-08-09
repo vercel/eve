@@ -9,6 +9,8 @@ export const { bot, channel, send } = chatSdkChannel({
     sendblue: createSendblueAdapter(),
   },
   state: createMemoryState(),
+  // Sendblue's iMessage API does not support editing sent messages.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
