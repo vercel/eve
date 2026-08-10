@@ -25,8 +25,8 @@ import {
 
 /** Input for one durable task run. */
 export interface TaskRunWorkflowInput {
-  /** Private continuation token; a routing credential, never model-visible. */
-  readonly continuationToken: string;
+  /** Private task inbox token; a routing credential, never model-visible. */
+  readonly taskInboxToken: string;
   /** The creation view, normally `working`. */
   readonly initialView: TaskView;
   /** Parent session delivery token used to wake the task's owning parent. */
@@ -64,7 +64,7 @@ function isTaskRunFinished(view: TaskView, dispatchAcknowledged: boolean): boole
 export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void> {
   "use workflow";
 
-  const commands = createHook<TaskRunInboundPayload>({ token: input.continuationToken });
+  const commands = createHook<TaskRunInboundPayload>({ token: input.taskInboxToken });
   // The iterator shares the hook's durable cursor; create it before
   // claiming so conflict replay is consumed by getConflict(), not a
   // later iterator read.

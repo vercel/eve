@@ -23,7 +23,7 @@ import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agen
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
-import { readTaskIdFromContinuationToken } from "#tasks/task-id.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),
@@ -97,7 +97,7 @@ export async function startRemoteAgentSession(input: {
     callback: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
-      taskId: readTaskIdFromContinuationToken(callbackToken),
+      taskId: readTaskIdFromInboxToken(callbackToken),
       token: callbackToken,
       url: createWorkflowCallbackUrl(
         input.callbackBaseUrl,

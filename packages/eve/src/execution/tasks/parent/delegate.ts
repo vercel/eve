@@ -18,12 +18,12 @@ import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";
 import { recordSessionTask } from "#tasks/session-index.js";
-import { deriveTaskContinuationToken, deriveTaskId } from "#tasks/task-id.js";
+import { deriveTaskInboxToken, deriveTaskId } from "#tasks/task-id.js";
 import { isTerminalTaskStatus, type TaskMetadata } from "#tasks/types.js";
 
 /** A prepared delegated task: identity plus its started durable run. */
 export interface DelegatedTask {
-  readonly continuationToken: string;
+  readonly taskInboxToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
   readonly metadata: TaskMetadata;
@@ -53,7 +53,7 @@ export async function beginDelegatedTask(input: {
     parentSessionId: input.parentSessionId,
     parentTurnId: input.parentTurnId,
   });
-  const continuationToken = deriveTaskContinuationToken({
+  const taskInboxToken = deriveTaskInboxToken({
     parentContinuationToken: input.session.continuationToken,
     taskId,
   });
@@ -69,7 +69,7 @@ export async function beginDelegatedTask(input: {
     name: input.name,
   };
   await startTaskRun({
-    continuationToken,
+    taskInboxToken,
     initialView: {
       metadata,
       status: "working",
@@ -77,9 +77,9 @@ export async function beginDelegatedTask(input: {
     },
     parentContinuationToken: sessionCommandHookToken(input.session.sessionId),
   });
-  const owner = await waitForTaskCommandOwner({ continuationToken });
+  const owner = await waitForTaskCommandOwner({ taskInboxToken });
   return {
-    continuationToken,
+    taskInboxToken,
     createdByStepIndex: input.parentStepIndex ?? 0,
     createdByTurnId: input.parentTurnId,
     metadata,
@@ -124,7 +124,7 @@ export async function settleDelegatedDispatch(input: {
       subagentName: input.subagentName,
     },
     session: recordSessionTask(input.session, {
-      continuationToken: input.task.continuationToken,
+      taskInboxToken: input.task.taskInboxToken,
       createdByStepIndex: input.task.createdByStepIndex,
       createdByTurnId: input.task.createdByTurnId,
       metadata: input.task.metadata,
@@ -138,7 +138,7 @@ export async function settleDelegatedDispatch(input: {
 /** Releases task events only after the parent session index committed. */
 export async function acknowledgeDelegatedTasksStep(input: {
   readonly tasks: readonly {
-    readonly continuationToken: string;
+    readonly taskInboxToken: string;
     readonly taskId: string;
     readonly taskRunId: string;
   }[];
@@ -148,7 +148,7 @@ export async function acknowledgeDelegatedTasksStep(input: {
   for (const task of input.tasks) {
     const owner = await sendTaskCommandToOwner({
       command: { kind: "ready" },
-      continuationToken: task.continuationToken,
+      taskInboxToken: task.taskInboxToken,
       retryUnreachable: { attempts: 20, delayMs: 250 },
     });
     if (owner !== undefined) continue;
@@ -170,7 +170,7 @@ export async function failDelegatedDispatch(input: {
 }): Promise<void> {
   await sendTaskCommand({
     command: { data: input.error, kind: "fail" },
-    continuationToken: input.task.continuationToken,
+    taskInboxToken: input.task.taskInboxToken,
     retryUnreachable: { attempts: 20, delayMs: 250 },
   });
 }

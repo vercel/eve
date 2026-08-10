@@ -24,7 +24,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import type { TaskInboundTurnStarted } from "#tasks/types.js";
-import { readTaskIdFromContinuationToken } from "#tasks/task-id.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
 
 const log = createLogger("execution.delegated-parent-notification");
 
@@ -270,7 +270,7 @@ export async function resolveInitialTurnCallerStep(input: {
         url: parsed.callback.url,
       },
       subagentName: parsed.callback.subagentName,
-      taskId: parsed.callback.taskId ?? readTaskIdFromContinuationToken(parsed.callback.token),
+      taskId: parsed.callback.taskId ?? readTaskIdFromInboxToken(parsed.callback.token),
     };
   }
 
@@ -284,7 +284,7 @@ export async function resolveInitialTurnCallerStep(input: {
     callId: adapter.state.callId,
     replyTo: { kind: "hook", token: adapter.state.parentContinuationToken },
     subagentName: adapter.state.subagentName,
-    taskId: readTaskIdFromContinuationToken(adapter.state.parentContinuationToken),
+    taskId: readTaskIdFromInboxToken(adapter.state.parentContinuationToken),
   };
 }
 

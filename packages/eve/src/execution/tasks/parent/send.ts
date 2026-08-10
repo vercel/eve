@@ -169,7 +169,7 @@ async function followUpTerminalTask(input: {
     agentId: handle.identity.id,
     bundle: input.bundle,
     currentSession: persisted.session,
-    parentToken: task.continuationToken,
+    parentToken: task.taskInboxToken,
   });
   if (outcome.kind === "error") {
     if (findTaskAgentAddress(outcome.session, handle.identity.id) === undefined) {

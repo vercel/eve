@@ -3,11 +3,11 @@
  * workflow when the agent enables `experimental.tasks`.
  *
  * Same plan → dispatch → emit skeleton, but every delegation is wrapped in
- * the durable task lifecycle: the task record and its continuation token
+ * the durable task lifecycle: the task record and its inbox token
  * exist *before* the child dispatch side effect (`beginDelegatedTask`),
  * continuations pass the availability check and enter the parent session's
  * task index first, and the task settles against the dispatch outcome.
- * Children report through their task's continuation token rather than the
+ * Children report through their task's inbox token rather than the
  * parent turn inbox, and every start dispatches a conversation-mode
  * (persistent) child so the background task stays resumable.
  *
@@ -140,7 +140,7 @@ export async function dispatchTaskStep(
               dynamicRemoteAgent: entry.dynamicRemoteAgent,
             }),
             currentSession: nextSession,
-            parentToken: delegated.continuationToken,
+            parentToken: delegated.taskInboxToken,
           });
           break;
         case "start":
@@ -154,7 +154,7 @@ export async function dispatchTaskStep(
             currentSession: nextSession,
             fanoutSize: prepared.fanoutSize,
             initiatorAuth: prepared.initiatorAuth,
-            parentContinuationToken: delegated.continuationToken,
+            parentContinuationToken: delegated.taskInboxToken,
             parentTraceContext: prepared.parentTraceContext,
             // Background tasks require resumable children, so task mode
             // always dispatches conversation-mode (persistent) sessions;

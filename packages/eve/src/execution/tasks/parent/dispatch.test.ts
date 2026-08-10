@@ -63,7 +63,7 @@ function createSession(mode: "local" | "remote"): RuntimeSession {
       [SESSION_TASKS_STATE_KEY]: {
         tasks: [
           {
-            continuationToken: "task-token",
+            taskInboxToken: "task-token",
             createdByTurnId: "turn-1",
             metadata: {
               agentId: "agent-1",

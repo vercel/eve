@@ -19,7 +19,7 @@ export const SESSION_TASKS_STATE_KEY = "eve.tasks";
  * One task owned by this session. Immutable model-safe metadata keeps the
  * task-to-agent join available before the task run publishes its first view.
  *
- * `continuationToken` is the private routing credential for the task run's
+ * `taskInboxToken` is the private routing credential for the task run's
  * inbound hook. It must never render into model context, history, task
  * views, or compaction summaries — the model addresses tasks by
  * `taskId` only, and lookup verifies ownership through this index.
@@ -29,7 +29,7 @@ export interface SessionTaskIndexEntry {
   readonly taskRunId: string;
   /** Immutable fallback once the owning workflow run expires. */
   readonly terminalView?: TaskView;
-  readonly continuationToken: string;
+  readonly taskInboxToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
   readonly metadata: TaskMetadata;
@@ -84,7 +84,7 @@ const taskViewSchema: z.ZodType<TaskView> = z.discriminatedUnion("status", [
 ]);
 
 const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictObject({
-  continuationToken: z.string().min(1),
+  taskInboxToken: z.string().min(1),
   createdByStepIndex: z.number().int().nonnegative().optional(),
   createdByTurnId: z.string().min(1),
   metadata: taskMetadataSchema,

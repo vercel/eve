@@ -24,7 +24,7 @@ export function deriveTaskId(input: {
 }
 
 /**
- * Derives the task run's private continuation token.
+ * Derives the task run's private inbox token.
  *
  * Deterministic on purpose: a durable replay of the dispatch step must
  * re-derive the same token so the duplicate task run loses the hook
@@ -33,7 +33,7 @@ export function deriveTaskId(input: {
  * itself a private capability, and the derived token never renders to
  * the model.
  */
-export function deriveTaskContinuationToken(input: {
+export function deriveTaskInboxToken(input: {
   readonly parentContinuationToken: string;
   readonly taskId: string;
 }): string {
@@ -43,8 +43,8 @@ export function deriveTaskContinuationToken(input: {
     .slice(0, 32)}`;
 }
 
-/** Reads the non-secret task id embedded in a private task continuation token. */
-export function readTaskIdFromContinuationToken(token: string): string | undefined {
+/** Reads the non-secret task id embedded in a private task inbox token. */
+export function readTaskIdFromInboxToken(token: string): string | undefined {
   const match = /^task:(task_[^:]+):[a-f0-9]{32}$/.exec(token);
   return match?.[1];
 }

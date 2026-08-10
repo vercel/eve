@@ -542,7 +542,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       agentId: addressedHandle.identity.id,
     });
     session = recordSessionTask(session, {
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       createdByTurnId: "turn-previous",
       metadata: {
         agentId: addressedHandle.identity.id,

@@ -37,7 +37,7 @@ describe("session task index", () => {
 
   it("records a task and finds it by id", () => {
     const session = recordSessionTask(createSession(), {
-      continuationToken: "task:token-1",
+      taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
       operationId: "operation-1",
@@ -46,7 +46,7 @@ describe("session task index", () => {
     });
 
     expect(findSessionTaskEntry(session.state, "task_a")).toEqual({
-      continuationToken: "task:token-1",
+      taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
       operationId: "operation-1",
@@ -58,7 +58,7 @@ describe("session task index", () => {
 
   it("replaces the entry on replayed creation instead of duplicating it", () => {
     let session = recordSessionTask(createSession(), {
-      continuationToken: "task:token-1",
+      taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
       operationId: "operation-1",
@@ -66,7 +66,7 @@ describe("session task index", () => {
       taskRunId: "run-1",
     });
     session = recordSessionTask(session, {
-      continuationToken: "task:token-2",
+      taskInboxToken: "task:token-2",
       createdByTurnId: "turn-1",
       metadata,
       operationId: "operation-1",
@@ -81,7 +81,7 @@ describe("session task index", () => {
 
   it("retains only terminal views as expired-run fallbacks", () => {
     const base = {
-      continuationToken: "task:token-1",
+      taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
       operationId: "operation-1",

@@ -42,7 +42,7 @@ import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { err, ok, type Result } from "#shared/result.js";
-import { readTaskIdFromContinuationToken } from "#tasks/task-id.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
 
 const log = createLogger("execution.agent-handle-dispatch");
 
@@ -336,7 +336,7 @@ async function deliverToAgentAddress(input: {
         callback: {
           callId: action.callId,
           subagentName: identity.name,
-          taskId: readTaskIdFromContinuationToken(input.parentToken),
+          taskId: readTaskIdFromInboxToken(input.parentToken),
           token: input.parentToken,
           url: createWorkflowCallbackUrl(
             address.callbackBaseUrl,
@@ -368,7 +368,7 @@ async function deliverToAgentAddress(input: {
           callId: action.callId,
           replyTo: { kind: "hook", token: input.parentToken },
           subagentName: identity.name,
-          taskId: readTaskIdFromContinuationToken(input.parentToken),
+          taskId: readTaskIdFromInboxToken(input.parentToken),
         },
         kind: "send",
         payload: {

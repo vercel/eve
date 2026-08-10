@@ -55,7 +55,7 @@ export async function routeProxiedDeliverStep(input: {
         continue;
       }
       const delivery = await sendTaskInboundPayload({
-        continuationToken: entry.continuationToken,
+        taskInboxToken: entry.taskInboxToken,
         payload: {
           auth: input.auth,
           childContinuationToken: forChild.childContinuationToken,

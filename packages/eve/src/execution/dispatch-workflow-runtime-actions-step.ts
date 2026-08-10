@@ -37,7 +37,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   readonly results: readonly RuntimeActionResult[];
   readonly sessionState: DurableSessionState;
   readonly taskReadiness: readonly {
-    readonly continuationToken: string;
+    readonly taskInboxToken: string;
     readonly taskId: string;
     readonly taskRunId: string;
   }[];

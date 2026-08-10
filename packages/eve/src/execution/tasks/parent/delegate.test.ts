@@ -29,7 +29,7 @@ describe("delegated task settlement", () => {
       sessionId: "parent-session",
     } as RuntimeSession;
     const task: DelegatedTask = {
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       createdByTurnId: "turn-parent",
       metadata: {
         agentId: "agent-1",

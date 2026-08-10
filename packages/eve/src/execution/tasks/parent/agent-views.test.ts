@@ -45,7 +45,7 @@ function createSession(taskRunIds: readonly string[]): HarnessSession {
       },
       [SESSION_TASKS_STATE_KEY]: {
         tasks: taskRunIds.map((taskRunId, index) => ({
-          continuationToken: `task-token-${index}`,
+          taskInboxToken: `task-token-${index}`,
           createdByTurnId: `turn-${index}`,
           metadata,
           operationId: `operation-${index}`,

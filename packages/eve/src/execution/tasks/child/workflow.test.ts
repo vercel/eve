@@ -87,7 +87,7 @@ describe("taskRunWorkflow", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -103,7 +103,7 @@ describe("taskRunWorkflow", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -118,7 +118,7 @@ describe("taskRunWorkflow", () => {
     );
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -133,7 +133,7 @@ describe("taskRunWorkflow", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -161,7 +161,7 @@ describe("taskRunWorkflow", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: {
         ...createWorkingView(),
         metadata: {
@@ -200,7 +200,7 @@ describe("taskRunWorkflow", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -235,7 +235,7 @@ describe("taskRunWorkflow", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -266,7 +266,7 @@ describe("taskRunWorkflow", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -292,7 +292,7 @@ describe("taskRunWorkflow", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -331,7 +331,7 @@ describe("taskRunWorkflow", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -384,7 +384,7 @@ describe("taskRunWorkflow answered input", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -409,7 +409,7 @@ describe("taskRunWorkflow answered input", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -432,7 +432,7 @@ describe("taskRunWorkflow answered input", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -455,7 +455,7 @@ describe("taskRunWorkflow answered input", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
@@ -472,7 +472,7 @@ describe("taskRunWorkflow answered input", () => {
     ]);
 
     await taskRunWorkflow({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });

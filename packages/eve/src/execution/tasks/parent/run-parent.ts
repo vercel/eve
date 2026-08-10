@@ -45,9 +45,9 @@ export async function startTaskRun(
 
 /** Resolves the task run that won ownership of one replay-stable command token. */
 export async function waitForTaskCommandOwner(input: {
-  readonly continuationToken: string;
+  readonly taskInboxToken: string;
 }): Promise<{ readonly runId: string }> {
-  return await waitForCommandHookOwner(input.continuationToken);
+  return await waitForCommandHookOwner(input.taskInboxToken);
 }
 
 /**
@@ -62,7 +62,7 @@ export async function waitForTaskCommandOwner(input: {
  */
 export async function sendTaskCommand(input: {
   readonly command: TaskCommand;
-  readonly continuationToken: string;
+  readonly taskInboxToken: string;
   readonly retryUnreachable?: { readonly attempts: number; readonly delayMs: number };
 }): Promise<"delivered" | "unreachable"> {
   return (await sendTaskCommandToOwner(input)) === undefined ? "unreachable" : "delivered";
@@ -71,23 +71,21 @@ export async function sendTaskCommand(input: {
 /** Delivers one command and returns the accepting task workflow's run id. */
 export async function sendTaskCommandToOwner(input: {
   readonly command: TaskCommand;
-  readonly continuationToken: string;
+  readonly taskInboxToken: string;
   readonly retryUnreachable?: { readonly attempts: number; readonly delayMs: number };
 }): Promise<{ readonly runId: string } | undefined> {
   const payload: TaskCommandHookPayload = { command: input.command, kind: "task-command" };
   const attempts = Math.max(1, input.retryUnreachable?.attempts ?? 1);
   for (let attempt = 0; ; attempt += 1) {
     try {
-      const owner = await resumeHook(input.continuationToken, payload);
+      const owner = await resumeHook(input.taskInboxToken, payload);
       if (
         typeof owner !== "object" ||
         owner === null ||
         !("runId" in owner) ||
         typeof owner.runId !== "string"
       ) {
-        throw new Error(
-          `Task continuation hook "${input.continuationToken}" returned no owner run id.`,
-        );
+        throw new Error(`Task inbox hook "${input.taskInboxToken}" returned no owner run id.`);
       }
       return { runId: owner.runId };
     } catch (error) {
@@ -111,11 +109,11 @@ export async function sendTaskCommandToOwner(input: {
  * hook, so the payload is stale by definition.
  */
 export async function sendTaskInboundPayload(input: {
-  readonly continuationToken: string;
+  readonly taskInboxToken: string;
   readonly payload: TaskRunInboundPayload;
 }): Promise<"delivered" | "unreachable"> {
   try {
-    await resumeHook(input.continuationToken, input.payload);
+    await resumeHook(input.taskInboxToken, input.payload);
     return "delivered";
   } catch (error) {
     if (!isFinishedTaskRunTarget(error)) {

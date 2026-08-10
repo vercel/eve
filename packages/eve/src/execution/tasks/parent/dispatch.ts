@@ -119,7 +119,7 @@ export async function cancelOwnedTask(input: {
   const { entry } = input;
   const delivery = await sendTaskCommand({
     command: { kind: "cancel" },
-    continuationToken: entry.continuationToken,
+    taskInboxToken: entry.taskInboxToken,
   });
 
   // The `cancelled` state must commit before the executor abort

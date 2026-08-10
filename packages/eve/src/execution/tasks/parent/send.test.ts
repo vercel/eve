@@ -45,7 +45,7 @@ function task(taskId: string, status: TaskStatus): TaskView {
 function createSession(includeActive = false, activeCreatedByTurnId = "turn-1"): RuntimeSession {
   const tasks = [
     {
-      continuationToken: "task-token-terminal",
+      taskInboxToken: "task-token-terminal",
       createdByTurnId: "turn-1",
       metadata,
       operationId: "operation-terminal",
@@ -55,7 +55,7 @@ function createSession(includeActive = false, activeCreatedByTurnId = "turn-1"):
     ...(includeActive
       ? [
           {
-            continuationToken: "task-token-active",
+            taskInboxToken: "task-token-active",
             createdByTurnId: activeCreatedByTurnId,
             metadata,
             operationId: "operation-active",
@@ -104,7 +104,7 @@ describe("task_send persistent-agent availability", () => {
     const session = createSession();
     vi.mocked(readLatestTaskView).mockResolvedValue(task("task_terminal", "completed"));
     vi.mocked(beginDelegatedTask).mockResolvedValue({
-      continuationToken: "task-token-new",
+      taskInboxToken: "task-token-new",
       createdByTurnId: "turn-2",
       metadata,
       operationId: "operation-new",
@@ -196,7 +196,7 @@ describe("task_send persistent-agent availability", () => {
     const persisted = createSession(true, "turn-2");
     vi.mocked(readLatestTaskView).mockResolvedValue(task("task_terminal", "completed"));
     vi.mocked(beginDelegatedTask).mockResolvedValue({
-      continuationToken: "task-token-new",
+      taskInboxToken: "task-token-new",
       createdByTurnId: "turn-2",
       metadata,
       operationId: "operation-new",

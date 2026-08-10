@@ -284,7 +284,7 @@ describe("routeProxiedDeliverStep", () => {
                 "eve.tasks": {
                   tasks: [
                     {
-                      continuationToken: "task-token",
+                      taskInboxToken: "task-token",
                       createdByTurnId: "turn-parent",
                       metadata: {
                         agentId: "agent-1",
@@ -315,7 +315,7 @@ describe("routeProxiedDeliverStep", () => {
       routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
     ).resolves.toMatchObject({ kind: "continue", remainder: undefined });
     expect(sendTaskInboundPayload).toHaveBeenCalledWith({
-      continuationToken: "task-token",
+      taskInboxToken: "task-token",
       payload: {
         auth: undefined,
         childContinuationToken: "child-token",
@@ -410,7 +410,7 @@ describe("recordTaskInputRequestStep", () => {
         "eve.tasks": {
           tasks: [
             {
-              continuationToken: "task-token",
+              taskInboxToken: "task-token",
               createdByTurnId: "turn-parent",
               metadata: {
                 agentId: "agent-1",
