@@ -51,8 +51,19 @@ export function registerIntegrationCommands(input: {
   integration
     .command("connect <slug> <service> [canonical-name]")
     .option("-y, --yes")
-    .action(async (slug: string, service: string, canonicalName: string | undefined) => {
-      const { runIntegrationConnectCommand } = await import("./integration-connect.js");
-      await runIntegrationConnectCommand(logger, appRoot, slug, service, canonicalName);
-    });
+    .option(
+      "--non-interactive",
+      "Run without interactive prompts, instead emit structured NDJSON when further input is required",
+    )
+    .action(
+      async (
+        slug: string,
+        service: string,
+        canonicalName: string | undefined,
+        options: { nonInteractive?: boolean },
+      ) => {
+        const { runIntegrationConnectCommand } = await import("./integration-connect.js");
+        await runIntegrationConnectCommand(logger, appRoot, slug, service, canonicalName, options);
+      },
+    );
 }

@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
-import { runIntegrationConnect } from "./integration-connect.js";
+import { runIntegrationConnect, runIntegrationConnectCommand } from "./integration-connect.js";
+
+const { isEveProject } = vi.hoisted(() => ({ isEveProject: vi.fn(async () => true) }));
+
+vi.mock("#setup/scaffold/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#setup/scaffold/index.js")>()),
+  isEveProject,
+}));
 
 const PROJECT = { orgId: "team_1", projectId: "prj_1" };
 
@@ -64,6 +71,50 @@ describe("runIntegrationConnect", () => {
     expect(deps.runLinkFlow).toHaveBeenCalledWith(
       expect.objectContaining({ appRoot: "/project", projectSelection: "create-or-link" }),
     );
+  });
+
+  it("requires a linked project without starting the link flow non-interactively", async () => {
+    const deps = dependencies({ readProjectLink: vi.fn(async () => undefined) });
+
+    await expect(
+      runIntegrationConnect({
+        appRoot: "/project",
+        slug: "linear",
+        service: "mcp.linear.app",
+        options: { nonInteractive: true },
+        dependencies: deps,
+      }),
+    ).rejects.toMatchObject({
+      prerequisite: expect.objectContaining({ code: "vercel-project-link", command: "eve link" }),
+    });
+    expect(deps.runLinkFlow).not.toHaveBeenCalled();
+    expect(deps.setupConnectionConnector).not.toHaveBeenCalled();
+  });
+
+  it("emits a structured linked-project prerequisite non-interactively", async () => {
+    const output = {
+      errors: [] as string[],
+      log: vi.fn(),
+      error: vi.fn((message) => output.errors.push(message)),
+    };
+    const deps = dependencies({ readProjectLink: vi.fn(async () => undefined) });
+
+    await runIntegrationConnectCommand(
+      output,
+      "/project",
+      "linear",
+      "mcp.linear.app",
+      undefined,
+      { nonInteractive: true },
+      deps,
+    );
+
+    expect(JSON.parse(output.errors[0]!)).toMatchObject({
+      type: "blocked",
+      status: "prerequisite_required",
+      prerequisite: { code: "vercel-project-link", command: "eve link" },
+    });
+    expect(process.exitCode).toBe(2);
   });
 
   it("cleans up a newly-created connector when the installed file cannot be patched", async () => {

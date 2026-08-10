@@ -6,6 +6,9 @@ import {
   type SetupConnectionConnectorOptions,
 } from "#setup/connection-connector.js";
 import { runLinkFlow, type LinkFlowDeps } from "#setup/flows/link.js";
+import { createHeadlessPrompter } from "#setup/headless.js";
+import { SetupPrerequisiteRequired } from "#setup/integrations/shared/prerequisite.js";
+import { resolveIntegrationVercelProject } from "#setup/integrations/shared/vercel-project.js";
 import { readProjectLink } from "#setup/project-resolution.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { createRegistrySetupClient } from "#setup/registry-setup-client.js";
@@ -14,8 +17,10 @@ import { updateConnectionConnectorUid } from "#setup/scaffold/update/update-conn
 
 import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import type { RegistryCommandLogger } from "./registry.js";
+import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 
 export interface IntegrationConnectOptions {
+  nonInteractive?: boolean;
   signal?: AbortSignal;
 }
 
@@ -47,24 +52,36 @@ export async function runIntegrationConnect(input: {
   dependencies?: Partial<IntegrationConnectDependencies>;
 }): Promise<void> {
   const dependencies = { ...defaultDependencies, ...input.dependencies };
-  const prompter = dependencies.createPrompter?.() ?? createPrompter();
+  const nonInteractive = input.options?.nonInteractive === true;
+  const prompter =
+    dependencies.createPrompter?.() ??
+    (nonInteractive ? createHeadlessPrompter(() => {}) : createPrompter());
   const signal = input.options?.signal;
   prompter.intro(`Set up ${input.slug}`);
 
   let project = await dependencies.readProjectLink(input.appRoot);
   if (project === undefined) {
-    const link = await dependencies.runLinkFlow({
-      appRoot: input.appRoot,
-      prompter,
-      signal,
-      projectSelection: "create-or-link",
-      teamSelectMessage: () =>
-        `You need to link to a project to use ${input.slug} through Vercel Connect.\n\nSelect your team`,
-      deps: dependencies.linkFlowDeps,
-    });
-    if (link.kind === "cancelled") return;
-    project = await dependencies.readProjectLink(input.appRoot);
-    if (project === undefined) throw new Error("Project link was not found after linking.");
+    if (nonInteractive) {
+      project = await resolveIntegrationVercelProject({
+        appRoot: input.appRoot,
+        integration: input.slug,
+        signal,
+        deps: { readProjectLink: dependencies.readProjectLink },
+      });
+    } else {
+      const link = await dependencies.runLinkFlow({
+        appRoot: input.appRoot,
+        prompter,
+        signal,
+        projectSelection: "create-or-link",
+        teamSelectMessage: () =>
+          `You need to link to a project to use ${input.slug} through Vercel Connect.\n\nSelect your team`,
+        deps: dependencies.linkFlowDeps,
+      });
+      if (link.kind === "cancelled") return;
+      project = await dependencies.readProjectLink(input.appRoot);
+      if (project === undefined) throw new Error("Project link was not found after linking.");
+    }
   }
 
   const connectorOptions: SetupConnectionConnectorOptions = {
@@ -126,6 +143,19 @@ export async function runIntegrationConnectCommand(
     client?.complete();
   } catch (error) {
     client?.fail(error);
+    if (client !== undefined) return;
+    if (options.nonInteractive && error instanceof SetupPrerequisiteRequired) {
+      logger.error(
+        serializeHeadlessSetupEvent({
+          version: 1,
+          type: "blocked",
+          status: "prerequisite_required",
+          prerequisite: error.prerequisite,
+        }),
+      );
+      process.exitCode = 2;
+      return;
+    }
     logger.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
