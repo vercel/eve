@@ -1,14 +1,34 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionIdKey } from "#context/keys.js";
 import {
+  CallbackBaseUrlKey,
   clearPendingAuthorization,
   consumeAuthorizationResult,
   getPendingAuthorization,
+  getHookUrl,
   PendingAuthorizationResultKey,
   setPendingAuthorization,
 } from "#harness/authorization.js";
 import type { ConnectionPrincipal } from "#runtime/connections/types.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("authorization callback URLs", () => {
+  it("includes the Vercel automation bypass query when configured", () => {
+    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret value");
+    const ctx = new ContextContainer();
+    ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
+    ctx.set(SessionIdKey, "session-1");
+
+    expect(contextStorage.run(ctx, () => getHookUrl("linear", "attempt-1"))).toBe(
+      "https://agent.example.com/eve/v1/connections/linear/callback/attempt-1/session-1%3Aauth?x-vercel-protection-bypass=secret+value",
+    );
+  });
+});
 
 describe("authorization callback results", () => {
   it("consumes each callback result once", () => {
