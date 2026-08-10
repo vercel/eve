@@ -137,7 +137,10 @@ export async function runIntegrationConnectCommand(
       dependencies: {
         ...dependencies,
         createPrompter: () =>
-          client?.prompter ?? dependencies.createPrompter?.() ?? createPrompter(),
+          client?.prompter ??
+          (options.nonInteractive
+            ? createHeadlessPrompter(() => {})
+            : (dependencies.createPrompter?.() ?? createPrompter())),
       },
     });
     client?.complete();

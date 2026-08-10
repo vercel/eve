@@ -117,6 +117,23 @@ describe("runIntegrationConnect", () => {
     expect(process.exitCode).toBe(2);
   });
 
+  it("does not create an interactive prompter for a non-interactive command", async () => {
+    const createPrompter = vi.fn(() => createFakePrompter().prompter);
+    const deps = dependencies({ createPrompter });
+
+    await runIntegrationConnectCommand(
+      { log: vi.fn(), error: vi.fn() },
+      "/project",
+      "linear",
+      "mcp.linear.app",
+      undefined,
+      { nonInteractive: true },
+      deps,
+    );
+
+    expect(createPrompter).not.toHaveBeenCalled();
+  });
+
   it("cleans up a newly-created connector when the installed file cannot be patched", async () => {
     const deps = dependencies({
       setupConnectionConnector: vi.fn(async () => ({

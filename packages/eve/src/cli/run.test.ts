@@ -104,7 +104,7 @@ describe("CLI command registration", () => {
     expect(help).toContain("add <registries...>");
     expect(help).toContain("list [options]");
     expect(help).toContain("search [options] <query>");
-    expect(help).toContain("view <item>");
+    expect(help).toContain("view [options] <item>");
     expect(help).not.toContain("remove [arguments...]");
     expect(help).not.toContain("sources [arguments...]");
   });

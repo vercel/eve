@@ -5,8 +5,6 @@ import {
   type RegistryConfig,
   type RegistrySearchItem,
 } from "#compiled/shadcn-registry/index.js";
-import { createCliTheme, sanitizeForTerminal } from "#cli/ui/output.js";
-import { clipVisible, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 import semver from "#compiled/semver/index.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
@@ -16,8 +14,18 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import { hasInteractiveTerminal, NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import { runDeclaredSetups } from "./registry-declared-setups.js";
-import { eveMetadataFromRegistryItem } from "./registry-metadata.js";
+import {
+  eveMetadataFromRegistryItem,
+  parseOfficialRegistrySearchMetadata,
+  type RegistrySearchMetadata,
+} from "./registry-metadata.js";
 import { runRegistryPackage } from "./registry-package.js";
+import {
+  printRegistrySearchResults,
+  registryViewText,
+  type RegistrySearchPresentationItem,
+  type RegistrySearchPresentationSection,
+} from "./registry-presentation.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
@@ -223,66 +231,25 @@ function validateRegistrySource(source: string | undefined): void {
   }
 }
 
-function normalizeRegistryText(value: string): string {
-  return sanitizeForTerminal(value)
-    .replaceAll('\\"', '"')
-    .replaceAll("\\'", "'")
-    .replaceAll(/\s+/gu, " ")
-    .trim();
-}
+type RegistrySearchResult = Awaited<ReturnType<typeof searchRegistries>>;
 
-function registryDescriptionSummary(description: string): string {
-  const normalized = normalizeRegistryText(description);
-  return normalized.match(/^.*?[.!?](?=\s|$)/u)?.[0] ?? normalized;
+async function loadOfficialSearchMetadata(): Promise<ReadonlyMap<string, RegistrySearchMetadata>> {
+  const response = await fetch(OFFICIAL_CATALOG);
+  if (!response.ok) throw new Error(`Could not read the eve registry (${response.status}).`);
+  return parseOfficialRegistrySearchMetadata(await response.json());
 }
 
 function searchItemAddress(item: RegistrySearchItem): string {
-  const address = item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument;
-  return normalizeRegistryText(address);
+  return item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument;
 }
 
-function searchItemFallbackTitle(item: RegistrySearchItem): string {
-  const name = normalizeRegistryText(item.name);
-  return name.split("/").at(-1) ?? name;
-}
-
-function renderSearchItem(
+function enrichSearchItem(
   item: RegistrySearchItem,
-  width: number,
-  theme: ReturnType<typeof createCliTheme>,
-  implementation?: "native" | "chat-sdk",
-): string {
-  const valueWidth = Math.max(1, width - 4);
-  const addressLines = wrapVisibleLine(searchItemAddress(item), valueWidth);
-  const implementationLabel =
-    implementation === "native"
-      ? "First-class eve channel"
-      : implementation === "chat-sdk"
-        ? "Chat SDK adapter"
-        : undefined;
-  const lines = [
-    `  ${theme.label(searchItemFallbackTitle(item))}${implementationLabel === undefined ? "" : theme.muted(` · ${implementationLabel}`)}`,
-    ...addressLines.map((line) => `    ${line}`),
-  ];
-  if (!item.description) return lines.join("\n");
-
-  const description = registryDescriptionSummary(item.description);
-  if (description.length === 0) return lines.join("\n");
-
-  const wrapped = wrapVisibleLine(description, valueWidth);
-  const descriptionLines =
-    wrapped.length <= 2
-      ? wrapped
-      : [wrapped[0]!, `${clipVisible(wrapped[1]!, Math.max(1, valueWidth - 1)).trimEnd()}…`];
-  lines.push(...descriptionLines.map((line) => theme.muted(`    ${line}`)));
-  return lines.join("\n");
+  metadataByAddress: ReadonlyMap<string, RegistrySearchMetadata>,
+): RegistrySearchPresentationItem {
+  const address = searchItemAddress(item);
+  return { item, address, ...metadataByAddress.get(address) };
 }
-
-type RegistrySearchResult = Awaited<ReturnType<typeof searchRegistries>>;
-type OfficialSearchMetadata = {
-  docs?: string;
-  implementation?: "native" | "chat-sdk";
-};
 
 function registrySourceLabel(source: string): string {
   if (source === OFFICIAL_CATALOG) return "eve";
@@ -290,78 +257,23 @@ function registrySourceLabel(source: string): string {
   return source;
 }
 
-function printSearchResults(
-  logger: RegistryCommandLogger,
-  result: RegistrySearchResult,
-  options: {
-    json?: boolean;
-    query: string | undefined;
-    resultsBySource: ReadonlyMap<string, RegistrySearchResult>;
-    sources: string[];
-    metadataByAddress: ReadonlyMap<string, OfficialSearchMetadata>;
-  },
-): void {
-  if (options.json) {
-    const enriched = {
-      ...result,
-      items: result.items.map((item) => ({
-        ...item,
-        ...options.metadataByAddress.get(searchItemAddress(item)),
-      })),
-    };
-    logger.log(JSON.stringify(enriched, null, 2));
-    return;
-  }
-  if (result.items.length === 0) {
-    const query = options.query && normalizeRegistryText(options.query);
-    logger.log(query ? `No registry items match "${query}".` : "No registry items found.");
-    return;
-  }
-
-  const theme = createCliTheme();
-  const width = Math.max(20, process.stdout.columns ?? 80);
-  const sections = options.sources.flatMap((source) => {
-    const sourceResult = options.resultsBySource.get(source);
-    if (sourceResult === undefined || sourceResult.items.length === 0) return [];
-    const { pagination } = sourceResult;
-    const count = `${pagination.total} result${pagination.total === 1 ? "" : "s"}`;
-    const detail =
-      sourceResult.items.length < pagination.total
-        ? `showing ${sourceResult.items.length} of ${count}`
-        : count;
-    const heading = `${theme.label(registrySourceLabel(source))} ${theme.muted(`(${detail})`)}`;
-    return [
-      [
-        heading,
-        ...sourceResult.items.map((item) =>
-          renderSearchItem(
-            item,
-            width,
-            theme,
-            options.metadataByAddress.get(searchItemAddress(item))?.implementation,
-          ),
-        ),
-      ].join("\n"),
-    ];
+function searchPresentationSections(
+  sources: readonly string[],
+  resultsBySource: ReadonlyMap<string, RegistrySearchResult>,
+  metadataByAddress: ReadonlyMap<string, RegistrySearchMetadata>,
+): RegistrySearchPresentationSection[] {
+  return sources.flatMap((source) => {
+    const result = resultsBySource.get(source);
+    return result === undefined
+      ? []
+      : [
+          {
+            label: registrySourceLabel(source),
+            items: result.items.map((item) => enrichSearchItem(item, metadataByAddress)),
+            total: result.pagination.total,
+          },
+        ];
   });
-  logger.log(sections.join("\n"));
-}
-
-async function officialSearchMetadata(): Promise<ReadonlyMap<string, OfficialSearchMetadata>> {
-  const response = await fetch(OFFICIAL_CATALOG);
-  if (!response.ok) throw new Error(`Could not read the eve registry (${response.status}).`);
-  const registry = (await response.json()) as { items?: unknown };
-  const metadata = new Map<string, OfficialSearchMetadata>();
-  if (!Array.isArray(registry.items)) return metadata;
-  for (const item of registry.items) {
-    if (typeof item !== "object" || item === null) continue;
-    const name = (item as { name?: unknown }).name;
-    if (typeof name !== "string") continue;
-    const eve = eveMetadataFromRegistryItem(item);
-    if (eve?.docs === undefined && eve?.implementation === undefined) continue;
-    metadata.set(name, { docs: eve.docs, implementation: eve.implementation });
-  }
-  return metadata;
 }
 
 async function searchRegistryCatalog(
@@ -420,8 +332,8 @@ async function searchRegistryCatalog(
     errors.map((error) => [`${error.registry}\0${error.message}`, error]),
   );
   const metadataByAddress = resultsBySource.has(OFFICIAL_CATALOG)
-    ? await officialSearchMetadata()
-    : new Map<string, OfficialSearchMetadata>();
+    ? await loadOfficialSearchMetadata()
+    : new Map<string, RegistrySearchMetadata>();
   const official = resultsBySource.get(OFFICIAL_CATALOG);
   if (official !== undefined) {
     official.items.sort((left, right) => {
@@ -498,13 +410,16 @@ async function browseRegistryItems(
   );
   const errors = result.errors ?? [];
   if (options.json || resultsBySource.size > 0) {
-    printSearchResults(logger, result, {
-      ...options,
+    const items = result.items.map((item) => ({
+      ...item,
+      ...metadataByAddress.get(searchItemAddress(item)),
+    }));
+    const presentation: Parameters<typeof printRegistrySearchResults>[1] = {
       query,
-      resultsBySource,
-      sources,
-      metadataByAddress,
-    });
+      sections: searchPresentationSections(sources, resultsBySource, metadataByAddress),
+    };
+    if (options.json) presentation.json = { ...result, items };
+    printRegistrySearchResults(logger, presentation);
   }
   for (const error of errors) {
     logger.error(`${error.registry}: ${error.message}`);
@@ -767,46 +682,6 @@ export async function runRegistrySearchCommand(
       limit: options.limit ?? DEFAULT_SEARCH_LIMIT,
     }),
   );
-}
-
-function registryViewText(item: string, manifest: unknown): string {
-  if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
-    return JSON.stringify(manifest, null, 2);
-  }
-  const record = manifest as Record<string, unknown>;
-  const metadata = eveMetadataFromRegistryItem(manifest);
-  const title = typeof record["title"] === "string" ? record["title"] : item;
-  const description = typeof record["description"] === "string" ? record["description"] : undefined;
-  const lines = [title, item];
-  if (description !== undefined) lines.push("", description);
-  if (metadata?.implementation !== undefined) {
-    lines.push(
-      "",
-      `Implementation  ${metadata.implementation === "native" ? "First-class eve channel" : "Chat SDK adapter"}`,
-    );
-  }
-  if (metadata?.setup !== undefined) lines.push("Setup           Guided setup");
-  if (metadata?.docs !== undefined) {
-    const docs = metadata.docs.startsWith("/") ? `https://eve.dev${metadata.docs}` : metadata.docs;
-    lines.push(`Documentation   ${docs}`);
-  }
-  lines.push("Source          Official eve registry");
-  const dependencies = Array.isArray(record["dependencies"])
-    ? record["dependencies"].filter((value): value is string => typeof value === "string")
-    : [];
-  if (dependencies.length > 0)
-    lines.push("", "Packages", ...dependencies.map((value) => `  ${value}`));
-  const files = Array.isArray(record["files"])
-    ? record["files"].flatMap((value) =>
-        typeof value === "object" &&
-        value !== null &&
-        typeof (value as { target?: unknown }).target === "string"
-          ? [(value as { target: string }).target]
-          : [],
-      )
-    : [];
-  if (files.length > 0) lines.push("", "Files", ...files.map((value) => `  ${value}`));
-  return lines.join("\n");
 }
 
 /** Inspects one official, configured, or URL-addressed registry item. */
