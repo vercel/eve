@@ -217,12 +217,8 @@ async function bootstrapSubject(
       { label: "create template workspace", command: `mkdir -p ${shellQuote(workspace)}` },
       {
         label: "initialize template eve project",
-        command: "AI_AGENT=benchmark node /tmp/eve-source/packages/eve/bin/eve.js init .",
-        workingDirectory: workspace,
-      },
-      {
-        label: "point template at checkout",
-        command: "pnpm pkg set 'dependencies.eve=file:/tmp/eve-source/packages/eve'",
+        command:
+          "AI_AGENT=benchmark EVE_INIT_PACKAGE_SPEC=file:/tmp/eve-source/packages/eve node /tmp/eve-source/packages/eve/bin/eve.js init .",
         workingDirectory: workspace,
       },
       {
