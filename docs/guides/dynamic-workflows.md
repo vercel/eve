@@ -7,6 +7,8 @@ The experimental `Workflow` tool lets the model write JavaScript that coordinate
 
 A single turn can already call several subagents, and parallel tool calls dispatch concurrently. What a workflow adds is _programmatic_ coordination. The program decides how many subagents to run based on an earlier result, which output feeds which call, and how to combine everything. That is logic the model cannot express as a few one-off calls.
 
+`Workflow` is a model-facing tool, not an API for authored tools, hooks, or application code. Authored code cannot submit a Workflow program or use `Workflow` to start an arbitrary user-authored Vercel Workflow. Use the [client SDK](./client/overview) when application code needs to start or continue an eve session; use ordinary application APIs for other deterministic orchestration.
+
 ## Enable the Workflow tool
 
 Export the experimental Workflow definition from `agent/tools/workflow.ts`. The helper name carries the "experimental" warning, but the tool the model actually sees is named `Workflow`.

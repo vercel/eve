@@ -183,9 +183,11 @@ export default defineSandbox({
 });
 ```
 
-Sessions are persistent, and how the underlying runtime idles out depends on the backend. On the Vercel backend, the VM times out after a period of inactivity (default 30 minutes); eve preserves the filesystem and resumes the sandbox on the next message as if nothing happened, even days later. The Docker backend keeps a long-lived container per durable session and persists `/workspace` across turns without that timeout, and the just-bash backend stores its virtual filesystem under `.eve/sandbox-cache/`. In every case, `/workspace` survives between turns for the same session.
+Sessions are persistent, and how the underlying runtime idles out depends on the backend. On the Vercel backend, the VM times out after a period of inactivity (default 30 minutes); eve preserves the filesystem and resumes the sandbox on the next message while the persisted sandbox remains available. The Docker backend keeps a long-lived container per durable session and persists `/workspace` across turns without that timeout, and the just-bash backend stores its virtual filesystem under `.eve/sandbox-cache/`.
 
-Session sandboxes are keyed per durable session, not per deployment, so redeploying your app does not discard them. A session gets a replacement sandbox only when the sandbox definition itself changes — the authored sandbox source, workspace seed content, or `revalidationKey` — in which case the next turn starts from the rebuilt template and `onSession` runs again.
+Session sandboxes are keyed per durable session, not per deployment, so redeploying your app does not by itself discard them. A definition change to the authored sandbox source, workspace seed content, or `revalidationKey` replaces the sandbox on the next turn and runs `onSession` again.
+
+Reattachment still depends on the backend retaining its physical sandbox state. If a persisted Vercel sandbox is no longer available, eve creates a replacement, using the current template when one is configured. Files and other changes made after the original sandbox was created are not restored automatically. Because the durable session still has the same sandbox key, `onSession` does not run again for this replacement. Persist important artifacts outside the sandbox, and do not rely on `onSession` as the only place that applies security-critical configuration.
 
 When the eve server stops, no sandbox compute outlives it. `eve dev` stops the sandboxes it started when the dev server closes, and a self-hosted production server stops every open sandbox on shutdown (`SIGTERM`/`SIGINT`). Session state persists across the stop — the next server start reattaches each durable session from its stopped container, VM, or snapshot. Custom `SandboxBackend` adapters participate through the handle's `shutdown()` method: stop the underlying compute, keeping the session reattachable from persisted state where the backend supports it.
 
@@ -205,7 +207,7 @@ networkPolicy: {
 
 Default egress is `allow-all`. For non-public, sensitive, regulated, or production workloads, configure `deny-all` or an explicit allow-list before running untrusted tools or handling sensitive data.
 
-Set it on the factory (`vercel({ networkPolicy: "deny-all" })`) and it applies before authored `bootstrap` code runs; framework-owned base setup may briefly keep egress open to install required packages. Set it in `onSession`'s `use()` to override per-session. The common pattern combines both: leave the factory open so `bootstrap` can `git clone`, then lock down in `onSession`. To change the policy mid-turn, call `sandbox.setNetworkPolicy(...)` on the live handle.
+Set it on the factory (`vercel({ networkPolicy: "deny-all" })`) and it applies before authored `bootstrap` code runs; framework-owned base setup may briefly keep egress open to install required packages. Set it in `onSession`'s `use()` to override per-session. A provider-loss replacement with the same sandbox key does not rerun `onSession`, so enforce the security-critical baseline on the factory. If `bootstrap` needs network access, give the factory only the destinations it needs, then narrow the policy further in `onSession`. To change the policy mid-turn, call `sandbox.setNetworkPolicy(...)` on the live handle.
 
 Domain-level allow-lists and credential brokering are supported by `vercel()` and `microsandbox()`. The Docker backend honors only `"allow-all"` and `"deny-all"` (at creation and via `setNetworkPolicy`); the just-bash backend rejects `setNetworkPolicy` entirely.
 

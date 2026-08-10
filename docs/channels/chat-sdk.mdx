@@ -5,7 +5,7 @@ description: "Bridge any Vercel Chat SDK adapter — Slack, Discord, Telegram, W
 
 The Chat SDK channel connects your agent to any [Vercel Chat SDK](https://chat-sdk.dev) adapter. You pick an adapter (`@chat-adapter/slack`, `@resend/chat-sdk-adapter`, and so on), register handlers for the messages you care about, and call `send` to hand each turn to eve. Use it to reach a surface eve does not ship a first-class channel for, or when you want to manage credentials and state with the Chat SDK's own primitives rather than [Vercel Connect](../guides/auth-and-route-protection). See [Channels](./overview) for the contract this builds on.
 
-You supply an adapter and a state store: the adapter owns provider auth, webhook verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. First-class channels such as [Slack](./slack) manage credentials through Vercel Connect instead — reach for whichever fits the surface you are targeting.
+You supply an adapter and a state store: the adapter owns provider auth, webhook verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. First-class channels such as [Slack](./slack) use their own channel APIs and can manage credentials through Vercel Connect or portable environment variables instead.
 
 ## Install
 

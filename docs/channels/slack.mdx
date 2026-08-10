@@ -1,31 +1,26 @@
 ---
 title: "Slack"
-description: "Reach your agent from Slack app mentions and DMs, with thread anchoring, buttons, and Vercel Connect credentials."
+description: "Reach your agent from Slack app mentions and DMs, with thread anchoring, buttons, and managed or portable credentials."
 type: integration
 ---
 
-The Slack channel puts your agent inside a workspace. It answers `@mentions` and DMs, replies in threads, shows typing indicators, and turns human-in-the-loop (HITL) prompts into buttons. Use it when the conversation should happen where your team already works. Credentials run through [Vercel Connect](../guides/auth-and-route-protection), which handles both the outbound bot token and inbound webhook verification, so there's no `SLACK_BOT_TOKEN` or `SLACK_SIGNING_SECRET` for you to manage. See [Channels](./overview) for the contract this builds on.
-
-## Set up Connect
-
-Create a Slack Connect client and copy its UID (e.g. `slack/my-agent`), then attach this project as the trigger destination at eve's Slack route:
-
-```bash
-npm install -g vercel@latest
-vercel connect create slack --triggers
-vercel connect detach <uid> --yes
-vercel connect attach <uid> --triggers --trigger-path /eve/v1/slack --yes
-```
-
-The `create` step provisions a destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/slack` re-points the trigger at the eve Slack route, since eve does not serve the default Connect path. `--triggers` turns on Slack Event Subscriptions; without it, Slack never delivers `app_mention` or `message.im`. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
+The Slack channel puts your agent inside a workspace. It answers `@mentions` and DMs, replies in threads, shows typing indicators, and turns human-in-the-loop (HITL) prompts into buttons. Use it when the conversation should happen where your team already works. [Vercel Connect](https://vercel.com/kb/guide/vercel-connect) can manage the outbound bot token and inbound webhook verification, or you can supply portable Slack credentials through environment variables. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
-Scaffold the channel and its dependency with `eve add channel/slack`, or set it up by hand:
+Run the guided setup from your agent project:
 
 ```bash
-npm install @vercel/connect
+eve add channel/slack
 ```
+
+The command asks you to choose Vercel Connect or portable credentials, then scaffolds `agent/channels/slack.ts` and installs any required dependency.
+
+### Use Vercel Connect
+
+Vercel Connect setup requires an authenticated Vercel CLI and a linked Vercel project. The guided flow creates or reuses a Slack connector, waits for you to install it in a workspace, and registers `/eve/v1/slack` as a trigger destination before writing the channel file.
+
+The generated channel resolves credentials at runtime:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -38,17 +33,93 @@ export default slackChannel({
 
 `connectSlackCredentials` returns `{ botToken, webhookVerifier }`, keeping token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code.
 
-If eve cannot find an authenticated Vercel session, `eve add channel/slack` asks whether to set up Vercel Connect or use portable environment credentials. The portable option adds the required names to `.env.example`. Before deploying, appropriate values must be supplied to your runtime environment.
+### Use portable credentials
 
-### Deploy
+Choose portable credentials when the agent does not run on Vercel or when you want to test against a public development or preview URL. The setup command adds `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` to `.env.example`.
 
-Deploy once the trigger destination and channel file are ready:
+The portable flow does not create or install the Slack app. Configure it in [Slack app settings](https://api.slack.com/apps):
+
+1. Add the `app_mentions:read` and `chat:write` bot scopes. Add `im:history` for DMs, `files:read` for inbound attachments, and `files:write` when the agent uploads files.
+2. Install or reinstall the app, copy its Bot User OAuth Token to `SLACK_BOT_TOKEN`, and copy the signing secret from **Basic Information** to `SLACK_SIGNING_SECRET`.
+3. Set both values in `.env.local` for local development or in the target runtime's environment, then start or deploy the agent at a public URL.
+4. Under **Event Subscriptions**, set the Request URL to `https://your-agent.example/eve/v1/slack`. Subscribe to `app_mention`, plus `message.im` for DMs.
+5. Under **Interactivity & Shortcuts**, use the same Request URL when the agent uses buttons or HITL prompts.
+
+Add the matching message events and history scopes if you also want unmentioned thread replies, as described in [Continue conversations without repeated mentions](#continue-conversations-without-repeated-mentions).
+
+## Deploy
+
+Deploy the production agent after the trigger destination and channel file are ready:
 
 ```bash
-VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1 vercel deploy --prod
+eve deploy
 ```
 
-`VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1` lets the Vercel CLI recognize eve as a framework during the build. eve's own setup commands set the same flag.
+`eve deploy` deploys the linked Vercel project to production. The guided flow registers the trigger destination against the production branch, which is the Vercel CLI default. Manage trigger destinations separately in the Connect dashboard when you need a different branch or environment.
+
+## Test a preview branch with Vercel Connect
+
+Use a separate connector when you want preview Slack traffic isolated from production, then register the preview branch as a trigger destination:
+
+```bash
+npm install -g vercel@latest
+vercel connect create slack --name your-agent-preview --triggers
+vercel connect attach slack/your-agent-preview \
+  --environment preview \
+  --triggers \
+  --trigger-branch your-preview-branch \
+  --trigger-path /eve/v1/slack \
+  --yes
+```
+
+Run these commands from the linked project directory. `--environment preview` makes the connector credentials available to Preview deployments. `--trigger-branch` selects the branch that receives forwarded Slack webhooks.
+
+Select the matching connector at runtime instead of leaving the generated production UID hard-coded:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+const connectorUid =
+  process.env.VERCEL_ENV === "preview" ? "slack/your-agent-preview" : "slack/my-agent";
+
+export default slackChannel({
+  credentials: connectSlackCredentials(connectorUid),
+});
+```
+
+Creating a connector with triggers also registers a default production destination. Remove that destination from the Connect dashboard before treating the preview connector as isolated. The guided production setup does not restrict credential environments, so also set the production connector's project access to **Production** and the preview connector's access to **Preview** in the dashboard. `vercel connect detach` removes project token access, not trigger destinations. Vercel Connect supports up to three trigger destinations per connector; see the [Vercel Connect guide](https://vercel.com/kb/guide/vercel-connect) for current limits and environment guidance.
+
+Slack must be able to reach the preview route without an interactive authentication challenge. For a Connect trigger, exempt the branch domain with a [Deployment Protection Exception](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/deployment-protection-exceptions) when that feature is available, or use an unprotected preview domain. For a portable Slack app, append `?x-vercel-protection-bypass=your-generated-secret` to its event and interaction request URLs. Enabling [Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation) does not bypass a request unless the sender presents that secret.
+
+## Set up Vercel Connect manually
+
+To set up the connector outside the guided flow, create it, then register eve's Slack route with the linked project:
+
+```bash
+npm install -g vercel@latest
+vercel connect create slack --name your-agent --triggers
+vercel connect attach slack/your-agent \
+  --environment production \
+  --triggers \
+  --trigger-path /eve/v1/slack \
+  --yes
+```
+
+`--triggers` enables Slack Event Subscriptions. The attach command registers eve's route in addition to the default destination created with the connector. Remove the default destination separately in the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect). For an existing connector, skip `create` and attach the intended route directly.
+
+## Troubleshoot Slack delivery
+
+Check the delivery path in order so you can identify where a Slack event stops:
+
+| Symptom                                                               | Check                                                                                                                                                                                  | Next action                                                                                                                                       |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eve add channel/slack` stops before scaffolding the channel          | Read the setup error for the failed Vercel login, project link, workspace install, connector lookup, or trigger registration step.                                                     | Resolve that step, then rerun `eve add channel/slack`.                                                                                            |
+| Setup says it could not remove an existing trigger destination        | Check the connector's destinations in the Connect dashboard. `vercel connect detach` removes project token access, not trigger destinations.                                           | Edit or remove the stale destination in the dashboard, then register `/eve/v1/slack` with `vercel connect attach`.                                |
+| Mentions never reach the deployment                                   | Confirm that the connector trigger destination uses the intended project and branch, enables triggers, and points to `/eve/v1/slack`.                                                  | Edit or remove stale destinations in the Connect dashboard, then register the intended destination with `vercel connect attach`.                  |
+| Mentions work but DMs or thread replies do not                        | Check the Slack app's Event Subscriptions and OAuth scopes. DMs require `message.im` and `im:history`; channel replies require the matching message event and history scope.           | Add the missing events or scopes, then reinstall the Slack app if Slack requires it.                                                              |
+| A preview request receives an authentication page or protection error | Check whether the branch domain is exempt or the direct Slack request URL includes `x-vercel-protection-bypass`. Slack cannot complete an interactive Vercel Authentication challenge. | Add a Deployment Protection Exception for the branch domain, or add the automation bypass query parameter to a portable Slack app's request URLs. |
+| The webhook reaches the deployment but the agent does not reply       | Open the project's Vercel runtime logs, then inspect the session in **Agent Runs** when your team has access.                                                                          | Use the first missing or failed stage to narrow the issue to channel dispatch, the agent run, or outbound Slack delivery.                         |
 
 ## How the channel handles inbound events
 
@@ -70,6 +141,43 @@ Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context
 Only the first available handler runs. A message hook returning `null` drops the message; it does not continue down the table.
 
 `onInteraction(action, ctx)` separately handles `block_actions` callbacks not consumed by HITL. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
+
+#### Restrict who can invoke the agent
+
+A valid Slack signature proves that Slack sent the event. It does not decide which channel or person your agent should trust. Fail closed in the inbound handler before returning auth, especially when the app is installed in a shared Slack Connect channel:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { defaultSlackAuth, slackChannel, type SlackMessage } from "eve/channels/slack";
+
+const allowedChannels = new Set(["C01234567"]);
+const allowedUsers = new Set(["U01234567"]);
+
+function isAllowedUser(message: SlackMessage) {
+  const userId = message.author?.userId;
+  return Boolean(userId && allowedUsers.has(userId));
+}
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  onAppMention(ctx, message) {
+    if (!isAllowedUser(message) || !allowedChannels.has(message.channelId)) {
+      return null;
+    }
+    return { auth: defaultSlackAuth(message, ctx) };
+  },
+  onDirectMessage(ctx, message) {
+    if (!isAllowedUser(message)) return null;
+    return { auth: defaultSlackAuth(message, ctx) };
+  },
+});
+```
+
+Override every enabled inbound handler; leaving `onDirectMessage` out would retain eve's default DM behavior. Slack Connect can deliver events from external users, so authorize the explicit user and current channel IDs your policy expects. If access depends on organization membership, resolve it from Slack's shared-channel and user data instead of inferring it from the request signature.
+
+Keep authorization checks inside sensitive tools too. The inbound allowlist controls who can start a turn; tool-level checks control what that authenticated Slack principal may read or change.
+
+The allowlist above gates message-started turns. Built-in HITL buttons are handled before `onInteraction`, and the person who clicks supplies the Slack auth for the resumed session. Anyone who can interact with the Slack message can answer it. Put sensitive prompts in channels limited to the intended approvers, and re-check `ctx.session.auth.current` inside a sensitive tool before performing its side effect.
 
 #### Continue conversations without repeated mentions
 
@@ -310,6 +418,8 @@ Start a session without an inbound message through `ctx.to(slack, target).send(m
 Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [File uploads](./custom#file-uploads) for the `fetchFile` contract.
 
 Private file downloads require the Slack bot token's `files:read` scope. Add the scope and reinstall the Slack app before sending attachments. If Slack returns an HTML sign-in page instead of file bytes, eve rejects the response with this remediation instead of staging the page as an attachment.
+
+Staged files live in the session sandbox under `/workspace/attachments`. Session history keeps a reference to that path, not a second copy of the Slack file. If the backend can no longer reattach the original sandbox, eve cannot restore the attachment bytes from history; later turns receive a missing-file result. Store files outside the sandbox when the agent must retain them independently of sandbox availability.
 
 ## What to read next
 

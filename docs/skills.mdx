@@ -59,9 +59,20 @@ export default defineSkill({
 
 eve generates `SKILL.md` from `markdown`, and each `files` entry becomes a package-relative sibling. Start with plain markdown and move to `defineSkill` only when you hit its limits.
 
+## Find and install community skills
+
+`eve registry search` includes [skills.sh](https://skills.sh) as the built-in `@skills` source. Search by task, review the source, then install the returned skill into your project:
+
+```bash
+eve registry search react --registry @skills
+eve add @skills/vercel-labs/agent-skills/vercel-react-best-practices
+```
+
+skills.sh skills are community-authored project files. Review their source and the resulting diff before running the agent. See [Install integrations](./install-integrations#add-a-skill) for registry configuration and install behavior.
+
 ## Skills are scoped per agent
 
-Skills are scoped to the agent that declares them. A [subagent](./subagents)'s `skills/` are invisible to the root agent, and the reverse holds too. There's no shared-skill mechanism, so put shared executable helpers in `lib/`.
+Skills are scoped to the agent that declares them. A [subagent](./subagents)'s `skills/` are invisible to the root agent, and the reverse holds too. To share one skill definition across agents, package it in a [workspace extension](./extensions#use-an-extension-in-a-workspace) and mount that extension in each agent. Put shared executable helpers in `lib/`.
 
 ## Read skill files at runtime
 
