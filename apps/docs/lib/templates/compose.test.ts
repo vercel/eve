@@ -46,6 +46,7 @@ describe("composeTemplateEntries", () => {
       "https://github.com/vercel-labs/example/tree/0123456789abcdef0123456789abcdef01234567",
     );
     expect(entry.githubOwner).toBe("vercel-labs");
+    expect(entry.githubPathPrefix).toBeUndefined();
     expect(entry.githubRepo).toBe("example");
     expect(entry.readme).toBe(generated.templates.example.readme);
     expect(entry.files).toEqual(generated.templates.example.files);
@@ -68,6 +69,7 @@ describe("composeTemplateEntries", () => {
     expect(entry.sourceRevisionHref).toBe(
       "https://github.com/vercel/eve-examples/tree/0123456789abcdef0123456789abcdef01234567/example-template",
     );
+    expect(entry.githubPathPrefix).toBe("example-template");
   });
 
   it("throws when a manifest slug has no generated data", () => {
