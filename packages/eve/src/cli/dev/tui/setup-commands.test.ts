@@ -344,6 +344,11 @@ describe("runTuiSetupCommand", () => {
       "Added Agent Browser",
     ],
     ["empty", { kind: "done", addedItems: [], items: [], facts: [] }, "No registry items added."],
+    [
+      "deployed",
+      { kind: "done", addedItems: [], items: [], facts: [], deployed: "production" },
+      "No registry items added.",
+    ],
     ["cancelled", { kind: "cancelled" }, "/add dismissed."],
   ] as const)("reports a %s registry flow", async (_case, result, message) => {
     const runRegistryFlow = vi.fn(async () => result);
@@ -352,11 +357,15 @@ describe("runTuiSetupCommand", () => {
       message: string;
       tone?: "success";
       preserveFlowDiagnostics: boolean;
+      effect?: { kind: "deployed" };
     } = {
       message,
       preserveFlowDiagnostics: true,
     };
     if (result.kind === "done" && result.addedItems.length > 0) expected.tone = "success";
+    if (result.kind === "done" && "deployed" in result && result.deployed === "production") {
+      expected.effect = { kind: "deployed" };
+    }
     expect(outcome).toEqual(expected);
     expect(runRegistryFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
   });

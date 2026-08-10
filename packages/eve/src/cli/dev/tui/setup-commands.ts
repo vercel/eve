@@ -256,14 +256,16 @@ async function executeSetupCommand(
         if (result.kind === "cancelled") {
           return { message: "/add dismissed.", preserveFlowDiagnostics: true };
         }
-        if (result.addedItems.length > 0) {
-          return {
-            message: registryResultMessage(result),
-            tone: "success",
-            preserveFlowDiagnostics: true,
-          };
-        }
-        return { message: "No registry items added.", preserveFlowDiagnostics: true };
+        const outcome: TuiSetupCommandResult = {
+          message:
+            result.addedItems.length > 0
+              ? registryResultMessage(result)
+              : "No registry items added.",
+          preserveFlowDiagnostics: true,
+        };
+        if (result.addedItems.length > 0) outcome.tone = "success";
+        if (result.deployed === "production") outcome.effect = { kind: "deployed" };
+        return outcome;
       }
       case "deploy": {
         const result = await flows.runDeployFlow({ appRoot, prompter, interactive: true, signal });
