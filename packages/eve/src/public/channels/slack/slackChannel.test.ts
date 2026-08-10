@@ -459,7 +459,7 @@ describe("slackChannel() default event handlers", () => {
     expect(parseSlackRequestBody(init as RequestInit)).toMatchObject({ status: "" });
   });
 
-  it("input.requested posts an approval card with Slack-unique button action ids", async () => {
+  it("input.requested keeps tool input out of the interactive approval message", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
@@ -494,18 +494,12 @@ describe("slackChannel() default event handlers", () => {
       ctx,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
-    const body = parseSlackRequestBody(init as RequestInit) as {
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [detailsCall, controlsCall] = fetchMock.mock.calls;
+    expect(String(detailsCall?.[0])).toBe("https://slack.com/api/chat.postMessage");
+    expect(String(controlsCall?.[0])).toBe("https://slack.com/api/chat.postMessage");
+    const detailsBody = parseSlackRequestBody(detailsCall?.[1] as RequestInit) as {
       blocks: Array<{
-        actions?: Array<{
-          action_id: string;
-          style?: string;
-          text: { emoji?: boolean; text: string; type: string };
-          value: string;
-        }>;
-        body?: { text: string; type: string; verbatim?: boolean };
         child_blocks?: Array<{ text?: { text?: string; type?: string }; type: string }>;
         title?: { text: string; type: string };
         type: string;
@@ -514,14 +508,52 @@ describe("slackChannel() default event handlers", () => {
       text: string;
       thread_ts: string;
     };
-    expect(body).toMatchObject({
+    expect(detailsBody).toMatchObject({
       channel: "C01",
       text: 'Approve tool call: mongodb-mutate\n*Tool input*\n```\n{\n  "operation": "deleteMany"\n}\n```',
       thread_ts: "1700000000.000001",
     });
+    expect(detailsBody.blocks).toEqual([
+      expect.objectContaining({
+        type: "container",
+        title: { type: "plain_text", text: "Tool input" },
+        is_collapsible: true,
+        default_collapsed: false,
+        child_blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: '```\n{\n  "operation": "deleteMany"\n}\n```',
+            },
+          },
+        ],
+      }),
+    ]);
 
-    expect(body.blocks).toHaveLength(2);
-    const [card, details] = body.blocks;
+    const controlsBody = parseSlackRequestBody(controlsCall?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{
+          action_id: string;
+          style?: string;
+          text: { emoji?: boolean; text: string; type: string };
+          value: string;
+        }>;
+        body?: { text: string; type: string; verbatim?: boolean };
+        type: string;
+      }>;
+      channel: string;
+      text: string;
+      thread_ts: string;
+    };
+    expect(controlsBody).toMatchObject({
+      channel: "C01",
+      text: "Approve tool call: mongodb-mutate",
+      thread_ts: "1700000000.000001",
+    });
+
+    expect(controlsBody.blocks).toHaveLength(1);
+    const [card] = controlsBody.blocks;
     expect(card).toMatchObject({
       type: "card",
       body: {
@@ -531,21 +563,7 @@ describe("slackChannel() default event handlers", () => {
       },
     });
     expect(card?.body?.text.length).toBeLessThanOrEqual(SLACK_CARD_BODY_TEXT_MAX_LENGTH);
-    expect(details).toMatchObject({
-      type: "container",
-      title: { type: "plain_text", text: "Tool input" },
-      is_collapsible: true,
-      default_collapsed: false,
-      child_blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: '```\n{\n  "operation": "deleteMany"\n}\n```',
-          },
-        },
-      ],
-    });
+    expect(JSON.stringify(controlsBody)).not.toContain("deleteMany");
 
     const actions = card?.actions ?? [];
     const actionIds = actions.map((element) => element.action_id);
@@ -565,6 +583,88 @@ describe("slackChannel() default event handlers", () => {
         value: "approve",
       },
     ]);
+  });
+
+  it("keeps a large tool input out of the Slack button callback", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+    });
+    const adapter = withState(getAdapter(channel), THREAD_STATE);
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const longPrompt = "cursor cloud task ".repeat(700);
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: {
+              callId: "call_cursor",
+              input: { prompt: longPrompt },
+              kind: "tool-call",
+              toolName: "spawn_cursor_agent",
+            },
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve tool call: spawn_cursor_agent",
+            requestId: "approval_cursor",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    const postCalls = fetchMock.mock.calls.filter(
+      ([url]) => String(url) === "https://slack.com/api/chat.postMessage",
+    );
+    expect(postCalls).toHaveLength(2);
+    const details = parseSlackRequestBody(postCalls[0]?.[1] as RequestInit);
+    expect(JSON.stringify(details)).toContain("cursor cloud task");
+
+    const controls = parseSlackRequestBody(postCalls[1]?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{
+          action_id: string;
+          text: { type: string; text: string };
+          value: string;
+        }>;
+      }>;
+      text: string;
+    };
+    expect(JSON.stringify(controls)).not.toContain("cursor cloud task");
+    const approve = controls.blocks[0]?.actions?.find((action) => action.value === "approve");
+    expect(approve).toBeDefined();
+
+    const interactionRequest = buildSignedInteractionRequest({
+      type: "block_actions",
+      team: { id: "T01" },
+      user: { id: "U_APPROVER", username: "ada", team_id: "T01" },
+      channel: { id: "C01" },
+      message: {
+        ts: "1700000000.000010",
+        thread_ts: "1700000000.000001",
+        text: controls.text,
+        blocks: controls.blocks,
+      },
+      actions: [approve],
+    });
+    const callbackBody = await interactionRequest.clone().text();
+    expect(callbackBody).not.toContain("cursor+cloud+task");
+    expect(callbackBody.length).toBeLessThan(3_000);
+
+    const { send } = await firePost(channel, interactionRequest);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]).toBe("C01:1700000000.000001");
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      inputResponses: [{ optionId: "approve", requestId: "approval_cursor" }],
+    });
   });
 
   it("input.requested caps section and fallback text so Slack does not reject the post", async () => {
@@ -618,9 +718,8 @@ describe("slackChannel() default event handlers", () => {
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
 
-    // Approval requests with tool input render as a card plus a tool-input
-    // container. 60 requests must split across three posts to stay below
-    // Slack's 50-block message cap.
+    // Tool-input containers and approval cards are grouped into separate
+    // posts. 60 of each must split into two posts per kind.
     const requests = Array.from({ length: 60 }, (_, index) => ({
       action: {
         callId: `call_${index}`,
@@ -644,9 +743,9 @@ describe("slackChannel() default event handlers", () => {
       ctx,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     const allRequestIds: string[] = [];
-    for (const [url, init] of fetchMock.mock.calls) {
+    for (const [callIndex, [url, init]] of fetchMock.mock.calls.entries()) {
       expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
       const body = parseSlackRequestBody(init as RequestInit) as {
         blocks: Array<{
@@ -656,6 +755,9 @@ describe("slackChannel() default event handlers", () => {
         }>;
       };
       expect(body.blocks.length).toBeLessThanOrEqual(SLACK_MAX_BLOCKS_PER_MESSAGE);
+      expect(new Set(body.blocks.map((block) => block.type))).toEqual(
+        new Set([callIndex < 2 ? "container" : "card"]),
+      );
       for (const block of body.blocks) {
         for (const element of block.actions ?? block.elements ?? []) {
           const requestId = element.action_id.replace(/^.*:(approval_\d+):button:\d+$/u, "$1");
@@ -2513,29 +2615,41 @@ describe("slackChannel() HITL interaction pipeline", () => {
       ctx,
     );
 
-    const postCall = fetchMock.mock.calls.find(
+    const postCalls = fetchMock.mock.calls.filter(
       ([url]) => String(url) === "https://slack.com/api/chat.postMessage",
     );
-    expect(postCall).toBeDefined();
-    const posted = parseSlackRequestBody(postCall?.[1] as RequestInit) as {
+    expect(postCalls).toHaveLength(2);
+    const postedDetails = parseSlackRequestBody(postCalls[0]?.[1] as RequestInit) as {
       blocks: Array<{
-        actions?: Array<{ action_id?: string; text?: { text?: string }; value?: string }>;
         child_blocks?: Array<{ text?: { text?: string } }>;
         title?: { text?: string };
         type?: string;
       }>;
     };
-    expect(posted.blocks).toHaveLength(4);
-    expect(posted.blocks[1]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 451');
-    expect(posted.blocks[1]?.child_blocks?.[0]?.text?.text).toContain(
+    expect(postedDetails.blocks).toHaveLength(2);
+    expect(postedDetails.blocks[0]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 451');
+    expect(postedDetails.blocks[0]?.child_blocks?.[0]?.text?.text).toContain(
       '"ownerSlackUserId": "U0AT7H56S90"',
     );
-    expect(posted.blocks[3]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
+    expect(postedDetails.blocks[1]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
 
-    const firstCancelAction = posted.blocks[0]?.actions?.find(
+    const postedControls = parseSlackRequestBody(postCalls[1]?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{ action_id?: string; text?: { text?: string }; value?: string }>;
+        type?: string;
+      }>;
+    };
+    expect(postedControls.blocks).toHaveLength(2);
+    expect(JSON.stringify(postedControls)).not.toContain("issueNumber");
+
+    const firstCancelAction = postedControls.blocks[0]?.actions?.find(
       (action) => action.value === "cancel",
     );
-    expect(firstCancelAction).toMatchObject({ value: "cancel" });
+    expect(firstCancelAction).toMatchObject({
+      action_id: `${HITL_ACTION_PREFIX}approval_451:button:0`,
+      text: { text: "Cancel" },
+      value: "cancel",
+    });
 
     const { send } = await firePost(
       channel,
@@ -2552,7 +2666,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
         message: {
           ts: "1700000000.000010",
           thread_ts: "1700000000.000001",
-          blocks: posted.blocks,
+          blocks: postedControls.blocks,
         },
         actions: [
           {
@@ -2584,8 +2698,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
     };
 
     expect(body.blocks[0]?.subtext?.text).toBe(":white_check_mark: *Cancel* by <@U0AT7H56S90>");
-    expect(body.blocks[1]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 451');
-    expect(body.blocks[3]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
+    expect(JSON.stringify(body.blocks)).not.toContain("issueNumber");
     const remainingActionIds = body.blocks.flatMap(
       (block) =>
         (block.actions ?? block.elements)
