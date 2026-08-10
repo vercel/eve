@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { channelEntries } from "@eve/catalog";
@@ -87,8 +87,6 @@ const targetSlugsByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-resend": "resend",
 };
 
-const nonStreamingCatalogSlugs = new Set(["chat-sdk-sendblue"]);
-
 const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
 const items = registry.items.filter((item) => item.name.startsWith("channel/"));
@@ -162,10 +160,7 @@ for (const [index, item] of items.entries()) {
       `Registry item "${item.name}" must write ${expectedPath} to ${expectedTarget}.`,
     );
   }
-  const source = await readFile(join(docsRoot, expectedPath), "utf8");
-  if (nonStreamingCatalogSlugs.has(entry.slug) && !source.includes("streaming: false")) {
-    throw new Error(`Registry item "${item.name}" must disable unsupported streaming edits.`);
-  }
+  await access(join(docsRoot, expectedPath));
 
   const adapterDependency = adapterDependenciesByCatalogSlug[entry.slug];
   if (entry.slug.startsWith("chat-sdk-") && adapterDependency === undefined) {

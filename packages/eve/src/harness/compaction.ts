@@ -3,12 +3,12 @@ import { generateText, type LanguageModel, type ModelMessage, type TelemetryOpti
 import {
   COMPACTION_CHECKPOINT_MARKER,
   COMPACTION_PROMPT_ENVELOPE,
-  COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
   stubContentOutputFileParts,
   TODO_COMPACTION_PRESERVATION_LABEL,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction-prompt.js";
+import { MODEL_RESUMPTION_MESSAGE } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -325,7 +325,7 @@ function withResumptionGuard(
     ...messages,
     replay !== undefined && !alreadyKept
       ? replay
-      : { content: COMPACTION_RESUMPTION_MESSAGE, role: "user" },
+      : { content: MODEL_RESUMPTION_MESSAGE, role: "user" },
   ];
 }
 
@@ -341,7 +341,7 @@ function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMe
       continue;
     }
     if (
-      message.content === COMPACTION_RESUMPTION_MESSAGE ||
+      message.content === MODEL_RESUMPTION_MESSAGE ||
       message.content === COMPACTION_CHECKPOINT_MARKER ||
       message.content.startsWith(TODO_COMPACTION_PRESERVATION_LABEL)
     ) {

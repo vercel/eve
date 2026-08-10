@@ -177,21 +177,6 @@ export const notionLogo = (props: LogoProps) => <SiNotion {...props} />;
 
 export const upstashLogo = (props: LogoProps) => <SiUpstash color="default" {...props} />;
 
-export const arcanaLogo = (props: LogoProps) => (
-  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
-    <circle cx="12" cy="12" r="3" fill="#1A1C1A" />
-    <circle cx="5" cy="7" r="2" fill="#1A1C1A" />
-    <circle cx="19" cy="7" r="2" fill="#69BE8B" />
-    <circle cx="6" cy="18" r="2" fill="#69BE8B" />
-    <circle cx="18" cy="18" r="2" fill="#1A1C1A" />
-    <path
-      d="m6.7 7.8 3.4 2.7m7.2-2.7-3.4 2.7m-6.5 6 3-2.7m4.2 0 3 2.7"
-      stroke="#1A1C1A"
-      strokeWidth="1.5"
-    />
-  </svg>
-);
-
 export const hindsightLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 186 139" xmlns="http://www.w3.org/2000/svg" {...props}>
     <g stroke="#078BC2" strokeLinecap="round" strokeLinejoin="round" strokeWidth="8">
@@ -670,7 +655,6 @@ export const logos = {
   raindrop: raindropLogo,
   kernel: kernelLogo,
   upstash: upstashLogo,
-  arcana: arcanaLogo,
   hindsight: hindsightLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,

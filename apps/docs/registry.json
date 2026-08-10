@@ -130,24 +130,6 @@
       ]
     },
     {
-      "name": "extension/arcana",
-      "type": "registry:item",
-      "title": "Kybernesis Arcana",
-      "description": "Give an eve agent a workspace-scoped long-term memory with recall, storage, and brain notes.",
-      "dependencies": ["@kybernesis/arcana"],
-      "envVars": {
-        "ARCANA_API_KEY": "",
-        "ARCANA_WORKSPACE": ""
-      },
-      "files": [
-        {
-          "path": "registry/extensions/arcana.ts",
-          "type": "registry:file",
-          "target": "agent/extensions/arcana.ts"
-        }
-      ]
-    },
-    {
       "name": "extension/hindsight",
       "type": "registry:item",
       "title": "Hindsight",

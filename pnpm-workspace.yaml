@@ -66,7 +66,6 @@ minimumReleaseAgeExclude:
   - "@getdial/chat-sdk-adapter"
   - "@github-tools/eve-extension"
   - "@github-tools/sdk"
-  - "@kybernesis/arcana"
   - "@kapso/chat-adapter"
   - "@larksuite/vercel-chat-adapter"
   - "@linqapp/chat-sdk-adapter"

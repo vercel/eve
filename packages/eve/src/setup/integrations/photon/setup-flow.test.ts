@@ -19,7 +19,6 @@ function deps(): PhotonSetupDeps {
     appendEnv: vi.fn(async () => ({ written: [], skipped: [] })),
     deriveConnectorSlug: vi.fn(async () => "agent" as never),
     ensureVercelProject: vi.fn(async () => ({ orgId: "team-id", projectId: "project-id" })),
-    findDedicatedLine: vi.fn(async () => undefined),
     openUrl: vi.fn(),
     provisionConnector: vi.fn(),
     provisionProject: vi.fn(async () => ({
@@ -80,42 +79,6 @@ describe("Photon setup", () => {
     expect(effects.provisionProject).toHaveBeenCalledWith(
       expect.objectContaining({ projectName: "eve · weather-agent" }),
     );
-  });
-
-  it("uses an existing dedicated project without asking for an operator number", async () => {
-    const answers: ("portable" | "existing")[] = ["portable", "existing"];
-    const fake = createFakePrompter({ single: () => answers.shift() ?? "existing" });
-    const effects = deps();
-    vi.mocked(effects.findDedicatedLine).mockResolvedValue("+15550000000");
-    vi.mocked(effects.useProject).mockResolvedValue({
-      projectId: "project-id",
-      projectSecret: "project-secret",
-      assignedPhoneNumber: "+15550000000",
-      cleanup: vi.fn(async () => {}),
-    });
-
-    await expect(
-      setupPhoton({
-        agentName: "agent",
-        projectPath: "/project",
-        environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
-        ui: createIntegrationSetupUi({
-          asker: asker({
-            "photon-project-id": "project-id",
-            "photon-project-secret": "project-secret",
-          }),
-          prompter: fake.prompter,
-        }),
-        deps: effects,
-      }),
-    ).resolves.toMatchObject({ kind: "done", assignedPhoneNumber: "+15550000000" });
-
-    expect(effects.useProject).toHaveBeenCalledWith({
-      projectId: "project-id",
-      projectSecret: "project-secret",
-      dedicatedLine: "+15550000000",
-      phoneNumber: undefined,
-    });
   });
 
   it("requires Vercel login when Connect is selected without an authenticated CLI", async () => {

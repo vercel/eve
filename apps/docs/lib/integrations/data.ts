@@ -650,7 +650,6 @@ export const { bot, channel, send } = chatSdkChannel({
     sendblue: createSendblueAdapter(),
   },
   state: createMemoryState(),
-  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
@@ -1404,64 +1403,6 @@ export default githubExtension({
 \`\`\`
 
 For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
-  },
-  arcana: {
-    logo: "arcana",
-    docsHref: "https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme",
-    keywords: [
-      "memory",
-      "long-term memory",
-      "mcp",
-      "semantic search",
-      "entity graph",
-      "timeline",
-      "brain notes",
-      "Kybernesis",
-    ],
-    install: `Install Kybernesis Arcana for eve:
-
-\`\`\`bash
-eve add extension/arcana
-\`\`\`
-
-This installs \`@kybernesis/arcana\` and writes an extension mount. The package requires Node.js 24 or later.`,
-    quickStart: `Create an Arcana workspace and workspace-scoped API key, then add both values to the agent's environment:
-
-\`\`\`bash title=".env.local"
-ARCANA_API_KEY=kb_your_api_key_here
-ARCANA_WORKSPACE=your-workspace
-\`\`\`
-
-The registry creates this mount:
-
-\`\`\`ts title="agent/extensions/arcana.ts"
-import arcana from "@kybernesis/arcana";
-
-export default arcana({
-  apiKey: process.env.ARCANA_API_KEY!,
-  workspace: process.env.ARCANA_WORKSPACE!,
-});
-\`\`\`
-
-The filename supplies the \`arcana\` namespace. The extension adds an MCP memory connection, recall, remember, and brain-note skills, and instructions that tell the model to search the workspace before it claims not to know something.`,
-    configure: `An Arcana key is scoped to a workspace. Keep the key in a sensitive environment variable and use a separate workspace and key when people or tenants must not share memory. The model can choose what to store and retrieve, but it cannot choose the configured key or default workspace.
-
-You can select a workspace per session with \`resolveWorkspace\`. Derive it only from verified session context, and only return workspaces that the configured key can access:
-
-\`\`\`ts title="agent/extensions/arcana.ts"
-import arcana from "@kybernesis/arcana";
-
-export default arcana({
-  apiKey: process.env.ARCANA_API_KEY!,
-  workspace: process.env.ARCANA_WORKSPACE!,
-  resolveWorkspace: (ctx) =>
-    ctx.session.auth.current?.attributes.surface === "dm"
-      ? process.env.ARCANA_DM_WORKSPACE
-      : undefined,
-});
-\`\`\`
-
-Arcana stores memories, embeddings, timeline entries, and brain notes in the selected workspace. The shipped instructions tell the model not to store passwords, access tokens, payment data, private keys, or one-time codes; add approval rules to memory-write tools when you need an enforced control. See the [Arcana package documentation](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme) for the full configuration and tool reference.`,
   },
   hindsight: {
     logo: "hindsight",

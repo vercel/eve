@@ -255,9 +255,6 @@ importers:
       '@kapso/chat-adapter':
         specifier: 0.1.1
         version: 0.1.1(ai@7.0.38(zod@4.4.3))(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
-      '@kybernesis/arcana':
-        specifier: 0.2.0
-        version: 0.2.0(eve@packages+eve)
       '@larksuite/vercel-chat-adapter':
         specifier: 0.1.2
         version: 0.1.2(ai@7.0.38(zod@4.4.3))(bufferutil@4.1.0)(chat@4.34.0(ai@7.0.38(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.4.3)
@@ -542,6 +539,28 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 25.9.1
+
+  e2e/fixtures/agent-assistant-final-resumption:
+    dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
+      '@workflow/world-postgres':
+        specifier: 'catalog:'
+        version: 5.0.0-beta.32(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.9.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
 
   e2e/fixtures/agent-basic-runtime:
     dependencies:
@@ -3237,12 +3256,6 @@ packages:
 
   '@kwsites/promise-deferred@1.1.1':
     resolution: {integrity: sha512-GaHYm+c0O9MjZRu0ongGBRbinu8gVAMd2UZjji6jVmqKtZluZnptXGWhz1E8j8D2HJ3f/yMxKAUC0b+57wncIw==}
-
-  '@kybernesis/arcana@0.2.0':
-    resolution: {integrity: sha512-9F0zw/SDgutjOFXqnpgyJhBuePVbGKJRS+p0V37ejbcNe+GH/LTWLowEz8t/o9d98JgnJfxK0cuJcEPqjI2qrQ==}
-    engines: {node: 24.x}
-    peerDependencies:
-      eve: '>=0.30.0 <0.31.0'
 
   '@langchain/core@1.2.4':
     resolution: {integrity: sha512-GIrJktdsFPx8gM0C3VyikkeYGZAV7iRIzUJuS5tFatiKLExybou0LI0MuxH9kksN38quyfWdQDl20lIEAEVkVA==}
@@ -17371,11 +17384,6 @@ snapshots:
       - supports-color
 
   '@kwsites/promise-deferred@1.1.1': {}
-
-  '@kybernesis/arcana@0.2.0(eve@packages+eve)':
-    dependencies:
-      eve: link:packages/eve
-      zod: 4.4.3
 
   '@langchain/core@1.2.4(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))(openai@6.39.1(ws@8.21.1(bufferutil@4.1.0))(zod@4.4.3))(ws@8.21.1(bufferutil@4.1.0))':
     dependencies:
