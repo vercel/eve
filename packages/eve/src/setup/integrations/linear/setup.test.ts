@@ -20,8 +20,11 @@ function deps(): LinearSetupDeps {
 
 function recommendedAsker(): Asker {
   const ask = async <T>(question: Question<T>): Promise<T> => question.recommended as T;
+  const askEditable: Asker["askEditable"] = async () => {
+    throw new Error("Unexpected editable question");
+  };
   const askMany: Asker["askMany"] = async () => [];
-  return { ask, askMany };
+  return { ask, askEditable, askMany };
 }
 
 describe("Linear setup", () => {

@@ -25,6 +25,12 @@ export type SetupWireQuestion =
       kind: "multi-select";
       recommended?: readonly string[];
       options: readonly SetupWireOption[];
+    })
+  | (SharedWireQuestion & {
+      kind: "editable-select";
+      recommended?: string;
+      options: readonly SetupWireOption[];
+      editable: { key: string; optionId: string; label: string; recommended: string };
     });
 
 function wireOptions(question: {
@@ -56,6 +62,29 @@ function sharedQuestion(question: AnyQuestion): SharedWireQuestion {
 /** Removes runtime values and validators from one internal setup question. */
 export function setupQuestionToWire(question: AnyQuestion): SetupWireQuestion {
   const shared = sharedQuestion(question);
+  if ("editable" in question) {
+    const editable = question;
+    const editableId = requiredOptionId(
+      editable,
+      editable.editable.value,
+      "configured editable value",
+    );
+    const wire: Extract<SetupWireQuestion, { kind: "editable-select" }> = {
+      ...shared,
+      kind: "editable-select",
+      options: wireOptions(editable),
+      editable: {
+        key: editable.editable.key,
+        optionId: editableId,
+        label: editable.editable.label,
+        recommended: editable.editable.recommended,
+      },
+    };
+    if (editable.recommended !== undefined) {
+      wire.recommended = requiredOptionId(editable, editable.recommended, "recommendation");
+    }
+    return wire;
+  }
   if (!("kind" in question)) {
     const many = question;
     const wire: Extract<SetupWireQuestion, { kind: "multi-select" }> = {

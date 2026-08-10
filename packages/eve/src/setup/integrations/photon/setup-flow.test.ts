@@ -10,6 +10,9 @@ import { setupPhoton, type PhotonSetupDeps } from "./setup-flow.js";
 function asker(answers: Record<string, string>): Asker {
   return {
     ask: async <T>(question: Question<T>) => answers[question.key] as T,
+    askEditable: async () => {
+      throw new Error("Unexpected editable question");
+    },
     askMany: async () => [],
   };
 }

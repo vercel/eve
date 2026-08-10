@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { confirm, select, text, type MultiSelectQuestion } from "./ask.js";
+import {
+  confirm,
+  select,
+  text,
+  type EditableSelectQuestion,
+  type MultiSelectQuestion,
+} from "./ask.js";
 import { setupQuestionToWire } from "./setup-question-wire.js";
 
 describe("setupQuestionToWire", () => {
@@ -99,6 +105,49 @@ describe("setupQuestionToWire", () => {
           disabledReason: "Unavailable",
         },
       ],
+    });
+    expect(JSON.stringify(wire)).not.toContain("internal");
+  });
+
+  it("projects editable selects to separate stable keys", () => {
+    const custom = { internal: "custom" };
+    const standard = { internal: "standard" };
+    const question: EditableSelectQuestion<object> = {
+      key: "project",
+      message: "Project?",
+      options: [
+        { id: "standard", label: "Standard", value: standard },
+        { id: "custom", label: "Custom", value: custom },
+      ],
+      recommended: custom,
+      required: true,
+      editable: {
+        key: "project-name",
+        value: custom,
+        label: "Project name",
+        recommended: "my-project",
+        validate: () => "not serialized",
+      },
+    };
+
+    const wire = setupQuestionToWire(question);
+
+    expect(wire).toEqual({
+      kind: "editable-select",
+      key: "project",
+      message: "Project?",
+      required: true,
+      recommended: "custom",
+      options: [
+        { id: "standard", label: "Standard" },
+        { id: "custom", label: "Custom" },
+      ],
+      editable: {
+        key: "project-name",
+        optionId: "custom",
+        label: "Project name",
+        recommended: "my-project",
+      },
     });
     expect(JSON.stringify(wire)).not.toContain("internal");
   });

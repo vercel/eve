@@ -24,6 +24,7 @@ describe("GitHub setup", () => {
   function asker(events = ["issue_comment", "pull_request_review_comment"]): Asker {
     return {
       ask: vi.fn(),
+      askEditable: vi.fn(),
       askMany: vi.fn(async () => events) as Asker["askMany"],
     };
   }
@@ -70,7 +71,7 @@ describe("GitHub setup", () => {
         appRoot: "/project",
         environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
         ui: createIntegrationSetupUi({
-          asker: { ask: vi.fn(), askMany },
+          asker: { ask: vi.fn(), askEditable: vi.fn(), askMany },
           prompter: fake.prompter,
         }),
       },

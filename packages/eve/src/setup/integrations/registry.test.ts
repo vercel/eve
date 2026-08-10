@@ -9,6 +9,9 @@ import { WizardCancelledError } from "../step.js";
 
 const unusedAsker: Asker = {
   ask: async <T>() => undefined as T,
+  askEditable: async () => {
+    throw new Error("Unexpected editable question");
+  },
   askMany: async () => [],
 };
 

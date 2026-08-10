@@ -40,7 +40,7 @@ describe("setupSlack", () => {
           appRoot: "/project",
           environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
           ui: createIntegrationSetupUi({
-            asker: { ask: vi.fn(), askMany: vi.fn() },
+            asker: { ask: vi.fn(), askEditable: vi.fn(), askMany: vi.fn() },
             prompter: fake.prompter,
           }),
           yes: true,

@@ -15,8 +15,14 @@
 // which also unlocks combinations a monolithic factory could not express.
 
 import { SetupPrerequisiteRequired } from "./integrations/shared/prerequisite.js";
+import {
+  renderEditableQuestion,
+  type EditableSelectAnswer,
+  type EditableSelectQuestion,
+} from "./ask-editable.js";
+export type { EditableSelectAnswer, EditableSelectQuestion } from "./ask-editable.js";
 import type { Prompter } from "./prompter.js";
-import { optionById, requiredOptionId } from "./question-options.js";
+import { optionById, optionByValue, requiredOptionId } from "./question-options.js";
 
 /** One choice in a select question. */
 export interface SelectOption<T> {
@@ -185,6 +191,8 @@ export function text(
 /** The capability boxes see. Pure and flow-agnostic: Prompter's successor. */
 export interface Asker {
   ask<T>(question: Question<T>): Promise<T>;
+  /** A single choice whose one row carries an editable string value. */
+  askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>>;
   /**
    * The multi-select channel. Paired with {@link ask} instead of being a
    * question kind because the answer type (`T[]`) differs from the option type
@@ -214,7 +222,10 @@ export class SkippedSignal extends Error {
 }
 
 /** Any question the channel can carry, for signals that quote one. */
-export type AnyQuestion = Question<unknown> | MultiSelectQuestion<unknown>;
+export type AnyQuestion =
+  | Question<unknown>
+  | EditableSelectQuestion<unknown>
+  | MultiSelectQuestion<unknown>;
 
 /**
  * Headless refusal that keeps the whole question: an agent driver can relay
@@ -463,6 +474,12 @@ export function interactiveAsker(prompter: Prompter, events?: AskerEvents): Aske
       if (question.internal) return value;
       return announce(events, question.key, value, "asked");
     },
+    async askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>> {
+      const result = await renderEditableQuestion(prompter, question);
+      announce(events, question.key, result.value, "asked");
+      if (result.text !== undefined) announce(events, question.editable.key, result.text, "asked");
+      return result;
+    },
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
       const value = await renderManyQuestion(prompter, question);
       if (question.internal) return value;
@@ -487,6 +504,9 @@ export function headlessAsker(events?: AskerEvents): Asker {
   return {
     // Async so refusal and skip surface as rejections, like every other rung.
     async ask<T>(question: Question<T>): Promise<T> {
+      return refuse(question);
+    },
+    async askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>> {
       return refuse(question);
     },
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
@@ -529,6 +549,42 @@ export function withAnswers(
       }
       return inner.ask(question);
     },
+    async askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>> {
+      if (!(question.key in answers)) return inner.askEditable(question);
+      const selection = coerceAnswer(
+        select({ key: question.key, message: question.message, options: question.options }),
+        answers[question.key],
+      );
+      announce(events, question.key, selection, "answer");
+      if (selection !== question.editable.value) return { value: selection };
+      if (!(question.editable.key in answers)) {
+        const value = await inner.ask(
+          text({
+            key: question.editable.key,
+            message: optionByValue(question, selection)?.label ?? question.message,
+            recommended: question.editable.recommended,
+            required: question.required,
+            validate: question.editable.validate,
+          }),
+        );
+        return { value: selection, text: value.trim() };
+      }
+      const raw = String(answers[question.editable.key]);
+      const problem = question.editable.validate?.(raw);
+      if (problem) {
+        throw new InvalidAnswerError(
+          text({
+            key: question.editable.key,
+            message: question.editable.label,
+            required: question.required,
+          }),
+          problem,
+        );
+      }
+      const value = raw.trim();
+      announce(events, question.editable.key, value, "answer");
+      return { value: selection, text: value };
+    },
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
       if (question.key in answers) {
         const value = coerceManyAnswer(question, answers[question.key]);
@@ -552,6 +608,13 @@ export function withRequired(keys: readonly string[]): AskerDecorator {
         return inner.ask({ ...question, required: true });
       }
       return inner.ask(question);
+    },
+    async askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>> {
+      return inner.askEditable(
+        !question.required && keys.includes(question.key)
+          ? { ...question, required: true }
+          : question,
+      );
     },
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
       if (!question.required && keys.includes(question.key)) {
@@ -607,6 +670,22 @@ export function withPolicy(policy: AnswerPolicy, events?: AskerEvents): AskerDec
         if (accepted) return announce(events, question.key, question.detected, "detected");
       }
       return inner.ask(question);
+    },
+    async askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>> {
+      if (policy !== "assume" || question.recommended === undefined) {
+        return inner.askEditable(question);
+      }
+      requiredOptionId(question, question.editable.value, "configured editable value");
+      requiredOptionId(question, question.recommended, "recommendation");
+      const result: EditableSelectAnswer<T> =
+        question.recommended === question.editable.value
+          ? { value: question.recommended, text: question.editable.recommended }
+          : { value: question.recommended };
+      announce(events, question.key, result.value, "assumed");
+      if (result.text !== undefined) {
+        announce(events, question.editable.key, result.text, "assumed");
+      }
+      return result;
     },
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
       if (policy === "assume") {

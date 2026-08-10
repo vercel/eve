@@ -86,6 +86,9 @@ function untouchableAsker(): Asker {
     ask(question): Promise<never> {
       throw new Error(`untouchableAsker was asked "${question.key}"`);
     },
+    askEditable(question): Promise<never> {
+      throw new Error(`untouchableAsker was asked "${question.key}"`);
+    },
     askMany(question): Promise<never> {
       throw new Error(`untouchableAsker was asked "${question.key}"`);
     },
