@@ -47,6 +47,7 @@ describe("session timeout steps", () => {
 
     expect(resumeHookMock).toHaveBeenCalledWith("session-1:session-timeout", {
       kind: "session-timeout",
+      version: 1,
     });
   });
 

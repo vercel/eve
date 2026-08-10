@@ -1,4 +1,4 @@
-import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import { encodeSessionCommand } from "#execution/wire/session-inbox-wire.js";
 import { readTaskInputTargetToken } from "#execution/task-input-capability.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { EVE_TASK_INPUT_ROUTE_PATTERN } from "#protocol/routes.js";
@@ -53,7 +53,7 @@ export async function handleTaskInputResponseRequest(
   }
   // Child inboxes outlive deployments; cross the hook in the durable
   // delivery envelope like every other session-inbox producer.
-  const command = sendCommandToDelivery({ kind: "send", payload: { inputResponses } });
+  const command = encodeSessionCommand({ kind: "send", payload: { inputResponses } });
   try {
     await resumeHook(targetToken, command);
   } catch {

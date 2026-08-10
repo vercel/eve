@@ -271,6 +271,7 @@ describe("routeProxiedDeliverStep", () => {
       },
       payloads: [{ inputResponses: [{ optionId: "approve", requestId: "request-1" }] }],
       requestId: undefined,
+      version: 1,
     });
   });
 

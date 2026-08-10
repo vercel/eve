@@ -8,7 +8,6 @@ import {
 import type {
   CancelTurnInput,
   CancelTurnResult,
-  DeliverHookPayload,
   DispatchContinuationInput,
   DispatchSessionInput,
   GetEventStreamOptions,
@@ -51,7 +50,7 @@ import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import { encodeSessionCommand, type SessionInboxWire } from "#execution/wire/session-inbox-wire.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
@@ -290,8 +289,8 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   return activeCommandResult(command, hook.runId);
 }
 
-function sessionHookPayload(command: SessionCommand): SessionCommand | DeliverHookPayload {
-  return command.kind === "send" ? sendCommandToDelivery(command) : command;
+function sessionHookPayload(command: SessionCommand): SessionInboxWire {
+  return encodeSessionCommand(command);
 }
 
 function activeCommandResult<TCommand extends SessionCommand>(

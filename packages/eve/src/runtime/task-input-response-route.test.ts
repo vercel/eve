@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import { encodeSessionCommand } from "#execution/wire/session-inbox-wire.js";
 import { EVE_TASK_INPUT_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import {
@@ -36,7 +36,7 @@ describe("task input response capability", () => {
     expect(response.status).toBe(202);
     expect(resumeHookMock).toHaveBeenCalledWith(
       TARGET_TOKEN,
-      sendCommandToDelivery({
+      encodeSessionCommand({
         kind: "send",
         payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
       }),

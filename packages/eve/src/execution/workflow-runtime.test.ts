@@ -128,6 +128,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       payload: { message: "hello" },
       payloads: [{ message: "hello" }],
       requestId: "req_deliver",
+      version: 1,
     });
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
@@ -144,6 +145,7 @@ describe("createWorkflowRuntime command dispatch", () => {
 
     expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
       kind: "clear",
+      version: 1,
     });
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
@@ -165,6 +167,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       payload: { message: "hello" },
       payloads: [{ message: "hello" }],
       requestId: undefined,
+      version: 1,
     });
   });
 
@@ -211,6 +214,7 @@ describe("createWorkflowRuntime command dispatch", () => {
     expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
       kind: "cancel",
       turnId: "turn-2",
+      version: 1,
     });
   });
 
@@ -263,6 +267,7 @@ describe("createWorkflowRuntime command dispatch", () => {
     expect(resumeHookMock).toHaveBeenCalledWith("eve:token", {
       kind: "reset",
       reason: "User requested /new",
+      version: 1,
     });
     expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
   });

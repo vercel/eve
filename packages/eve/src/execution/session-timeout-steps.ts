@@ -10,6 +10,7 @@ import {
   sessionTimeoutWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import type { SessionTimeoutWorkflowInput } from "#execution/session-timeout-workflow.js";
+import { encodeSessionCommand } from "#execution/wire/session-inbox-wire.js";
 import { cancelRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
 
@@ -28,7 +29,7 @@ export async function signalSessionTimeoutStep(input: { readonly token: string }
   "use step";
 
   try {
-    await resumeHook(input.token, { kind: "session-timeout" });
+    await resumeHook(input.token, encodeSessionCommand({ kind: "session-timeout" }));
   } catch (error) {
     if (!isInactiveTimeoutTarget(error)) {
       throw error;

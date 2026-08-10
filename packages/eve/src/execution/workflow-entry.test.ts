@@ -922,7 +922,6 @@ describe("workflowEntry", () => {
         auth: undefined,
         caller: undefined,
         kind: "deliver",
-        payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
         payloads: [{ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }],
         requestId: undefined,
       },

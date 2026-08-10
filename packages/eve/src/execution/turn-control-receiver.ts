@@ -1,14 +1,19 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, SessionCommand } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
-import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
-import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
+import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
+import {
+  decodeSessionInbox,
+  SessionInboxWireError,
+  type DecodedSessionInbox,
+} from "#execution/wire/session-inbox-wire.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
 
 type DeliveryRequest = Extract<TurnControlPayload, { readonly kind: "turn-delivery-request" }>;
@@ -79,16 +84,11 @@ export class TurnControlReceiver {
   }
 
   private async handleSessionCommand(
-    command: SessionInboxPayload,
+    command: DecodedSessionInbox,
   ): Promise<TurnDriverAction | undefined> {
     if (command.kind === "deliver") {
       if (!this.acceptTaskDelivery(command)) return undefined;
       await this.bufferDelivery(command);
-      return undefined;
-    }
-    if (command.kind === "send") {
-      if (!this.acceptTaskDelivery(command)) return undefined;
-      await this.bufferDelivery(sendCommandToDelivery(command));
       return undefined;
     }
     if (command.kind === "clear" || command.kind === "compact") {
@@ -97,9 +97,6 @@ export class TurnControlReceiver {
     }
     if (command.kind === "session-timeout") {
       this.bufferedSessionControls.push("expired");
-      return undefined;
-    }
-    if (command.kind === "runtime-action-result") {
       return undefined;
     }
     if (command.kind === "cancel") {
@@ -157,7 +154,7 @@ export class TurnControlReceiver {
   }
 
   private async nextControlOrCommand(): Promise<
-    | { readonly command: SessionInboxPayload; readonly kind: "command" }
+    | { readonly command: DecodedSessionInbox; readonly kind: "command" }
     | { readonly kind: "control"; readonly payload: TurnControlPayload }
   > {
     const winner = await Promise.race([
@@ -170,7 +167,20 @@ export class TurnControlReceiver {
         throw new Error("Session command inbox closed before the active turn settled.");
       }
       this.commandInbox.consumeNext();
-      return { command: winner.value.value, kind: "command" };
+      // Runtime-action results belong to the active turn's private inbox. A
+      // late value on a retired session alias stays ignorable, but it is not
+      // part of the versioned session-command wire family.
+      if (winner.value.value.kind === "runtime-action-result") {
+        return await this.nextControlOrCommand();
+      }
+      try {
+        return { command: decodeSessionInbox(winner.value.value), kind: "command" };
+      } catch (error) {
+        if (!(error instanceof SessionInboxWireError)) throw error;
+        // Drop loudly and keep servicing the turn; see decodeSessionInbox.
+        await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
+        return await this.nextControlOrCommand();
+      }
     }
 
     this.consumeControl();
@@ -230,26 +240,28 @@ export class TurnControlReceiver {
       }
 
       this.commandInbox.consumeNext();
-      if (winner.value.value.kind === "deliver") {
-        if (!this.acceptTaskDelivery(winner.value.value)) continue;
-        if (deliveryHasMessage(winner.value.value)) {
-          await this.bufferDelivery(winner.value.value);
+      if (winner.value.value.kind === "runtime-action-result") {
+        continue;
+      }
+      let decoded: DecodedSessionInbox;
+      try {
+        decoded = decodeSessionInbox(winner.value.value);
+      } catch (error) {
+        if (!(error instanceof SessionInboxWireError)) throw error;
+        // Drop loudly and keep servicing the request; see decodeSessionInbox.
+        await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
+        continue;
+      }
+      if (decoded.kind === "deliver") {
+        if (!this.acceptTaskDelivery(decoded)) continue;
+        if (deliveryHasMessage(decoded)) {
+          await this.bufferDelivery(decoded);
         } else {
-          delivery = winner.value.value;
+          delivery = decoded;
         }
         continue;
       }
-      if (winner.value.value.kind === "send") {
-        if (!this.acceptTaskDelivery(winner.value.value)) continue;
-        const candidate = sendCommandToDelivery(winner.value.value);
-        if (deliveryHasMessage(candidate)) {
-          await this.bufferDelivery(candidate);
-        } else {
-          delivery = candidate;
-        }
-        continue;
-      }
-      const terminal = await this.handleSessionCommand(winner.value.value);
+      const terminal = await this.handleSessionCommand(decoded);
       if (terminal !== undefined) return terminal;
     }
 
@@ -319,9 +331,7 @@ export class TurnControlReceiver {
     }
   }
 
-  private acceptTaskDelivery(
-    command: DeliverHookPayload | Extract<SessionCommand, { readonly kind: "send" }>,
-  ): boolean {
+  private acceptTaskDelivery(command: DeliverHookPayload): boolean {
     const deliveryId = command.taskDeliveryId ?? command.caller?.taskId;
     if (deliveryId === undefined) return true;
     if (this.originatesFromCancelledTask(deliveryId)) return false;

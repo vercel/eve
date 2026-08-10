@@ -77,8 +77,9 @@ export default defineEval({
       await t.require(
         payload,
         satisfies(
-          (text: string) => text.includes('"deliver"') && text.includes('"payloads"'),
-          "the persisted continuation payload uses the frozen `deliver` envelope",
+          (text: string) =>
+            text.includes('"deliver"') && text.includes('"payloads"') && text.includes('"version"'),
+          "the persisted continuation payload uses the versioned `deliver` envelope",
         ),
       );
       await t.require(

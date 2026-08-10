@@ -92,7 +92,6 @@
  *             authoring roots, every historical epoch must be supported or
  *             dropped, every retained epoch needs a compiling fixture, and
  *             every public authoring value must belong to a capability.
- *
  *   rule 37 — The instrumentation lifecycle contract stays provider-neutral.
  *             `harness/instrumentation/lifecycle.ts` must not import from
  *             `ai`: its event payloads are eve's published shape, so deriving
@@ -102,6 +101,23 @@
  *             `pnpm --filter eve build`. Turbo owns workspace dependency
  *             ordering; nested builds race on eve's clean-and-publish dist
  *             directory and let consumers observe a partial package.
+ *   rule 39 — No inline `kind: "send"` / `kind: "deliver"` payload literal at
+ *             a `resumeHook(...)` call outside `src/execution/wire/`. Session
+ *             hook payloads are durable wire formats that outlive deployments;
+ *             they must route through the owning family's `encode*` function
+ *             from a versioned wire codec under `execution/wire/` so shape
+ *             changes are visible as wire changes (see
+ *             research/session-inbox-wire-schema.md). Test files and
+ *             `internal/testing/` frozen-cohort workflows are exempt —
+ *             impersonating old cohorts is their job. The auth-hook delivery
+ *             in `runtime/connections/callback-route.ts` is allowlisted
+ *             until auth payloads join a wire family.
+ *   rule 40 — Every wire family (`src/execution/wire/*-wire.ts`) must carry a
+ *             colocated frozen contract test (`*-wire.test.ts` containing
+ *             `FROZEN_SHAPES` and `FROZEN_FIXTURES`). The frozen shapes and
+ *             backwards-compatibility fixtures are the mechanism that turns
+ *             "changing a shipped schema" into a red diff; a family without
+ *             them is an unversioned wire wearing a versioned name.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -197,6 +213,7 @@ function isTsLike(relPath) {
  *   rule33: Violation[];
  *   rule35: Violation[];
  *   rule37: Violation[];
+ *   rule39: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -226,6 +243,7 @@ async function scanRepo(state) {
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
+    checkRule39(posix, lines, state.rule39);
   }
 }
 
@@ -415,6 +433,99 @@ function importSpecifier(node) {
     return node.arguments[0];
   }
   return undefined;
+}
+
+// ---------- Rule 40: wire families carry frozen contracts ----------
+
+const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
+
+async function checkRule40WireContracts() {
+  /** @type {Violation[]} */
+  const violations = [];
+  let entries;
+  try {
+    entries = await readdir(join(REPO_ROOT, WIRE_FAMILY_DIR));
+  } catch {
+    return violations;
+  }
+
+  for (const name of entries) {
+    const family = name.match(/^([a-z0-9-]+)-wire\.ts$/)?.[1];
+    if (family === undefined) continue;
+
+    const testName = `${family}-wire.test.ts`;
+    if (!entries.includes(testName)) {
+      violations.push({
+        rule: 40,
+        file: `${WIRE_FAMILY_DIR}/${name}`,
+        line: 1,
+        message: `wire family "${family}" has no colocated frozen contract test (${testName}). Freeze each version's schema shape and backwards-compatibility fixtures so editing a shipped shape is a red diff.`,
+      });
+      continue;
+    }
+
+    const content = await readFile(join(REPO_ROOT, WIRE_FAMILY_DIR, testName), "utf8");
+    for (const marker of ["FROZEN_SHAPES", "FROZEN_FIXTURES"]) {
+      if (!content.includes(marker)) {
+        violations.push({
+          rule: 40,
+          file: `${WIRE_FAMILY_DIR}/${testName}`,
+          line: 1,
+          message: `frozen contract test is missing ${marker}. Every wire family pins its per-version schema shapes and backwards-compatibility fixtures.`,
+        });
+      }
+    }
+  }
+
+  return violations;
+}
+
+// ---------- Rule 39: raw session wire literals at resumeHook ----------
+
+const RESUME_HOOK_CALL_RE = /\bresumeHook\s*\(/;
+const SESSION_WIRE_LITERAL_RE = /\bkind:\s*["'](?:send|deliver)["']/;
+/** Lines after a `resumeHook(` opener to scan for an inline payload literal. */
+const RULE_39_WINDOW = 6;
+const RULE_39_ALLOWLIST = new Set([
+  // Auth-hook delivery; migrates when auth payloads join a wire module.
+  "packages/eve/src/runtime/connections/callback-route.ts",
+]);
+
+/**
+ * @param {string} posix
+ */
+function isRule39Exempt(posix) {
+  return (
+    !posix.startsWith("packages/eve/src/") ||
+    posix.startsWith("packages/eve/src/execution/wire/") ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    /\.test\.(ts|tsx|mts|cts)$/.test(posix) ||
+    RULE_39_ALLOWLIST.has(posix)
+  );
+}
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule39(posix, lines, violations) {
+  if (isRule39Exempt(posix)) return;
+  lines.forEach((line, idx) => {
+    if (!RESUME_HOOK_CALL_RE.test(line)) return;
+    const window = lines.slice(idx, idx + 1 + RULE_39_WINDOW).join("\n");
+    // A literal handed to a wire-module encoder (`encodeXxx(...)`) is
+    // routed, not raw.
+    if (/\bencode[A-Z]\w*\s*\(/.test(window)) return;
+    if (SESSION_WIRE_LITERAL_RE.test(window)) {
+      violations.push({
+        rule: 39,
+        file: posix,
+        line: idx + 1,
+        message: `passes an inline \`kind: "send"\`/\`kind: "deliver"\` literal to resumeHook(). Session hook payloads are durable wire formats that outlive deployments — route them through the owning family's encode* function under execution/wire/ so shape changes stay visible as wire changes (research/session-inbox-wire-schema.md).`,
+      });
+    }
+  });
 }
 
 // ---------- Rule 19: AsyncLocalStorage instances ----------
@@ -1169,6 +1280,7 @@ async function main() {
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
+    rule39: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1270,6 +1382,12 @@ async function main() {
 
   // Rule 38
   violations.push(...(await checkRule38NoNestedEveBuild()));
+
+  // Rule 39
+  violations.push(...state.rule39);
+
+  // Rule 40
+  violations.push(...(await checkRule40WireContracts()));
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");
