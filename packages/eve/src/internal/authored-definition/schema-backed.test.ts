@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z as z3 } from "zod/v3";
 import { z } from "#compiled/zod/index.js";
 
 import {
@@ -31,6 +32,27 @@ describe("normalizeToolDefinition", () => {
     }
     expect(entry.definition.description).toBe("Echoes the input back to the caller.");
     expect(typeof entry.definition.execute).toBe("function");
+  });
+
+  it("normalizes a tool with a Zod 3 input schema", () => {
+    const tool = defineTool({
+      description: "Gets weather for a city.",
+      inputSchema: z3.object({ city: z3.string() }),
+      execute(input) {
+        return input.city;
+      },
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    expect(entry.kind).toBe("tool");
+    if (entry.kind !== "tool") throw new Error("expected tool kind");
+    expect(entry.definition.inputSchema).toEqual({
+      additionalProperties: false,
+      properties: { city: { type: "string" } },
+      required: ["city"],
+      type: "object",
+    });
   });
 
   it("returns a disabled entry for a disableTool sentinel", () => {

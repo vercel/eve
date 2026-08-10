@@ -1,4 +1,7 @@
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import type {
+  StandardJSONSchemaV1,
+  StandardSchemaV1,
+} from "#compiled/@standard-schema/spec/index.js";
 
 import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
 import type { PublicToolDefinition, ToolModelOutput } from "#shared/tool-definition.js";
@@ -161,7 +164,7 @@ type ToolDefinitionWithExecuteReturn<TInput, TOutput, TReturn> = ToolDefinition<
  * stamps a brand that lifecycle code validates; it rejects raw object literals.
  */
 export function defineTool<
-  TInputSchema extends StandardJSONSchemaV1<unknown, unknown>,
+  TInputSchema extends StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>,
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
   TReturn extends
     | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
@@ -171,29 +174,29 @@ export function defineTool<
   description: ToolDefinition<unknown, unknown>["description"];
   inputSchema: TInputSchema;
   outputSchema: TOutputSchema;
-  execute(input: StandardJSONSchemaV1.InferOutput<TInputSchema>, ctx: ToolContext): TReturn;
-  approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
+  execute(input: StandardSchemaV1.InferOutput<TInputSchema>, ctx: ToolContext): TReturn;
+  approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
-  StandardJSONSchemaV1.InferOutput<TInputSchema>,
+  StandardSchemaV1.InferOutput<TInputSchema>,
   StandardJSONSchemaV1.InferOutput<TOutputSchema>,
   TReturn
 >;
 export function defineTool<
-  TSchema extends StandardJSONSchemaV1<unknown, unknown>,
+  TSchema extends StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>,
   TReturn,
 >(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
   inputSchema: TSchema;
   outputSchema?: JsonObject;
-  execute(input: StandardJSONSchemaV1.InferOutput<TSchema>, ctx: ToolContext): TReturn;
-  approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, unknown>["approval"];
+  execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext): TReturn;
+  approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
-  StandardJSONSchemaV1.InferOutput<TSchema>,
+  StandardSchemaV1.InferOutput<TSchema>,
   ToolOutputFromExecuteReturn<TReturn>,
   TReturn
 >;

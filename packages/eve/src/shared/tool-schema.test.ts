@@ -1,6 +1,7 @@
 import { asSchema } from "ai";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { z as z3 } from "zod/v3";
 
 import {
   UNSPECIFIED_INPUT_SCHEMA,
@@ -140,6 +141,41 @@ describe("ToolSchema", () => {
       required: ["prompt"],
       type: "object",
     });
+  });
+
+  it("serializes and rehydrates a Zod 3 input schema", async () => {
+    const source = z3.object({ city: z3.string() });
+
+    expect(serializeInputSchema(source)).toEqual({
+      additionalProperties: false,
+      properties: { city: { type: "string" } },
+      required: ["city"],
+      type: "object",
+    });
+
+    const validate = asSchema(toInputSchema(source)).validate;
+    await expect(validate?.({ city: "San Francisco" })).resolves.toMatchObject({ success: true });
+    await expect(validate?.({ city: 42 })).resolves.toMatchObject({ success: false });
+  });
+
+  it("rejects a Zod 3 output schema with an actionable error", () => {
+    expect(() => serializeOutputSchema(z3.object({ city: z3.string() }))).toThrow(
+      "Zod 3 cannot emit an output JSON Schema. Upgrade to Zod 4 or provide a plain JSON Schema object.",
+    );
+  });
+
+  it("explains when a Standard Schema cannot emit JSON Schema", () => {
+    const schema = {
+      "~standard": {
+        validate: (value: unknown) => ({ value }),
+        vendor: "example",
+        version: 1 as const,
+      },
+    };
+
+    expect(() => serializeInputSchema(schema)).toThrow(
+      'Standard Schema vendor "example" does not support JSON Schema conversion. Provide a Standard Schema implementation with JSON Schema conversion or a plain JSON Schema object.',
+    );
   });
 
   it("strips the $schema version key from serialized data", () => {

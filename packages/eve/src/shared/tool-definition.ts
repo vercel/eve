@@ -1,5 +1,8 @@
 import type { ToolExecutionOptions } from "ai";
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import type {
+  StandardJSONSchemaV1,
+  StandardSchemaV1,
+} from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -31,6 +34,7 @@ export interface InternalToolDefinition extends ToolDefinitionBase {
 }
 
 export type PublicToolInputSchema<TInput = unknown> =
+  | StandardSchemaV1<unknown, TInput>
   | StandardJSONSchemaV1<unknown, TInput>
   | JsonObject;
 
