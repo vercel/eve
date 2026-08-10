@@ -179,11 +179,44 @@ export function createSlackFetchFile(input: {
     if (!response.ok) {
       throw new Error(`Slack file fetch returned HTTP ${response.status} for ${url}.`);
     }
+    const mediaType = response.headers.get("content-type") ?? undefined;
+    // Slack serves its browser sign-in page (HTTP 200, `text/html`) instead
+    // of the file bytes when the bot token lacks the `files:read` scope.
+    // Staging that HTML as the attachment looks like a vision/auth mystery
+    // downstream ("the model received a Slack login page"), so refuse it here
+    // with an actionable error instead of returning the login page.
+    const servedHtml =
+      (mediaType !== undefined && mediaType.toLowerCase().startsWith("text/html")) ||
+      (mediaType === undefined && (await looksLikeHtml(response)));
+    if (servedHtml) {
+      throw new Error(
+        `Slack file fetch returned an HTML sign-in page instead of file bytes for ${url}. ` +
+          "This almost always means the Slack bot token is missing the files:read scope. " +
+          "Add files:read to your Slack app and reinstall the workspace, then retry.",
+      );
+    }
     return {
       bytes: Buffer.from(await response.arrayBuffer()),
-      mediaType: response.headers.get("content-type") ?? undefined,
+      mediaType,
     };
   };
+}
+
+/**
+ * Reads `response`'s body through a clone and reports whether it looks like
+ * an HTML document (`<!DOCTYPE html` / `<html`), ignoring leading whitespace.
+ * Used only when the response carries no `Content-Type` to trust; a real
+ * Slack file never reaches here with a missing content-type, and a sign-in
+ * page rendered without one is the missing-`files:read` case we refuse.
+ */
+async function looksLikeHtml(response: Response): Promise<boolean> {
+  try {
+    const head = await response.clone().text();
+    const trimmed = head.trimStart().slice(0, 512).toLowerCase();
+    return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+  } catch {
+    return false;
+  }
 }
 
 function isSlackFileUrl(url: string): boolean {

@@ -309,6 +309,8 @@ Start a session without an inbound message through `ctx.to(slack, target).send(m
 
 Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [File uploads](./custom#file-uploads) for the `fetchFile` contract.
 
+Staged file downloads require the Slack bot token's **`files:read`** scope. When that scope is missing, Slack answers the authenticated fetch with a `200 OK` browser sign-in page (`text/html`) instead of the file bytes. eve refuses to stage that HTML as the attachment and throws an actionable error naming the missing scope — add `files:read` to the Slack app, reinstall the workspace, and retry. A previously-working bot that starts surfacing "the model received a Slack login page" almost always hit this case.
+
 ## What to read next
 
 - [Channels overview](./overview): the channel contract and every built-in channel
