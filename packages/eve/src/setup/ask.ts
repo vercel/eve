@@ -20,7 +20,19 @@ import {
   type EditableSelectAnswer,
   type EditableSelectQuestion,
 } from "./ask-editable.js";
+import {
+  InteractionRequired,
+  InvalidAnswerError,
+  SkippedSignal,
+  type AnyQuestion,
+} from "./ask-signals.js";
 export type { EditableSelectAnswer, EditableSelectQuestion } from "./ask-editable.js";
+export {
+  InteractionRequired,
+  InvalidAnswerError,
+  SkippedSignal,
+  type AnyQuestion,
+} from "./ask-signals.js";
 import type { Prompter } from "./prompter.js";
 import { optionById, optionByValue, requiredOptionId } from "./question-options.js";
 
@@ -210,49 +222,6 @@ export type AskerDecorator = (inner: Asker) => Asker;
 // already has a repo-wide signal, WizardCancelledError in step.ts, which the
 // interactive prompter throws and the runner folds; the channel lets it
 // propagate instead of introducing a second cancel signal.
-
-/** Thrown when a skippable question is skipped, so the box can branch on it. */
-export class SkippedSignal extends Error {
-  readonly key: string;
-  constructor(key: string) {
-    super(`Skipped: ${key}`);
-    this.name = "SkippedSignal";
-    this.key = key;
-  }
-}
-
-/** Any question the channel can carry, for signals that quote one. */
-export type AnyQuestion =
-  | Question<unknown>
-  | EditableSelectQuestion<unknown>
-  | MultiSelectQuestion<unknown>;
-
-/**
- * Headless refusal that keeps the whole question: an agent driver can relay
- * exactly what is missing (key, message, options) instead of a bare string.
- */
-export class InteractionRequired extends Error {
-  readonly question: AnyQuestion;
-  constructor(question: AnyQuestion) {
-    super(`Interaction required for "${question.key}": ${question.message}`);
-    this.name = "InteractionRequired";
-    this.question = question;
-  }
-}
-
-/** Thrown when a pre-supplied answer fails the question's own validation. */
-export class InvalidAnswerError extends Error {
-  readonly question: AnyQuestion;
-  constructor(question: AnyQuestion, message: string) {
-    super(message);
-    this.name = "InvalidAnswerError";
-    this.question = question;
-  }
-
-  get key(): string {
-    return this.question.key;
-  }
-}
 
 /** How a question got its value, so nothing is silently assumed. */
 export type ResolutionSource = "answer" | "detected" | "assumed" | "asked" | "skipped";
