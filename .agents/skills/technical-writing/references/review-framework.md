@@ -36,6 +36,8 @@ Treat a wrong command, nonexistent API, unsafe instruction, or false guarantee a
 - Are headings descriptive enough to work as search results?
 - Is critical information present locally rather than only behind links?
 - Are sentences direct, active, and free of promotional or robotic phrasing?
+- Did the edit preserve supported meaning, nuance, uncertainty, and strong existing prose?
+- Are stock rhetorical patterns, filler, inflated claims, and mechanical rhythm removed where they add no value?
 
 ## Pass 5: Diff discipline
 

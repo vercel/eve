@@ -214,6 +214,28 @@ async onMessage(ctx, message) {
 
 Like `threadContext`, this helper calls `conversations.replies` and requires the matching Slack history scope. It observes at most the first 50 messages of the thread, and a failed fetch is logged and swallowed, so the returned list may be empty or stale — treat an unexpected empty list as "don't route" rather than "no participants".
 
+#### Load prior thread messages
+
+You get the triggering mention by default, but not the earlier replies in the thread. Enable `threadContext` to fetch and inject them with every message attributed by stable Slack user id. Use `since: "last-agent-reply"` so repeated mentions inject only what is new:
+
+```ts
+import { slackChannel } from "eve/channels/slack";
+import { connectSlackCredentials } from "@vercel/connect/eve";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  threadContext: { since: "last-agent-reply" },
+});
+```
+
+`since` sets the boundary for what each mention injects and accepts three values:
+
+- `"thread-root"` (the default): every prior message in the thread, on every mention. `threadContext: {}` behaves the same.
+- `"last-agent-reply"`: only messages after this installed agent's last reply, keeping repeated mentions incremental. Replies from other Slack bots do not move the boundary.
+- A predicate `(message: SlackThreadMessage) => boolean`: only messages after the last one it matches, such as "since the last message that mentioned a particular user".
+
+`threadContext` requires the matching Slack history scope. Thread helpers reuse messages already loaded within the same inbound handler, and overlapping refreshes share one `conversations.replies` request. Omit it when the agent should see only direct mentions. `loadThreadContextMessages` remains available when you need custom filtering or non-model processing of the raw thread messages.
+
 #### Cancel an active turn
 
 Message hooks (`onMessage`, `onAppMention`, and `onDirectMessage`) receive thread-bound session operations directly on `ctx`. Call `ctx.cancel({ turnId? })` before returning `{ auth }` to stop the current turn and queue the new Slack message as replacement input, producing a debounce-like experience:
@@ -319,26 +341,6 @@ const session = await ctx.resolveSession({ target });
 
 `onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Add every desired event and required OAuth scope to the Slack app's Event Subscriptions configuration; eve can only handle events Slack sends.
 
-You get the triggering mention by default, but not the earlier replies in the thread. Enable `threadContext` to fetch and inject them with every message attributed by stable Slack user id. Use `since: "last-agent-reply"` so repeated mentions inject only what is new:
-
-```ts
-import { slackChannel } from "eve/channels/slack";
-import { connectSlackCredentials } from "@vercel/connect/eve";
-
-export default slackChannel({
-  credentials: connectSlackCredentials("slack/my-agent"),
-  threadContext: { since: "last-agent-reply" },
-});
-```
-
-`since` sets the boundary for what each mention injects and accepts three values:
-
-- `"thread-root"` (the default): every prior message in the thread, on every mention. `threadContext: {}` behaves the same.
-- `"last-agent-reply"`: only messages after this installed agent's last reply, keeping repeated mentions incremental. Replies from other Slack bots do not move the boundary.
-- A predicate `(message: SlackThreadMessage) => boolean`: only messages after the last one it matches, such as "since the last message that mentioned a particular user".
-
-`threadContext` requires the matching Slack history scope. Thread helpers reuse messages already loaded within the same inbound handler, and overlapping refreshes share one `conversations.replies` request. Omit it when the agent should see only direct mentions. `loadThreadContextMessages` remains available when you need custom filtering or non-model processing of the raw thread messages.
-
 ### Slack API calls outside a handler
 
 Inside webhook-side handlers (`onAppMention`, `onEvent`, `onInteraction`, `events`),
@@ -348,7 +350,7 @@ messages, for example, has no inbound Slack request. For that, call the
 same primitive the handle uses directly:
 
 ```ts
-import { callSlackApi, resolveSlackBotToken } from "eve/channels/slack";
+import { callSlackApi } from "eve/channels/slack";
 import { connectSlackCredentials } from "@vercel/connect/eve";
 
 const { botToken } = connectSlackCredentials("slack/my-agent");
@@ -417,7 +419,7 @@ Start a session without an inbound message through `ctx.to(slack, target).send(m
 
 Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [File uploads](./custom#file-uploads) for the `fetchFile` contract.
 
-Private file downloads require the Slack bot token's `files:read` scope. Add the scope and reinstall the Slack app before sending attachments. If Slack returns an HTML sign-in page instead of file bytes, eve rejects the response with this remediation instead of staging the page as an attachment.
+Private file downloads require the Slack bot token's `files:read` scope. Add the scope and reinstall the Slack app before sending attachments.
 
 Staged files live in the session sandbox under `/workspace/attachments`. Session history keeps a reference to that path, not a second copy of the Slack file. If the backend can no longer reattach the original sandbox, eve cannot restore the attachment bytes from history; later turns receive a missing-file result. Store files outside the sandbox when the agent must retain them independently of sandbox availability.
 

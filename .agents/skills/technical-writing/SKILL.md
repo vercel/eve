@@ -1,9 +1,9 @@
 ---
-name: eve-technical-writing
-description: Write, edit, review, or audit user-facing documentation for the eve repository. Use for changes under docs/, documentation tied to eve APIs or CLI behavior, docs work based on Slack or support feedback, and docs reviews that must verify claims against current eve source, tests, CLI help, and repository conventions.
+name: technical-writing
+description: Write, edit, review, or audit user-facing documentation for the eve repository. Use for changes under docs/, documentation tied to eve APIs or CLI behavior, docs work based on Slack or support feedback, and requests to make eve docs clearer, more natural, or less AI-patterned while verifying claims against current source, tests, CLI help, public releases, and repository conventions.
 ---
 
-# eve technical writing
+# Technical writing
 
 Write accurate, task-focused documentation for eve. Treat developers and AI agents as readers: make each section easy to scan, retrieve, and act on without relying on unstated context.
 
@@ -13,6 +13,7 @@ Write accurate, task-focused documentation for eve. Treat developers and AI agen
 - For targeted or structural changes to existing pages, read [references/editing-workflow.md](references/editing-workflow.md).
 - Before finalizing any change, read [references/review-framework.md](references/review-framework.md).
 - For formatting and terminology, read [references/style-rules.md](references/style-rules.md).
+- For wording, voice, or AI-pattern concerns, read [references/prose-quality.md](references/prose-quality.md).
 - For page structure, read [references/content-types.md](references/content-types.md) when the content type is unclear or changing.
 
 ## Verify before writing
@@ -48,6 +49,7 @@ Use support evidence to identify the reader's problem, not to establish product 
 - Lead each page and section with the answer or outcome.
 - Address the reader as `you`; use imperative verbs for steps.
 - Prefer active voice, present tense, concrete nouns, and consistent terms.
+- Preserve the author's supported meaning, nuance, and uncertainty. Make the minimum effective edit and leave strong prose alone.
 - Keep one page focused on one primary job. Add a section to an existing page when it already owns the task.
 - Put the happy path before alternatives and failure modes.
 - Add troubleshooting where observed failures cluster around a workflow. Use symptoms, verified causes, and concrete next checks.
@@ -60,6 +62,7 @@ Use support evidence to identify the reader's problem, not to establish product 
 - Do not turn one product request into a new page. First decide whether the gap belongs to docs, product, or both.
 - Do not duplicate broad guides when a focused section or cross-link resolves the problem.
 - Do not rewrite clear prose merely to match a personal preference.
+- Do not manufacture examples, opinions, reactions, or specificity to make prose sound more human.
 - Do not use promotional language, rhetorical questions, filler, or claims that a task is easy, simple, or quick.
 - Do not use `we` unless describing a deliberate Vercel or eve team action.
 
@@ -69,4 +72,5 @@ Use support evidence to identify the reader's problem, not to establish product 
 2. Verify each new technical claim against its source.
 3. Search for contradictory statements and affected cross-links.
 4. Run the review workflow.
-5. Run `pnpm docs:check` when preparing to push, unless the user requests earlier validation.
+5. Check changed prose against the prose-quality reference when wording changed materially.
+6. Run `pnpm docs:check` when preparing to push, unless the user requests earlier validation.
