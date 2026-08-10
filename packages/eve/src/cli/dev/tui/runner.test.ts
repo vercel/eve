@@ -1104,6 +1104,7 @@ describe("EveTUIRunner initial input", () => {
     expect(session.send).toHaveBeenCalledTimes(1);
     expect(session.send).toHaveBeenNthCalledWith(1, "edited and sent", {
       signal: expect.any(AbortSignal),
+      turnPolicy: "queue",
     });
   });
 });
@@ -1169,6 +1170,7 @@ describe("EveTUIRunner native continuation state", () => {
     expect(session.send).toHaveBeenCalledTimes(1);
     expect(session.send).toHaveBeenNthCalledWith(1, "approve this", {
       signal: expect.any(AbortSignal),
+      turnPolicy: "queue",
     });
     expect(session.respond).toHaveBeenCalledWith(
       [{ requestId: "request-1", optionId: "approve" }],
@@ -3090,7 +3092,11 @@ describe("EveTUIRunner mid-turn message queue", () => {
 
     expect(session.send).toHaveBeenCalledTimes(2);
     expect(session.send).toHaveBeenNthCalledWith(1, "hello", expect.any(Object));
-    expect(session.send).toHaveBeenNthCalledWith(2, "queued follow-up", expect.any(Object));
+    expect(session.send).toHaveBeenNthCalledWith(
+      2,
+      "queued follow-up",
+      expect.objectContaining({ turnPolicy: "queue" }),
+    );
     // The drained prompt bypasses the interactive prompt read entirely.
     expect(renderer.readPrompt).toHaveBeenCalledTimes(2);
   });
