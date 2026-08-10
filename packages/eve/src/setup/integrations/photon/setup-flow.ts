@@ -196,7 +196,9 @@ async function resolvePhotonProject(
     kind: "external-action",
     emphasis: "browser",
   });
-  let authorizationAction: ReturnType<SetupApplyContext["presenter"]["beginExternalAction"]> | undefined;
+  let authorizationAction:
+    | ReturnType<SetupApplyContext["presenter"]["beginExternalAction"]>
+    | undefined;
   try {
     const project = await deps.provisionProject({
       projectName: plan.photonProjectName ?? `eve · ${plan.agentName || "agent"}`,

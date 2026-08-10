@@ -124,12 +124,12 @@ describe("runIntegrationSetupCommand", () => {
     const logs: string[] = [];
     output.log = (message) => logs.push(message);
     vi.mocked(runIntegrationSetup).mockImplementation(async (_kind, options) => {
-      const action = options.onExternalAction?.({
+      const action = options.beginExternalAction?.({
         message: "Authorize Photon",
         url: "https://example.com/device",
         userCode: "ABCD1234",
       });
-      action?.resolve();
+      action?.complete();
       return { kind: "done", completion: { facts: [] } };
     });
 

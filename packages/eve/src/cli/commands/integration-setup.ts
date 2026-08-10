@@ -79,7 +79,7 @@ export async function runIntegrationSetupCommand(
                 signal: client?.signal ?? options.signal,
               }),
         signal: client?.signal ?? options.signal,
-        onExternalAction: nonInteractive
+        beginExternalAction: nonInteractive
           ? (action) => {
               const id = `external-action-${crypto.randomUUID()}`;
               logger.log(
@@ -92,7 +92,7 @@ export async function runIntegrationSetupCommand(
                 }),
               );
               return {
-                resolve() {
+                complete() {
                   logger.log(
                     serializeHeadlessSetupEvent({
                       version: 1,

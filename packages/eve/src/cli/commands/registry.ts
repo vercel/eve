@@ -5,8 +5,6 @@ import {
   type RegistryConfig,
   type RegistrySearchItem,
 } from "#compiled/shadcn-registry/index.js";
-import { createCliTheme, sanitizeForTerminal } from "#cli/ui/output.js";
-import { clipVisible, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 import semver from "#compiled/semver/index.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
@@ -18,6 +16,7 @@ import { hasInteractiveTerminal, NOT_AN_AGENT_MESSAGE } from "./preconditions.js
 import { runDeclaredSetups } from "./registry-declared-setups.js";
 import { eveMetadataFromRegistryItem } from "./registry-metadata.js";
 import { runRegistryPackage } from "./registry-package.js";
+import { printRegistrySearchResults } from "./registry-search-presentation.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
@@ -223,54 +222,6 @@ function validateRegistrySource(source: string | undefined): void {
   }
 }
 
-function normalizeRegistryText(value: string): string {
-  return sanitizeForTerminal(value)
-    .replaceAll('\\"', '"')
-    .replaceAll("\\'", "'")
-    .replaceAll(/\s+/gu, " ")
-    .trim();
-}
-
-function registryDescriptionSummary(description: string): string {
-  const normalized = normalizeRegistryText(description);
-  return normalized.match(/^.*?[.!?](?=\s|$)/u)?.[0] ?? normalized;
-}
-
-function searchItemAddress(item: RegistrySearchItem): string {
-  const address = item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument;
-  return normalizeRegistryText(address);
-}
-
-function searchItemFallbackTitle(item: RegistrySearchItem): string {
-  const name = normalizeRegistryText(item.name);
-  return name.split("/").at(-1) ?? name;
-}
-
-function renderSearchItem(
-  item: RegistrySearchItem,
-  width: number,
-  theme: ReturnType<typeof createCliTheme>,
-): string {
-  const valueWidth = Math.max(1, width - 4);
-  const addressLines = wrapVisibleLine(searchItemAddress(item), valueWidth);
-  const lines = [
-    `  ${theme.label(searchItemFallbackTitle(item))}`,
-    ...addressLines.map((line) => `    ${line}`),
-  ];
-  if (!item.description) return lines.join("\n");
-
-  const description = registryDescriptionSummary(item.description);
-  if (description.length === 0) return lines.join("\n");
-
-  const wrapped = wrapVisibleLine(description, valueWidth);
-  const descriptionLines =
-    wrapped.length <= 2
-      ? wrapped
-      : [wrapped[0]!, `${clipVisible(wrapped[1]!, Math.max(1, valueWidth - 1)).trimEnd()}…`];
-  lines.push(...descriptionLines.map((line) => theme.muted(`    ${line}`)));
-  return lines.join("\n");
-}
-
 type RegistrySearchResult = Awaited<ReturnType<typeof searchRegistries>>;
 
 function registrySourceLabel(source: string): string {
@@ -279,45 +230,8 @@ function registrySourceLabel(source: string): string {
   return source;
 }
 
-function printSearchResults(
-  logger: RegistryCommandLogger,
-  result: RegistrySearchResult,
-  options: {
-    json?: boolean;
-    query: string | undefined;
-    resultsBySource: ReadonlyMap<string, RegistrySearchResult>;
-    sources: string[];
-  },
-): void {
-  if (options.json) {
-    logger.log(JSON.stringify(result, null, 2));
-    return;
-  }
-  if (result.items.length === 0) {
-    const query = options.query && normalizeRegistryText(options.query);
-    logger.log(query ? `No registry items match "${query}".` : "No registry items found.");
-    return;
-  }
-
-  const theme = createCliTheme();
-  const width = Math.max(20, process.stdout.columns ?? 80);
-  const sections = options.sources.flatMap((source) => {
-    const sourceResult = options.resultsBySource.get(source);
-    if (sourceResult === undefined || sourceResult.items.length === 0) return [];
-    const { pagination } = sourceResult;
-    const count = `${pagination.total} result${pagination.total === 1 ? "" : "s"}`;
-    const detail =
-      sourceResult.items.length < pagination.total
-        ? `showing ${sourceResult.items.length} of ${count}`
-        : count;
-    const heading = `${theme.label(registrySourceLabel(source))} ${theme.muted(`(${detail})`)}`;
-    return [
-      [heading, ...sourceResult.items.map((item) => renderSearchItem(item, width, theme))].join(
-        "\n",
-      ),
-    ];
-  });
-  logger.log(sections.join("\n"));
+function searchItemAddress(item: RegistrySearchItem): string {
+  return item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument;
 }
 
 async function searchRegistryCatalog(
@@ -440,7 +354,20 @@ async function browseRegistryItems(
   });
   const errors = result.errors ?? [];
   if (options.json || resultsBySource.size > 0) {
-    printSearchResults(logger, result, { ...options, query, resultsBySource, sources });
+    const sections = sources.flatMap((source) => {
+      const sourceResult = resultsBySource.get(source);
+      return sourceResult === undefined
+        ? []
+        : [
+            {
+              label: registrySourceLabel(source),
+              items: sourceResult.items,
+              total: sourceResult.pagination.total,
+              address: searchItemAddress,
+            },
+          ];
+    });
+    printRegistrySearchResults(logger, result, { ...options, query, sections });
   }
   for (const error of errors) {
     logger.error(`${error.registry}: ${error.message}`);
@@ -596,10 +523,7 @@ export async function runAddCommand(
     }
     if (
       options.skipSetup === true ||
-      (!options.nonInteractive &&
-        !options.yes &&
-        !interactive &&
-        options.setupAuthorized !== true)
+      (!options.nonInteractive && !options.yes && !interactive && options.setupAuthorized !== true)
     ) {
       logger.log(setupReminder(item, "skipped"));
       return;

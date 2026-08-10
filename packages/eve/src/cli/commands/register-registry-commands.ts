@@ -46,7 +46,6 @@ export function registerRegistryCommands(input: {
       "--answer <key=value>",
       "Answer a setup question with JSON; requires --non-interactive; repeat for multiple answers.",
       parseSetupAnswer,
-      {},
     )
     .option("-y, --yes", "Run setup and accept its recommended defaults.")
     .action(
