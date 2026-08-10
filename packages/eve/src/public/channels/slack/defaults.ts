@@ -11,8 +11,8 @@ import {
   type ConnectionAuthorizationOutcome,
 } from "#public/channels/slack/connections.js";
 import {
-  formatInputRequestFallbackText,
-  renderInputRequestBlocks,
+  renderInputRequestPostParts,
+  type SlackInputRequestPostPart,
 } from "#public/channels/slack/hitl.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import {
@@ -114,21 +114,34 @@ export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["
 
 /**
  * Groups HITL requests into `chat.postMessage` payloads that stay under
- * Slack's block-count cap. A request's blocks never split across posts,
- * so its buttons always land in the same message as its prompt.
+ * Slack's block-count cap. Tool input details are posted before interactive
+ * approval controls so Slack's callback body cannot grow with the input.
  */
 function buildInputRequestPosts(
   requests: readonly InputRequest[],
 ): Array<{ blocks: unknown[]; text: string }> {
-  const groups: Array<{ blocks: unknown[]; fallbacks: string[] }> = [];
+  const details: SlackInputRequestPostPart[] = [];
+  const controls: SlackInputRequestPostPart[] = [];
   for (const request of requests) {
-    const blocks = renderInputRequestBlocks(request);
+    const parts = renderInputRequestPostParts(request);
+    if (parts.details) details.push(parts.details);
+    controls.push(parts.controls);
+  }
+
+  return [...groupInputRequestPostParts(details), ...groupInputRequestPostParts(controls)];
+}
+
+function groupInputRequestPostParts(
+  parts: readonly SlackInputRequestPostPart[],
+): Array<{ blocks: unknown[]; text: string }> {
+  const groups: Array<{ blocks: unknown[]; fallbacks: string[] }> = [];
+  for (const part of parts) {
     const current = groups.at(-1);
-    if (current && current.blocks.length + blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE) {
-      current.blocks.push(...blocks);
-      current.fallbacks.push(formatInputRequestFallbackText(request));
+    if (current && current.blocks.length + part.blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE) {
+      current.blocks.push(...part.blocks);
+      current.fallbacks.push(part.text);
     } else {
-      groups.push({ blocks, fallbacks: [formatInputRequestFallbackText(request)] });
+      groups.push({ blocks: [...part.blocks], fallbacks: [part.text] });
     }
   }
   return groups.map((group) => ({

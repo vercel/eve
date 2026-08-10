@@ -195,6 +195,37 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
   return [prompt];
 }
 
+export interface SlackInputRequestPostPart {
+  readonly blocks: unknown[];
+  readonly text: string;
+}
+
+/**
+ * Splits approval details from their interactive controls. Slack includes the
+ * originating message in `block_actions`, so putting large tool input beside
+ * the buttons makes the callback body grow with model-authored input.
+ */
+export function renderInputRequestPostParts(request: InputRequest): {
+  readonly controls: SlackInputRequestPostPart;
+  readonly details?: SlackInputRequestPostPart;
+} {
+  const blocks = renderInputRequestBlocks(request);
+  const firstBlock = blocks[0];
+  if (!isApprovalRequest(request) || !isBlockType(firstBlock, "card") || blocks.length === 1) {
+    return {
+      controls: { blocks, text: formatInputRequestFallbackText(request) },
+    };
+  }
+
+  return {
+    controls: { blocks: [firstBlock], text: request.prompt },
+    details: {
+      blocks: blocks.slice(1),
+      text: formatInputRequestFallbackText(request),
+    },
+  };
+}
+
 /**
  * Creates the fallback text for one HITL request. Slack clients use this
  * outside the rich Block Kit surface, so include the same approval details
@@ -429,6 +460,10 @@ function truncateWithEllipsis(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
   const sliceLength = Math.max(0, maxLength - 3);
   return `${value.slice(0, sliceLength).trimEnd()}...`;
+}
+
+function isBlockType(value: unknown, type: string): boolean {
+  return typeof value === "object" && value !== null && (value as { type?: unknown }).type === type;
 }
 
 function isApprovalRequest(request: InputRequest): boolean {
