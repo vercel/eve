@@ -337,6 +337,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             callback: body.callback,
             context,
             outputSchema: body.outputSchema,
+            turnPolicy: body.turnPolicy,
           };
           result =
             body.inputResponses === undefined
@@ -661,6 +662,7 @@ interface ParsedSessionMessageBody {
   inputResponses?: readonly InputResponse[];
   context?: readonly string[];
   outputSchema?: JsonObject;
+  turnPolicy?: TurnPolicy;
 }
 
 function parseSessionMessageBody(
@@ -685,6 +687,8 @@ function parseSessionMessageBody(
   if (context instanceof Response) return context;
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
+  const turnPolicy = parseTurnPolicyField(payload.turnPolicy);
+  if (turnPolicy instanceof Response) return turnPolicy;
 
   if (message === undefined && inputResponses === undefined) {
     return Response.json(
@@ -703,7 +707,7 @@ function parseSessionMessageBody(
     );
   }
 
-  return { callback, message, inputResponses, context, outputSchema };
+  return { callback, message, inputResponses, context, outputSchema, turnPolicy };
 }
 
 interface ParsedCancelTurnBody {
@@ -875,6 +879,15 @@ function parseModeField(value: unknown): RunMode | Response | undefined {
   if (value === "conversation" || value === "task") return value;
   return Response.json(
     { error: "Expected 'mode' to be either 'conversation' or 'task'.", ok: false },
+    { status: 400 },
+  );
+}
+
+function parseTurnPolicyField(value: unknown): TurnPolicy | Response | undefined {
+  if (value === undefined) return undefined;
+  if (value === "queue" || value === "steer") return value;
+  return Response.json(
+    { error: "Expected 'turnPolicy' to be either 'queue' or 'steer'.", ok: false },
     { status: 400 },
   );
 }

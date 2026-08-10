@@ -1419,6 +1419,20 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
     );
   });
 
+  it("forwards turnPolicy with a continue-session message", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ message: "Wait your turn", turnPolicy: "queue" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handler.send).toHaveBeenCalledWith(
+      "Wait your turn",
+      expect.objectContaining({ turnPolicy: "queue" }),
+    );
+  });
+
   it("rejects invalid continue-session clientContext", async () => {
     const handler = createEveContinueHandler({ auth: none() });
 
