@@ -2,11 +2,26 @@ import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
+  const authorization = request.userMessages.some((message) =>
+    message.includes("C7 authorization mode"),
+  );
+  if (authorization) {
+    if (request.toolResults.find((result) => result.id === "c7-authorization") === undefined) {
+      return {
+        toolCalls: [
+          { id: "c7-authorization", input: { marker: "C7" }, name: "authorization_gate" },
+        ],
+      };
+    }
+    return "C7-AUTHORIZATION-COMPLETE";
+  }
+
   const continuation = request.userMessages.some((message) =>
     message.includes("continuation approval gates"),
   );
   const threeGates =
-    continuation || request.userMessages.some((message) => message.includes("three approval gates"));
+    continuation ||
+    request.userMessages.some((message) => message.includes("three approval gates"));
   const id = (gate: string) => (continuation ? `continuation-${gate}` : `approval-${gate}`);
   const first = request.toolResults.find((result) => result.id === id("first"));
   if (first === undefined) {

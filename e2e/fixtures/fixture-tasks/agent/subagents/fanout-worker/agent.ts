@@ -1,11 +1,15 @@
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
+const FAN_IN_MARKER_PATTERN = /TASK-FAN-IN-[12]/u;
+
 function respond(request: MockModelRequest): MockModelResponse | string {
+  const fanInMarker = FAN_IN_MARKER_PATTERN.exec(request.lastUserMessage ?? "")?.[0];
   const released = request.toolResults.find((result) => result.name === "release");
   if (released === undefined) {
-    return { toolCalls: [{ input: { marker: "RELEASE" }, name: "release" }] };
+    return { toolCalls: [{ input: { marker: fanInMarker ?? "RELEASE" }, name: "release" }] };
   }
+  if (fanInMarker !== undefined) return `FANOUT-COMPLETE:${fanInMarker}`;
   return `FANOUT-COMPLETE:${request.lastUserMessage ?? ""}`;
 }
 

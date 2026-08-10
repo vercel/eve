@@ -17,6 +17,25 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message.startsWith("CHILD-TASK-EXCLUSIVITY-LATER ")) {
     return laterBusyWorker(request, message);
   }
+  if (message.startsWith("TASK-A2-CHILD-FAILURE-VERIFY ")) {
+    return peekTask(request, "task-a2-child-failure-verify", "TASK-A2-FAILED", message);
+  }
+  if (message.startsWith("TASK-A3-UNKNOWN-VERIFY ")) {
+    return peekTask(request, "task-a3-unknown-verify", "TASK-A3-UNKNOWN", message);
+  }
+  if (message.startsWith("TASK-D6-PARTIAL-FANOUT-VERIFY ")) {
+    return peekTask(request, "task-d6-partial-fanout-verify", "TASK-D6-STATUS", message);
+  }
+  if (message.startsWith("TASK-D6-PARTIAL-FANOUT-UNKNOWN ")) {
+    return peekTask(request, "task-d6-partial-fanout-unknown", "TASK-D6-UNKNOWN", message);
+  }
+  if (message.startsWith("TASK-C7-AUTHORIZATION-VERIFY ")) {
+    return peekTask(request, "task-c7-authorization-verify", "TASK-C7-STATUS", message);
+  }
+  if (message.startsWith("TASK-C8-REMOTE-VERIFY ")) {
+    return peekTask(request, "task-c8-remote-verify", "TASK-C8-STATUS", message);
+  }
+  if (message.includes("TASK-C8-REMOTE-CHILD")) return runRemoteGate(request);
   if (message.startsWith("Background task ")) {
     // Scenarios that act on wake notifications route to their script;
     // every other scenario acknowledges them without running tools.
@@ -53,6 +72,10 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message === "TASK-HITL-ROUTING") {
     return startApprovalWorker(request, "task-hitl-worker", "TASK-HITL-STARTED");
   }
+  if (message === "TASK-C7-AUTHORIZATION") {
+    return startApprovalWorker(request, "task-c7-authorization-worker", "TASK-C7-STARTED");
+  }
+  if (message === "TASK-C8-REMOTE-HITL") return startRemoteWorker(request);
   if (message === "TASK-INPUT-BATCH-ORDERING") {
     return startApprovalWorker(request, "task-input-batch-worker", "TASK-INPUT-BATCH-STARTED");
   }
@@ -67,6 +90,9 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return continueApprovalWorker(request, message);
   }
   if (message === "CHILD-TASK-EXCLUSIVITY-SETUP") return setupBusyWorker(request);
+  if (message === "TASK-A2-CHILD-FAILURE") return startFailingBusyWorker(request);
+  if (message === "TASK-A3-DISPATCH-START-FAILURE") return startUnstartableWorker(request);
+  if (message === "TASK-D6-PARTIAL-FANOUT-FAILURE") return partialFailureFanout(request);
 
   return `Mock reply: ${message}`;
 }
@@ -177,9 +203,11 @@ function startApprovalWorker(
           id: callId,
           input: {
             message:
-              callId === "task-hitl-worker"
-                ? "Run three approval gates in order, then return CHILD-GATES-COMPLETE."
-                : "Run both approval gates in order, then return CHILD-GATES-COMPLETE.",
+              callId === "task-c7-authorization-worker"
+                ? "Run the C7 authorization mode, then return C7-AUTHORIZATION-COMPLETE."
+                : callId === "task-hitl-worker"
+                  ? "Run three approval gates in order, then return CHILD-GATES-COMPLETE."
+                  : "Run both approval gates in order, then return CHILD-GATES-COMPLETE.",
           },
           name: "approval-worker",
         },
@@ -187,6 +215,44 @@ function startApprovalWorker(
     };
   }
   return completedText;
+}
+
+function startRemoteWorker(request: MockModelRequest): MockModelResponse | string {
+  const callId = "task-c8-remote-worker";
+  if (resultById(request, callId) === undefined) {
+    return {
+      toolCalls: [
+        {
+          id: callId,
+          input: {
+            message:
+              "TASK-C8-REMOTE-CHILD Run the remote gate, then return its principal marker verbatim.",
+          },
+          name: "remote-loopback",
+        },
+      ],
+    };
+  }
+  return "TASK-C8-STARTED";
+}
+
+function runRemoteGate(request: MockModelRequest): MockModelResponse | string {
+  const callId = "task-c8-remote-gate";
+  const result = resultById(request, callId);
+  if (result === undefined) {
+    return {
+      toolCalls: [
+        {
+          id: callId,
+          input: { marker: "C8" },
+          name: "remote_gate",
+        },
+      ],
+    };
+  }
+  const marker = findString(result.output, "C8-REMOTE-PRINCIPAL:");
+  if (marker === undefined) throw new Error("Remote gate returned no principal marker.");
+  return `C8-REMOTE-COMPLETE ${marker}`;
 }
 
 function peekTask(
@@ -219,6 +285,70 @@ function setupBusyWorker(request: MockModelRequest): MockModelResponse | string 
   }
 
   return "CHILD-TASK-EXCLUSIVITY-READY";
+}
+
+function startFailingBusyWorker(request: MockModelRequest): MockModelResponse | string {
+  const callId = "task-a2-failing-busy-worker";
+  if (resultById(request, callId) === undefined) {
+    return {
+      toolCalls: [
+        {
+          id: callId,
+          input: { message: "TASK-A2-BUSY-WORKER-FAILURE" },
+          name: "busy-worker",
+        },
+      ],
+    };
+  }
+  return "TASK-A2-CHILD-FAILURE-STARTED";
+}
+
+function startUnstartableWorker(request: MockModelRequest): MockModelResponse | string {
+  const callId = "task-a3-unstartable-worker";
+  if (resultById(request, callId) === undefined) {
+    return {
+      toolCalls: [
+        {
+          id: callId,
+          input: { message: "TASK-A3-INTENTIONAL-START-FAILURE" },
+          name: "unstartable-worker",
+        },
+      ],
+    };
+  }
+  return "TASK-A3-PARENT-SURVIVED";
+}
+
+const PARTIAL_FANOUT_CALLS = [
+  {
+    id: "task-d6-success-first",
+    message: "TASK-D6-FIRST-SUCCESS",
+    name: "busy-worker",
+  },
+  {
+    id: "task-d6-failure-middle",
+    message: "TASK-D6-INTENTIONAL-START-FAILURE",
+    name: "unstartable-worker",
+  },
+  {
+    id: "task-d6-success-third",
+    message: "TASK-D6-THIRD-SUCCESS",
+    name: "busy-worker",
+  },
+] as const;
+
+function partialFailureFanout(request: MockModelRequest): MockModelResponse | string {
+  const pending = PARTIAL_FANOUT_CALLS.filter(({ id }) => resultById(request, id) === undefined);
+  if (pending.length > 0) {
+    return {
+      toolCalls: pending.map(({ id, message, name }) => ({
+        id,
+        input: { message },
+        name,
+      })),
+    };
+  }
+  return "TASK-D6-PARTIAL-FANOUT-STARTED";
 }
 
 function raceBusyWorker(request: MockModelRequest): MockModelResponse | string {
@@ -264,7 +394,10 @@ function laterBusyWorker(request: MockModelRequest, message: string): MockModelR
   return "CHILD-TASK-EXCLUSIVITY-LATER-DONE";
 }
 
-function continueApprovalWorker(request: MockModelRequest, message: string): MockModelResponse | string {
+function continueApprovalWorker(
+  request: MockModelRequest,
+  message: string,
+): MockModelResponse | string {
   const callId = "task-continuation-hitl-send";
   const result = resultById(request, callId);
   if (result === undefined) {
@@ -306,6 +439,24 @@ function findTaskId(value: unknown): string | undefined {
     for (const entry of Object.values(value)) {
       const nested = findTaskId(entry);
       if (nested !== undefined) return nested;
+    }
+  }
+  return undefined;
+}
+
+function findString(value: unknown, prefix: string): string | undefined {
+  if (typeof value === "string") return value.startsWith(prefix) ? value : undefined;
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const match = findString(entry, prefix);
+      if (match !== undefined) return match;
+    }
+    return undefined;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const entry of Object.values(value)) {
+      const match = findString(entry, prefix);
+      if (match !== undefined) return match;
     }
   }
   return undefined;

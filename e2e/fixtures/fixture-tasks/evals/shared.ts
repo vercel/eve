@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { EveEvalContext, EveEvalSession, EveEvalTurn, InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -15,6 +17,16 @@ export interface FollowedQueuedTurn {
   readonly observedTurns: readonly EveEvalTurn[];
   readonly session: TaskEvalSessionDriver;
   readonly turn: EveEvalTurn;
+}
+
+/** Reproduces the runtime task id for a fixed call in an observed parent turn. */
+export function deriveTurnTaskId(turn: EveEvalTurn, callId: string): string {
+  const started = turn.events.find((event) => event.type === "turn.started");
+  if (started === undefined) throw new Error("Cannot derive task id without turn.started.");
+  const operationId = createHash("sha256")
+    .update(`${turn.sessionId}\0${started.data.turnId}\0${callId}`)
+    .digest("hex");
+  return `task_${operationId.slice(0, 24)}`;
 }
 
 /** Waits across server-initiated parent turns for one task-owned input request. */
