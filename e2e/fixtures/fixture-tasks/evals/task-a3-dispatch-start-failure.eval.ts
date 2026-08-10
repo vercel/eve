@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { deriveTurnTaskId } from "./shared.js";
+import { deriveTurnTaskId, sendAndFollowQueuedTurn } from "./shared.js";
 
 const CALL_ID = "task-a3-unstartable-worker";
 
@@ -49,11 +49,11 @@ export default defineEval({
     );
 
     const taskId = deriveTurnTaskId(started, CALL_ID);
-    const unknown = await t.send(`TASK-A3-UNKNOWN-VERIFY ${taskId}`);
-    unknown.expectOk();
-    unknown.messageIncludes("TASK-A3-UNKNOWN");
+    const unknown = await sendAndFollowQueuedTurn(t, `TASK-A3-UNKNOWN-VERIFY ${taskId}`);
+    unknown.turn.expectOk();
+    unknown.turn.messageIncludes("TASK-A3-UNKNOWN");
     await t.require(
-      unknown.requireToolCall("task_peek", {
+      unknown.turn.requireToolCall("task_peek", {
         input: { taskIds: [taskId] },
         status: "failed",
       }).output,

@@ -61,7 +61,7 @@ export default defineEval({
     if (webhookUrl === undefined) throw new Error("C7 authorization.required had no webhook URL.");
     const callback = new URL(webhookUrl);
     callback.searchParams.set("code", AUTHORIZATION_CODE);
-    const callbackResponse = await t.target.fetch(`${callback.pathname}${callback.search}`, {
+    const callbackResponse = await fetch(callback, {
       method: "GET",
     });
     await t.require(callbackResponse.status, equals(200));

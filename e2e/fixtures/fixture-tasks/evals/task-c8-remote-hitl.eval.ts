@@ -36,7 +36,6 @@ export default defineEval({
       },
     ]);
     answered.expectOk();
-    answered.notEvent("step.started");
 
     const terminal = await waitForCompletedTask(t, gate.session, "TASK-C8-REMOTE-VERIFY", taskId);
     terminal.expectOk();

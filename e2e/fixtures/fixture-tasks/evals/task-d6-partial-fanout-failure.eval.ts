@@ -1,7 +1,12 @@
 import { defineEval, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { deriveTurnTaskId, requireTaskView, waitForCompletedTask } from "./shared.js";
+import {
+  deriveTurnTaskId,
+  requireTaskView,
+  sendAndFollowQueuedTurn,
+  waitForCompletedTask,
+} from "./shared.js";
 
 const FIRST_CALL_ID = "task-d6-success-first";
 const FAILED_CALL_ID = "task-d6-failure-middle";
@@ -101,11 +106,14 @@ export default defineEval({
         );
       }, "task-id derivation reproduces both receipts and a distinct failed identity"),
     );
-    const unknown = await t.send(`TASK-D6-PARTIAL-FANOUT-UNKNOWN ${failedTaskId}`);
-    unknown.expectOk();
-    unknown.messageIncludes("TASK-D6-UNKNOWN");
+    const unknown = await sendAndFollowQueuedTurn(
+      t,
+      `TASK-D6-PARTIAL-FANOUT-UNKNOWN ${failedTaskId}`,
+    );
+    unknown.turn.expectOk();
+    unknown.turn.messageIncludes("TASK-D6-UNKNOWN");
     await t.require(
-      unknown.requireToolCall("task_peek", {
+      unknown.turn.requireToolCall("task_peek", {
         input: { taskIds: [failedTaskId] },
         status: "failed",
       }).output,
@@ -117,14 +125,14 @@ export default defineEval({
 
     const firstCompleted = await waitForCompletedTask(
       t,
-      t,
+      unknown.session,
       "TASK-D6-PARTIAL-FANOUT-VERIFY",
       firstTaskId,
     );
     assertCompletedBusyWorker(firstCompleted, firstTaskId, "TASK-D6-FIRST-SUCCESS");
     const thirdCompleted = await waitForCompletedTask(
       t,
-      t,
+      unknown.session,
       "TASK-D6-PARTIAL-FANOUT-VERIFY",
       thirdTaskId,
     );
