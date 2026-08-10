@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { z } from "#compiled/zod/index.js";
 import {
   decodeSessionInbox,
   encodeSessionCommand,
   SESSION_INBOX_WIRE_VERSION,
   SessionInboxWireError,
-  sessionInboxWireSchema,
+  SESSION_INBOX_V1_FIELDS,
 } from "#execution/wire/session-inbox-wire.js";
 
 /**
@@ -19,7 +18,7 @@ import {
  * persisted by a shipped version must keep decoding on the current build.
  */
 const FROZEN_SHAPES: Readonly<Record<number, string>> = {
-  1: `{"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"auth":{"anyOf":[{},{"type":"null"}]},"caller":{},"kind":{"const":"deliver","type":"string"},"payload":{},"payloads":{"items":{},"type":"array"},"requestId":{"type":"string"},"version":{"const":1,"type":"number"}},"required":["kind","payloads","version"],"type":"object"},{"additionalProperties":false,"properties":{"kind":{"const":"session-timeout","type":"string"},"version":{"const":1,"type":"number"}},"required":["kind","version"],"type":"object"},{"additionalProperties":false,"properties":{"kind":{"const":"clear","type":"string"},"version":{"const":1,"type":"number"}},"required":["kind","version"],"type":"object"},{"additionalProperties":false,"properties":{"kind":{"const":"compact","type":"string"},"version":{"const":1,"type":"number"}},"required":["kind","version"],"type":"object"},{"additionalProperties":false,"properties":{"kind":{"const":"reset","type":"string"},"reason":{"type":"string"},"version":{"const":1,"type":"number"}},"required":["kind","version"],"type":"object"},{"additionalProperties":false,"properties":{"kind":{"const":"cancel","type":"string"},"turnId":{"type":"string"},"version":{"const":1,"type":"number"}},"required":["kind","version"],"type":"object"}]}`,
+  1: `{"cancel":{"turnId":"string?"},"clear":{},"compact":{},"deliver":{"auth":"object-or-null?","caller":"object?","payload":"object?","payloads":"object[]","requestId":"string?"},"reset":{"reason":"string?"},"session-timeout":{}}`,
 };
 
 const FROZEN_FIXTURES: ReadonlyArray<{
@@ -77,11 +76,10 @@ describe("session inbox wire contract", () => {
     expect(Object.keys(FROZEN_SHAPES)).toEqual([String(SESSION_INBOX_WIRE_VERSION)]);
   });
 
-  it("the current schema matches its frozen shape byte for byte", () => {
-    const shape = stableStringify(
-      z.toJSONSchema(sessionInboxWireSchema, { unrepresentable: "any" }),
+  it("the current field table matches its frozen shape byte for byte", () => {
+    expect(stableStringify(SESSION_INBOX_V1_FIELDS)).toBe(
+      FROZEN_SHAPES[SESSION_INBOX_WIRE_VERSION],
     );
-    expect(shape).toBe(FROZEN_SHAPES[SESSION_INBOX_WIRE_VERSION]);
   });
 
   it.each(FROZEN_FIXTURES)(

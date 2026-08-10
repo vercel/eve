@@ -51,11 +51,23 @@ encodeSessionCommand(input) // build current shape → safeParse → persist
 
 Normative rules:
 
-- **The current version has exactly one schema.** Changing the shipped
-  shape **must** be a new version: bump the constant, add a one-step
+- **The current version has exactly one declared shape.** Changing it
+  **must** be a new version: bump the constant, add a one-step
   `VersionMigration`, freeze the new shape. Historic versions live on as
   executable migrations plus frozen payload fixtures (the turn-workflow
   precedent), not as retained schemas.
+- **No schema library in the workflow body.** The shape is a declarative
+  field table validated by a ~35-line walker. The driver bundle is
+  self-contained (no external imports, no access to the server's shared
+  `_libs` chunks) and is base64-embedded into the server bundle, with its
+  own inline sourcemap carrying `sourcesContent` — so a vendored dependency
+  costs roughly 5–6× its own size there. Measured on `weather-agent`:
+  vendored zod added **+1.45 MB**, vendored `zod/mini` **+1.35 MB** (eve
+  vendors a package as one pre-bundled artifact exposing its full API, which
+  cannot tree-shake — proven by bundling the vendored file in isolation),
+  and the field table **+0.04 MB**. The durable session snapshot store makes
+  the same call for the same reason. Outside the workflow body, zod remains
+  the right tool and is already bundled.
 - **Version 0 is the unversioned era** (`initialVersion: 0`): every shape
   the family persisted before payloads carried `version`, following the
   field name every persisted eve structure already uses.
