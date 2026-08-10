@@ -39,7 +39,8 @@ delivery adopt the same split in follow-ups.
 // Dependency-free contract imported by encoder and decoder.
 export const SESSION_INBOX_WIRE_VERSION = 1;
 
-// Server/step-only encoder: execution/wire/session-inbox-encoder.ts
+// One append-only module per shipped version:
+// execution/wire/session-inbox-wire.v1.ts (server/step only)
 const deliverPayloadSchema = z.object({
   context: z.array(z.string()).optional(),
   inputResponses: z.array(inputResponseSchema).optional(),
@@ -47,15 +48,21 @@ const deliverPayloadSchema = z.object({
   outputSchema: jsonObjectSchema.optional(),
 }).loose(); // explicit adapter extension point
 
-export const sessionInboxV1Schema = z.discriminatedUnion("kind", [
+export const sessionInboxWireV1Schema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("deliver"), payloads: z.array(deliverPayloadSchema), ... }),
   ...controls,
 ]);
-export type SessionInboxWire = z.infer<typeof sessionInboxV1Schema>;
-encodeSessionCommand(input) // build → parse complete value once → persist
+export type SessionInboxWireV1 = z.infer<typeof sessionInboxWireV1Schema>;
+encodeSessionCommandV1(input) // build → parse complete value once → persist
+
+// execution/wire/session-inbox-wire.v0.ts (dependency-free, temporary)
+export const sessionInboxWireV0Migration: VersionMigration = { from: 0, to: 1, migrate };
+
+// Stable encoder facade selects the current version.
+encodeSessionCommand(input) // delegates to encodeSessionCommandV1
 
 // Workflow-safe decoder: execution/wire/session-inbox-wire.ts
-import type { SessionInboxWire } from "./session-inbox-encoder.js";
+import type { SessionInboxWireV1 } from "./session-inbox-wire.v1.js";
 export class SessionInboxWireError extends Error { ... }
 const sessionInboxMigrations: readonly VersionMigration[] = [{ from: 0, to: 1, migrate }];
 decodeSessionInbox(value) // runMigrationChain (initialVersion: 0) → version/kind → trust → normalize

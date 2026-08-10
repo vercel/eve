@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import {
-  encodeSessionCommand,
-  sessionInboxV1Schema,
-} from "#execution/wire/session-inbox-encoder.js";
+import { encodeSessionCommand } from "#execution/wire/session-inbox-encoder.js";
 import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 import { decodeSessionInbox, SessionInboxWireError } from "#execution/wire/session-inbox-wire.js";
+import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
 
 /**
  * Frozen wire contract for the `session-inbox` family.
@@ -77,7 +75,7 @@ describe("session inbox wire contract", () => {
   it("the complete current schema matches its frozen shape byte for byte", () => {
     expect(
       stableStringify(
-        z.toJSONSchema(sessionInboxV1Schema, { io: "input", unrepresentable: "any" }),
+        z.toJSONSchema(sessionInboxWireV1Schema, { io: "input", unrepresentable: "any" }),
       ),
     ).toMatchSnapshot();
   });
