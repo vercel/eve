@@ -31,5 +31,6 @@ export function sendCommandToDelivery(
     payload: command.payload,
     payloads: [command.payload],
     requestId: command.requestId,
+    turnPolicy: command.turnPolicy,
   };
 }

@@ -56,6 +56,8 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
 ```
 
+Follow-up messages use `turnPolicy: "experimental-steer"` by default. If a turn is active, eve buffers the message before cooperatively cancelling that turn, then starts the follow-up as a replacement turn with a new turn ID. Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` never steer.
+
 Sending a message to an unknown or terminal session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
 TypeScript clients expose the stable code as `ClientError.code`. The route never

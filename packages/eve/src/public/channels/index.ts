@@ -29,6 +29,7 @@ export {
   type SessionHandle,
   type SessionRespondOptions,
   type SessionSendOptions,
+  type TurnPolicy,
   type RouteDefinition,
   type RouteHandlerArgs,
   type HttpRouteDefinition,

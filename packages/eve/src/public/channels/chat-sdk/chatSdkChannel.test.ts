@@ -220,7 +220,7 @@ describe("chatSdkChannel", () => {
     });
   });
 
-  it("cancels the active turn before an experimental steering send", async () => {
+  it("carries an experimental steering send on the shared delivery", async () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
@@ -241,7 +241,7 @@ describe("chatSdkChannel", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(cancel).toHaveBeenCalledWith({ continuationToken: THREAD_ID });
+    expect(cancel).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith(THREAD_ID, {
       auth: AUTH,
       message: "@bot correction",
@@ -251,8 +251,8 @@ describe("chatSdkChannel", () => {
           id: THREAD_ID,
         }),
       },
+      turnPolicy: "experimental-steer",
     });
-    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]!);
   });
 
   it("does not cancel for an experimental steering response without a message", async () => {

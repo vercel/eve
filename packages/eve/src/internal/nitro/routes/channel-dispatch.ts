@@ -203,8 +203,12 @@ function buildRouteArgs(
     channelName,
     metadata: { requestId },
     runtime: bundle.runtime,
+    turnPolicy: channel?.turnPolicy,
   });
-  const attachSession = createAttachSessionFn(bundle.runtime, { requestId });
+  const attachSession = createAttachSessionFn(bundle.runtime, {
+    requestId,
+    turnPolicy: channel?.turnPolicy,
+  });
   const to = createCrossChannelToFn(bundle.runtime, toCrossChannelTargets(bundle.channels));
 
   const args = attachRouteSessionCreator(

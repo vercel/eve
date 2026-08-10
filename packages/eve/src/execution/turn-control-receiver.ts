@@ -73,11 +73,11 @@ export class TurnControlReceiver {
     command: SessionInboxPayload,
   ): Promise<TurnDriverAction | undefined> {
     if (command.kind === "deliver") {
-      this.bufferedDeliveries.push(command);
+      await this.bufferDelivery(command);
       return undefined;
     }
     if (command.kind === "send") {
-      this.bufferedDeliveries.push(sendCommandToDelivery(command));
+      await this.bufferDelivery(sendCommandToDelivery(command));
       return undefined;
     }
     if (command.kind === "clear" || command.kind === "compact") {
@@ -104,6 +104,16 @@ export class TurnControlReceiver {
       return undefined;
     }
     return unsupportedSessionCommand(command);
+  }
+
+  private async bufferDelivery(delivery: DeliverHookPayload): Promise<void> {
+    this.bufferedDeliveries.push(delivery);
+    if (delivery.turnPolicy !== "experimental-steer" || !deliveryHasMessage(delivery)) return;
+
+    await forwardTurnCancellationStep({
+      payload: {},
+      token: turnCancellationHookToken(this.control.token),
+    });
   }
 
   private bufferTurnDeliveries(
@@ -165,7 +175,7 @@ export class TurnControlReceiver {
   ): Promise<TurnDriverAction | undefined> {
     await this.commandInbox.rekeyContinuation(request.continuationToken);
 
-    let delivery = this.bufferedDeliveries.shift();
+    let delivery = this.takeInputResponseDelivery();
     while (delivery === undefined) {
       const winner = await Promise.race([
         this.getControlPromise().then((value) => ({ kind: "control" as const, value })),
@@ -197,12 +207,16 @@ export class TurnControlReceiver {
       }
 
       this.commandInbox.consumeNext();
-      if (winner.value.value.kind === "deliver") {
-        delivery = winner.value.value;
-        continue;
-      }
-      if (winner.value.value.kind === "send") {
-        delivery = sendCommandToDelivery(winner.value.value);
+      if (winner.value.value.kind === "deliver" || winner.value.value.kind === "send") {
+        const candidate =
+          winner.value.value.kind === "deliver"
+            ? winner.value.value
+            : sendCommandToDelivery(winner.value.value);
+        if (deliveryHasMessage(candidate)) {
+          await this.bufferDelivery(candidate);
+        } else {
+          delivery = candidate;
+        }
         continue;
       }
       const terminal = await this.handleSessionCommand(winner.value.value);
@@ -226,6 +240,12 @@ export class TurnControlReceiver {
     }
 
     return await this.awaitForwardedDelivery(request.requestId, delivery);
+  }
+
+  private takeInputResponseDelivery(): DeliverHookPayload | undefined {
+    const index = this.bufferedDeliveries.findIndex((delivery) => !deliveryHasMessage(delivery));
+    if (index === -1) return undefined;
+    return this.bufferedDeliveries.splice(index, 1)[0];
   }
 
   /**
@@ -268,6 +288,10 @@ export class TurnControlReceiver {
       if (terminal !== undefined) return terminal;
     }
   }
+}
+
+function deliveryHasMessage(delivery: DeliverHookPayload): boolean {
+  return delivery.payloads.some((payload) => payload.message !== undefined);
 }
 
 function unsupportedSessionCommand(command: never): never {

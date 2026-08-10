@@ -15,6 +15,7 @@ import type {
   Runtime,
   SessionAuthContext,
   SessionCallback,
+  TurnPolicy,
 } from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -28,6 +29,7 @@ interface BaseChannelSendOptions {
   readonly mode?: RunMode;
   readonly outputSchema?: JsonObject;
   readonly title?: string;
+  readonly turnPolicy?: TurnPolicy;
 }
 
 /** Options for sending a message from a channel-local continuation address. */
@@ -91,6 +93,7 @@ export function createChannelOperations<TState = undefined>(input: {
   readonly channelName: string;
   readonly metadata?: { readonly requestId?: string };
   readonly runtime: Runtime;
+  readonly turnPolicy?: TurnPolicy;
 }): ChannelReceiveContext<TState> {
   const channelAddress = createChannelAddressFn<TState>(input);
 

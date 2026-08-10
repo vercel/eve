@@ -36,6 +36,7 @@ export function getFrameworkChannelDefinitions(): readonly ResolvedChannelDefini
       fetch: async (req: Request, ctx: any) => route.handler(req, ctx),
       handler: route.handler,
       adapter: compiled.adapter,
+      turnPolicy: compiled.turnPolicy,
       logicalPath: `framework://channels/${route.path}`,
       sourceId: `eve:framework:${route.method.toLowerCase()}-${route.path}`,
       sourceKind: "module",

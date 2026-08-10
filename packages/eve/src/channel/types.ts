@@ -146,6 +146,12 @@ export interface DeliverPayload {
   readonly [key: string]: unknown;
 }
 
+/** Controls how a channel message interacts with an active turn. */
+export type TurnPolicy = "experimental-steer" | "queue";
+
+/** Default policy for message sends produced by current channel surfaces. */
+export const DEFAULT_TURN_POLICY: TurnPolicy = "experimental-steer";
+
 /** One command accepted by a durable session inbox. */
 export type SessionCommand =
   | {
@@ -154,6 +160,7 @@ export type SessionCommand =
       readonly kind: "send";
       readonly payload: DeliverPayload;
       readonly requestId?: string;
+      readonly turnPolicy?: TurnPolicy;
     }
   | { readonly kind: "cancel"; readonly turnId?: string }
   | { readonly kind: "compact" }
@@ -208,6 +215,7 @@ export interface DeliverHookPayload {
   readonly requestId?: string;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
+  readonly turnPolicy?: TurnPolicy;
 }
 
 /** Internal deadline signal sent through the stable session command inbox. */

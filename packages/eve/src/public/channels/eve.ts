@@ -1,6 +1,11 @@
 import { type FilePart, type TextPart, type UserContent } from "ai";
 
-import type { SessionAuthContext, SessionCallback, SessionCapabilities } from "#channel/types.js";
+import type {
+  SessionAuthContext,
+  SessionCallback,
+  SessionCapabilities,
+  TurnPolicy,
+} from "#channel/types.js";
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
 import type { ClearResponse } from "#protocol/clear-session.js";
 import type { CompactResponse } from "#protocol/compact-session.js";
@@ -168,6 +173,8 @@ export interface EveChannelInput {
    * object to narrow the policy.
    */
   readonly cors?: EveChannelCors;
+  /** Policy for follow-up messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
   /**
    * Pre-dispatch hook for inbound eve HTTP messages. Runs after route auth and body
    * parsing, before runtime dispatch.
@@ -204,6 +211,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
   return defineChannel<undefined, EveEventContext>({
     cors: normalizeEveCors(input.cors),
+    turnPolicy: input.turnPolicy,
     routes: [
       GET(EVE_INFO_ROUTE_PATH, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);

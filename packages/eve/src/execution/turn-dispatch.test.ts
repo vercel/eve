@@ -136,7 +136,10 @@ describe("dispatchAndAwaitTurn", () => {
       commandInbox: createCommandInbox({
         next: async () => ({
           done: false,
-          value: { kind: "send", payload: { message: "later delivery" } },
+          value: {
+            kind: "send",
+            payload: { inputResponses: [{ optionId: "yes", requestId: "input-1" }] },
+          },
         }),
       }),
       controlToken: "turn-control",
@@ -147,15 +150,20 @@ describe("dispatchAndAwaitTurn", () => {
       sessionState: state,
     });
 
-    expect(bufferedDeliveries.map((item) => item.payloads[0]?.message)).toEqual([
-      "earlier remainder",
-      "later delivery",
+    expect(bufferedDeliveries).toEqual([
+      { kind: "deliver", payloads: [{ message: "earlier remainder" }] },
+      expect.objectContaining({
+        payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
+      }),
     ]);
   });
 
   it("re-buffers a forwarded delivery when the turn inbox is already gone", async () => {
     const state = createState("http:test");
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "relayed" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
+    };
     vi.mocked(forwardTurnDeliveryStep).mockRejectedValue(
       Object.assign(new Error("inbox gone"), { name: "HookNotFoundError" }),
     );

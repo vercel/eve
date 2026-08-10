@@ -101,18 +101,18 @@ bot.onNewMention(async (thread, message) => {
 
 ### Experimental steering
 
-By default, a message sent while an eve turn is active waits for the next turn. Pass `turnPolicy: "experimental-steer"` to cancel the active turn before sending the new message:
+Messages default to `turnPolicy: "experimental-steer"`: a message sent while an eve turn is active is durably buffered, then cancels that turn and starts as its replacement. Set `turnPolicy: "queue"` when the active turn should finish first:
 
 ```ts
 bot.onSubscribedMessage(async (thread, message) => {
   await send(message.text, {
     thread,
-    turnPolicy: "experimental-steer",
+    turnPolicy: "queue",
   });
 });
 ```
 
-This is cancellation-backed steering: the interrupted turn emits `turn.cancelled`, and the replacement message starts a new turn with a new turn ID. Partial output and completed side effects from the interrupted turn are not rolled back. If no turn is active, the message is sent normally. Use the default `turnPolicy: "queue"` when every turn should finish in order.
+Cancellation-backed steering emits `turn.cancelled`, and the replacement message starts a new turn with a new turn ID. Partial output and completed side effects from the interrupted turn are not rolled back. If no turn is active, the message is sent normally. You can set the policy once on `chatSdkChannel({ turnPolicy })` or override it per `send(...)`.
 
 This policy controls overlapping eve turns. Chat SDK's separate `concurrency` option controls overlapping webhook handlers; use `concurrency: "concurrent"` when each inbound message should reach the experimental steering path immediately.
 

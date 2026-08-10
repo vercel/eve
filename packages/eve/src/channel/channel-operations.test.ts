@@ -38,6 +38,7 @@ describe("createChannelOperations", () => {
         kind: "send",
         payload: { message: "hello" },
         requestId: undefined,
+        turnPolicy: "experimental-steer",
       },
       continuationToken: "slack:C1:T1",
     });

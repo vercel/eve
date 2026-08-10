@@ -14,7 +14,9 @@ import type {
   SessionAuthContext,
   SessionCallback,
   SessionCommand,
+  TurnPolicy,
 } from "#channel/types.js";
+import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { isReservedSessionCommandToken } from "#execution/session-command-token.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -25,6 +27,7 @@ interface BaseChannelAddressDeliveryOptions {
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly mode?: RunMode;
   readonly title?: string;
+  readonly turnPolicy?: TurnPolicy;
 }
 
 /** Delivery options for a channel address whose continuation token is already bound. */
@@ -66,6 +69,7 @@ export function createChannelAddress<TState = undefined>(input: {
   readonly continuationToken: string;
   readonly metadata?: { readonly requestId?: string };
   readonly runtime: Runtime;
+  readonly turnPolicy?: TurnPolicy;
 }): ChannelAddress<TState> {
   const metadata = input.metadata ?? {};
   const namespacedToken = `${input.channelName}:${input.continuationToken}`;
@@ -86,6 +90,10 @@ export function createChannelAddress<TState = undefined>(input: {
           message: serializeUrlFilePartsInMessage(payload.message),
         },
         requestId: metadata.requestId,
+        turnPolicy:
+          payload.message === undefined
+            ? undefined
+            : (options.turnPolicy ?? input.turnPolicy ?? DEFAULT_TURN_POLICY),
       };
       const command: Extract<SessionCommand, { readonly kind: "send" }> =
         caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };
@@ -95,7 +103,10 @@ export function createChannelAddress<TState = undefined>(input: {
           continuationToken: namespacedToken,
         });
         return result.status === "accepted"
-          ? createSession(result.sessionId, input.runtime, metadata)
+          ? createSession(result.sessionId, input.runtime, {
+              ...metadata,
+              turnPolicy: input.turnPolicy,
+            })
           : undefined;
       };
 
@@ -134,7 +145,10 @@ export function createChannelAddress<TState = undefined>(input: {
       };
       try {
         const handle = await input.runtime.createSession(runInput);
-        return createSession(handle.sessionId, input.runtime, metadata);
+        return createSession(handle.sessionId, input.runtime, {
+          ...metadata,
+          turnPolicy: input.turnPolicy,
+        });
       } catch (error) {
         if (!isRuntimeSessionOwnershipConflictError(error)) throw error;
         const winner = await dispatch();
@@ -179,7 +193,10 @@ export function createChannelAddress<TState = undefined>(input: {
       const owner = await input.runtime.resolveContinuation(namespacedToken);
       return owner === undefined
         ? undefined
-        : createSession(owner.sessionId, input.runtime, metadata);
+        : createSession(owner.sessionId, input.runtime, {
+            ...metadata,
+            turnPolicy: input.turnPolicy,
+          });
     },
   };
 }
@@ -190,6 +207,7 @@ export function createChannelAddressFn<TState = undefined>(input: {
   readonly channelName: string;
   readonly metadata?: { readonly requestId?: string };
   readonly runtime: Runtime;
+  readonly turnPolicy?: TurnPolicy;
 }): ChannelAddressFn<TState> {
   return (continuationToken) => createChannelAddress({ ...input, continuationToken });
 }

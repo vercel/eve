@@ -10,8 +10,10 @@ import type {
   SessionAuthContext,
   SessionCallback,
   SessionSendCommandResult,
+  TurnPolicy,
   TurnCaller,
 } from "#channel/types.js";
+import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
@@ -53,7 +55,7 @@ interface SessionDeliveryOptions {
 }
 
 /** Options for sending a message through a fixed session handle. */
-export type SessionSendOptions = SessionDeliveryOptions;
+export type SessionSendOptions = SessionDeliveryOptions & { readonly turnPolicy?: TurnPolicy };
 
 /** Options for answering pending input requests through a fixed session handle. */
 export type SessionRespondOptions = SessionDeliveryOptions;
@@ -77,7 +79,7 @@ export interface SessionHandle {
 export function createSession(
   id: string,
   runtime: Runtime,
-  metadata: { readonly requestId?: string } = {},
+  metadata: { readonly requestId?: string; readonly turnPolicy?: TurnPolicy } = {},
 ): Session {
   return {
     id,
@@ -95,6 +97,7 @@ export function createSession(
         kind: "send" as const,
         payload,
         requestId: metadata.requestId,
+        turnPolicy: options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY,
       };
       return await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
@@ -154,7 +157,7 @@ export function createSession(
 /** Builds an I/O-free factory for fixed session-ID handles. */
 export function createAttachSessionFn(
   runtime: Runtime,
-  metadata: { readonly requestId?: string } = {},
+  metadata: { readonly requestId?: string; readonly turnPolicy?: TurnPolicy } = {},
 ): (sessionId: string) => Session {
   return (sessionId) => createSession(sessionId, runtime, metadata);
 }
