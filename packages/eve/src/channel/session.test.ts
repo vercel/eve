@@ -74,7 +74,7 @@ describe("fixed session operations", () => {
         kind: "send",
         payload: { message: "hello" },
         requestId: "req_1",
-        turnPolicy: "experimental-steer",
+        turnPolicy: "steer",
       },
       sessionId: "sess_1",
     });
@@ -129,7 +129,7 @@ describe("fixed session operations", () => {
         kind: "send",
         payload: { message: "continue" },
         requestId: undefined,
-        turnPolicy: "experimental-steer",
+        turnPolicy: "steer",
       },
       sessionId: "sess_1",
     });

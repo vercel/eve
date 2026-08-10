@@ -166,7 +166,7 @@
 ### Patch Changes
 
 - 22bfa02: Add guided Photon setup through `eve add channel/photon-imessage`, including project creation, phone registration, Vercel Connect or portable credentials, and channel scaffolding.
-- 0c0de19: Add an opt-in experimental steering policy to Chat SDK sends that cancels an active turn before delivering its replacement message.
+- 0c0de19: Add an opt-in steering policy to Chat SDK sends that cancels an active turn before delivering its replacement message.
 - b00a79d: Add `photonIMessageChannel`, a first-class Photon iMessage channel with lazy credentials, Vercel OIDC webhook verification, and automatic eve session routing.
 - 495e93b: Resolve leading `$HOME` paths in the built-in `read_file`, `write_file`, `glob`, and `grep` tools so agents can directly access packaged skill references advertised in their prompt.
 - bf01952: Local trace spans now capture model and tool payloads: the system prompt, prompt messages, and response text/reasoning/tool calls on model spans, and call arguments/results on tool spans, each capped at 32 KB with provider transport metadata stripped. Set `EVE_TRACES_CONTENT=off` to keep payloads out of the spool.

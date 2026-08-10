@@ -142,7 +142,7 @@ export interface ChatSdkSendOptions {
   readonly title?: string;
   /**
    * Controls how this input interacts with an active eve turn on the same
-   * thread. Defaults to `"experimental-steer"`.
+   * thread. Defaults to `"steer"`.
    */
   readonly turnPolicy?: TurnPolicy;
   /**

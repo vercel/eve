@@ -220,7 +220,7 @@ describe("chatSdkChannel", () => {
     });
   });
 
-  it("carries an experimental steering send on the shared delivery", async () => {
+  it("carries a steering send on the shared delivery", async () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
@@ -232,7 +232,7 @@ describe("chatSdkChannel", () => {
       await bridge.send(message.text, {
         auth: AUTH,
         thread,
-        turnPolicy: "experimental-steer",
+        turnPolicy: "steer",
       });
     });
 
@@ -251,11 +251,11 @@ describe("chatSdkChannel", () => {
           id: THREAD_ID,
         }),
       },
-      turnPolicy: "experimental-steer",
+      turnPolicy: "steer",
     });
   });
 
-  it("does not cancel for an experimental steering response without a message", async () => {
+  it("does not cancel for a steering response without a message", async () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
@@ -266,7 +266,7 @@ describe("chatSdkChannel", () => {
     bridge.bot.onNewMention(async (thread: Thread) => {
       await bridge.send(
         { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
-        { thread, turnPolicy: "experimental-steer" },
+        { thread, turnPolicy: "steer" },
       );
     });
 

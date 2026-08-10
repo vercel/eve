@@ -44,7 +44,7 @@ describe("createChannelAddress", () => {
         kind: "send",
         payload: { message: "hello" },
         requestId: undefined,
-        turnPolicy: "experimental-steer",
+        turnPolicy: "steer",
       },
       continuationToken: "slack:C1:T1",
     });
@@ -67,7 +67,7 @@ describe("createChannelAddress", () => {
     });
 
     await address.send("queued", { auth: null });
-    await address.send("replace", { auth: null, turnPolicy: "experimental-steer" });
+    await address.send("replace", { auth: null, turnPolicy: "steer" });
     await address.respond([{ optionId: "yes", requestId: "input-1" }], { auth: null });
 
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(
@@ -77,7 +77,7 @@ describe("createChannelAddress", () => {
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        command: expect.objectContaining({ turnPolicy: "experimental-steer" }),
+        command: expect.objectContaining({ turnPolicy: "steer" }),
       }),
     );
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(

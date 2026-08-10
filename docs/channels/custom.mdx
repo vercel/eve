@@ -109,7 +109,7 @@ await session.reset({ reason: "Retire this session" });
 await session.getEventStream({ startIndex: 12 });
 ```
 
-Message sends use the channel's `turnPolicy`, which defaults to `"experimental-steer"`. An accepted message arriving during an active turn is durably buffered before eve cancels that turn and starts the message as a replacement turn. Configure `turnPolicy: "queue"` on `defineChannel(...)` when active turns should finish in order, or override one send:
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. An accepted message arriving during an active turn is durably buffered before eve cancels that turn and starts the message as a replacement turn. Configure `turnPolicy: "queue"` on `defineChannel(...)` when active turns should finish in order, or override one send:
 
 ```ts
 export default defineChannel({
@@ -119,7 +119,7 @@ export default defineChannel({
       const body = await request.json();
       await from(body.threadId).send(body.message, {
         auth: null,
-        turnPolicy: "experimental-steer",
+        turnPolicy: "steer",
       });
       return new Response(null, { status: 202 });
     }),

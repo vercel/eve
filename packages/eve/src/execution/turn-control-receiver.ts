@@ -108,7 +108,7 @@ export class TurnControlReceiver {
 
   private async bufferDelivery(delivery: DeliverHookPayload): Promise<void> {
     this.bufferedDeliveries.push(delivery);
-    if (delivery.turnPolicy !== "experimental-steer" || !deliveryHasMessage(delivery)) return;
+    if (delivery.turnPolicy !== "steer" || !deliveryHasMessage(delivery)) return;
 
     await forwardTurnCancellationStep({
       payload: {},

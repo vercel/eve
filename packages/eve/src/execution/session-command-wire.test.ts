@@ -17,7 +17,7 @@ describe("sendCommandToDelivery", () => {
       kind: "send",
       payload,
       requestId: "req-1",
-      turnPolicy: "experimental-steer",
+      turnPolicy: "steer",
     });
 
     expect(wire).toEqual({
@@ -27,7 +27,7 @@ describe("sendCommandToDelivery", () => {
       payload,
       payloads: [payload],
       requestId: "req-1",
-      turnPolicy: "experimental-steer",
+      turnPolicy: "steer",
     });
     // The 0.30.3–0.30.8 parked decode reads `.payload`; everything else reads
     // `payloads`. Both views must reference the same delivery.

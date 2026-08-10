@@ -153,7 +153,7 @@ describe("TurnControlReceiver", () => {
       expect(bufferedDeliveries).toEqual([
         expect.objectContaining({
           payloads: [{ message: "replace this turn" }],
-          turnPolicy: "experimental-steer",
+          turnPolicy: "steer",
         }),
       ]);
       return true;
@@ -164,7 +164,7 @@ describe("TurnControlReceiver", () => {
         {
           kind: "send",
           payload: { message: "replace this turn" },
-          turnPolicy: "experimental-steer",
+          turnPolicy: "steer",
         },
       ]),
     });
@@ -184,7 +184,7 @@ describe("TurnControlReceiver", () => {
         {
           kind: "send",
           payload: { inputResponses: [{ optionId: "yes", requestId: "input-1" }] },
-          turnPolicy: "experimental-steer",
+          turnPolicy: "steer",
         },
       ]),
     });

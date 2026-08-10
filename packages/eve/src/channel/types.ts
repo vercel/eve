@@ -147,10 +147,10 @@ export interface DeliverPayload {
 }
 
 /** Controls how a channel message interacts with an active turn. */
-export type TurnPolicy = "experimental-steer" | "queue";
+export type TurnPolicy = "steer" | "queue";
 
 /** Default policy for message sends produced by current channel surfaces. */
-export const DEFAULT_TURN_POLICY: TurnPolicy = "experimental-steer";
+export const DEFAULT_TURN_POLICY: TurnPolicy = "steer";
 
 /** One command accepted by a durable session inbox. */
 export type SessionCommand =

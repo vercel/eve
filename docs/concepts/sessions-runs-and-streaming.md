@@ -148,7 +148,7 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
   -d '{"message":"Now send the short version."}'
 ```
 
-The follow-up reuses the same durable session: same history, same state. Message sends default to cancellation-backed `"experimental-steer"`; if a turn is active, eve buffers the follow-up, cancels that turn, and starts the message under a new turn ID. Channels and TypeScript `Session.send(...)` calls can select `turnPolicy: "queue"` when active work should finish first. Structured `inputResponses` never steer.
+The follow-up reuses the same durable session: same history, same state. Message sends default to cancellation-backed `"steer"`; if a turn is active, eve buffers the follow-up, cancels that turn, and starts the message under a new turn ID. Channels and TypeScript `Session.send(...)` calls can select `turnPolicy: "queue"` when active work should finish first. Structured `inputResponses` never steer.
 
 If the session is waiting on a human-in-the-loop approval, a matching text reply such as `approve` or `cancel` answers the approval. Other follow-up text is held until the approval is answered, so an unrelated message does not implicitly deny the pending tool call.
 

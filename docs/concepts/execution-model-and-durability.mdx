@@ -79,7 +79,7 @@ channel alias. Rekeying replaces only that channel alias. An HTTP-created
 session has the stable ID alias and no channel continuation token. Competing
 channel input is not forwarded to the owner.
 
-When a session is waiting, a delivery through its ID or current channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "experimental-steer"`: while a turn is active, the session driver durably buffers the replacement before requesting cooperative cancellation. The interrupted turn emits `turn.cancelled` followed by `session.waiting`, then the replacement starts with a new turn ID. Partial output and completed side effects are not rolled back.
+When a session is waiting, a delivery through its ID or current channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`: while a turn is active, the session driver durably buffers the replacement before requesting cooperative cancellation. The interrupted turn emits `turn.cancelled` followed by `session.waiting`, then the replacement starts with a new turn ID. Partial output and completed side effects are not rolled back.
 
 `turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the driver checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
 
