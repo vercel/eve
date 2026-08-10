@@ -1287,6 +1287,7 @@ export class EveTUIRunner {
           ...options,
           continueSession: true,
         });
+        this.#enterPendingConnectionAuthorization(result);
         if (!consumed) return;
       }
     } finally {

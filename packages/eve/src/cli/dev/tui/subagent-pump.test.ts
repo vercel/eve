@@ -272,6 +272,51 @@ describe("SubagentPump background receipts", () => {
 });
 
 describe("SubagentPump child stream transport", () => {
+  it("leaves connection authorization events to the parent runner", async () => {
+    const client = new Client({ host: "http://localhost:3000" });
+    vi.spyOn(client, "fetch").mockResolvedValue(
+      responseOf([
+        stampTestEvent(
+          {
+            type: "authorization.required",
+            data: {
+              description: "Authorize stub-mcp",
+              name: "stub-mcp",
+              sequence: 1,
+              stepIndex: 0,
+              turnId: "child-turn",
+            },
+          } as UnstampedMessageStreamEvent,
+          0,
+        ),
+        stampTestEvent(
+          {
+            type: "authorization.completed",
+            data: {
+              name: "stub-mcp",
+              outcome: "authorized",
+              sequence: 2,
+              stepIndex: 0,
+              turnId: "child-turn",
+            },
+          } as UnstampedMessageStreamEvent,
+          1,
+        ),
+        boundaryEvent(2),
+      ]),
+    );
+    const view = fakeView();
+    const pump = new SubagentPump({ client, view, formatActionResultError: () => "failed" });
+
+    pump.begin(subagentCalled("call-1"));
+    await vi.waitFor(() =>
+      expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
+    );
+
+    expect(view.upsertStep).not.toHaveBeenCalled();
+    expect(view.upsertTool).not.toHaveBeenCalled();
+  });
+
   it("reopens an exhausted source at its cursor without replaying output", async () => {
     vi.useFakeTimers();
     const first = reasoningEvent("looked up ", 0);

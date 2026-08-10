@@ -987,6 +987,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("settles an authorization block when its callback arrives in a later stream pass", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "background", name: "researcher" });
+    renderer.backgroundSubagent({ callId: "background" });
     renderer.upsertConnectionAuth({
       name: "linear",
       description: "Authorization required for linear",
@@ -1015,6 +1017,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
+    expect(countOccurrences(snapshot, "linear · authorization")).toBe(1);
     expect(snapshot).toContain("linear · authorization · authorized");
     expect(snapshot).toContain("Authorization complete");
     expect(snapshot).not.toContain("linear · authorization · required");

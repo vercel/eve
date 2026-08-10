@@ -566,6 +566,31 @@ function sessionYieldingTurns(turns: ReadonlyArray<readonly unknown[]>): ClientS
 }
 
 describe("EveTUIRunner idle session follow", () => {
+  it("does not start idle following when model setup has no session", async () => {
+    const handle = vi.fn(async () => ({ message: "dismissed" }));
+    const renderIdleStream = vi.fn(async () => {});
+    const runner = new EveTUIRunner({
+      renderer: fakeRenderer({
+        renderIdleStream,
+        setupFlow: createFakeSetupFlowRenderer(),
+      }),
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      initialInput: "/model",
+      bootDetections: [],
+      getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
+      promptCommandHandler: { handle },
+    });
+
+    await expect(runner.run()).resolves.toBeUndefined();
+
+    expect(handle).toHaveBeenCalledWith(
+      { type: "extension", name: "model", argument: "" },
+      expect.objectContaining({ initialModelStep: "provider" }),
+    );
+    expect(renderIdleStream).not.toHaveBeenCalled();
+  });
+
   it("renders a wake turn while prompting, then stops before send without replay", async () => {
     const client = stubClient();
     const session = client.sessions.attach("session_test");
@@ -699,6 +724,87 @@ describe("EveTUIRunner idle session follow", () => {
         type: "assistant-delta",
       },
     ]);
+  });
+
+  it("parks idle authorization wake turns until their callback completes", async () => {
+    const session = stubSession();
+    const prompt = createDeferred<string | undefined>();
+    const completed = createDeferred<void>();
+    const updates: Array<{ name: string; state: string }> = [];
+    const pendingCounts: number[] = [];
+    const wakeEvents = [
+      stampTestEvent(
+        {
+          type: "authorization.required",
+          data: {
+            authorization: { url: "https://connect.vercel.com/authorize/linear" },
+            description: "Authorization required for linear",
+            name: "linear",
+            sequence: 1,
+            stepIndex: 0,
+            turnId: "wake-turn",
+            webhookUrl: "https://eve.test/connections/linear/callback",
+          },
+        } as UnstampedMessageStreamEvent,
+        0,
+      ),
+      stampTestEvent(
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+        1,
+      ),
+      stampTestEvent(
+        {
+          type: "authorization.completed",
+          data: {
+            name: "linear",
+            outcome: "authorized",
+            sequence: 2,
+            stepIndex: 0,
+            turnId: "wake-turn",
+          },
+        } as UnstampedMessageStreamEvent,
+        2,
+      ),
+      stampTestEvent(
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+        3,
+      ),
+    ];
+    vi.spyOn(session, "stream").mockReturnValue(
+      (async function* () {
+        for (const event of wakeEvents) yield event;
+      })(),
+    );
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn().mockImplementationOnce(() => prompt.promise),
+      renderIdleStream: vi.fn(async (result) => {
+        for await (const event of result.events) void event;
+      }),
+      upsertConnectionAuth: (update) => {
+        updates.push({ name: update.name, state: update.state });
+        if (update.state === "authorized") completed.resolve();
+      },
+      setConnectionAuthPendingCount: (count) => pendingCounts.push(count),
+    });
+    const runner = new EveTUIRunner({ session, renderer, name: "Weather Agent" });
+
+    const running = runner.run();
+    await completed.promise;
+    prompt.resolve(undefined);
+    await running;
+
+    expect(updates).toEqual([
+      { name: "linear", state: "required" },
+      { name: "linear", state: "pending" },
+      { name: "linear", state: "authorized" },
+    ]);
+    expect(pendingCounts).toEqual([1, 0]);
   });
 
   it("replaces a failed idle source exactly once before submitting the prompt", async () => {
