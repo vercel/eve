@@ -3,7 +3,7 @@
 import { createCodePlugin } from "@streamdown/code";
 import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { useMemo } from "react";
-import { type Components, Streamdown } from "streamdown";
+import { type Components, defaultRemarkPlugins, Streamdown } from "streamdown";
 import { createResolveReadmeLinksPlugin, resolveReadmeHref } from "@/lib/templates/readme-links";
 
 interface TemplateReadmeProps {
@@ -17,7 +17,10 @@ export const TemplateReadme = ({ readme, sourceRevisionHref }: TemplateReadmePro
     [],
   );
   const remarkPlugins = useMemo(
-    () => [createResolveReadmeLinksPlugin(sourceRevisionHref)],
+    () => [
+      ...Object.values(defaultRemarkPlugins),
+      createResolveReadmeLinksPlugin(sourceRevisionHref),
+    ],
     [sourceRevisionHref],
   );
   const components = useMemo<Partial<Components>>(
