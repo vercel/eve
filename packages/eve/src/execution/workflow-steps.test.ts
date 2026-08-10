@@ -50,6 +50,12 @@ import {
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
+import {
+  createMessageAppendedEvent,
+  createMessageCompletedEvent,
+  type HandleMessageStreamEvent,
+  type SubagentChildEventStreamEvent,
+} from "#protocol/message.js";
 
 vi.mock("./durable-session-store.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./durable-session-store.js")>();
@@ -111,6 +117,14 @@ function createTestWritable(
       workflowWritesByNamespace.set(namespace, existing);
     },
   });
+}
+
+const textDecoder = new TextDecoder();
+function decodeWrittenEvents(
+  namespace = DEFAULT_WORKFLOW_STREAM_NAMESPACE,
+): HandleMessageStreamEvent[] {
+  const writes = workflowWritesByNamespace.get(namespace) ?? [];
+  return writes.map((chunk) => JSON.parse(textDecoder.decode(chunk as Uint8Array)));
 }
 
 vi.mock("./node-step.js", () => ({
@@ -538,6 +552,88 @@ describe("dispatchRuntimeActionsStep", () => {
         }),
       ],
       expect.any(Object),
+    );
+  });
+
+  it("forwards delegated subagent stream events to the parent stream in child order", async () => {
+    const session = createStubSession({
+      continuationToken: "subagent:parent-session:call-1",
+      sessionId: "child-session",
+    });
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(({ handleEvent }) => {
+      return async (session): Promise<StepResult> => {
+        if (handleEvent === undefined) {
+          throw new Error("expected handleEvent");
+        }
+
+        await handleEvent(
+          createMessageAppendedEvent({
+            messageDelta: "hello",
+            messageSoFar: "hello",
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "child-turn",
+          }),
+        );
+        await handleEvent(
+          createMessageCompletedEvent({
+            message: "hello",
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "child-turn",
+          }),
+        );
+
+        return {
+          next: { done: true, output: "final child result" },
+          session,
+        };
+      };
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "delegate" }],
+      },
+      forwardedSubagentStream: {
+        callId: "call-1",
+        parentWritable: createTestWritable("parent"),
+        subagentName: "researcher",
+      },
+      parentWritable: createTestWritable("child"),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState({
+        continuationToken: "subagent:parent-session:call-1",
+        sessionId: "child-session",
+      }),
+    });
+
+    expect(result.action).toBe("done");
+    if (result.action === "done") {
+      expect(result.output).toBe("final child result");
+    }
+
+    expect(decodeWrittenEvents("child").map((event) => event.type)).toEqual([
+      "message.appended",
+      "message.completed",
+    ]);
+
+    const parentEvents = decodeWrittenEvents("parent") as SubagentChildEventStreamEvent[];
+    expect(parentEvents.map((event) => event.type)).toEqual(["subagent.event", "subagent.event"]);
+    expect(parentEvents.map((event) => event.data.callId)).toEqual(["call-1", "call-1"]);
+    expect(parentEvents.map((event) => event.data.subagentName)).toEqual([
+      "researcher",
+      "researcher",
+    ]);
+    expect(parentEvents.map((event) => event.data.event.type)).toEqual([
+      "message.appended",
+      "message.completed",
+    ]);
+    expect(parentEvents[0]?.data.event.meta?.at).toEqual(expect.any(String));
+    expect((parentEvents[0] as HandleMessageStreamEvent | undefined)?.meta?.at).toEqual(
+      expect.any(String),
     );
   });
 

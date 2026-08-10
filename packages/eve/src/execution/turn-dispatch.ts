@@ -1,4 +1,9 @@
-import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#channel/types.js";
+import type {
+  DeliverHookPayload,
+  ForwardedSubagentStream,
+  HookPayload,
+  SessionCapabilities,
+} from "#channel/types.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
@@ -30,6 +35,7 @@ export async function dispatchAndAwaitTurn(input: {
   readonly commandInbox: SessionCommandInbox;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
+  readonly forwardedSubagentStream?: ForwardedSubagentStream;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<DispatchedTurn> {
@@ -47,6 +53,7 @@ export async function dispatchAndAwaitTurn(input: {
       delivery: input.delivery,
       mode: input.mode,
       parentWritable: input.parentWritable,
+      forwardedSubagentStream: input.forwardedSubagentStream,
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     });

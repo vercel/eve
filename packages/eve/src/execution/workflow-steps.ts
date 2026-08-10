@@ -46,10 +46,8 @@ import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import {
   createAuthorizationCompletedEvent,
   createSessionStartedEvent,
-  encodeMessageStreamEvent,
-  type UnstampedMessageStreamEvent,
-  stampMessageStreamEvent,
   type MessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import {
   CallbackBaseUrlKey,
@@ -75,6 +73,7 @@ import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-s
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
+import { writeSessionEvent } from "#execution/subagent-stream-forwarding.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
@@ -333,9 +332,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
     const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-    const stamped = stampMessageStreamEvent(toEmit);
-    await writer.write(encodeMessageStreamEvent(stamped));
-    return stamped;
+    return writeSessionEvent({
+      event: toEmit,
+      forwardedSubagentStream: input.forwardedSubagentStream,
+      writer,
+    });
   };
 
   const handleEvent = async (
