@@ -1,8 +1,9 @@
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ROOT_CONTEXT, trace } from "@opentelemetry/api";
+import { ROOT_CONTEXT, trace as runtimeTrace } from "@opentelemetry/api";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -14,6 +15,7 @@ import { installLocalInstrumentationRuntime } from "#tracing/local-instrumentati
 import { LocalTraceSpanProcessor } from "#tracing/local-trace-span-processor.js";
 
 const temporaryDirectories: string[] = [];
+const require = createRequire(import.meta.url);
 
 afterEach(async () => {
   await Promise.all(
@@ -30,6 +32,10 @@ describe("local instrumentation runtime", () => {
       frameworkVersion: "test",
       serviceName: "test-agent",
     });
+    // Resolve the public API outside Vitest's transformed module graph, as an
+    // authored app does when it imports its own @opentelemetry/api dependency.
+    const authoredTrace = (require("@opentelemetry/api") as typeof import("@opentelemetry/api"))
+      .trace;
     const scope: InstrumentationAttemptScope = {
       attemptId: "session-1:turn-1:0:0",
       attemptIndex: 0,
@@ -70,7 +76,8 @@ describe("local instrumentation runtime", () => {
       await bridge.executeLanguageModelCall!({
         callId: "call-1",
         execute: async () => {
-          const span = trace.getTracer("test-user").startSpan("user.model-work");
+          const span = authoredTrace.getTracer("test-user").startSpan("user.model-work");
+          expect(span.isRecording()).toBe(true);
           await Promise.resolve();
           span.end();
         },
@@ -94,7 +101,8 @@ describe("local instrumentation runtime", () => {
       await bridge.executeTool!({
         callId: "call-1",
         execute: async () => {
-          const span = trace.getTracer("test-user").startSpan("user.tool-work");
+          const span = authoredTrace.getTracer("test-user").startSpan("user.tool-work");
+          expect(span.isRecording()).toBe(true);
           await Promise.resolve();
           span.end();
         },
@@ -173,9 +181,9 @@ describe("local instrumentation runtime", () => {
     const secondProcessor = new LocalTraceSpanProcessor(appRoot);
     const firstProvider = new BasicTracerProvider({ spanProcessors: [firstProcessor] });
     const secondProvider = new BasicTracerProvider({ spanProcessors: [secondProcessor] });
-    const parent = trace.setSpan(
+    const parent = runtimeTrace.setSpan(
       ROOT_CONTEXT,
-      trace.wrapSpanContext({
+      runtimeTrace.wrapSpanContext({
         spanId: "b".repeat(16),
         traceFlags: 1,
         traceId: "a".repeat(32),

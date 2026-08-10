@@ -39,7 +39,7 @@ const WORKFLOW_GENERATION_DESCRIPTOR: ScenarioAppDescriptor = {
 function createGenerationMarkerToolSource(marker: string, crashOnce: boolean): string {
   const lifecycle = crashOnce
     ? [
-        'import { existsSync, watch, writeFileSync } from "node:fs";',
+        'import { existsSync, renameSync, watch, writeFileSync } from "node:fs";',
         'import { basename, join } from "node:path";',
         "",
         "async function waitForPath(path: string) {",
@@ -67,7 +67,10 @@ function createGenerationMarkerToolSource(marker: string, crashOnce: boolean): s
         '    const restartPath = join(process.cwd(), ".restart-generation-test");',
         '    writeFileSync(startedPath, "ready");',
         "    if (existsSync(restartPath)) {",
-        `      writeFileSync(join(process.cwd(), ".recovered-turn-started"), JSON.stringify({ instrumentation: String(globalThis.__EVE_INSTRUMENTATION_MARKER__ ?? "missing"), marker: ${JSON.stringify(marker)} }));`,
+        '      const recoveredPath = join(process.cwd(), ".recovered-turn-started");',
+        "      const temporaryRecoveredPath = `${recoveredPath}.${process.pid}.tmp`;",
+        `      writeFileSync(temporaryRecoveredPath, JSON.stringify({ instrumentation: String(globalThis.__EVE_INSTRUMENTATION_MARKER__ ?? "missing"), marker: ${JSON.stringify(marker)} }));`,
+        "      renameSync(temporaryRecoveredPath, recoveredPath);",
         "    } else {",
         "      await waitForPath(crashPath);",
         "      if (!existsSync(crashedPath)) {",
