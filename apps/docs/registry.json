@@ -1200,7 +1200,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "slack"]
           },
-          "requires": ">=0.31.3"
+          "requires": ">=0.31.4"
         }
       },
       "dependencies": ["@vercel/connect@>=0.4.2"]
@@ -1219,7 +1219,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "discord"]
           },
-          "requires": ">=0.31.3"
+          "requires": ">=0.31.4"
         }
       }
     },
@@ -1286,7 +1286,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "github"]
           },
-          "requires": ">=0.31.3"
+          "requires": ">=0.31.4"
         }
       },
       "dependencies": ["@vercel/connect@>=0.6.0"]
@@ -1304,7 +1304,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "linear"]
           },
-          "requires": ">=0.31.3"
+          "requires": ">=0.31.4"
         }
       },
       "dependencies": ["@vercel/connect"]
@@ -1322,7 +1322,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "web"]
           },
-          "requires": ">=0.31.3"
+          "requires": ">=0.31.4"
         }
       },
       "dependencies": [
@@ -1758,7 +1758,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "photon"]
           },
-          "requires": ">=0.31.3"
+          "requires": ">=0.31.4"
         }
       }
     },
