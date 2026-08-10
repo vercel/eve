@@ -38,10 +38,13 @@ export function registerRegistryCommands(input: {
     .option("-o, --overwrite", "Overwrite existing files.")
     .option("--skip-install", "Run the item's setup flow without installing it.")
     .option("--skip-setup", "Skip the item's setup flow.")
-    .option("--non-interactive", "Never prompt and emit NDJSON setup events.")
+    .option(
+      "--non-interactive",
+      "Run without interactive prompts, instead emit structured NDJSON when further input is required",
+    )
     .option(
       "--answer <key=value>",
-      "Answer a setup question with JSON; repeat for multiple answers.",
+      "Answer a setup question with JSON; requires --non-interactive; repeat for multiple answers.",
       parseSetupAnswer,
       {},
     )

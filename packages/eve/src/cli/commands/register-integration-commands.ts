@@ -20,8 +20,16 @@ export function registerIntegrationCommands(input: {
   integration
     .command("setup <kind>")
     .option("-y, --yes")
-    .option("--non-interactive")
-    .option("--answer <key=value>", "Answer a setup question.", parseSetupAnswer, {})
+    .option(
+      "--non-interactive",
+      "Run without interactive prompts, instead emit structured NDJSON when further input is required",
+    )
+    .option(
+      "--answer <key=value>",
+      "Answer a setup question; requires --non-interactive.",
+      parseSetupAnswer,
+      {},
+    )
     .action(
       async (
         kind: string,

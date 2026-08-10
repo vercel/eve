@@ -25,7 +25,7 @@ export type ResolvedProjectPath =
   | { kind: "resolved"; inPlace: boolean; path: string };
 
 /**
- * The `--headless` Vercel project flags. Read ONLY on the headless path (see
+ * The `--non-interactive` Vercel project flags. Read ONLY on the headless path (see
  * {@link ProvisioningMode}): an interactive run prompts for these decisions
  * instead, so the args never reach the prompt code.
  *
@@ -42,7 +42,7 @@ export interface ArgsHeadlessProject {
 }
 
 /**
- * The `--headless` AI Gateway flags, read only on the headless path alongside
+ * The `--non-interactive` AI Gateway flags, read only on the headless path alongside
  * {@link ArgsHeadlessProject}.
  */
 export interface ArgsHeadlessAiGateway {
