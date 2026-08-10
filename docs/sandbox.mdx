@@ -185,11 +185,29 @@ export default defineSandbox({
 
 Sessions are persistent, and how the underlying runtime idles out depends on the backend. On the Vercel backend, the VM times out after a period of inactivity (default 30 minutes); eve preserves the filesystem and resumes the sandbox on the next message while the persisted sandbox remains available. The Docker backend keeps a long-lived container per durable session and persists `/workspace` across turns without that timeout, and the just-bash backend stores its virtual filesystem under `.eve/sandbox-cache/`.
 
+Authored runtime callbacks can stop compute sooner through the handle returned
+by `ctx.getSandbox()`:
+
+```ts
+const sandbox = await ctx.getSandbox();
+await sandbox.stop();
+```
+
+Every built-in backend uses its native lifecycle operation without deleting the
+durable session. Treat the stop as the end of sandbox work in the current
+callback. On the next callback, `ctx.getSandbox()` reopens the same Docker
+container, microsandbox VM or snapshot, or just-bash filesystem and environment.
+Vercel can also automatically resume the same handle on its next I/O operation,
+just as it would after an inactivity timeout. No separate reconnect step or
+stop-specific state is needed. Lifecycle `use()` calls return the I/O-only
+`SandboxSession` because bootstrap and session initialization do not own runtime
+teardown.
+
 Session sandboxes are keyed per durable session, not per deployment, so redeploying your app does not by itself discard them. A definition change to the authored sandbox source, workspace seed content, or `revalidationKey` replaces the sandbox on the next turn and runs `onSession` again.
 
 Reattachment still depends on the backend retaining its physical sandbox state. If a persisted Vercel sandbox is no longer available, eve creates a replacement, using the current template when one is configured. Files and other changes made after the original sandbox was created are not restored automatically. Because the durable session still has the same sandbox key, `onSession` does not run again for this replacement. Persist important artifacts outside the sandbox, and do not rely on `onSession` as the only place that applies security-critical configuration.
 
-When the eve server stops, no sandbox compute outlives it. `eve dev` stops the sandboxes it started when the dev server closes, and a self-hosted production server stops every open sandbox on shutdown (`SIGTERM`/`SIGINT`). Session state persists across the stop — the next server start reattaches each durable session from its stopped container, VM, or snapshot. Custom `SandboxBackend` adapters participate through the handle's `shutdown()` method: stop the underlying compute, keeping the session reattachable from persisted state where the backend supports it.
+When the eve server stops, no sandbox compute outlives it. `eve dev` stops the sandboxes it started when the dev server closes, and a self-hosted production server stops every open sandbox on shutdown (`SIGTERM`/`SIGINT`). Session state persists across the stop — the next server start reattaches each durable session from its stopped container, VM, or snapshot. Custom `SandboxBackend` adapters implement `stop()` for authored runtime calls and `shutdown()` for server teardown. Both stop the underlying compute while keeping the session reattachable from persisted state where the backend supports it; authored `stop()` failures reject, while process-wide shutdown collects and logs failures without blocking teardown.
 
 ## Network policy
 

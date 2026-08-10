@@ -15,10 +15,10 @@ import type {
  * Returns a sandbox session that applies `abortSignal` to every operation.
  * Per-call signals are composed with the bound signal.
  */
-export function bindSandboxAbortSignal(
-  session: SandboxSession,
+export function bindSandboxAbortSignal<TSession extends SandboxSession>(
+  session: TSession,
   abortSignal: AbortSignal,
-): SandboxSession {
+): TSession {
   const compose = (callSignal: AbortSignal | undefined): AbortSignal =>
     AbortSignal.any(callSignal === undefined ? [abortSignal] : [abortSignal, callSignal]);
 
@@ -42,5 +42,5 @@ export function bindSandboxAbortSignal(
       session.writeTextFile({ ...options, abortSignal: compose(options.abortSignal) }),
     removePath: (options: SandboxRemovePathOptions) =>
       session.removePath({ ...options, abortSignal: compose(options.abortSignal) }),
-  };
+  } as TSession;
 }

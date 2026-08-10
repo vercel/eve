@@ -276,6 +276,9 @@ export function createDockerSandboxBackend(
             sessionKey: createInput.sessionKey,
           };
         },
+        async stop() {
+          await stopDockerContainerIfRunning(cli, containerName);
+        },
         // Session state lives in the container filesystem, so a stopped
         // container restarts with state intact on the next `create`.
         async shutdown() {

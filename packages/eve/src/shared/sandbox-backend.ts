@@ -13,6 +13,12 @@ export interface SandboxBackendHandle<SO = Record<string, never>> {
   readonly useSessionFn: SandboxSessionUseFn<SO>;
   captureState(): Promise<SandboxBackendSessionState>;
   /**
+   * Stops the underlying compute at an authored runtime boundary while
+   * preserving any backend state needed to reopen the durable session.
+   * Provider errors must reject this call.
+   */
+  stop(): Promise<void>;
+  /**
    * Stops the underlying compute because the eve server is shutting
    * down; nothing may be left running afterwards. The session must
    * remain reattachable from persisted state on the next server start

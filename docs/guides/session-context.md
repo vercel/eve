@@ -69,6 +69,24 @@ Behavior:
 - It is async because eve binds or restores sandbox state lazily.
 - It only works when sandbox access is attached to the active runtime path.
 - Visibility is node-local. A subagent sees its own sandbox, not the parent's.
+- The returned `RuntimeSandboxSession` extends the ordinary sandbox I/O surface
+  with `stop()`. It is exported from `eve/sandbox`.
+
+Call `stop()` to release sandbox compute while preserving the durable session
+and its filesystem:
+
+```ts
+const sandbox = await ctx.getSandbox();
+await sandbox.stop();
+```
+
+Each backend implements this with its native lifecycle operation. Treat the
+stop as the end of sandbox work in the current callback; a later callback calls
+`ctx.getSandbox()` normally and eve reopens the same durable session. Vercel
+also supports using the same handle again: its next command or file operation
+automatically resumes the sandbox, just as it would after an inactivity
+timeout. No separate eve reconnect state is created, and provider failures
+reject the returned promise.
 
 `SandboxSession` also exposes `resolvePath(path)`, which returns the live backend-native path for a logical `/workspace/...` location. Use it when authored code needs that path before passing it to shell code or a child process.
 
