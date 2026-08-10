@@ -18,6 +18,7 @@ export default {
       },
       "zod/v3": { kind: "vendored", compiledPath: "zod" },
       "zod/v4": { kind: "vendored", compiledPath: "zod" },
+      "zod/v4/core": { kind: "external" },
     },
   }),
 };
