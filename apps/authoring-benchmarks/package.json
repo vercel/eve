@@ -1,0 +1,25 @@
+{
+  "name": "@eve-internal/authoring-benchmarks",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "benchmark": "tsx src/cli.ts",
+    "benchmark:photon": "tsx src/cli.ts photon-imessage",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/harness": "1.0.40",
+    "@ai-sdk/harness-pi": "1.0.40",
+    "@ai-sdk/provider-utils": "5.0.12",
+    "@ai-sdk/sandbox-vercel": "1.0.40",
+    "@vercel/sandbox": "2.8.0",
+    "ai": "catalog:",
+    "ws": "8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "^4.21.0",
+    "typescript": "catalog:"
+  }
+}
