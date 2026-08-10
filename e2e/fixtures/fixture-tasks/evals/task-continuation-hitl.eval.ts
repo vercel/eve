@@ -18,14 +18,16 @@ export default defineEval({
 
     const first = await waitForTaskInput(t, t, "first_gate");
     t.log("answering first task gate one");
-    const firstAnswered = await first.session.respond({
-      optionId: "approve",
-      requestId: first.request.requestId,
-    });
+    const firstAnswered = await first.session.respond([
+      {
+        optionId: "approve",
+        requestId: first.request.requestId,
+      },
+    ]);
     firstAnswered.notEvent("step.started");
     const second = await waitForTaskInput(t, first.session, "second_gate");
     t.log("answering first task gate two");
-    await second.session.respond({ optionId: "approve", requestId: second.request.requestId });
+    await second.session.respond([{ optionId: "approve", requestId: second.request.requestId }]);
     await waitForCompletedTask(t, second.session, "TASK-HITL-VERIFY", firstTaskId);
     t.log("first task completed; sending continuation");
 
@@ -43,22 +45,21 @@ export default defineEval({
     if (typeof secondTaskId !== "string") throw new Error("task_send returned no new task id.");
     t.log("continuation admitted; waiting for rebound HITL");
     const continuedThird = await waitForTaskInput(t, continued.session, "third_gate");
-    const continuedThirdAnswer = await continuedThird.session.respond({
-      optionId: "approve",
-      requestId: continuedThird.request.requestId,
-    });
+    const continuedThirdAnswer = await continuedThird.session.respond([
+      {
+        optionId: "approve",
+        requestId: continuedThird.request.requestId,
+      },
+    ]);
     continuedThirdAnswer.notEvent("step.started");
     const continuedFourth = await waitForTaskInput(t, continuedThird.session, "fourth_gate");
-    await continuedFourth.session.respond({
-      optionId: "approve",
-      requestId: continuedFourth.request.requestId,
-    });
-    await waitForCompletedTask(
-      t,
-      continuedFourth.session,
-      "TASK-HITL-VERIFY",
-      secondTaskId,
-    );
+    await continuedFourth.session.respond([
+      {
+        optionId: "approve",
+        requestId: continuedFourth.request.requestId,
+      },
+    ]);
+    await waitForCompletedTask(t, continuedFourth.session, "TASK-HITL-VERIFY", secondTaskId);
     t.noFailedActions();
   },
 });

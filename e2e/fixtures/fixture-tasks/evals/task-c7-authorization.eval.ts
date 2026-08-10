@@ -3,6 +3,7 @@ import { equals, satisfies } from "eve/evals/expect";
 
 import {
   requireBackgroundTaskId,
+  requireSessionStreamIndex,
   requireTaskView,
   sendAndFollowQueuedTurn,
   type TaskEvalSessionDriver,
@@ -149,7 +150,9 @@ async function waitForAuthorizationEvent<TType extends AuthorizationEvent["type"
 
     const sessionId = session.sessionId;
     if (sessionId === undefined) throw new Error("Authorization event wait has no session id.");
-    const live = t.target.watchTurn(sessionId, { startIndex: session.state.streamIndex });
+    const live = t.target.watchTurn(sessionId, {
+      startIndex: requireSessionStreamIndex(session, "Authorization event wait"),
+    });
     turn = await live.result();
     session = live.session;
   }

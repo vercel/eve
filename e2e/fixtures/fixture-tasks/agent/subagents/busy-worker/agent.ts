@@ -5,7 +5,7 @@ export default defineAgent({
   description: "Return one deterministic marker for each message.",
   model: mockModel((request) => {
     const message = request.lastUserMessage ?? "";
-    if (message === "TASK-A2-BUSY-WORKER-FAILURE") {
+    if (message.includes("TASK-A2-BUSY-WORKER-FAILURE")) {
       throw Object.assign(new Error("TASK-A2-BUSY-WORKER-FAILURE"), { statusCode: 400 });
     }
     if (message.includes("BUSY-WORKER-A") || message.includes("BUSY-WORKER-B")) {

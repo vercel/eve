@@ -18,35 +18,26 @@ export default defineEval({
     started.messageIncludes("TASK-CANCEL-READY");
 
     const blocked = await waitForTaskInput(t, t, "release");
-    const previousSessionId = blocked.session.sessionId;
-    if (previousSessionId === undefined) {
+    const sessionId = blocked.session.sessionId;
+    if (sessionId === undefined) {
       throw new Error("The blocked task has no parent session id.");
     }
-    const continuationToken = t.state.continuationToken;
-    if (continuationToken === undefined) {
-      throw new Error("The parent session has no continuation token.");
-    }
 
-    const reset = await postReset(t.target, continuationToken);
+    const reset = await postReset(t.target, sessionId);
     await t.require(
       reset,
       satisfies(
         (value: ResetResponse) =>
-          value.ok === true &&
-          value.status === "reset" &&
-          value.previousSessionId === previousSessionId,
+          value.ok === true && value.status === "reset" && value.previousSessionId === sessionId,
         "reset identifies the blocked task's previous parent session",
       ),
     );
   },
 });
 
-async function postReset(
-  target: EveEvalTargetHandle,
-  continuationToken: string,
-): Promise<ResetResponse> {
-  const response = await target.fetch("/eve/v1/session/reset", {
-    body: JSON.stringify({ continuationToken }),
+async function postReset(target: EveEvalTargetHandle, sessionId: string): Promise<ResetResponse> {
+  const response = await target.fetch(`/eve/v1/session/${sessionId}/reset`, {
+    body: JSON.stringify({}),
     headers: { "content-type": "application/json" },
     method: "POST",
   });

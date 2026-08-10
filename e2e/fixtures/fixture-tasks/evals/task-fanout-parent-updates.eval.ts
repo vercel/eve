@@ -1,7 +1,11 @@
 import { defineEval, type EveEvalTurn, type InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { sendAndFollowQueuedTurn, type TaskEvalSessionDriver } from "./shared.js";
+import {
+  requireSessionStreamIndex,
+  sendAndFollowQueuedTurn,
+  type TaskEvalSessionDriver,
+} from "./shared.js";
 
 const FANOUT_SIZE = 10;
 
@@ -35,7 +39,7 @@ export default defineEval({
     interactive.turn.usedNoTools();
 
     const released = await interactive.session.respond(
-      ...blocked.requests.map((request) => ({
+      blocked.requests.map((request) => ({
         optionId: "approve",
         requestId: request.requestId,
       })),
@@ -48,14 +52,14 @@ export default defineEval({
       ...interactive.observedTurns.flatMap((turn) => completedTaskUpdates(turn, taskIds)),
       ...completedTaskUpdates(released, taskIds),
     ]);
-    let startIndex = interactive.session.state.streamIndex;
+    let startIndex = requireSessionStreamIndex(interactive.session, "Task fanout update wait");
     for (let attempt = 0; attempt < FANOUT_SIZE && updated.size < FANOUT_SIZE; attempt += 1) {
       const sessionId = t.sessionId;
       if (sessionId === undefined) throw new Error("Task fanout has no parent session id.");
       const live = t.target.watchTurn(sessionId, { startIndex });
       const turn = await live.result();
       for (const taskId of completedTaskUpdates(turn, taskIds)) updated.add(taskId);
-      startIndex = live.session.state.streamIndex;
+      startIndex = requireSessionStreamIndex(live.session, "Task fanout update wait");
     }
 
     await t.require(
@@ -87,7 +91,9 @@ async function waitForReleaseRequests(
   for (let attempt = 0; attempt < FANOUT_SIZE && requests.size < FANOUT_SIZE; attempt += 1) {
     const sessionId = session.sessionId;
     if (sessionId === undefined) throw new Error("Task fanout has no parent session id.");
-    const live = t.target.watchTurn(sessionId, { startIndex: session.state.streamIndex });
+    const live = t.target.watchTurn(sessionId, {
+      startIndex: requireSessionStreamIndex(session, "Task fanout release wait"),
+    });
     const turn = await live.result();
     observedTurns.push(turn);
     collectReleaseRequests(turn, requests);

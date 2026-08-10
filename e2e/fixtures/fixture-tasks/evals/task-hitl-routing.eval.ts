@@ -19,28 +19,34 @@ export default defineEval({
     const taskId = requireBackgroundTaskId(started);
 
     const first = await waitForTaskInput(t, t, "first_gate");
-    const answered = await first.session.respond({
-      optionId: "approve",
-      requestId: first.request.requestId,
-    });
+    const answered = await first.session.respond([
+      {
+        optionId: "approve",
+        requestId: first.request.requestId,
+      },
+    ]);
     answered.expectOk();
     answered.notEvent("step.started");
 
     // A second child request proves the first answer reached the child even
     // though the parent model did not run.
     const second = await waitForTaskInput(t, first.session, "second_gate");
-    const answeredSecond = await second.session.respond({
-      optionId: "approve",
-      requestId: second.request.requestId,
-    });
+    const answeredSecond = await second.session.respond([
+      {
+        optionId: "approve",
+        requestId: second.request.requestId,
+      },
+    ]);
     answeredSecond.expectOk();
     answeredSecond.notEvent("step.started");
 
     const third = await waitForTaskInput(t, second.session, "third_gate");
-    const finished = await third.session.respond({
-      optionId: "approve",
-      requestId: third.request.requestId,
-    });
+    const finished = await third.session.respond([
+      {
+        optionId: "approve",
+        requestId: third.request.requestId,
+      },
+    ]);
     finished.expectOk();
 
     const verified = await waitForCompletedTask(t, third.session, "TASK-HITL-VERIFY", taskId);

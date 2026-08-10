@@ -1,7 +1,7 @@
 import { defineEval, type EveEvalContext, type EveEvalTurn, type InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import type { TaskEvalSessionDriver } from "./shared.js";
+import { requireSessionStreamIndex, type TaskEvalSessionDriver } from "./shared.js";
 
 const FAN_IN_SIZE = 2;
 const MAX_WAKE_TURNS = 8;
@@ -50,10 +50,12 @@ export default defineEval({
     const marker1Request = requireMappedValue(blocked.requestsByMarker, marker1, "release request");
     const marker2Request = requireMappedValue(blocked.requestsByMarker, marker2, "release request");
 
-    const firstReleased = await blocked.session.respond({
-      optionId: "approve",
-      requestId: marker2Request.requestId,
-    });
+    const firstReleased = await blocked.session.respond([
+      {
+        optionId: "approve",
+        requestId: marker2Request.requestId,
+      },
+    ]);
     firstReleased.expectOk();
 
     const waiting = await waitForTurnMessage(
@@ -85,10 +87,12 @@ export default defineEval({
 
     // Release the second task: the next peek sees both completed and the
     // model may finally answer.
-    const secondReleased = await waiting.session.respond({
-      optionId: "approve",
-      requestId: marker1Request.requestId,
-    });
+    const secondReleased = await waiting.session.respond([
+      {
+        optionId: "approve",
+        requestId: marker1Request.requestId,
+      },
+    ]);
     secondReleased.expectOk();
 
     const complete = await waitForTurnMessage(
@@ -186,7 +190,9 @@ async function waitForReleaseRequests(
   ) {
     const sessionId = session.sessionId;
     if (sessionId === undefined) throw new Error("Fan-in has no parent session id.");
-    const live = t.target.watchTurn(sessionId, { startIndex: session.state.streamIndex });
+    const live = t.target.watchTurn(sessionId, {
+      startIndex: requireSessionStreamIndex(session, "Fan-in release wait"),
+    });
     const turn = await live.result();
     collectReleaseRequests(turn.inputRequests, requestsByMarker);
     session = live.session;
@@ -239,7 +245,9 @@ async function waitForTurnMessage(
   for (let attempt = 0; attempt < MAX_WAKE_TURNS; attempt += 1) {
     const sessionId = session.sessionId;
     if (sessionId === undefined) throw new Error("Fan-in has no parent session id.");
-    const live = t.target.watchTurn(sessionId, { startIndex: session.state.streamIndex });
+    const live = t.target.watchTurn(sessionId, {
+      startIndex: requireSessionStreamIndex(session, "Fan-in message wait"),
+    });
     const turn = await live.result();
     observedTurns.push(turn);
     session = live.session;

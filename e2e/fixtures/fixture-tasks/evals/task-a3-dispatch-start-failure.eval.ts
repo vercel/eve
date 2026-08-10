@@ -8,7 +8,7 @@ const CALL_ID = "task-a3-unstartable-worker";
 /** A failed remote start never admits its prepared task or child session. */
 export default defineEval({
   description:
-    "A malformed remote URL fails dispatch without exposing a receipt, task id, or child session.",
+    "An unreachable remote URL fails dispatch without exposing a receipt, task id, or child session.",
   async test(t) {
     const started = await t.send("TASK-A3-DISPATCH-START-FAILURE");
     started.expectOk();

@@ -21,17 +21,21 @@ export default defineEval({
     const taskId = requireBackgroundTaskId(started);
 
     const first = await waitForTaskInput(t, t, "first_gate");
-    const firstAnswer = await first.session.respond({
-      optionId: "approve",
-      requestId: first.request.requestId,
-    });
+    const firstAnswer = await first.session.respond([
+      {
+        optionId: "approve",
+        requestId: first.request.requestId,
+      },
+    ]);
     firstAnswer.expectOk();
 
     const second = await waitForTaskInput(t, first.session, "second_gate");
-    const stale = await second.session.respond({
-      optionId: "approve",
-      requestId: first.request.requestId,
-    });
+    const stale = await second.session.respond([
+      {
+        optionId: "approve",
+        requestId: first.request.requestId,
+      },
+    ]);
     stale.expectOk();
 
     const afterStale = await sendAndFollowQueuedTurn(
@@ -56,10 +60,12 @@ export default defineEval({
 
     // If the stale Q1 answer cleared Q2, this exact Q2 response cannot resume
     // the child and the task never reaches `completed`.
-    const secondAnswer = await afterStale.session.respond({
-      optionId: "approve",
-      requestId: second.request.requestId,
-    });
+    const secondAnswer = await afterStale.session.respond([
+      {
+        optionId: "approve",
+        requestId: second.request.requestId,
+      },
+    ]);
     secondAnswer.expectOk();
 
     const verified = await waitForCompletedTask(

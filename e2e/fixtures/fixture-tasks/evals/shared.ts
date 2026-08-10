@@ -19,6 +19,15 @@ export interface FollowedQueuedTurn {
   readonly turn: EveEvalTurn;
 }
 
+export function requireSessionStreamIndex(
+  session: TaskEvalSessionDriver,
+  operation: string,
+): number {
+  const state = session.state;
+  if (state === undefined) throw new Error(`${operation} has no session state.`);
+  return state.streamIndex;
+}
+
 /** Reproduces the runtime task id for a fixed call in an observed parent turn. */
 export function deriveTurnTaskId(turn: EveEvalTurn, callId: string): string {
   const started = turn.events.find((event) => event.type === "turn.started");
@@ -44,7 +53,9 @@ export async function waitForTaskInput(
 
     const sessionId = session.sessionId;
     if (sessionId === undefined) throw new Error("Task input wait has no parent session id.");
-    const live = t.target.watchTurn(sessionId, { startIndex: session.state.streamIndex });
+    const live = t.target.watchTurn(sessionId, {
+      startIndex: requireSessionStreamIndex(session, "Task input wait"),
+    });
     await live.result();
     session = live.session;
   }
@@ -98,7 +109,9 @@ export async function sendAndFollowQueuedTurn(
 
     const sessionId = session.sessionId;
     if (sessionId === undefined) throw new Error("Queued turn follow-up has no session id.");
-    const live = t.target.watchTurn(sessionId, { startIndex: session.state.streamIndex });
+    const live = t.target.watchTurn(sessionId, {
+      startIndex: requireSessionStreamIndex(session, "Queued turn follow-up"),
+    });
     turn = await live.result();
     observedTurns.push(turn);
     session = live.session;

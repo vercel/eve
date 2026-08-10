@@ -29,10 +29,12 @@ export default defineEval({
     const taskId = requireBackgroundTaskId(started);
 
     const gate = await waitForTaskInput(t, t, "remote_gate");
-    const answered = await gate.session.respond({
-      optionId: "approve",
-      requestId: gate.request.requestId,
-    });
+    const answered = await gate.session.respond([
+      {
+        optionId: "approve",
+        requestId: gate.request.requestId,
+      },
+    ]);
     answered.expectOk();
     answered.notEvent("step.started");
 
