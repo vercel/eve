@@ -100,7 +100,7 @@ export default defineSandbox({
   revalidationKey: () => "repo-bootstrap-v1",
   async bootstrap({ use }) {
     const sandbox = await use();
-    await sandbox.run({ command: "apt-get install -y jq" });
+    await sandbox.run({ command: "sudo apt-get install -y jq" });
   },
   async onSession({ use }) {
     await use({ networkPolicy: "deny-all" });
