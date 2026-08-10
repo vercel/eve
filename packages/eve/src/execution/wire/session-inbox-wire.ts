@@ -8,6 +8,7 @@ import {
   runMigrationChain,
   type VersionMigration,
 } from "#execution/durable-session-migrations/chain.js";
+import { isObject } from "#shared/guards.js";
 import {
   SESSION_INBOX_WIRE_VERSION,
   SessionInboxWireError,
@@ -42,8 +43,6 @@ import type { SessionInboxWire } from "#execution/wire/session-inbox-encoder.js"
  * See research/session-inbox-wire-schema.md and issue #1765.
  */
 
-type SendCommand = Extract<SessionCommand, { readonly kind: "send" }>;
-
 /** A persisted inbox payload normalized for consumption; `send` never survives decode. */
 export type DecodedSessionInbox =
   | DeliverHookPayload
@@ -55,6 +54,45 @@ export { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js
 /** Prefixes chain and schema failures alike, so messages read as one voice. */
 const WIRE_LABEL = "session inbox payload";
 
+function migrateSessionInboxV0(prior: unknown): Record<string, unknown> & { readonly version: 1 } {
+  const value = prior as Record<string, unknown>;
+  if (value.kind === "send") return migrateLegacySend(value);
+
+  if (
+    value.kind === "deliver" &&
+    !(Array.isArray(value.payloads) && value.payloads.every(isObject))
+  ) {
+    throw new Error("legacy deliver payload has no object-array payloads field.");
+  }
+
+  return { ...value, version: 1 };
+}
+
+function migrateLegacySend(send: Record<string, unknown>): {
+  readonly version: 1;
+} & Record<string, unknown> {
+  if (!isObject(send.payload)) {
+    throw new Error("legacy send command has no object payload field.");
+  }
+  if (send.delivery !== undefined && !isObject(send.delivery)) {
+    throw new Error("legacy send command has a non-object delivery field.");
+  }
+
+  return {
+    auth: send.auth,
+    caller: send.caller,
+    deliveryMetadata:
+      send.delivery === undefined ? undefined : [{ ...send.delivery, payloadIndex: 0 }],
+    kind: "deliver",
+    payload: send.payload,
+    payloads: [send.payload],
+    requestId: send.requestId,
+    taskDeliveryId: send.taskDeliveryId,
+    turnPolicy: send.turnPolicy,
+    version: 1,
+  };
+}
+
 /**
  * v0 → v1: the unversioned era. Only one shape actually changed — raw
  * `send` commands (persisted by eve 0.30.3–0.30.8; removable once runs
@@ -65,41 +103,7 @@ const WIRE_LABEL = "session inbox payload";
 const sessionInboxMigrations: readonly VersionMigration[] = [
   {
     from: 0,
-    migrate: (prior) => {
-      const value = prior as { readonly kind?: unknown };
-      if (value.kind !== "send") {
-        if (
-          value.kind === "deliver" &&
-          !(
-            Array.isArray((value as { readonly payloads?: unknown }).payloads) &&
-            (value as { readonly payloads: unknown[] }).payloads.every(
-              (payload) => typeof payload === "object" && payload !== null,
-            )
-          )
-        ) {
-          throw new Error("legacy deliver payload has no object-array payloads field.");
-        }
-        return { ...(value as object), version: 1 };
-      }
-
-      const send = value as SendCommand;
-      if (typeof send.payload !== "object" || send.payload === null) {
-        throw new Error("legacy send command has no object payload field.");
-      }
-      return {
-        auth: send.auth,
-        caller: send.caller,
-        deliveryMetadata:
-          send.delivery === undefined ? undefined : [{ ...send.delivery, payloadIndex: 0 }],
-        kind: "deliver",
-        payload: send.payload,
-        payloads: [send.payload],
-        requestId: send.requestId,
-        taskDeliveryId: send.taskDeliveryId,
-        turnPolicy: send.turnPolicy,
-        version: 1,
-      };
-    },
+    migrate: migrateSessionInboxV0,
     to: 1,
   },
 ];
