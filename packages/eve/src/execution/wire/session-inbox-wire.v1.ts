@@ -248,9 +248,7 @@ export function encodeSessionCommandV1(
           auth: command.auth,
           caller: command.caller,
           deliveryMetadata:
-            command.delivery === undefined
-              ? undefined
-              : [{ ...command.delivery, payloadIndex: 0 }],
+            command.delivery === undefined ? undefined : [{ ...command.delivery, payloadIndex: 0 }],
           kind: "deliver" as const,
           payload: command.payload,
           payloads: [command.payload],

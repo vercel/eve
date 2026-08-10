@@ -209,11 +209,7 @@ async function waitForNextSessionAction(input: {
       return { kind: "expired" };
     }
 
-    if (
-      decoded.kind === "clear" ||
-      decoded.kind === "compact" ||
-      decoded.kind === "reset"
-    ) {
+    if (decoded.kind === "clear" || decoded.kind === "compact" || decoded.kind === "reset") {
       return { kind: decoded.kind };
     }
 

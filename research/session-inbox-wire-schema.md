@@ -176,9 +176,11 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
   `internal/testing/` frozen-consumer workflows are exempt — impersonating
   old cohorts is their job. The baseline starts at zero; baselines may only
   shrink.
-- **Invariant guard (rule 40).** Every `execution/wire/*-wire.ts` family
-  must have a colocated contract test containing `FROZEN_SHAPES` and
-  `FROZEN_FIXTURES` — a family cannot ship without its frozen contract.
+- **Invariant guard (rule 40).** Every append-only
+  `execution/wire/*-wire.vN.ts` module must have a colocated
+  `*-wire.vN.test.ts`: v0 pins legacy fixtures and migration behavior; v1
+  pins the complete schema, encoder, and round-trip. A version cannot ship
+  as untested protocol history.
 - Enforcement is layered by what each CI job can check: the mechanical
   guards (rules 39/40) run in the lint job and enforce presence and routing
   textually; the semantic contract (shape bytes, fixture decoding,

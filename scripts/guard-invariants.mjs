@@ -112,12 +112,11 @@
  *             impersonating old cohorts is their job. The auth-hook delivery
  *             in `runtime/connections/callback-route.ts` is allowlisted
  *             until auth payloads join a wire family.
- *   rule 40 — Every wire family (`src/execution/wire/*-wire.ts`) must carry a
- *             colocated frozen contract test (`*-wire.test.ts` containing
- *             `FROZEN_SHAPES` and `FROZEN_FIXTURES`). The frozen shapes and
- *             backwards-compatibility fixtures are the mechanism that turns
- *             "changing a shipped schema" into a red diff; a family without
- *             them is an unversioned wire wearing a versioned name.
+ *   rule 40 — Every shipped wire-version module
+ *             (`src/execution/wire/*-wire.vN.ts`) must carry a colocated
+ *             `*-wire.vN.test.ts`. Version modules are append-only protocol
+ *             history; the paired test pins that version's schema/encoder or
+ *             migration/fixtures so a version cannot exist as untested code.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -435,7 +434,7 @@ function importSpecifier(node) {
   return undefined;
 }
 
-// ---------- Rule 40: wire families carry frozen contracts ----------
+// ---------- Rule 40: wire versions carry colocated contract tests ----------
 
 const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
 
@@ -450,30 +449,18 @@ async function checkRule40WireContracts() {
   }
 
   for (const name of entries) {
-    const family = name.match(/^([a-z0-9-]+)-wire\.ts$/)?.[1];
-    if (family === undefined) continue;
+    const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)\.ts$/);
+    if (match === null) continue;
+    const [, family, version] = match;
 
-    const testName = `${family}-wire.test.ts`;
+    const testName = `${family}-wire.v${version}.test.ts`;
     if (!entries.includes(testName)) {
       violations.push({
         rule: 40,
         file: `${WIRE_FAMILY_DIR}/${name}`,
         line: 1,
-        message: `wire family "${family}" has no colocated frozen contract test (${testName}). Freeze each version's schema shape and backwards-compatibility fixtures so editing a shipped shape is a red diff.`,
+        message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
       });
-      continue;
-    }
-
-    const content = await readFile(join(REPO_ROOT, WIRE_FAMILY_DIR, testName), "utf8");
-    for (const marker of ["FROZEN_SHAPES", "FROZEN_FIXTURES"]) {
-      if (!content.includes(marker)) {
-        violations.push({
-          rule: 40,
-          file: `${WIRE_FAMILY_DIR}/${testName}`,
-          line: 1,
-          message: `frozen contract test is missing ${marker}. Every wire family pins its per-version schema shapes and backwards-compatibility fixtures.`,
-        });
-      }
     }
   }
 
