@@ -35,5 +35,11 @@ export const config = defineConfig({
     // Used only if eveAgent is removed and chat falls back to gateway mode.
     prompt,
     suggestions,
+    // Ask AI is answered by an agent built on eve (help-eve).
+    footer: (
+      <div className="text-right">
+        <a href="https://eve.dev">Powered by eve</a>
+      </div>
+    ),
   },
 });
