@@ -22,6 +22,7 @@ import type {
 const WORKSPACE = "workspace";
 const DEFAULT_TIMEOUT_MS = 15 * 60_000;
 const DEFAULT_SUBJECT_REVISION = "origin/main";
+const BENCHMARK_BOOTSTRAP_VERSION = 2;
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const execFileAsync = promisify(execFile);
 
@@ -75,7 +76,7 @@ export async function runBenchmark(options: RunBenchmarkOptions): Promise<Benchm
     sandbox: sandboxProvider,
     sandboxConfig: {
       workDir: WORKSPACE,
-      bootstrapHash: `eve-authoring-${evaluation.id}-${subjectRevision}-v1`,
+      bootstrapHash: `eve-authoring-${evaluation.id}-${subjectRevision}-v${BENCHMARK_BOOTSTRAP_VERSION}`,
       async onBootstrap({ session, workDir }) {
         progress("Building reusable eve benchmark template");
         await world.bootstrap({ sandbox: session });
@@ -222,6 +223,14 @@ async function bootstrapSubject(
         workingDirectory: workspace,
       },
       {
+        label: "pin project package manager policy",
+        command: [
+          "pnpm config set --location=project minimum-release-age 0",
+          "pnpm config set --location=project manage-package-manager-versions false",
+        ].join(" && "),
+        workingDirectory: workspace,
+      },
+      {
         label: "install template dependencies",
         command: "pnpm install --config.minimumReleaseAge=0",
         workingDirectory: workspace,
@@ -283,6 +292,7 @@ function setupEnvironment(): Record<string, string> {
   return {
     AI_AGENT: "benchmark",
     EVE_DEV_OFFICIAL_REGISTRY_URL: "http://127.0.0.1:4173/r",
+    COREPACK_ENABLE_PROJECT_SPEC: "0",
   };
 }
 
