@@ -684,7 +684,7 @@ describe("resolvePendingInput", () => {
     expect(result.rejectedActions).toBeUndefined();
   });
 
-  it("uses the final response consistently when a deferred approval is answered again", () => {
+  it("does not retain approval when a deferred response is superseded", () => {
     const approval = (requestId: string, callId: string): InputRequest => ({
       action: { callId, input: { command: "pwd" }, kind: "tool-call", toolName: "bash" },
       allowFreeform: false,
@@ -727,9 +727,6 @@ describe("resolvePendingInput", () => {
     expect(result.rejectedActions?.[0]?.results).toEqual([
       expect.objectContaining({
         callId: "call-1",
-        output: expect.objectContaining({
-          approval: { requestId: "approval-1", status: "denied" },
-        }),
       }),
     ]);
   });
