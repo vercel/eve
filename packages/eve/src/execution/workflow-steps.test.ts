@@ -1194,6 +1194,50 @@ describe("turnStep", () => {
     });
   });
 
+  it("carries a settled turn while an older input batch remains pending", async () => {
+    const session = appendPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "call-existing-input",
+            input: {},
+            kind: "tool-call",
+            toolName: "confirm",
+          },
+          kind: "question",
+          prompt: "Continue?",
+          requestId: "request-existing-input",
+        },
+      ],
+      responseMessages: [],
+      session: createStubSession(),
+    });
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: stepSession,
+        settledTurn: { output: "settled while approval remains open" },
+      });
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "unrelated message" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "park",
+      hasPendingInputBatch: true,
+      settled: { output: "settled while approval remains open" },
+    });
+  });
+
   it.each([
     {
       name: "authorization",
@@ -1253,14 +1297,13 @@ describe("turnStep", () => {
           session,
         }),
     },
-  ])("does not attach settled output while a $name remains pending", async ({ withPending }) => {
+  ])("does not infer settled output from a pending $name", async ({ withPending }) => {
     const session = createStubSession();
     installSessionStoreMocks([session]);
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (stepSession): Promise<StepResult> => ({
         next: null,
         session: withPending(stepSession),
-        settledTurn: { output: "must stay gated" },
       });
     });
 

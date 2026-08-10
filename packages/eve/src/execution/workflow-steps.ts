@@ -498,21 +498,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
     const pending = derivePendingState(stepResult.session);
 
-    // A park is idle when the turn stopped because it finished, not because
-    // it is blocked on an authorization grant, a queued input batch, or
-    // runtime-action dispatch.
-    const isIdlePark =
-      !pending.hasPendingAuthorization &&
-      !pending.hasPendingInputBatch &&
-      (pending.pendingRuntimeActionKeys?.length ?? 0) === 0;
-
-    // A settled answer crosses the park boundary only at an idle park: the
-    // driver forwards it to the delegated caller (notify-then-park), and
-    // forwarding from a blocked park would report the turn as finished while
-    // it still waits on pending work. `usage` carries only this turn's
-    // delta: the take marks the totals reported, so the next settled turn
-    // of a persistent child never re-reports earlier spend.
-    if (isIdlePark && stepResult.settledTurn !== undefined) {
+    // `settledTurn` is the harness's explicit settlement verdict. Pending
+    // state may predate this turn, while newly created parks omit the verdict.
+    // `usage` carries only this turn's delta: the take marks the totals
+    // reported, so a persistent child never re-reports earlier spend.
+    if (stepResult.settledTurn !== undefined) {
       const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
       return {
         action: "park",

@@ -2244,7 +2244,10 @@ async function handleStepResult(input: {
       }
     }
 
-    return { next: null, session: parkedSession };
+    return {
+      next: hasDeferredStepInput(parkedSession) ? runStep : null,
+      session: parkedSession,
+    };
   }
 
   // --- Park on authorization request ------------------------------------------

@@ -80,10 +80,10 @@ export function hasStepInput(input?: StepInput): boolean {
  * run the model. A message behind a single question-only batch keeps its
  * dismiss-and-continue behavior.
  *
- * Tool approval responses additionally resolve in isolation because AI SDK
- * cannot process an approval response and a new user message in the same
- * request; {@link consumeDeferredStepInput} replays the message on the
- * subsequent step.
+ * Tool approval responses additionally resolve with at most one
+ * approval-bearing batch per internal step because AI SDK only collects
+ * approval responses from the tail tool message. Session-limit prompts take
+ * exclusive ownership of resolution until answered.
  */
 export function resolvePendingInput(input: {
   readonly history?: readonly ModelMessage[];
@@ -102,22 +102,47 @@ export function resolvePendingInput(input: {
     return { outcome: "continue", messages: baseHistory, session };
   }
 
-  // Text matching stays scoped to a single open batch: with several open,
-  // a bare option word is ambiguous, so it stays an ordinary message.
+  const limitBatch = batches.find((batch) =>
+    batch.requests.some((request) => isSessionLimitContinuationRequest(request)),
+  );
+
+  // A session-limit prompt owns text matching even when other batches are
+  // open. Otherwise a bare option word remains ambiguous across batches.
   const resolvedStepInput: (StepInput & { readonly messageConsumed?: boolean }) | undefined =
-    batches.length === 1 ? resolveTextMessageInput(batches[0]!, stepInput) : stepInput;
-  const responses = resolvedStepInput?.inputResponses ?? [];
+    limitBatch !== undefined
+      ? resolveTextMessageInput(limitBatch, stepInput)
+      : batches.length === 1
+        ? resolveTextMessageInput(batches[0]!, stepInput)
+        : stepInput;
+  const responses = canonicalizeInputResponses(resolvedStepInput?.inputResponses ?? []);
 
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
+    const deferredInput = compactStepInput(resolvedStepInput);
+    if (deferredInput.context !== undefined || deferredInput.outputSchema !== undefined) {
+      session = queueDeferredStepInput(session, deferredInput);
+    }
     return { outcome: "unresolved", messages: baseHistory, session };
   }
 
   const responseIds = new Set(responses.map((response) => response.requestId));
-  const resolvedBatches = batches.filter(
+  const eligibleBatches = limitBatch === undefined ? batches : [limitBatch];
+  let resolvedBatches = eligibleBatches.filter(
     (batch) =>
       batch.requests.some((request) => responseIds.has(request.requestId)) &&
       !hasUnansweredRequiredRequest({ pendingBatch: batch, responses }),
   );
+
+  if (limitBatch === undefined) {
+    const firstApprovalIndex = resolvedBatches.findIndex((batch) =>
+      batch.requests.some((request) => isApprovalRequest(request)),
+    );
+    if (firstApprovalIndex >= 0) {
+      // Anything after this batch would hide its approval response from AI
+      // SDK's tail-tool-message scan. Its responses replay on the next step.
+      resolvedBatches = resolvedBatches.slice(0, firstApprovalIndex + 1);
+    }
+  }
+
   const openBatches = batches.filter((batch) => !resolvedBatches.includes(batch));
   const leftoverResponses = responses.filter((response) =>
     openBatches.some((batch) =>
@@ -180,6 +205,7 @@ export function resolvePendingInput(input: {
 
   let limitContinuation: { readonly granted: boolean } | undefined;
   let resolvesApprovalBatch = false;
+  const resumesApprovalBatch = hasTailApprovalResponse(baseHistory);
   const messages: ModelMessage[] = [...baseHistory];
   const rejectedActions: RejectedActionBatch[] = [];
 
@@ -224,7 +250,7 @@ export function resolvePendingInput(input: {
   if (leftoverResponses.length > 0) {
     deferredInput.inputResponses = leftoverResponses;
   }
-  if (resolvesApprovalBatch || limitBlocked) {
+  if (resolvesApprovalBatch || resumesApprovalBatch || limitBlocked) {
     if ((resolvedStepInput?.context?.length ?? 0) > 0) {
       deferredInput.context = resolvedStepInput?.context;
     }
@@ -262,11 +288,31 @@ export function resolvePendingInput(input: {
   };
 }
 
+function canonicalizeInputResponses(responses: readonly InputResponse[]): readonly InputResponse[] {
+  const byRequestId = new Map<string, InputResponse>();
+  for (const response of responses) {
+    byRequestId.set(response.requestId, response);
+  }
+  return [...byRequestId.values()];
+}
+
+function hasTailApprovalResponse(messages: readonly ModelMessage[]): boolean {
+  const tail = messages.at(-1);
+  return (
+    tail?.role === "tool" && tail.content.some((part) => part.type === "tool-approval-response")
+  );
+}
+
 function resolveTextMessageInput(
   pendingBatch: PendingInputBatch,
   stepInput: StepInput | undefined,
 ): (StepInput & { readonly messageConsumed?: boolean }) | undefined {
-  if (typeof stepInput?.message !== "string" || (stepInput.inputResponses?.length ?? 0) > 0) {
+  if (typeof stepInput?.message !== "string") {
+    return stepInput;
+  }
+
+  const batchRequestIds = new Set(pendingBatch.requests.map((request) => request.requestId));
+  if (stepInput.inputResponses?.some((response) => batchRequestIds.has(response.requestId))) {
     return stepInput;
   }
 
@@ -277,7 +323,7 @@ function resolveTextMessageInput(
 
   return compactStepInput({
     ...stepInput,
-    inputResponses: responses,
+    inputResponses: [...(stepInput.inputResponses ?? []), ...responses],
     messageConsumed: true,
     message: undefined,
   });

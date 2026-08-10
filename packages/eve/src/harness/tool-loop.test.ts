@@ -420,6 +420,34 @@ function setupMockAgent(result: Record<string, unknown>): void {
   } as unknown as MockAgentConstructor);
 }
 
+function setupMockAgentSequence(results: readonly Record<string, unknown>[]): void {
+  let index = 0;
+  vi.mocked(ToolLoopAgent).mockImplementation(function (
+    this: MockAgentInstance,
+    settings: MockAgentSettings,
+  ) {
+    const result = results[index++];
+    if (result === undefined) {
+      throw new Error("ToolLoopAgent mock exhausted its scripted results.");
+    }
+    const { onStepFinish, prepareStep } = settings;
+    this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+      if (prepareStep) {
+        await prepareStep({
+          messages: options.messages,
+          steps: [],
+          stepNumber: 0,
+          model: {},
+          context: undefined,
+        });
+      }
+      if (onStepFinish) await onStepFinish(result);
+      return createMockGenerateResult(result);
+    });
+    return this;
+  } as MockAgentConstructor);
+}
+
 /**
  * Builds a terminal step result whose assistant turn calls the framework
  * `final_output` tool with `structured` as its (provider-constrained) input.
@@ -8009,6 +8037,101 @@ describe("createToolLoopHarness", () => {
       role: "assistant",
     });
     expect(hasPendingInputBatch(deniedResult.session.state)).toBe(false);
+  });
+
+  it("continues deferred input when approval resolution raises another request", async () => {
+    setupMockAgentSequence([
+      {
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            {
+              content: [
+                {
+                  input: { prompt: "Which color?" },
+                  toolCallId: "question-1",
+                  toolName: "ask_question",
+                  type: "tool-call",
+                },
+              ],
+              role: "assistant",
+            },
+          ],
+        },
+        text: "",
+        toolCalls: [
+          {
+            input: { prompt: "Which color?" },
+            toolCallId: "question-1",
+            toolName: "ask_question",
+            type: "tool-call",
+          },
+        ],
+        toolResults: [],
+      },
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Handled the deferred message.", role: "assistant" }] },
+        text: "Handled the deferred message.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+
+    const base = createPendingBashApprovalSession();
+    const session = {
+      ...base,
+      agent: {
+        ...base.agent,
+        tools: [
+          ...base.agent.tools,
+          {
+            description: "Ask the user a question.",
+            inputSchema: { type: "object" },
+            name: "ask_question",
+          },
+        ],
+      },
+    };
+    const config = createTestConfig("conversation", undefined, {
+      tools: new Map([
+        [
+          "bash",
+          {
+            description: "Run shell commands",
+            execute: vi.fn().mockResolvedValue("ok"),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "bash",
+          },
+        ],
+        [
+          "ask_question",
+          {
+            description: "Ask the user a question.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "ask_question",
+          },
+        ],
+      ]),
+    });
+    const runStep = createToolLoopHarness(config);
+
+    const first = await runStep(session, {
+      inputResponses: [{ optionId: "deny", requestId: "approval-1" }],
+      message: "Use this instead.",
+    });
+
+    expect(typeof first.next).toBe("function");
+    expect(getPendingInputRequestIds(first.session.state)).toEqual(new Set(["question-1"]));
+    if (typeof first.next !== "function") {
+      throw new TypeError("Expected deferred input to continue after the new question.");
+    }
+    const result = await first.next(first.session);
+
+    expect(result.next).toBeNull();
+    expect(hasDeferredStepInput(result.session)).toBe(false);
+    expect(hasPendingInputBatch(result.session.state)).toBe(false);
+    expect(JSON.stringify(result.session.history)).toContain("Use this instead.");
   });
 
   it("emits input.requested for ask_question and does not emit actions.requested", async () => {

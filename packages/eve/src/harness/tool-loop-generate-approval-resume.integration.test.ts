@@ -1,9 +1,10 @@
-import { jsonSchema, type LanguageModel, type ModelMessage } from "ai";
+import { jsonSchema, type LanguageModel, type ModelMessage, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 
 const usage = {
@@ -20,6 +21,27 @@ const usage = {
   },
 };
 
+type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
+type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
+
+function textStreamResult(text: string): StreamResult {
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "stream-start", warnings: [] },
+        { id: "answer", type: "text-start" },
+        { delta: text, id: "answer", type: "text-delta" },
+        { id: "answer", type: "text-end" },
+        {
+          finishReason: { raw: undefined, unified: "stop" },
+          type: "finish",
+          usage,
+        },
+      ] satisfies StreamPart[],
+    }),
+  };
+}
+
 const toolCall = {
   input: { command: "pwd" },
   toolCallId: "call-1",
@@ -30,6 +52,19 @@ const toolCall = {
 const approvalRequest = {
   approvalId: "approval-1",
   toolCallId: toolCall.toolCallId,
+  type: "tool-approval-request" as const,
+};
+
+const secondToolCall = {
+  input: { command: "whoami" },
+  toolCallId: "call-2",
+  toolName: "bash",
+  type: "tool-call" as const,
+};
+
+const secondApprovalRequest = {
+  approvalId: "approval-2",
+  toolCallId: secondToolCall.toolCallId,
   type: "tool-approval-request" as const,
 };
 
@@ -79,6 +114,37 @@ function createPendingApprovalSession(history?: readonly ModelMessage[]): Harnes
       },
     ],
     session,
+  });
+}
+
+function createTwoPendingApprovalSession(): HarnessSession {
+  return appendPendingInputBatch({
+    requests: [
+      {
+        action: {
+          callId: secondToolCall.toolCallId,
+          input: secondToolCall.input,
+          kind: "tool-call",
+          toolName: secondToolCall.toolName,
+        },
+        allowFreeform: false,
+        display: "confirmation",
+        kind: "tool-approval",
+        options: [
+          { id: "approve", label: "Yes" },
+          { id: "deny", label: "No" },
+        ],
+        prompt: "Approve tool call: bash",
+        requestId: secondApprovalRequest.approvalId,
+      },
+    ],
+    responseMessages: [
+      {
+        content: [secondToolCall, secondApprovalRequest],
+        role: "assistant",
+      },
+    ],
+    session: createPendingApprovalSession(),
   });
 }
 
@@ -141,6 +207,108 @@ function findPart(
 }
 
 describe("tool loop generate approval resume (real AI SDK)", () => {
+  it("executes two approvals delivered together exactly once each", async () => {
+    const execute = vi.fn(async (input: unknown) =>
+      (input as { command: string }).command === "pwd" ? "/workspace" : "eve",
+    );
+    const model = createModel();
+
+    const first = await createToolLoopHarness(createConfig(model, execute))(
+      createTwoPendingApprovalSession(),
+      {
+        inputResponses: [
+          { optionId: "approve", requestId: approvalRequest.approvalId },
+          { optionId: "approve", requestId: secondApprovalRequest.approvalId },
+        ],
+      },
+    );
+    if (typeof first.next !== "function") {
+      throw new TypeError("Expected the deferred approval to schedule another harness step.");
+    }
+    const result = await first.next(first.session);
+
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenNthCalledWith(
+      1,
+      toolCall.input,
+      expect.objectContaining({ toolCallId: toolCall.toolCallId }),
+    );
+    expect(execute).toHaveBeenNthCalledWith(
+      2,
+      secondToolCall.input,
+      expect.objectContaining({ toolCallId: secondToolCall.toolCallId }),
+    );
+
+    const toolResultCallIds = result.session.history.flatMap((message) =>
+      message.role === "tool" && Array.isArray(message.content)
+        ? message.content.flatMap((part) => (part.type === "tool-result" ? [part.toolCallId] : []))
+        : [],
+    );
+    expect(toolResultCallIds).toEqual([toolCall.toolCallId, secondToolCall.toolCallId]);
+  });
+
+  it("executes an approval before replaying its message after a limit continuation", async () => {
+    const execute = vi.fn(async () => "/workspace");
+    const model = new MockLanguageModelV4({
+      doStream: [textStreamResult("The command completed."), textStreamResult("Summary complete.")],
+      modelId: "generate-approval-resume-model",
+      provider: "eve-integration-mock",
+    });
+    const config = {
+      ...createConfig(model, execute),
+      handleEvent: async () => {},
+    } satisfies ToolLoopHarnessConfig;
+    const usageState = {
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0,
+      inputTokens: 12,
+      outputTokens: 3,
+      sawCost: false,
+    };
+    const session = setTurnUsageState(
+      {
+        ...createPendingApprovalSession(),
+        limits: { maxInputTokensPerSession: 12 },
+      },
+      { ...usageState, session: usageState, turnId: "turn_previous" },
+    );
+    const runStep = createToolLoopHarness(config);
+
+    const limited = await runStep(session, {
+      inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }],
+      message: "Then summarize it.",
+    });
+
+    expect(execute).not.toHaveBeenCalled();
+    const resumed = await runStep(limited.session, {
+      inputResponses: [
+        {
+          optionId: "continue",
+          requestId: `${session.sessionId}:limit:input:12`,
+        },
+      ],
+    });
+
+    expect(execute).toHaveBeenCalledExactlyOnceWith(
+      toolCall.input,
+      expect.objectContaining({ toolCallId: toolCall.toolCallId }),
+    );
+    expect(typeof resumed.next).toBe("function");
+    if (typeof resumed.next !== "function") {
+      throw new TypeError("Expected the deferred message to run after approval execution.");
+    }
+    await resumed.next(resumed.session);
+
+    expect(model.doStreamCalls).toHaveLength(2);
+    expect(model.doStreamCalls[0]?.prompt.at(-1)?.role).toBe("tool");
+    expect(model.doStreamCalls[1]?.prompt.at(-1)).toMatchObject({
+      content: [{ text: "Then summarize it.", type: "text" }],
+      role: "user",
+    });
+  });
+
   it("persists the approved pre-model tool result without an event handler", async () => {
     const execute = vi.fn(async () => "/workspace");
     const model = createModel();

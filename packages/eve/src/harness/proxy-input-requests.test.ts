@@ -39,7 +39,7 @@ describe("upsertProxyInputRequests", () => {
     });
   });
 
-  it("replaces prior entries for the same child continuation token", () => {
+  it("keeps two batches from the same child independently addressable", () => {
     let session = upsertProxyInputRequests({
       entries: [["req-1", { childContinuationToken: "child-a", kind: "question" }]],
       forChildContinuationToken: "child-a",
@@ -53,12 +53,37 @@ describe("upsertProxyInputRequests", () => {
     });
 
     const entries = getProxyInputRequests(session.state);
-    expect(entries.size).toBe(1);
+    expect(entries.size).toBe(2);
+    expect(entries.get("req-1")).toEqual({
+      childContinuationToken: "child-a",
+      kind: "question",
+    });
     expect(entries.get("req-2")).toEqual({
       childContinuationToken: "child-a",
       kind: "question",
     });
-    expect(entries.has("req-1")).toBe(false);
+  });
+
+  it("replaces only a reused request ID", () => {
+    let session = upsertProxyInputRequests({
+      entries: [
+        ["req-1", { childContinuationToken: "child-a", kind: "question" }],
+        ["req-2", { childContinuationToken: "child-a", kind: "question" }],
+      ],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+
+    session = upsertProxyInputRequests({
+      entries: [["req-1", { childContinuationToken: "child-b", kind: "tool-approval" }]],
+      forChildContinuationToken: "child-b",
+      session,
+    });
+
+    expect([...getProxyInputRequests(session.state)]).toEqual([
+      ["req-1", { childContinuationToken: "child-b", kind: "tool-approval" }],
+      ["req-2", { childContinuationToken: "child-a", kind: "question" }],
+    ]);
   });
 
   it("keeps entries from other children when upserting", () => {
