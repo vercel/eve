@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { encodeSessionCommand } from "#execution/wire/session-inbox-wire.js";
+import { encodeSessionCommand } from "#execution/wire/session-inbox-encoder.js";
 import { EVE_TASK_INPUT_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import {

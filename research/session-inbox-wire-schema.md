@@ -29,31 +29,36 @@ In this document, **must**, **should**, and **may** are normative.
 
 No new framework. Version walking reuses `runMigrationChain`
 (`execution/durable-session-migrations/chain.ts`), exactly as the durable
-session snapshot and turn-workflow input already do. Shape checking is a
-shared, dependency-free field-table walker (`execution/wire/field-table.ts`)
-that every family reuses. The session inbox is the first family;
-turn-control, the subagent proxies, and the auth-hook delivery adopt the
-same composition in follow-ups.
+session snapshot and turn-workflow input already do. The complete current
+wire value is defined by one zod schema in a server/step-only encoder module;
+the workflow-safe decoder imports only its inferred type. The session inbox
+is the first family; turn-control, the subagent proxies, and the auth-hook
+delivery adopt the same split in follow-ups.
 
 ```ts
-// Shared: execution/wire/field-table.ts
-type FieldSpec = "object" | "object-or-null" | "object[]" | "string" | `${FieldType}?`;
-type FieldTable = Readonly<Record<string, Readonly<Record<string, FieldSpec>>>>;
-resolveFieldSpecs({ discriminator, label, table })  // throws WireFieldError
-pickDeclaredFields({ label, specs, value })         // validates, returns declared fields only
-
-// One module per family, e.g. execution/wire/session-inbox-wire.ts
+// Dependency-free contract imported by encoder and decoder.
 export const SESSION_INBOX_WIRE_VERSION = 1;
+
+// Server/step-only encoder: execution/wire/session-inbox-encoder.ts
+const deliverPayloadSchema = z.object({
+  context: z.array(z.string()).optional(),
+  inputResponses: z.array(inputResponseSchema).optional(),
+  message: userContentSchema.optional(),
+  outputSchema: jsonObjectSchema.optional(),
+}).loose(); // explicit adapter extension point
+
+export const sessionInboxV1Schema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("deliver"), payloads: z.array(deliverPayloadSchema), ... }),
+  ...controls,
+]);
+export type SessionInboxWire = z.infer<typeof sessionInboxV1Schema>;
+encodeSessionCommand(input) // build → parse complete value once → persist
+
+// Workflow-safe decoder: execution/wire/session-inbox-wire.ts
+import type { SessionInboxWire } from "./session-inbox-encoder.js";
 export class SessionInboxWireError extends Error { ... }
-
-export const SESSION_INBOX_V1_FIELDS = {
-  deliver: { payloads: "object[]", payload: "object?", auth: "object-or-null?", ... },
-  clear: {}, cancel: { turnId: "string?" }, ...
-} as const satisfies FieldTable;
 const sessionInboxMigrations: readonly VersionMigration[] = [{ from: 0, to: 1, migrate }];
-
-decodeSessionInbox(value)   // runMigrationChain (initialVersion: 0) → parse → normalize
-encodeSessionCommand(input) // build current shape → parse → persist
+decodeSessionInbox(value) // runMigrationChain (initialVersion: 0) → version/kind → trust → normalize
 ```
 
 Normative rules:
@@ -63,44 +68,27 @@ Normative rules:
   `VersionMigration`, freeze the new shape. Historic versions live on as
   executable migrations plus frozen payload fixtures (the turn-workflow
   precedent), not as retained schemas.
-- **No schema library in the workflow body.** The shape is a declarative
-  field table validated by a ~35-line walker. The driver bundle is
-  self-contained (no external imports, no access to the server's shared
-  `_libs` chunks) and is base64-embedded into the server bundle, with its
-  own inline sourcemap carrying `sourcesContent` — so a vendored dependency
-  costs roughly 5–6× its own size there. Measured on `weather-agent`:
-  vendored zod added **+1.45 MB**, vendored `zod/mini` **+1.63 MB**, and the
-  field table **+0.05 MB**. `zod/mini` is _worse_ than classic zod despite a
-  smaller artifact, because a standalone-vendored copy cannot share the
-  `_chunks/client/core` chunk and inlines zod core itself; a vendored
-  artifact must expose its package's whole public API and so cannot
-  tree-shake at all (proven by bundling the vendored file in isolation:
-  304 kB, versus 14 kB when `zod/mini` is shaken from `node_modules`). The durable session snapshot store makes
-  the same call for the same reason. Outside the workflow body, zod remains
-  the right tool and is already bundled.
+- **The complete transported value is validated once, at encode.** The
+  schema owns the envelope and every eve-owned `DeliverPayload` field,
+  composing the existing strict `inputResponseSchema` and
+  `jsonObjectSchema`; adapter-specific payload fields are the explicit open
+  extension point. The inferred schema type is the wire type, so runtime
+  validation and TypeScript cannot drift.
+- **Zod stays outside the workflow driver bundle.** Every producer is
+  server-side or a `"use step"` body; in the driver bundle those steps are
+  dependency-free stubs. The decoder imports `SessionInboxWire` with
+  `import type` and the numeric version from a dependency-free contract
+  module, so zod never enters the self-contained/base64-embedded driver.
 - **Version 0 is the unversioned era** (`initialVersion: 0`): every shape
   the family persisted before payloads carried `version`, following the
   field name every persisted eve structure already uses.
-- **Decode validates, never trusts.** `runMigrationChain` rejects unknown
-  newer versions ("written by a newer eve deployment"); the migrated value
-  is then checked against the current field table, which rejects unknown
-  discriminators (by own-property lookup, so a `kind` of `"toString"` cannot
-  resolve a prototype member), missing required fields, and wrong field
-  types. The shared walker raises `WireFieldError`, which each family
-  rethrows as its own error class so consumers catch one class per family. A
-  truncated or corrupted payload fails at the boundary, not three frames
-  later.
-- **Validation stops at the envelope.** Family-owned fields are asserted
-  structurally and undeclared envelope keys are **omitted** from the parsed
-  result, so a caller-supplied field cannot ride onto the durable wire.
-  Interiors owned by other subsystems (`DeliverPayload`, `auth`, `caller`)
-  are asserted to be objects and nothing more, copied by reference so
-  envelope-internal aliasing survives, and never rewritten — deep-validating them would turn every
-  adapter field addition into a wire change. Note what this does and does
-  not promise: unrecognized **kinds** and malformed structure fail loudly,
-  while additive envelope junk is silently discarded rather than rejected —
-  discarding cannot lose declared data, and rejecting would risk dropping
-  historic payloads.
+- **Decode trusts a known current version because that trust is earned by
+  the single encoder.** `runMigrationChain` rejects unknown newer versions;
+  known v1 values were produced only by the schema-validating encoder. The
+  decoder checks version and kind, then normalizes away wire-only fields.
+  Legacy v0 is the temporary exception: those writers predate the encoder,
+  so its 0→1 migration defensively checks the historic `send`/`deliver`
+  fields until that cohort ages out under the 30-day timeout.
 - **Encode goes through the wire module too.** Every persisted inbox
   payload — sends and controls alike — is built and validated against the
   current schema before it persists, so producer drift dies at the producer
@@ -147,11 +135,11 @@ consumer ──decode──────────▶ known v → typed payload
 `payloads`, 0.30.3–0.30.8 reads `payload`, 0.30.9+ reads `payloads`), so v1
 is byte-compatible with today's hybrid envelope and ships without gating.
 
-| Phase                                               | Emit                                              | Removable                                                                 |
-| --------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------- |
-| Now                                                 | v1 (hybrid + `v: 1`) to everyone                  | —                                                                         |
-| Pre-stamp cohorts aged out (30-day session timeout) | v2 (no mirror) to stamped hooks; v1 to markerless | markerless branch soon after                                              |
-| Pre-`v` cohorts aged out                            | v2 only                                           | legacy no-`v` decode paths, `SessionCommand` inbox fallback, mirror field |
+| Phase                                               | Emit                                              | Removable                                                                      |
+| --------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Now                                                 | v1 (hybrid + `version: 1`) to everyone            | —                                                                              |
+| Pre-stamp cohorts aged out (30-day session timeout) | v2 (no mirror) to stamped hooks; v1 to markerless | markerless branch soon after                                                   |
+| Pre-version cohorts aged out                        | v2 only                                           | legacy unversioned decode paths, `SessionCommand` inbox fallback, mirror field |
 
 Each removable row already has its condition written next to the code it
 deletes; #1765 tracks the cleanups.
@@ -161,12 +149,12 @@ deletes; #1765 tracks the cleanups.
 Each family carries a frozen contract test with three checks, plus one
 mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
 
-- **Frozen shape.** The current version's field table serializes to a
-  byte-frozen string. Editing the shipped shape cannot pass this check — the
-  only green path is bumping the version, adding a migration, and freezing
-  the new table. Because the table _is_ the validator, the pinned artifact
-  and the code enforcing it cannot drift, and no dependency upgrade can red
-  this check spuriously.
+- **Frozen shape.** The complete current schema serializes to a byte-frozen
+  JSON Schema snapshot. Editing any envelope or eve-owned payload field
+  cannot pass this check — the only green path is bumping the version,
+  adding a migration, and freezing the new schema artifact. The wire type is
+  inferred from the same schema the encoder executes, so runtime validation
+  and TypeScript cannot drift.
 - **Backwards-compatibility fixtures.** Frozen payload JSON per shipped
   version **must** keep decoding on the current build, with frozen expected
   normalizations. This is the "current code still reads every payload ever
@@ -202,17 +190,16 @@ defining strengths (cross-language interop, compact bytes) do not apply to an
 eve↔eve-only wire, and its default evolution posture — silently tolerating
 unknown fields — is the exact failure mode this plan exists to eliminate.
 Its real benefit, an externalized schema with mechanical evolution rules, is
-what the frozen field table provides without a new runtime dependency or
+what the frozen schema artifact provides without a second binary format or
 codegen toolchain.
 
-**A schema library (zod) in the wire module.** Tried and reverted on
-measurement. It reads as the obvious choice — zod is already vendored and
-used across eve — but "already vendored" is the wrong test for workflow-body
-code: the driver bundle is self-contained and amplifies every byte, so the
-dependency cost +1.45 MB (classic) or +1.63 MB (`zod/mini`) against the
-field table's +0.05 MB, tripping the repository's bundle-regression gate.
-The right test is "is it already in the _workflow_ bundle", which is a much
-shorter list. Zod remains the correct tool everywhere else in eve.
+**A schema library in the workflow-safe decoder.** Tried and rejected on
+measurement: importing vendored zod there grew `weather-agent` by +1.45 MB
+and `zod/mini` by +1.63 MB because the driver bundle is self-contained,
+contains inline `sourcesContent`, and is itself base64-embedded. The final
+split keeps zod in the server/step-only encoder, where it is already bundled
+and can express the complete transported type, while the decoder imports
+only the inferred type and a dependency-free version constant.
 
 ## Non-goals
 

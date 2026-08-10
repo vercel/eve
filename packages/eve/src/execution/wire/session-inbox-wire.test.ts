@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { z } from "#compiled/zod/index.js";
 
 import {
-  decodeSessionInbox,
   encodeSessionCommand,
-  SESSION_INBOX_WIRE_VERSION,
-  SessionInboxWireError,
-  SESSION_INBOX_V1_FIELDS,
-} from "#execution/wire/session-inbox-wire.js";
+  sessionInboxV1Schema,
+} from "#execution/wire/session-inbox-encoder.js";
+import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
+import { decodeSessionInbox, SessionInboxWireError } from "#execution/wire/session-inbox-wire.js";
 
 /**
  * Frozen wire contract for the `session-inbox` family.
@@ -17,9 +17,7 @@ import {
  * instead. FROZEN_FIXTURES pins backwards compatibility: every payload ever
  * persisted by a shipped version must keep decoding on the current build.
  */
-const FROZEN_SHAPES: Readonly<Record<number, string>> = {
-  1: `{"cancel":{"turnId":"string?"},"clear":{},"compact":{},"deliver":{"auth":"object-or-null?","caller":"object?","payload":"object?","payloads":"object[]","requestId":"string?"},"reset":{"reason":"string?"},"session-timeout":{}}`,
-};
+const FROZEN_SHAPES = [1] as const;
 
 const FROZEN_FIXTURES: ReadonlyArray<{
   readonly name: string;
@@ -73,13 +71,15 @@ const FROZEN_FIXTURES: ReadonlyArray<{
 
 describe("session inbox wire contract", () => {
   it("freezes exactly the current version's shape", () => {
-    expect(Object.keys(FROZEN_SHAPES)).toEqual([String(SESSION_INBOX_WIRE_VERSION)]);
+    expect(FROZEN_SHAPES).toEqual([SESSION_INBOX_WIRE_VERSION]);
   });
 
-  it("the current field table matches its frozen shape byte for byte", () => {
-    expect(stableStringify(SESSION_INBOX_V1_FIELDS)).toBe(
-      FROZEN_SHAPES[SESSION_INBOX_WIRE_VERSION],
-    );
+  it("the complete current schema matches its frozen shape byte for byte", () => {
+    expect(
+      stableStringify(
+        z.toJSONSchema(sessionInboxV1Schema, { io: "input", unrepresentable: "any" }),
+      ),
+    ).toMatchSnapshot();
   });
 
   it.each(FROZEN_FIXTURES)(
@@ -125,15 +125,13 @@ describe("session inbox wire contract", () => {
     });
   });
 
-  it("the mirror and the payloads entry reference the same delivery", () => {
+  it("the mirror and the payloads entry carry the same validated delivery", () => {
     const wire = encodeSessionCommand({ auth: null, kind: "send", payload: { message: "m" } });
     expect(wire.kind).toBe("deliver");
-    // Opaque interiors cross by reference, so the alias survives encoding and
-    // devalue can persist the delivery once instead of twice.
-    if (wire.kind === "deliver") expect(wire.payloads[0]).toBe(wire.payload);
+    if (wire.kind === "deliver") expect(wire.payloads[0]).toEqual(wire.payload);
   });
 
-  it("strips envelope fields the schema does not declare, keeping interiors opaque", () => {
+  it("does not persist undeclared command fields and preserves adapter extensions", () => {
     const payload = { interaction: { slack: true }, message: "hi" };
     const encoded = encodeSessionCommand({
       auth: null,
@@ -141,17 +139,26 @@ describe("session inbox wire contract", () => {
       payload,
       stowaway: "must not persist",
     } as never);
-
     expect(encoded).not.toHaveProperty("stowaway");
-    // Adapter-owned interiors are asserted only to be objects, never rewritten.
     expect(encoded.kind === "deliver" && encoded.payloads[0]).toEqual(payload);
+  });
+
+  it.each([
+    ["input response", { inputResponses: [{ requestId: 7 }] }],
+    ["context", { context: ["valid", 7] }],
+    ["message part", { message: [{ text: 7, type: "text" }] }],
+    ["output schema", { outputSchema: { invalid: () => undefined } }],
+  ])("rejects a malformed eve-owned %s before persistence", (_name, payload) => {
+    expect(() => encodeSessionCommand({ kind: "send", payload } as never)).toThrowError(
+      SessionInboxWireError,
+    );
   });
 
   it.each([
     ["a future wire version", { kind: "deliver", payloads: [], version: 2 }],
     ["a non-numeric version", { kind: "deliver", payloads: [], version: "1" }],
-    ["an unrecognized kind", { kind: "mystery" }],
-    ["a malformed v1 envelope", { kind: "deliver", payloads: "nope", version: 1 }],
+    ["an unrecognized kind", { kind: "mystery", version: 1 }],
+    ["a malformed legacy deliver", { kind: "deliver", payloads: "nope" }],
     ["a malformed legacy send", { kind: "send", payload: "nope" }],
     ["a non-object payload", "deliver"],
   ])("throws SessionInboxWireError for %s instead of reinterpreting", (_name, payload) => {

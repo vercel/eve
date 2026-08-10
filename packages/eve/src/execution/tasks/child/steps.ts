@@ -6,7 +6,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
-import { encodeSessionCommand } from "#execution/wire/session-inbox-wire.js";
+import { encodeSessionCommand } from "#execution/wire/session-inbox-encoder.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import {

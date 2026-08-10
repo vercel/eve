@@ -4,17 +4,15 @@ import type {
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
-import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
   runMigrationChain,
   type VersionMigration,
 } from "#execution/durable-session-migrations/chain.js";
 import {
-  pickDeclaredFields,
-  resolveFieldSpecs,
-  WireFieldError,
-  type FieldTable,
-} from "#execution/wire/field-table.js";
+  SESSION_INBOX_WIRE_VERSION,
+  SessionInboxWireError,
+} from "#execution/wire/session-inbox-contract.js";
+import type { SessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 
 /**
  * The session inbox wire family: every payload persisted to a session's
@@ -44,8 +42,6 @@ import {
  * See research/session-inbox-wire-schema.md and issue #1765.
  */
 
-export const SESSION_INBOX_WIRE_VERSION = 1;
-
 type SendCommand = Extract<SessionCommand, { readonly kind: "send" }>;
 
 /** A persisted inbox payload normalized for consumption; `send` never survives decode. */
@@ -54,92 +50,10 @@ export type DecodedSessionInbox =
   | SessionTimeoutHookPayload
   | Extract<SessionCommand, { readonly kind: "cancel" | "clear" | "compact" | "reset" }>;
 
-/** Raised for payloads a consumer must not reinterpret. */
-export class SessionInboxWireError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SessionInboxWireError";
-  }
-}
+export { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
 
 /** Prefixes chain and schema failures alike, so messages read as one voice. */
 const WIRE_LABEL = "session inbox payload";
-
-/**
- * v1, the current wire shape: payload kind → its envelope fields, where a
- * `?` suffix marks the field optional. `kind` and `version` are implicit.
- *
- * This table is both the validator and the frozen contract, so the artifact
- * CI pins and the code that enforces it cannot drift apart.
- *
- * The deliver `payload` mirror is transitional: consumers pinned to eve
- * 0.30.3–0.30.8 cast any non-control payload to a `send` command and read
- * `.payload`, so the mirror is what keeps their parked sessions receiving
- * messages. Sessions are bounded by the 30-day default timeout; the version
- * after this drops the mirror once runs created on those versions have aged
- * out.
- */
-export const SESSION_INBOX_V1_FIELDS = {
-  cancel: { taskId: "string?", turnId: "string?" },
-  clear: {},
-  compact: {},
-  deliver: {
-    auth: "object-or-null?",
-    caller: "object?",
-    deliveryMetadata: "object[]?",
-    payload: "object?",
-    payloads: "object[]",
-    requestId: "string?",
-    taskDeliveryId: "string?",
-    turnPolicy: "turn-policy?",
-  },
-  reset: { reason: "string?" },
-  "session-timeout": {},
-} as const satisfies FieldTable;
-
-export type SessionInboxWire =
-  | (DeliverHookPayload & { readonly payload?: DeliverPayload; readonly version: 1 })
-  | {
-      readonly kind: "cancel";
-      readonly taskId?: string;
-      readonly turnId?: string;
-      readonly version: 1;
-    }
-  | { readonly kind: "clear"; readonly version: 1 }
-  | { readonly kind: "compact"; readonly version: 1 }
-  | { readonly kind: "reset"; readonly reason?: string; readonly version: 1 }
-  | { readonly kind: "session-timeout"; readonly version: 1 };
-
-/**
- * Validates one current-version envelope and returns it with undeclared
- * keys removed, so a caller-supplied field cannot ride onto durable storage.
- */
-function parseWire(value: object): SessionInboxWire {
-  const envelope = value as Record<string, unknown>;
-  if (envelope.version !== SESSION_INBOX_WIRE_VERSION) {
-    throw new SessionInboxWireError(
-      `${WIRE_LABEL} declares version ${JSON.stringify(envelope.version)}, expected ${SESSION_INBOX_WIRE_VERSION}.`,
-    );
-  }
-
-  try {
-    const specs = resolveFieldSpecs({
-      discriminator: envelope.kind,
-      label: WIRE_LABEL,
-      table: SESSION_INBOX_V1_FIELDS,
-    });
-    return {
-      kind: envelope.kind,
-      version: SESSION_INBOX_WIRE_VERSION,
-      ...pickDeclaredFields({ label: WIRE_LABEL, specs, value: envelope }),
-    } as SessionInboxWire;
-  } catch (error) {
-    // Field-table failures are this family's failures: consumers catch one
-    // error class per wire family.
-    if (error instanceof WireFieldError) throw new SessionInboxWireError(error.message);
-    throw error;
-  }
-}
 
 /**
  * v0 → v1: the unversioned era. Only one shape actually changed — raw
@@ -153,9 +67,25 @@ const sessionInboxMigrations: readonly VersionMigration[] = [
     from: 0,
     migrate: (prior) => {
       const value = prior as { readonly kind?: unknown };
-      if (value.kind !== "send") return { ...(value as object), version: 1 };
+      if (value.kind !== "send") {
+        if (
+          value.kind === "deliver" &&
+          !(
+            Array.isArray((value as { readonly payloads?: unknown }).payloads) &&
+            (value as { readonly payloads: unknown[] }).payloads.every(
+              (payload) => typeof payload === "object" && payload !== null,
+            )
+          )
+        ) {
+          throw new Error("legacy deliver payload has no object-array payloads field.");
+        }
+        return { ...(value as object), version: 1 };
+      }
 
       const send = value as SendCommand;
+      if (typeof send.payload !== "object" || send.payload === null) {
+        throw new Error("legacy send command has no object payload field.");
+      }
       return {
         auth: send.auth,
         caller: send.caller,
@@ -195,7 +125,13 @@ export function decodeSessionInbox(value: unknown): DecodedSessionInbox {
     throw new SessionInboxWireError(error instanceof Error ? error.message : String(error));
   }
 
-  return normalizeWire(parseWire(migrated as object));
+  const wire = migrated as Partial<SessionInboxWire>;
+  if (wire.version !== SESSION_INBOX_WIRE_VERSION) {
+    throw new SessionInboxWireError(
+      `${WIRE_LABEL} declares version ${JSON.stringify(wire.version)}, expected ${SESSION_INBOX_WIRE_VERSION}.`,
+    );
+  }
+  return normalizeWire(wire as SessionInboxWire);
 }
 
 /** Strips wire-only fields (`version`, the deliver mirror) for consumption. */
@@ -207,7 +143,7 @@ function normalizeWire(wire: SessionInboxWire): DecodedSessionInbox {
         caller: wire.caller,
         deliveryMetadata: wire.deliveryMetadata,
         kind: "deliver",
-        payloads: wire.payloads,
+        payloads: wire.payloads as readonly DeliverPayload[],
         requestId: wire.requestId,
         taskDeliveryId: wire.taskDeliveryId,
         turnPolicy: wire.turnPolicy,
@@ -222,45 +158,9 @@ function normalizeWire(wire: SessionInboxWire): DecodedSessionInbox {
       return { kind: "reset", reason: wire.reason };
     case "cancel":
       return { kind: "cancel", taskId: wire.taskId, turnId: wire.turnId };
+    default:
+      throw new SessionInboxWireError(
+        `${WIRE_LABEL} has an unrecognized kind ${JSON.stringify((wire as { kind?: unknown }).kind)}.`,
+      );
   }
-}
-
-/**
- * Encodes a session command as the current wire version, validated against
- * the current field table before it persists so producer drift dies at the
- * producer instead of at a pinned consumer weeks later.
- */
-export function encodeSessionCommand(
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
-): SessionInboxWire {
-  const wire: SessionInboxWire =
-    command.kind === "send"
-      ? {
-          auth: command.auth,
-          caller: command.caller,
-          deliveryMetadata:
-            command.delivery === undefined
-              ? undefined
-              : [{ ...command.delivery, payloadIndex: 0 }],
-          kind: "deliver" as const,
-          payload: command.payload,
-          payloads: [command.payload],
-          requestId: command.requestId,
-          taskDeliveryId: command.taskDeliveryId,
-          turnPolicy: command.turnPolicy,
-          version: SESSION_INBOX_WIRE_VERSION,
-        }
-      : command.kind === "deliver"
-        ? {
-            ...command,
-            payload: coalesceDeliverPayloads(command.payloads),
-            version: SESSION_INBOX_WIRE_VERSION,
-          }
-      : { ...command, version: SESSION_INBOX_WIRE_VERSION };
-
-  // Return the parsed envelope, not the built object: parseWire copies only
-  // declared fields, so a caller-supplied stowaway cannot ride onto the
-  // durable wire. Opaque interiors are copied by reference, so the envelope's
-  // internal aliasing (`payloads[0] === payload`) stays intact.
-  return parseWire(wire);
 }

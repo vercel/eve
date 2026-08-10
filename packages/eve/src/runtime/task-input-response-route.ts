@@ -1,4 +1,4 @@
-import { encodeSessionCommand } from "#execution/wire/session-inbox-wire.js";
+import { encodeSessionCommand } from "#execution/wire/session-inbox-encoder.js";
 import { readTaskInputTargetToken } from "#execution/task-input-capability.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { EVE_TASK_INPUT_ROUTE_PATTERN } from "#protocol/routes.js";

@@ -10,7 +10,7 @@ import {
   sessionTimeoutWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import type { SessionTimeoutWorkflowInput } from "#execution/session-timeout-workflow.js";
-import { encodeSessionCommand } from "#execution/wire/session-inbox-wire.js";
+import { encodeSessionCommand } from "#execution/wire/session-inbox-encoder.js";
 import { cancelRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
 

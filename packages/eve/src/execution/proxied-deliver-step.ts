@@ -7,7 +7,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
-import { encodeSessionCommand } from "#execution/wire/session-inbox-wire.js";
+import { encodeSessionCommand } from "#execution/wire/session-inbox-encoder.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";

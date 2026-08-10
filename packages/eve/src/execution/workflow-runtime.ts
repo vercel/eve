@@ -50,7 +50,10 @@ import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { encodeSessionCommand, type SessionInboxWire } from "#execution/wire/session-inbox-wire.js";
+import {
+  encodeSessionCommand,
+  type SessionInboxWire,
+} from "#execution/wire/session-inbox-encoder.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
