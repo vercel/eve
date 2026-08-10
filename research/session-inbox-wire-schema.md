@@ -27,26 +27,33 @@ In this document, **must**, **should**, and **may** are normative.
 
 ## Authoring API
 
-No new framework: each wire family composes the repo's two existing
-durable-format idioms. Version walking reuses `runMigrationChain`
+No new framework. Version walking reuses `runMigrationChain`
 (`execution/durable-session-migrations/chain.ts`), exactly as the durable
-session snapshot and turn-workflow input already do; shape validation
-reuses the compiled-artifact loader idiom (`version: z.literal(N)` schema +
-`safeParse` + a named error class + `formatValidationError`). The session
-inbox is the first family; turn-control, the subagent proxies, and the
-auth-hook delivery adopt the same composition in follow-ups.
+session snapshot and turn-workflow input already do. Shape checking is a
+shared, dependency-free field-table walker (`execution/wire/field-table.ts`)
+that every family reuses. The session inbox is the first family;
+turn-control, the subagent proxies, and the auth-hook delivery adopt the
+same composition in follow-ups.
 
 ```ts
+// Shared: execution/wire/field-table.ts
+type FieldSpec = "object" | "object-or-null" | "object[]" | "string" | `${FieldType}?`;
+type FieldTable = Readonly<Record<string, Readonly<Record<string, FieldSpec>>>>;
+resolveFieldSpecs({ discriminator, label, table })  // throws WireFieldError
+pickDeclaredFields({ label, specs, value })         // validates, returns declared fields only
+
 // One module per family, e.g. execution/wire/session-inbox-wire.ts
 export const SESSION_INBOX_WIRE_VERSION = 1;
 export class SessionInboxWireError extends Error { ... }
 
-const sessionInboxWireSchema = z.discriminatedUnion("kind", [ ...current shapes,
-  each with `version: z.literal(SESSION_INBOX_WIRE_VERSION)`... ]);
+export const SESSION_INBOX_V1_FIELDS = {
+  deliver: { payloads: "object[]", payload: "object?", auth: "object-or-null?", ... },
+  clear: {}, cancel: { turnId: "string?" }, ...
+} as const satisfies FieldTable;
 const sessionInboxMigrations: readonly VersionMigration[] = [{ from: 0, to: 1, migrate }];
 
-decodeSessionInbox(value)   // runMigrationChain (initialVersion: 0) → safeParse → normalize
-encodeSessionCommand(input) // build current shape → safeParse → persist
+decodeSessionInbox(value)   // runMigrationChain (initialVersion: 0) → parse → normalize
+encodeSessionCommand(input) // build current shape → parse → persist
 ```
 
 Normative rules:
@@ -62,26 +69,33 @@ Normative rules:
   `_libs` chunks) and is base64-embedded into the server bundle, with its
   own inline sourcemap carrying `sourcesContent` — so a vendored dependency
   costs roughly 5–6× its own size there. Measured on `weather-agent`:
-  vendored zod added **+1.45 MB**, vendored `zod/mini` **+1.35 MB** (eve
-  vendors a package as one pre-bundled artifact exposing its full API, which
-  cannot tree-shake — proven by bundling the vendored file in isolation),
-  and the field table **+0.04 MB**. The durable session snapshot store makes
+  vendored zod added **+1.45 MB**, vendored `zod/mini` **+1.63 MB**, and the
+  field table **+0.05 MB**. `zod/mini` is _worse_ than classic zod despite a
+  smaller artifact, because a standalone-vendored copy cannot share the
+  `_chunks/client/core` chunk and inlines zod core itself; a vendored
+  artifact must expose its package's whole public API and so cannot
+  tree-shake at all (proven by bundling the vendored file in isolation:
+  304 kB, versus 14 kB when `zod/mini` is shaken from `node_modules`). The durable session snapshot store makes
   the same call for the same reason. Outside the workflow body, zod remains
   the right tool and is already bundled.
 - **Version 0 is the unversioned era** (`initialVersion: 0`): every shape
   the family persisted before payloads carried `version`, following the
   field name every persisted eve structure already uses.
 - **Decode validates, never trusts.** `runMigrationChain` rejects unknown
-  newer versions ("written by a newer eve deployment") and the migration
-  rejects unrecognized kinds; the migrated value is then parsed with the
-  current schema. All failures throw the family's error class — a truncated
-  or corrupted payload fails at the boundary, not three frames later.
+  newer versions ("written by a newer eve deployment"); the migrated value
+  is then checked against the current field table, which rejects unknown
+  discriminators (by own-property lookup, so a `kind` of `"toString"` cannot
+  resolve a prototype member), missing required fields, and wrong field
+  types. The shared walker raises `WireFieldError`, which each family
+  rethrows as its own error class so consumers catch one class per family. A
+  truncated or corrupted payload fails at the boundary, not three frames
+  later.
 - **Validation stops at the envelope.** Family-owned fields are asserted
-  structurally and undeclared envelope keys are **stripped** (schemas use
-  zod's default strip mode), so a caller-supplied field cannot ride onto the
-  durable wire. Interiors owned by other subsystems (`DeliverPayload`,
-  `auth`, `caller`) cross as opaque objects (`z.custom<T>`, object-ness
-  only) and are never rewritten — deep-validating them would turn every
+  structurally and undeclared envelope keys are **omitted** from the parsed
+  result, so a caller-supplied field cannot ride onto the durable wire.
+  Interiors owned by other subsystems (`DeliverPayload`, `auth`, `caller`)
+  are asserted to be objects and nothing more, copied by reference so
+  envelope-internal aliasing survives, and never rewritten — deep-validating them would turn every
   adapter field addition into a wire change. Note what this does and does
   not promise: unrecognized **kinds** and malformed structure fail loudly,
   while additive envelope junk is silently discarded rather than rejected —
@@ -147,14 +161,12 @@ deletes; #1765 tracks the cleanups.
 Each family carries a frozen contract test with three checks, plus one
 mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
 
-- **Frozen shape.** The current version's schema serializes (via
-  `z.toJSONSchema`, opaque interiors rendered as `{}`) to a byte-frozen
-  string. Editing the shipped shape cannot pass this check — the only green
-  path is bumping the version, adding a migration, and freezing the new
-  shape. A vendored-zod upgrade that changes JSON-Schema emission can red
-  this check without a wire change; the re-freeze protocol is to verify the
-  diff is emission-only against the frozen payload fixtures (which must
-  stay green untouched), then re-freeze the shape string.
+- **Frozen shape.** The current version's field table serializes to a
+  byte-frozen string. Editing the shipped shape cannot pass this check — the
+  only green path is bumping the version, adding a migration, and freezing
+  the new table. Because the table _is_ the validator, the pinned artifact
+  and the code enforcing it cannot drift, and no dependency upgrade can red
+  this check spuriously.
 - **Backwards-compatibility fixtures.** Frozen payload JSON per shipped
   version **must** keep decoding on the current build, with frozen expected
   normalizations. This is the "current code still reads every payload ever
@@ -190,8 +202,17 @@ defining strengths (cross-language interop, compact bytes) do not apply to an
 eve↔eve-only wire, and its default evolution posture — silently tolerating
 unknown fields — is the exact failure mode this plan exists to eliminate.
 Its real benefit, an externalized schema with mechanical evolution rules, is
-what the frozen JSON-Schema-per-version contract provides without a new
-runtime dependency or codegen toolchain.
+what the frozen field table provides without a new runtime dependency or
+codegen toolchain.
+
+**A schema library (zod) in the wire module.** Tried and reverted on
+measurement. It reads as the obvious choice — zod is already vendored and
+used across eve — but "already vendored" is the wrong test for workflow-body
+code: the driver bundle is self-contained and amplifies every byte, so the
+dependency cost +1.45 MB (classic) or +1.63 MB (`zod/mini`) against the
+field table's +0.05 MB, tripping the repository's bundle-regression gate.
+The right test is "is it already in the _workflow_ bundle", which is a much
+shorter list. Zod remains the correct tool everywhere else in eve.
 
 ## Non-goals
 
