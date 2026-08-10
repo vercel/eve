@@ -22,12 +22,24 @@ export async function ensureVercelProject(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
+  /**
+   * Headless runs never open the interactive linking flow below: an existing
+   * link is returned and a missing link fails, so the caller completes this
+   * shared one-time prerequisite separately.
+   */
+  headless?: boolean;
   teamSelectMessage?: (currentTeam: string) => string;
   deps?: Partial<EnsureVercelProjectDeps>;
 }): Promise<VercelProjectReference> {
   const readLink = input.deps?.readProjectLink ?? readProjectLink;
   const existing = await readLink(input.appRoot);
   if (existing !== undefined) return existing;
+
+  if (input.headless) {
+    throw new Error(
+      "This project is not linked to a Vercel project, and headless setup cannot open the interactive linking flow. Link the project separately, then retry.",
+    );
+  }
 
   const state = inProjectSetupState(input.appRoot, { kind: "unresolved" });
   const boxes: AnySetupBox<SetupState>[] = [

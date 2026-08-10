@@ -119,6 +119,9 @@ export async function setupDiscord(
       appRoot: context.appRoot,
       prompter: context.ui.prompter,
       signal: context.signal,
+      // A headless run completes this shared prerequisite separately instead
+      // of falling into its interactive linking flow.
+      headless: context.headless,
     });
     const connector = await deps.provisionConnector({
       botToken,
