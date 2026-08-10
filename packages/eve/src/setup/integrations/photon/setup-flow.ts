@@ -136,6 +136,7 @@ async function choosePhotonProject(
         message: "Photon project secret",
         required: true,
         sensitive: true,
+        environment: "IMESSAGE_PROJECT_SECRET",
       }),
     );
     return { photonProject: { projectId: projectId.trim(), projectSecret: projectSecret.trim() } };

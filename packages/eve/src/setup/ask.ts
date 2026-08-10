@@ -14,7 +14,9 @@
 // Boxes only ever see `Asker`. Policies are presence/absence of decorators,
 // which also unlocks combinations a monolithic factory could not express.
 
+import { SetupPrerequisiteRequired } from "./integrations/shared/prerequisite.js";
 import type { Prompter } from "./prompter.js";
+import { optionById, requiredOptionId } from "./question-options.js";
 
 /** One choice in a select question. */
 export interface SelectOption<T> {
@@ -90,7 +92,15 @@ export type Question<T> = {
   | {
       kind: "text";
       validate?: (raw: string) => string | null;
-      sensitive?: boolean;
+      sensitive?: false;
+      /** Presentation hint: ghost text shown while the input is empty. */
+      placeholder?: string;
+    }
+  | {
+      kind: "text";
+      validate?: (raw: string) => string | null;
+      sensitive: true;
+      environment: string;
       /** Presentation hint: ghost text shown while the input is empty. */
       placeholder?: string;
     }
@@ -148,17 +158,29 @@ export const confirm = (q: {
   kind: "confirm",
 });
 
-/** Builds a text question without spelling the discriminant at call sites. */
-export const text = (q: {
+interface TextQuestionInput {
   key: string;
   message: string;
   detected?: string;
   recommended?: string;
   required?: boolean;
   validate?: (raw: string) => string | null;
-  sensitive?: boolean;
   placeholder?: string;
-}): Question<string> => ({ ...q, kind: "text" });
+}
+
+/** Builds a text question without spelling the discriminant at call sites. */
+export function text(
+  q: TextQuestionInput & { sensitive: true; environment: string },
+): Question<string>;
+export function text(
+  q: TextQuestionInput & { sensitive?: false; environment?: never },
+): Question<string>;
+export function text(
+  q: TextQuestionInput &
+    ({ sensitive: true; environment: string } | { sensitive?: false; environment?: never }),
+): Question<string> {
+  return { ...q, kind: "text" };
+}
 
 /** The capability boxes see. Pure and flow-agnostic: Prompter's successor. */
 export interface Asker {
@@ -209,11 +231,15 @@ export class InteractionRequired extends Error {
 
 /** Thrown when a pre-supplied answer fails the question's own validation. */
 export class InvalidAnswerError extends Error {
-  readonly key: string;
-  constructor(key: string, message: string) {
+  readonly question: AnyQuestion;
+  constructor(question: AnyQuestion, message: string) {
     super(message);
     this.name = "InvalidAnswerError";
-    this.key = key;
+    this.question = question;
+  }
+
+  get key(): string {
+    return this.question.key;
   }
 }
 
@@ -245,11 +271,11 @@ function announce<T>(
 function coerceAnswer<T>(question: Question<T>, raw: unknown): T {
   if (question.kind === "select") {
     const id = String(raw);
-    const match = question.options.find((option) => option.id === id);
+    const match = optionById(question, id);
     if (!match) {
       const ids = question.options.map((option) => option.id).join(", ");
       throw new InvalidAnswerError(
-        question.key,
+        question,
         `Invalid answer for "${question.key}": ${id}. Expected one of: ${ids}.`,
       );
     }
@@ -260,7 +286,7 @@ function coerceAnswer<T>(question: Question<T>, raw: unknown): T {
       typeof raw === "boolean" ? raw : raw === "true" ? true : raw === "false" ? false : null;
     if (value === null) {
       throw new InvalidAnswerError(
-        question.key,
+        question,
         `Invalid answer for "${question.key}": expected a boolean.`,
       );
     }
@@ -268,7 +294,7 @@ function coerceAnswer<T>(question: Question<T>, raw: unknown): T {
   }
   const value = String(raw);
   const problem = question.validate?.(value);
-  if (problem) throw new InvalidAnswerError(question.key, problem);
+  if (problem) throw new InvalidAnswerError(question, problem);
   return value as T;
 }
 
@@ -282,25 +308,25 @@ function coerceAnswer<T>(question: Question<T>, raw: unknown): T {
 function coerceManyAnswer<T>(question: MultiSelectQuestion<T>, raw: unknown): T[] {
   if (!Array.isArray(raw)) {
     throw new InvalidAnswerError(
-      question.key,
+      question,
       `Invalid answer for "${question.key}": expected an array of option ids.`,
     );
   }
   const values: T[] = [];
   for (const item of raw) {
     const id = String(item);
-    const match = question.options.find((option) => option.id === id);
+    const match = optionById(question, id);
     if (!match) {
       const ids = question.options.map((option) => option.id).join(", ");
       throw new InvalidAnswerError(
-        question.key,
+        question,
         `Invalid answer for "${question.key}": ${id}. Expected one of: ${ids}.`,
       );
     }
     if (match.disabled) {
       const reason = match.disabledReason === undefined ? "" : ` (${match.disabledReason})`;
       throw new InvalidAnswerError(
-        question.key,
+        question,
         `Invalid answer for "${question.key}": ${id} is unavailable${reason}.`,
       );
     }
@@ -330,7 +356,11 @@ async function renderQuestion<T>(prompter: Prompter, question: Question<T>): Pro
       initialValue:
         preselected === undefined
           ? undefined
-          : question.options.find((option) => option.value === preselected)?.id,
+          : requiredOptionId(
+              question,
+              preselected,
+              question.detected !== undefined ? "detected value" : "recommendation",
+            ),
       search: question.search,
       placeholder: question.placeholder,
     });
@@ -392,9 +422,13 @@ async function renderManyQuestion<T>(
     initialValues:
       premarked === undefined
         ? undefined
-        : question.options
-            .filter((option) => premarked.includes(option.value))
-            .map((option) => option.id),
+        : premarked.map((value) =>
+            requiredOptionId(
+              question,
+              value,
+              question.detected !== undefined ? "detected value" : "recommendation",
+            ),
+          ),
     required: question.requireSelection,
     search: question.search,
     placeholder: question.placeholder,
@@ -404,10 +438,10 @@ async function renderManyQuestion<T>(
   // re-judging its output would move box-level guards (e.g. the Slack/Vercel
   // assert in select-channels) behind a different error.
   return chosen.map((id) => {
-    const match = question.options.find((option) => option.id === id);
+    const match = optionById(question, id);
     if (!match) {
       throw new InvalidAnswerError(
-        question.key,
+        question,
         `Invalid answer for "${question.key}": ${id} is not an option id.`,
       );
     }
@@ -453,10 +487,10 @@ export function headlessAsker(events?: AskerEvents): Asker {
   return {
     // Async so refusal and skip surface as rejections, like every other rung.
     async ask<T>(question: Question<T>): Promise<T> {
-      return refuse(question as Question<unknown>);
+      return refuse(question);
     },
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
-      return refuse(question as MultiSelectQuestion<unknown>);
+      return refuse(question);
     },
   };
 }
@@ -476,6 +510,22 @@ export function withAnswers(
       if (question.key in answers) {
         const value = coerceAnswer(question, answers[question.key]);
         return announce(events, question.key, value, "answer");
+      }
+      if (question.kind === "text" && question.sensitive === true) {
+        const environmentValue = process.env[question.environment];
+        if (environmentValue !== undefined) return coerceAnswer(question, environmentValue);
+        try {
+          return await inner.ask(question);
+        } catch (error) {
+          if (!(error instanceof InteractionRequired)) throw error;
+          throw new SetupPrerequisiteRequired({
+            kind: "environment",
+            code: question.key,
+            message: `Set ${question.environment}, then retry setup.`,
+            variable: question.environment,
+            sensitive: true,
+          });
+        }
       }
       return inner.ask(question);
     },
@@ -527,9 +577,15 @@ export function withPolicy(policy: AnswerPolicy, events?: AskerEvents): AskerDec
     async ask<T>(question: Question<T>): Promise<T> {
       if (policy === "assume") {
         if (question.detected !== undefined) {
+          if (question.kind === "select") {
+            requiredOptionId(question, question.detected, "detected value");
+          }
           return announce(events, question.key, question.detected, "detected");
         }
         if (question.recommended !== undefined) {
+          if (question.kind === "select") {
+            requiredOptionId(question, question.recommended, "recommendation");
+          }
           return announce(events, question.key, question.recommended, "assumed");
         }
         // Assume minimizes interaction: the unknowable is skipped when the
@@ -555,9 +611,15 @@ export function withPolicy(policy: AnswerPolicy, events?: AskerEvents): AskerDec
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
       if (policy === "assume") {
         if (question.detected !== undefined) {
+          for (const value of question.detected) {
+            requiredOptionId(question, value, "detected value");
+          }
           return announce(events, question.key, [...question.detected], "detected");
         }
         if (question.recommended !== undefined) {
+          for (const value of question.recommended) {
+            requiredOptionId(question, value, "recommendation");
+          }
           return announce(events, question.key, [...question.recommended], "assumed");
         }
         if (!question.required) {

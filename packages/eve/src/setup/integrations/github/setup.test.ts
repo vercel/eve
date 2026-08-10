@@ -69,7 +69,10 @@ describe("GitHub setup", () => {
       {
         appRoot: "/project",
         environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
-        ui: createIntegrationSetupUi({ asker: { ask: vi.fn(), askMany }, prompter: fake.prompter }),
+        ui: createIntegrationSetupUi({
+          asker: { ask: vi.fn(), askMany },
+          prompter: fake.prompter,
+        }),
       },
       deps(),
     );

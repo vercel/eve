@@ -88,6 +88,7 @@ export async function setupDiscord(
           message: "Discord bot token",
           required: true,
           sensitive: true,
+          environment: "DISCORD_BOT_TOKEN",
         }),
       )
     ).trim();
