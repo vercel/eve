@@ -2187,6 +2187,10 @@ async function handleStepResult(input: {
           }),
         );
       }
+
+      if (config.mode === "conversation") {
+        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+      }
     }
 
     return {

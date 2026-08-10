@@ -5401,6 +5401,12 @@ describe("createToolLoopHarness", () => {
         webhookUrl: "https://app.example/callback",
       });
 
+      expect(getCompatibilityEventTypes(events).slice(-3)).toEqual([
+        "authorization.required",
+        "turn.completed",
+        "session.waiting",
+      ]);
+
       const actionResults = events.filter((event) => event.type === "action.result");
       expect(actionResults).toHaveLength(0);
     });
