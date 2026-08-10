@@ -24,7 +24,7 @@ export interface RunIntegrationSetupOptions {
   asker?: Asker;
   signal?: AbortSignal;
   force?: boolean;
-  onExternalAction?: (input: { url: string; userCode?: string; message: string }) => void;
+  beginExternalAction?: (input: { url: string; userCode?: string; message: string }) => void;
   resolveVercelProject?: SetupProjectResolver;
 }
 
@@ -73,7 +73,7 @@ export async function runIntegrationSetup(
           })),
       signal: options.signal,
       force: options.force,
-      onExternalAction: options.onExternalAction,
+      beginExternalAction: options.beginExternalAction,
     }),
   );
 }

@@ -202,7 +202,7 @@ async function resolvePhotonProject(
       phoneNumber: plan.phoneNumber,
       signal: context.signal,
       onAuthorization(authorization) {
-        context.presenter.externalAction({
+        context.presenter.beginExternalAction({
           message: "Authorize Photon",
           url: authorization.verificationUrl,
           userCode: authorization.userCode,

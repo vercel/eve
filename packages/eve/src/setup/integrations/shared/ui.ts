@@ -4,7 +4,7 @@ import type { SetupApplyContext, SetupPrepareContext, SetupPresenter } from "../
 
 export function createSetupPresenter(
   prompter: Prompter,
-  onExternalAction?: (input: { url: string; userCode?: string; message: string }) => void,
+  beginExternalAction?: (input: { url: string; userCode?: string; message: string }) => void,
 ): SetupPresenter {
   return {
     log: prompter.log,
@@ -12,9 +12,9 @@ export function createSetupPresenter(
     nextSteps(lines) {
       if (lines.length > 0) prompter.note(lines.join("\n"), "Next steps", { tone: "success" });
     },
-    externalAction(input) {
-      if (onExternalAction !== undefined) {
-        onExternalAction(input);
+    beginExternalAction(input) {
+      if (beginExternalAction !== undefined) {
+        beginExternalAction(input);
         return;
       }
       prompter.log.message(input.message);
@@ -32,9 +32,9 @@ export function createSetupContexts(input: {
   resolveVercelProject: SetupPrepareContext["resolveVercelProject"];
   signal?: AbortSignal;
   force?: boolean;
-  onExternalAction?: (input: { url: string; userCode?: string; message: string }) => void;
+  beginExternalAction?: (input: { url: string; userCode?: string; message: string }) => void;
 }): { prepare: SetupPrepareContext; apply: SetupApplyContext } {
-  const presenter = createSetupPresenter(input.prompter, input.onExternalAction);
+  const presenter = createSetupPresenter(input.prompter, input.beginExternalAction);
   const apply: SetupApplyContext = { appRoot: input.appRoot, presenter };
   if (input.signal !== undefined) apply.signal = input.signal;
   if (input.force !== undefined) apply.force = input.force;

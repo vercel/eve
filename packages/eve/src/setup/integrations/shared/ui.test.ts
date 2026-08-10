@@ -12,4 +12,18 @@ describe("createSetupPresenter", () => {
       { tone: "success" },
     );
   });
+
+  it("announces when an external action begins", () => {
+    const beginExternalAction = vi.fn();
+    createSetupPresenter(createFakePrompter().prompter, beginExternalAction).beginExternalAction({
+      message: "Authorize Photon",
+      url: "https://example.com/authorize",
+      userCode: "ABCD",
+    });
+    expect(beginExternalAction).toHaveBeenCalledWith({
+      message: "Authorize Photon",
+      url: "https://example.com/authorize",
+      userCode: "ABCD",
+    });
+  });
 });
