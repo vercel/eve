@@ -1,3 +1,4 @@
+import type { TurnPolicy } from "eve/channels";
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -12,10 +13,11 @@ async function postMessage(
   target: EveEvalTargetHandle,
   threadId: string,
   message: string,
+  turnPolicy?: TurnPolicy,
 ): Promise<MessageResponse> {
   const path = `/threads/${threadId}/messages`;
   const response = await target.fetch(path, {
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, turnPolicy }),
     headers: { "content-type": "application/json" },
     method: "POST",
   });
@@ -55,6 +57,7 @@ export default defineEval({
       t.target,
       threadId,
       "Reply with exactly CHANNEL-STEERING-REPLACEMENT-OK.",
+      "steer",
     );
     await t.require(
       replacement,
