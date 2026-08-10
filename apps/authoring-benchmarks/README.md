@@ -51,11 +51,13 @@ EVE_BENCHMARK_REVISION=<branch> \
 
 The first run for a case/revision builds a reusable Vercel Sandbox template:
 it clones, installs, and builds eve, creates the fresh project, and installs its
-dependencies before snapshotting. Later runs with the same case, harness, and
-revision fork that snapshot and perform only run-scoped setup. Changing the
-subject revision or benchmark bootstrap version intentionally creates a new
-template. Each concurrent eval still gets an isolated sandbox fork and
-workspace; they share the immutable prepared snapshot, not mutable run state.
+dependencies before snapshotting. The runner resolves branch names such as
+`origin/main` to a commit SHA before constructing the cache identity, so repeated
+commands reuse the same template until that branch actually advances. Later
+runs fork that snapshot and perform only run-scoped setup. Changing the subject
+commit or benchmark bootstrap version intentionally creates a new template.
+Each concurrent eval still gets an isolated sandbox fork and workspace; they
+share the immutable prepared snapshot, not mutable run state.
 
 The CLI prints each setup phase and a heartbeat every 15 seconds while sandbox
 or model work is in flight. Pass `--verbose` to also stream normalized

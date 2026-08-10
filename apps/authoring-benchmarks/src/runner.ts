@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
@@ -21,6 +23,7 @@ const WORKSPACE = "workspace";
 const DEFAULT_TIMEOUT_MS = 15 * 60_000;
 const DEFAULT_SUBJECT_REVISION = "origin/main";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
+const execFileAsync = promisify(execFile);
 
 export interface RunBenchmarkOptions {
   readonly evaluation: AuthoringCase;
@@ -38,7 +41,11 @@ export async function runBenchmark(options: RunBenchmarkOptions): Promise<Benchm
   const { evaluation } = options;
   const startedAt = new Date().toISOString();
   const progress = options.onProgress ?? (() => {});
-  const subjectRevision = process.env.EVE_BENCHMARK_REVISION ?? DEFAULT_SUBJECT_REVISION;
+  const repository = process.env.EVE_BENCHMARK_REPOSITORY ?? "https://github.com/vercel/eve.git";
+  const requestedRevision = process.env.EVE_BENCHMARK_REVISION ?? DEFAULT_SUBJECT_REVISION;
+  progress(`Resolving subject revision ${requestedRevision}`);
+  const subjectRevision = await resolveSubjectRevision(repository, requestedRevision);
+  progress(`Subject revision: ${subjectRevision.slice(0, 12)}`);
   const world = evaluation.createWorld();
   const user = evaluation.createUser();
   const transcript: SubjectTurn[] = [{ role: "user", text: evaluation.prompt }];
@@ -72,7 +79,7 @@ export async function runBenchmark(options: RunBenchmarkOptions): Promise<Benchm
       async onBootstrap({ session, workDir }) {
         progress("Building reusable eve benchmark template");
         await world.bootstrap({ sandbox: session });
-        await bootstrapSubject(session, workDir, subjectRevision, progress);
+        await bootstrapSubject(session, workDir, repository, subjectRevision, progress);
       },
       async onSession({ session, sessionWorkDir }) {
         sandbox = session as HarnessV1NetworkSandboxSession;
@@ -181,10 +188,10 @@ interface SetupStep {
 async function bootstrapSubject(
   sandbox: Experimental_SandboxSession,
   workspace: string,
+  repository: string,
   revision: string,
   progress: (message: string) => void,
 ): Promise<void> {
-  const repository = process.env.EVE_BENCHMARK_REPOSITORY ?? "https://github.com/vercel/eve.git";
   const environment = setupEnvironment();
   await runSetupSteps(
     sandbox,
@@ -306,6 +313,24 @@ function formatDuration(milliseconds: number): string {
   const seconds = Math.round(milliseconds / 1_000);
   if (seconds < 60) return `${seconds}s`;
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+async function resolveSubjectRevision(repository: string, revision: string): Promise<string> {
+  if (/^[0-9a-f]{40}$/iu.test(revision)) return revision.toLowerCase();
+  const normalized = normalizeRevision(revision);
+  const { stdout } = await execFileAsync("git", [
+    "ls-remote",
+    repository,
+    normalized,
+    `refs/heads/${normalized}`,
+    `refs/tags/${normalized}^{}`,
+    `refs/tags/${normalized}`,
+  ]);
+  const sha = stdout.match(/^[0-9a-f]{40}/imu)?.[0];
+  if (sha === undefined) {
+    throw new Error(`Could not resolve benchmark subject revision ${JSON.stringify(revision)}.`);
+  }
+  return sha.toLowerCase();
 }
 
 function normalizeRevision(revision: string): string {
