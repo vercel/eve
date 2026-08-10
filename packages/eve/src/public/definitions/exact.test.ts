@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
+import { z as z3 } from "zod/v3";
 
 import { z } from "#compiled/zod/index.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -79,6 +80,19 @@ describe("definition helper exact inputs", () => {
     expectTypeOf<ReturnType<typeof ordinaryTool.execute>>().toEqualTypeOf<
       Promise<{ ok: boolean }>
     >();
+  });
+
+  it("infers tool input from Zod 3 schemas", () => {
+    const tool = defineTool({
+      description: "Fetch current weather for a city.",
+      inputSchema: z3.object({ city: z3.string() }),
+      execute(input) {
+        expectTypeOf(input.city).toEqualTypeOf<string>();
+        return input.city;
+      },
+    });
+
+    expectTypeOf<ReturnType<typeof tool.execute>>().toEqualTypeOf<string>();
   });
 
   it("keeps the public hook event map aligned with runtime stream events", () => {

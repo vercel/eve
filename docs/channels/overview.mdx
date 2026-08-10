@@ -40,9 +40,9 @@ When eve doesn't ship a channel for your surface, build one with `defineChannel`
 
 ## Relationship to the Chat SDK
 
-eve uses the Chat SDK's **card-builder components** (Cards, Buttons, Actions, etc.) for composing rich Slack messages. When you build a card with the [Slack channel](./slack), the underlying primitives come from the Chat SDK and get converted to Slack Block Kit at post time.
+eve uses the [Chat SDK's card-builder components](https://chat-sdk.dev/docs/api/cards) (Cards, Buttons, Actions, etc.) for composing rich Slack messages. When you build a card with the [Slack channel](./slack), the underlying primitives come from the Chat SDK and get converted to Slack Block Kit at post time.
 
-eve does **not** use the Chat SDK's runtime. The `Chat`, `Adapter`, and `Thread` primitives are never imported or reachable through eve's public API. eve implements its own channel layer (webhook handling, signature verification, event parsing, and thread management). Building Slack messages works like Chat SDK cards, but wiring a channel means authoring against eve's `defineChannel(...)` API, not a Chat SDK adapter.
+eve's first-class channels use eve-owned runtimes for webhook handling, verification, event parsing, and thread management. The optional [Chat SDK channel](./chat-sdk) is the exception: it accepts a Chat SDK adapter and exposes its `Chat` and `Thread` primitives. Use `slackChannel` for eve's first-class Slack integration, `defineChannel(...)` for an eve-native custom channel, or `chatSdkChannel` when you intentionally want a Chat SDK adapter and runtime.
 
 ## Which channel?
 

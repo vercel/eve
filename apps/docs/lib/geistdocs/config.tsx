@@ -1,4 +1,5 @@
 import { defineConfig } from "@vercel/geistdocs/config";
+import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
 import {
   agent,
   basePath,
@@ -35,5 +36,18 @@ export const config = defineConfig({
     // Used only if eveAgent is removed and chat falls back to gateway mode.
     prompt,
     suggestions,
+    // Ask AI is answered by an agent built on eve (help-eve).
+    footer: (
+      <div className="flex justify-center">
+        <a
+          aria-label="Powered by eve"
+          className="inline-flex items-center gap-1.5 text-gray-700 text-label-12 transition-colors hover:text-gray-900"
+          href="https://eve.dev"
+        >
+          <span>Powered by</span>
+          <LogoEve height={10} />
+        </a>
+      </div>
+    ),
   },
 });

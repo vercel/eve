@@ -478,6 +478,7 @@ function resolveStepOtelContext(
     const stored = getTurnTraceState(session);
     if (stored) {
       const parent = trace.wrapSpanContext({
+        isRemote: true,
         traceId: stored.traceId,
         spanId: stored.spanId,
         traceFlags: stored.traceFlags,

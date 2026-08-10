@@ -39,6 +39,8 @@ function createFakeAccess(
       return { initialized: false, session: null };
     },
 
+    async stop() {},
+
     async get() {
       return {
         // Use a fresh id per fake session so the ripgrep-probe cache

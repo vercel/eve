@@ -152,6 +152,11 @@ export class MicrosandboxVm {
     await this.detach();
   }
 
+  async stop(): Promise<void> {
+    await this.#sandbox.stop();
+    await this.detach();
+  }
+
   async readFileBytes(path: string): Promise<Buffer | null> {
     try {
       const fs = this.#sandbox.fs();

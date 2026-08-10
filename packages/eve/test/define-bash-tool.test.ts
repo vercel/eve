@@ -43,6 +43,8 @@ describe("defineBashTool", () => {
         };
       },
 
+      async stop() {},
+
       async get() {
         return {
           id: "test-bash-sandbox",
@@ -100,6 +102,8 @@ describe("defineBashTool", () => {
         };
       },
 
+      async stop() {},
+
       async get() {
         return null;
       },
@@ -132,6 +136,8 @@ describe("defineBashTool", () => {
       async captureState() {
         return { initialized: false, session: null };
       },
+
+      async stop() {},
 
       async get() {
         return {

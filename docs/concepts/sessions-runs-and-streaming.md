@@ -150,7 +150,7 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
 
 The follow-up reuses the same durable session: same history, same state.
 
-If the session is waiting on a human-in-the-loop approval, a matching text reply such as `approve` or `deny` answers the approval. Other follow-up text is held until the approval is answered, so an unrelated message does not implicitly deny the pending tool call.
+If the session is waiting on a human-in-the-loop approval, a matching text reply such as `approve` or `cancel` answers the approval. Other follow-up text is held until the approval is answered, so an unrelated message does not implicitly deny the pending tool call.
 
 If the session is waiting on `ask_question`, a follow-up message clears that pending request before the model continues. An exact option match or permitted freeform response answers the question; any other message marks the question unanswered and starts the follow-up turn.
 

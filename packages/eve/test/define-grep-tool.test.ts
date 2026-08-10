@@ -16,6 +16,8 @@ function createFakeAccess(
       return { initialized: false, session: null };
     },
 
+    async stop() {},
+
     async get() {
       const callHandler = handler;
       if (callHandler === null) return null;
@@ -103,6 +105,8 @@ describe("defineGrepTool", () => {
       async captureState() {
         return { initialized: false, session: null };
       },
+
+      async stop() {},
 
       async get() {
         return null;

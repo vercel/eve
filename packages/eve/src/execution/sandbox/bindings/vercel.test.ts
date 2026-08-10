@@ -1026,6 +1026,20 @@ describe("createVercelSandbox", () => {
     expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
   });
 
+  it("stops authored compute and keeps the Vercel session handle usable", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    vi.mocked(sessionSandbox.runCommand).mockResolvedValue(createMockDetachedCommand() as never);
+    vi.mocked(sessionSandbox.runCommand).mockClear();
+
+    await handle.stop();
+    await handle.session.run({ command: "printf resumed" });
+
+    expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
+    expect(sessionSandbox.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ args: ["-lc", "printf resumed"], cmd: "bash" }),
+    );
+  });
+
   it("skips the stop call on shutdown when the sandbox is not running", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session", status: "stopped" });
@@ -1055,6 +1069,13 @@ describe("createVercelSandbox", () => {
     await handle.shutdown();
 
     expect(sessionSandbox.stop).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an authored session stop failure", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    sessionSandbox.stop.mockRejectedValueOnce(new Error("provider unreachable"));
+
+    await expect(handle.stop()).rejects.toThrow("provider unreachable");
   });
 
   it("falls back to creating a new session when the persisted sandbox no longer exists", async () => {

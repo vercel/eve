@@ -178,6 +178,36 @@ describe("createMicrosandboxHandle", () => {
     expect(runtimeMocks.createPreparedMicrosandbox).toHaveBeenCalledTimes(2);
   });
 
+  it("stops the VM and evicts the active-session cache on an authored stop", async () => {
+    const vm = createFakeMicrosandboxVm("session-key");
+    runtimeMocks.createPreparedMicrosandbox.mockResolvedValue(vm);
+    const options = resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE });
+    const createInput = {
+      runtimeContext: { appRoot: "/tmp/eve-app" },
+      sessionKey: "session-key",
+      templateKey: "template-key",
+    };
+
+    const handle = await createMicrosandboxHandle({
+      backendName: "microsandbox",
+      createInput,
+      options,
+      optionsHash: "options-hash",
+    });
+    await handle.stop();
+
+    expect(vm.stop).toHaveBeenCalledTimes(1);
+
+    const nextHandle = await createMicrosandboxHandle({
+      backendName: "microsandbox",
+      createInput,
+      options,
+      optionsHash: "options-hash",
+    });
+    expect(nextHandle).not.toBe(handle);
+    expect(runtimeMocks.createPreparedMicrosandbox).toHaveBeenCalledTimes(2);
+  });
+
   it("reports a missing template snapshot race as not provisioned", async () => {
     runtimeMocks.createPreparedMicrosandbox.mockRejectedValueOnce(
       new Error("snapshot template-snapshot not found"),
@@ -292,6 +322,7 @@ function createFakeMicrosandboxVm(sessionKey: string) {
       };
     },
     async detach() {},
+    stop: vi.fn(async () => {}),
     shutdown: vi.fn(async () => {}),
     async readFileBytes(path: string) {
       return files.get(path) ?? null;

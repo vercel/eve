@@ -14,7 +14,7 @@ Run the registry setup from the agent directory:
 eve add channel/github
 ```
 
-The flow checks that the Vercel CLI is authenticated, creates or links a Vercel project when needed, provisions an app-scoped GitHub Connect client, and replaces its default trigger with `/eve/v1/github`. It then installs `@vercel/connect` and writes `agent/channels/github.ts` with the connector UID.
+The flow checks that the Vercel CLI is authenticated, creates or links a Vercel project when needed, provisions an app-scoped GitHub Connect client, and registers `/eve/v1/github` as a trigger destination. It then installs `@vercel/connect` and writes `agent/channels/github.ts` with the connector UID.
 
 Vercel Connect creates the GitHub App, receives and verifies its webhooks, and forwards them to the deployed agent. After deploying, open the GitHub App in the Connect dashboard and install it in the organization or account where you want to use it. Add the generated invocation token (for example, `@my-agent`) to a new issue, pull request, or review comment to start a conversation. GitHub may not autocomplete the token or render it as a linked mention.
 

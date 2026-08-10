@@ -84,4 +84,5 @@ RUN set -eux; \
   printf 'vercel-sandbox ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/vercel-sandbox; \
   chmod 0440 /etc/sudoers.d/vercel-sandbox
 
+USER vercel-sandbox
 WORKDIR /workspace

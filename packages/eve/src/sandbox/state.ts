@@ -32,4 +32,5 @@ export interface SandboxState {
 export interface SandboxAccess {
   captureState(): Promise<SandboxState>;
   get(): Promise<SandboxSession | null>;
+  stop(): Promise<void>;
 }

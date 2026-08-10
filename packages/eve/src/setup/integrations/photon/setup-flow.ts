@@ -4,6 +4,7 @@ import { text } from "../../ask.js";
 import { appendEnv } from "../../append-env.js";
 import { provisionPhotonConnector } from "./connect.js";
 import {
+  findDedicatedPhotonLine,
   provisionPhotonProject,
   usePhotonProject,
   validatePhotonPhoneNumber,
@@ -43,6 +44,7 @@ export interface PhotonSetupDeps {
   appendEnv: typeof appendEnv;
   deriveConnectorSlug: typeof deriveSlackConnectorSlug;
   ensureVercelProject: typeof ensureVercelProject;
+  findDedicatedLine: typeof findDedicatedPhotonLine;
   openUrl: typeof openUrl;
   provisionConnector: typeof provisionPhotonConnector;
   provisionProject: typeof provisionPhotonProject;
@@ -54,6 +56,7 @@ const defaultDeps: PhotonSetupDeps = {
   appendEnv,
   deriveConnectorSlug: deriveSlackConnectorSlug,
   ensureVercelProject,
+  findDedicatedLine: findDedicatedPhotonLine,
   openUrl,
   provisionConnector: provisionPhotonConnector,
   provisionProject: provisionPhotonProject,
@@ -183,12 +186,14 @@ async function chooseSetupPlan(
 async function resolvePhotonProject(
   options: PhotonSetupOptions,
   plan: PhotonSetupPlan,
-  phoneNumber: string,
+  phoneNumber: string | undefined,
+  dedicatedLine: string | undefined,
   deps: PhotonSetupDeps,
 ): Promise<PhotonManagedProject> {
   if (plan.photonProject !== "create") {
-    return deps.useProject({ ...plan.photonProject, phoneNumber });
+    return deps.useProject({ ...plan.photonProject, dedicatedLine, phoneNumber });
   }
+  if (phoneNumber === undefined) throw new Error("Photon phone number is required.");
   const spinner = options.ui.prompter.log.spinner?.("Waiting for Photon approval…", {
     kind: "external-action",
     emphasis: "browser",
@@ -214,17 +219,28 @@ async function scaffoldPhoton(
   plan: PhotonSetupPlan,
   deps: PhotonSetupDeps,
 ): Promise<{ assignedPhoneNumber?: string; dashboardUrl: string }> {
-  const phoneNumber = await options.ui.asker.ask(
-    text({
-      key: "photon-phone-number",
-      message: "Your iMessage phone number",
-      placeholder: "+15551234567",
-      required: true,
-      validate: validatePhotonPhoneNumber,
-    }),
-  );
+  const dedicatedLine =
+    plan.photonProject === "create" ? undefined : await deps.findDedicatedLine(plan.photonProject);
+  const phoneNumber =
+    plan.photonProject !== "create" && dedicatedLine !== undefined
+      ? undefined
+      : await options.ui.asker.ask(
+          text({
+            key: "photon-phone-number",
+            message: "Your iMessage phone number",
+            placeholder: "+15551234567",
+            required: true,
+            validate: validatePhotonPhoneNumber,
+          }),
+        );
   const projectRoot = options.projectPath;
-  const managedProject = await resolvePhotonProject(options, plan, phoneNumber, deps);
+  const managedProject = await resolvePhotonProject(
+    options,
+    plan,
+    phoneNumber,
+    dedicatedLine,
+    deps,
+  );
   try {
     const channelPath = join(projectRoot, "agent/channels/photon.ts");
     if (plan.credentials === "vercel-connect") {
