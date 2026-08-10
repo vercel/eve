@@ -62,4 +62,24 @@ describe("coordinateApprovalDelivery", () => {
       { optionId: "approve", requestId: request.requestId },
     ]);
   });
+
+  it("recovers a cancelled settlement before its synthetic response is consumed", async () => {
+    const parked = parkedSession();
+    const settled = settleDirectApprovalResponse({
+      actor: responder,
+      outcome: "cancelled",
+      requestId: request.requestId,
+      settledAt: 100,
+      state: parked.state,
+    });
+    const result = await coordinateApprovalDelivery({
+      now: 101,
+      session: { ...parked, state: settled.state },
+      tools: new Map(),
+    });
+    expect(result.kind).toBe("continue");
+    expect(result.stepInput?.inputResponses).toEqual([
+      { optionId: "cancel", requestId: request.requestId },
+    ]);
+  });
 });
