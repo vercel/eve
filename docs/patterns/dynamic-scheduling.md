@@ -1,5 +1,5 @@
 ---
-title: "Dynamic scheduling"
+title: "Dynamic Scheduling"
 description: "Compose one minute-level eve schedule, proactive channel handoff, and CRUD tools into application-managed schedules."
 ---
 

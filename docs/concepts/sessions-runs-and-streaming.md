@@ -14,7 +14,7 @@ or creates a replacement implicitly.
 Authored channels also have channel-local continuation tokens. A token addresses
 whichever session currently owns a platform conversation, such as a Slack thread.
 That identity stays behind the channel boundary and is never accepted or returned
-by the eve HTTP session API. See [Custom channels](../channels/custom#address-and-session-handles).
+by the eve HTTP session API. See [Custom channels](../channels/custom#channel-operations-and-session-handles).
 
 Sessions last 30 days by default; configure `limits.sessionTimeoutMs` in
 `agent.ts`, or set it to `false` to disable the deadline. At expiration, eve
@@ -148,7 +148,15 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
   -d '{"message":"Now send the short version."}'
 ```
 
-The follow-up reuses the same durable session: same history, same state. Message sends default to cancellation-backed `"steer"`; if a turn is active, eve buffers the follow-up, cancels that turn, and starts the message under a new turn ID. Channels and TypeScript `Session.send(...)` calls can select `turnPolicy: "queue"` when active work should finish first. Structured `inputResponses` never steer.
+The follow-up reuses the same durable session: same history, same state. A follow-up accepts exactly one of `message` or `inputResponses`. Use structured responses to answer one or more pending human-input requests by ID:
+
+```bash
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
+  -H 'content-type: application/json' \
+  -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
+```
+
+Message sends default to cancellation-backed `"steer"`; if a turn is active, eve buffers the follow-up, cancels that turn, and starts the message under a new turn ID. Channels and TypeScript `Session.send(...)` calls can select `turnPolicy: "queue"` when active work should finish first. Structured `inputResponses` never steer.
 
 If one pending batch is waiting on a human-in-the-loop approval, a matching text reply such as `approve` or `cancel` answers it. Unrelated text starts an ordinary turn immediately without denying the tool call; the approval stays pending and answerable. A later structured `inputResponses` answer keyed by its `requestId` still resumes the original tool call, even after intervening turns.
 
@@ -190,9 +198,11 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/reset \
   -d '{"reason":"Start over"}'
 ```
 
-Compaction summarizes context, clear removes model-message history in place,
-and reset terminally retires the session. A reset ID never becomes a new session;
-create another session explicitly for a fresh conversation.
+Compaction summarizes context without adding a user message. If a turn is active, eve queues the request until that turn settles. A successful compaction emits `compaction.requested` and `compaction.completed`, followed by `session.waiting`; if summarization fails, the session returns to waiting with its previous history.
+
+Clear removes model-message history in place while preserving the session identity, system prompt, tools, skills, durable state, limits, and sandbox. It emits `context.cleared` followed by `session.waiting`.
+
+Reset terminally retires the exact session ID. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. Compact, clear, and reset return `"no_active_session"` when the target is already inactive.
 
 ## Reconnect and rewind
 

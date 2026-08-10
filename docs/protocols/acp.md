@@ -1,5 +1,5 @@
 ---
-title: "Use eve through ACP"
+title: "Agent Client Protocol (ACP)"
 description: "Use local or deployed eve agents from Agent Client Protocol clients."
 ---
 

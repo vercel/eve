@@ -13,6 +13,7 @@ export const DocsLayout = ({ tree, children }: DocsLayoutProps) => (
     containerProps={{
       className: "max-w-[1448px] mx-auto",
     }}
+    sidebarMode="tree"
     tree={tree}
   >
     {children}

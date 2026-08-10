@@ -1,5 +1,6 @@
 {
-  "title": "Concepts",
+  "title": "Core Concepts",
+  "defaultOpen": false,
   "pages": [
     "execution-model-and-durability",
     "sessions-runs-and-streaming",

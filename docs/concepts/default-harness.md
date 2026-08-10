@@ -125,7 +125,7 @@ import { experimental_workflow } from "eve/tools";
 export default experimental_workflow({ maxSubagents: 100 });
 ```
 
-With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. The tool is root-only — delegated subagent sessions never see it — and one program may dispatch at most the configured `maxSubagents` calls (default 100). See [Dynamic workflows](../guides/dynamic-workflows).
+With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. The tool is root-only — delegated subagent sessions never see it — and one program may dispatch at most the configured `maxSubagents` calls (default 100). See [Workflow Tool](../guides/dynamic-workflows).
 
 ## The opt-in `sleep` tool
 

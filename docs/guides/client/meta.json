@@ -1,4 +1,5 @@
 {
   "title": "TypeScript SDK",
+  "defaultOpen": false,
   "pages": ["overview", "messages", "continuations", "streaming", "output-schema"]
 }

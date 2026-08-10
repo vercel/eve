@@ -1,5 +1,5 @@
 ---
-title: "Human-in-the-loop"
+title: "Human-in-the-Loop"
 description: "Pause a run for a person — gate a tool on approval or have the agent ask a question — and resume durably when they answer."
 url: /human-in-the-loop
 ---

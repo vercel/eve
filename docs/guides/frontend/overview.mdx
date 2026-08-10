@@ -16,6 +16,14 @@ The per-framework pages below walk through the wiring step by step: [Next.js](./
 
 For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [TypeScript SDK](../client/overview) directly.
 
+## Authenticate browser requests
+
+A same-origin framework integration sends your application cookies with every eve request. For bearer tokens or another non-cookie scheme, pass `auth` or `headers` to `useEveAgent`.
+
+The default eve channel fails closed. Without an authored `agent/channels/eve.ts`, production browser traffic receives `401` from the default `[vercelOidc(), localDev(), placeholderAuth()]` policy. Add the channel file with an `AuthFn` that verifies your application session or token.
+
+For a public demo, use `none()` from `eve/channels/auth` to admit anonymous requests explicitly. Do not use `none()` for an agent that handles private or production data. See [Authentication](../auth-and-route-protection) for application-session examples, token verifiers, and the default policy.
+
 ## Basic chat (React)
 
 The hook lives in `eve/react`. Render `data.messages`, gate the composer on `status`, and send text with `send`:
@@ -204,11 +212,12 @@ const agent = useEveAgent({
 
 ## Lifecycle callbacks
 
-On top of `onSessionChange`, the hook takes a few per-turn callbacks:
+The hook accepts these lifecycle callbacks:
 
 - `onEvent(event)`: fires for each eve stream event as it arrives.
 - `onError(error)`: fires with the last `Error` when a turn fails.
 - `onFinish(snapshot)`: fires with the final `{ data, status, session, ... }` snapshot once a turn settles.
+- `onSessionChange(session)`: fires when the session cursor advances. Persist it to resume across reloads.
 
 ```tsx
 const agent = useEveAgent({

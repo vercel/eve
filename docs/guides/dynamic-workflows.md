@@ -1,5 +1,5 @@
 ---
-title: "Dynamic Workflows"
+title: "Workflow Tool"
 description: "The experimental Workflow tool: let the model orchestrate its own subagents from model-authored JavaScript as one durable step."
 ---
 

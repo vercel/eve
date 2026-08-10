@@ -118,4 +118,4 @@ Pass another bare OpenAI model slug to override the default. The helper reads cr
 
 - [`agent.ts`](../agent-config): the agent config these helpers configure
 - [Tools](../tools): `defineTool`, the most-used helper
-- [Project layout](./project-layout): where each define\* lives on disk
+- [Project layout](../getting-started#project-layout): where each define\* lives on disk

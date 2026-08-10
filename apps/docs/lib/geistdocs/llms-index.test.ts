@@ -7,6 +7,12 @@ describe("createLlmsIndex", () => {
 
     expect(output).toMatch(/^# eve\n\n> /);
     expect(output).not.toMatch(/^---/);
+    expect(output).toContain("## Introduction");
+    expect(output).toContain("## Build");
+    expect(output).toContain("## Integrations");
+    expect(output).toContain("## Advanced");
+    expect(output).not.toContain("## Application Integration");
+    expect(output).toContain("## Core Concepts");
     expect(output).toContain("## Optional");
   });
 

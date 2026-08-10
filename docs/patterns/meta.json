@@ -1,5 +1,6 @@
 {
   "title": "Patterns",
+  "defaultOpen": false,
   "pages": [
     "multi-tenant-memory",
     "dynamic-scheduling",

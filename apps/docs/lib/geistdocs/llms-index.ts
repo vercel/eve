@@ -10,67 +10,81 @@ eve.dev publishes framework documentation. It is not a shared API, authorization
 
 Documentation links below point directly to Markdown. Remove the \`.md\` suffix for the canonical HTML page.
 
-## Start here
+## Introduction
 
-- [Getting started](${EVE_ORIGIN}/docs/getting-started.md): Choose the right path for a new or existing eve project.
-- [Installation](${EVE_ORIGIN}/docs/installation.md): Create a project, configure a model credential, and run it locally.
-- [Project structure](${EVE_ORIGIN}/docs/project-structure.md): Learn which files eve discovers and how paths define capabilities.
-- [First-agent tutorial](${EVE_ORIGIN}/docs/tutorial/first-agent.md): Build an agent with tools, durable state, and an interface.
+- [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure a model, understand its layout, and run it locally.
+- [Tutorial](${EVE_ORIGIN}/docs/tutorial/first-agent.md): Build an agent with tools, durable state, and an interface.
+- [Terminal UI](${EVE_ORIGIN}/docs/guides/dev-tui.md): Work with a local or deployed agent from the interactive terminal UI.
 
-## Author an agent
+## Build
 
-- [Agent configuration](${EVE_ORIGIN}/docs/agent-config.md): Configure the model, reasoning effort, compaction, and runtime behavior.
+- [Agents](${EVE_ORIGIN}/docs/agent-config.md): Configure the model, reasoning effort, compaction, and runtime behavior.
 - [Instructions](${EVE_ORIGIN}/docs/instructions.md): Write the agent's always-on system prompt.
 - [Tools](${EVE_ORIGIN}/docs/tools.md): Define typed actions and gate sensitive calls on human approval.
 - [Skills](${EVE_ORIGIN}/docs/skills.md): Add procedures that the model loads on demand.
-- [Channels](${EVE_ORIGIN}/docs/channels/overview.md): Expose the agent through HTTP, Slack, Discord, and other messaging surfaces.
-- [Connections](${EVE_ORIGIN}/docs/connections.md): Connect external MCP and OpenAPI servers without exposing credentials to the model.
-- [Extensions](${EVE_ORIGIN}/docs/extensions.md): Package and mount reusable eve capabilities.
+- [Durable State](${EVE_ORIGIN}/docs/guides/state.md): Persist per-session memory across step boundaries.
 - [Sandbox](${EVE_ORIGIN}/docs/sandbox.md): Configure the isolated shell, filesystem, lifecycle, and network policy.
 - [Subagents](${EVE_ORIGIN}/docs/subagents.md): Delegate work to copies of the root agent or declared specialists.
 - [Schedules](${EVE_ORIGIN}/docs/schedules.md): Run prompts or handlers on a cron cadence.
 - [Evals](${EVE_ORIGIN}/docs/evals/overview.md): Define repeatable scored checks and run them with \`eve eval\`.
 
-## Connect clients and interfaces
+## Integrations
 
-- [Base eve channel](${EVE_ORIGIN}/docs/channels/eve.md): Understand the HTTP API exposed by each running eve app.
-- [Frontend overview](${EVE_ORIGIN}/docs/guides/frontend/overview.md): Build browser chat interfaces with \`useEveAgent\`.
+- [Add Integrations](${EVE_ORIGIN}/docs/install-integrations.md): Discover and add official or third-party integrations.
+- [Connections](${EVE_ORIGIN}/docs/connections.md): Connect external MCP and OpenAPI servers without exposing credentials to the model.
+- [Channels](${EVE_ORIGIN}/docs/channels/overview.md): Expose the agent through HTTP, Slack, Discord, and other messaging surfaces.
+- [Base eve Channel](${EVE_ORIGIN}/docs/channels/eve.md): Understand the HTTP API exposed by each running eve app.
+- [Extensions](${EVE_ORIGIN}/docs/extensions.md): Package and mount reusable eve capabilities.
+- [Remote Agents](${EVE_ORIGIN}/docs/guides/remote-agents.md): Call another eve deployment as a subagent.
+- [Agent Client Protocol (ACP)](${EVE_ORIGIN}/docs/protocols/acp.md): Use local or deployed eve agents from ACP clients.
+- [Universal Commerce Protocol (UCP)](${EVE_ORIGIN}/docs/protocols/ucp.md): Serve a UCP profile from a custom eve channel.
+
+- [Frontend Frameworks](${EVE_ORIGIN}/docs/guides/frontend/overview.md): Build browser chat interfaces with \`useEveAgent\`.
 - [Next.js](${EVE_ORIGIN}/docs/guides/frontend/nextjs.md): Mount eve routes and use the React client in Next.js.
 - [Nuxt](${EVE_ORIGIN}/docs/guides/frontend/nuxt.md): Mount eve routes and use the Vue client in Nuxt.
 - [SvelteKit](${EVE_ORIGIN}/docs/guides/frontend/sveltekit.md): Mount eve routes and use the Svelte client in SvelteKit.
 - [TypeScript SDK](${EVE_ORIGIN}/docs/guides/client/overview.md): Call an eve app from scripts, services, tests, or custom UIs.
-- [Sessions, runs, and streaming](${EVE_ORIGIN}/docs/concepts/sessions-runs-and-streaming.md): Understand continuation tokens, stream handles, NDJSON events, and reconnecting.
-- [Authentication and route protection](${EVE_ORIGIN}/docs/guides/auth-and-route-protection.md): Secure a deployed app's routes and connection OAuth.
 
-## Run and operate
+## Advanced
 
-- [Execution model and durability](${EVE_ORIGIN}/docs/concepts/execution-model-and-durability.md): Understand sessions, checkpointed steps, and parked work.
-- [Default harness](${EVE_ORIGIN}/docs/concepts/default-harness.md): Understand the built-in loop, tools, workspace, and context assembly.
-- [Context control](${EVE_ORIGIN}/docs/concepts/context-control.md): Control context growth, compaction, and model-visible history.
-- [Security model](${EVE_ORIGIN}/docs/concepts/security-model.md): Review trust boundaries, secret handling, credentials, and fail-closed behavior.
-- [Deployment overview](${EVE_ORIGIN}/docs/guides/deployment/overview.md): Choose between Vercel and self-hosted infrastructure.
-- [Deploy to Vercel](${EVE_ORIGIN}/docs/guides/deployment/vercel.md): Build and deploy with Vercel Workflow and Vercel Sandbox.
-- [Self-hosting](${EVE_ORIGIN}/docs/guides/deployment/self-hosting.md): Run eve as a Node service or container.
-- [Instrumentation](${EVE_ORIGIN}/docs/guides/instrumentation.md): Trace agents with OpenTelemetry and inspect workflow metadata.
 - [Hooks](${EVE_ORIGIN}/docs/guides/hooks.md): Subscribe to runtime stream events.
-- [Durable state](${EVE_ORIGIN}/docs/guides/state.md): Persist per-session memory across step boundaries.
-- [Dynamic capabilities](${EVE_ORIGIN}/docs/guides/dynamic-capabilities.md): Resolve models, tools, skills, subagents, and instructions at runtime.
-- [Remote agents](${EVE_ORIGIN}/docs/guides/remote-agents.md): Call another eve deployment as a subagent.
+- [Dynamic Capabilities](${EVE_ORIGIN}/docs/guides/dynamic-capabilities.md): Resolve models, tools, skills, subagents, and instructions at runtime.
+- [Workflow Tool](${EVE_ORIGIN}/docs/guides/dynamic-workflows.md): Let the model orchestrate subagents through the experimental Workflow tool.
+- [Deployment Overview](${EVE_ORIGIN}/docs/guides/deployment/overview.md): Choose between Vercel and self-hosted infrastructure.
+- [Deploy to Vercel](${EVE_ORIGIN}/docs/guides/deployment/vercel.md): Build and deploy with Vercel Workflow and Vercel Sandbox.
+- [Self-Hosting](${EVE_ORIGIN}/docs/guides/deployment/self-hosting.md): Run eve as a Node service or container.
+- [Authentication](${EVE_ORIGIN}/docs/guides/auth-and-route-protection.md): Secure an agent's HTTP routes and establish caller identity.
+- [Observability](${EVE_ORIGIN}/docs/guides/instrumentation.md): Trace agents with OpenTelemetry and inspect workflow metadata.
 
-## Reference and discovery
+## Core Concepts
+
+- [Execution Model and Durability](${EVE_ORIGIN}/docs/concepts/execution-model-and-durability.md): Understand sessions, checkpointed steps, and parked work.
+- [Sessions, Runs, and Streaming](${EVE_ORIGIN}/docs/concepts/sessions-runs-and-streaming.md): Understand session IDs, NDJSON events, controls, and reconnecting.
+- [Default Harness](${EVE_ORIGIN}/docs/concepts/default-harness.md): Understand the built-in loop, tools, workspace, and context assembly.
+- [Context Control](${EVE_ORIGIN}/docs/concepts/context-control.md): Choose what the model sees and when.
+- [Security Model](${EVE_ORIGIN}/docs/concepts/security-model.md): Review trust boundaries, secret handling, credentials, and fail-closed behavior.
+
+## Patterns
+
+- [Multi-Tenant Memory](${EVE_ORIGIN}/docs/patterns/multi-tenant-memory.md): Compose tenant-scoped long-term memory from dynamic instructions and tools.
+- [Dynamic Scheduling](${EVE_ORIGIN}/docs/patterns/dynamic-scheduling.md): Build application-managed schedules from an eve schedule and authored tools.
+- [Multi-Tenant Outbound Auth](${EVE_ORIGIN}/docs/patterns/multi-tenant-auth.md): Select tenant-scoped credentials for tools and connections.
+- [Multi-Tenant Approvals](${EVE_ORIGIN}/docs/patterns/multi-tenant-approvals.md): Apply tenant policy to authored and connection tools.
+
+## Reference and Discovery
 
 - [TypeScript API](${EVE_ORIGIN}/docs/reference/typescript-api.md): Find public \`define*\` helpers, runtime context, and import paths.
-- [CLI reference](${EVE_ORIGIN}/docs/reference/cli.md): Find every eve command and option.
-- [Project layout reference](${EVE_ORIGIN}/docs/reference/project-layout.md): Look up authored slots and path-derived naming rules.
-- [Install integrations](${EVE_ORIGIN}/docs/install-integrations.md): Discover and add official or third-party integrations.
-- [Documentation map](${EVE_ORIGIN}/sitemap.md): Browse every documentation, integration, and template page with type and summary metadata.
-- [Agent instructions](${EVE_ORIGIN}/agents.md): Read operational guidance for coding agents working with eve.
-- [Full documentation corpus](${EVE_ORIGIN}/llms-full.txt): Load all docs and integration content for offline indexing or a large context window.
+- [CLI Reference](${EVE_ORIGIN}/docs/reference/cli.md): Find every eve command and option.
+- [Session Context](${EVE_ORIGIN}/docs/guides/session-context.md): Use session metadata and runtime accessors in authored code.
+- [Responsible Use](${EVE_ORIGIN}/docs/responsible-use.md): Review deployer responsibilities and safeguards.
+- [Documentation Map](${EVE_ORIGIN}/sitemap.md): Browse every documentation, integration, and template page with type and summary metadata.
+- [Agent Instructions](${EVE_ORIGIN}/agents.md): Read operational guidance for coding agents working with eve.
+- [Full Documentation Corpus](${EVE_ORIGIN}/llms-full.txt): Load all docs and integration content for offline indexing or a large context window.
 
 ## Optional
 
 - [Integrations](${EVE_ORIGIN}/integrations): Browse official channels, connections, extensions, and instrumentation providers.
 - [Templates](${EVE_ORIGIN}/templates): Browse complete example projects and their source.
-- [Official eve skill](https://github.com/vercel/eve/blob/main/skills/eve/SKILL.md): Install or inspect the coding-agent skill; its guidance defers to version-matched bundled docs.
-- [Source repository](https://github.com/vercel/eve): Read source, releases, issues, and contribution guidance.
+- [Official eve Skill](https://github.com/vercel/eve/blob/main/skills/eve/SKILL.md): Install or inspect the coding-agent skill; its guidance defers to version-matched bundled docs.
+- [Source Repository](https://github.com/vercel/eve): Read source, releases, issues, and contribution guidance.
 `;

@@ -1,5 +1,5 @@
 ---
-title: "Auth & Route Protection"
+title: "Authentication"
 description: "Secure your agent's HTTP routes with an ordered auth walk, verifier helpers, and connection OAuth via Vercel Connect."
 ---
 
@@ -12,7 +12,7 @@ Start with route auth.
 
 ## Route auth
 
-The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`) and guards three routes:
+The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`) and guards these route groups:
 
 - `POST /eve/v1/session`
 - `POST /eve/v1/session/:sessionId`
@@ -307,22 +307,7 @@ Built-in platform channels that identify a human sender, such as Slack, Discord,
 
 ### On a connection
 
-Attach `connect()` from `@vercel/connect/eve` to the connection:
-
-```ts title="agent/connections/linear.ts"
-import { connect } from "@vercel/connect/eve";
-import { defineMcpClientConnection } from "eve/connections";
-import { once } from "eve/tools/approval";
-
-export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/mcp",
-  description: "Linear: project management, issue tracking, and team workflows.",
-  auth: connect("linear/myagent"),
-  approval: once(),
-});
-```
-
-The first call that needs a user-scoped connection kicks off an OAuth sign-in, surfaced as an authorization challenge (a URL the caller visits). [Vercel Connect](https://vercel.com/docs/connect) brokers the flow and holds the credentials, which are resolved and cached per workflow step, never serialized into history, and never shown to the model. For non-interactive connections, pass a static token or `connect({ connector, principalType: "app" })` in place of user-scoped `connect()`. [Connections](../connections) covers both shapes.
+Set `auth` on an MCP or OpenAPI connection when the external service supplies a family of remote tools. The [connections overview](../connections) owns the shared `connect()` setup, static-token providers, app and user scope, approval interaction, and self-hosted OAuth flow.
 
 ### On a single tool
 
