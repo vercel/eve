@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -826,6 +826,77 @@ describe("compileAgent", () => {
     expect(compiledManifestText).not.toContain("Find primary sources");
     expect(compiledManifestText).not.toContain("query-template.bin");
     expect(moduleMapText).not.toContain("Find primary sources");
+  });
+
+  it("dereferences linked skill packages into self-contained workspace resources", async ({
+    skip,
+  }) => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-compile-linked-skill-package-",
+      APP_ROOT_OPTIONS,
+    );
+    const sharedSkillRoot = join(appRoot, "shared-skills", "research");
+    const linkedSkillRoot = join(agentRoot, "skills", "research");
+
+    await mkdir(join(sharedSkillRoot, "references"), { recursive: true });
+    await mkdir(join(agentRoot, "skills"), { recursive: true });
+    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
+    await writeFile(
+      join(sharedSkillRoot, "SKILL.md"),
+      [
+        "---",
+        "description: Research unfamiliar topics.",
+        "---",
+        "Gather evidence first.",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(sharedSkillRoot, "references", "checklist.md"),
+      "# Checklist\n\n- Find primary sources.\n",
+    );
+    try {
+      await symlink(
+        sharedSkillRoot,
+        linkedSkillRoot,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error.code === "EPERM" || error.code === "EACCES")
+      ) {
+        skip("directory symlink or junction creation is unavailable on this platform");
+      }
+
+      throw error;
+    }
+
+    const result = await compileAgent({ startPath: appRoot });
+    const compiledSkillRoot = join(
+      result.paths.compileDirectoryPath,
+      "workspace-resources",
+      ROOT_COMPILED_AGENT_NODE_ID,
+      "skills",
+      "research",
+    );
+
+    await rm(sharedSkillRoot, { recursive: true });
+
+    const [skillStats, referenceStats, skillMarkdown, checklist] = await Promise.all([
+      lstat(join(compiledSkillRoot, "SKILL.md")),
+      lstat(join(compiledSkillRoot, "references", "checklist.md")),
+      readFile(join(compiledSkillRoot, "SKILL.md"), "utf8"),
+      readFile(join(compiledSkillRoot, "references", "checklist.md"), "utf8"),
+    ]);
+
+    expect(skillStats.isSymbolicLink()).toBe(false);
+    expect(referenceStats.isSymbolicLink()).toBe(false);
+    expect(skillMarkdown).toContain("Gather evidence first.");
+    expect(checklist).toBe("# Checklist\n\n- Find primary sources.\n");
+    expect(result.manifest.workspaceResourceRoot?.contentHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("compiles nested authored tools using the path-derived tool name", async () => {
