@@ -1,5 +1,28 @@
 # eve
 
+## 0.32.0
+
+### Minor Changes
+
+- 1702f91: Tool approval responses now use `cancel` instead of `deny`, while retaining `approve` for the positive response, aligning the public protocol with the user-facing flow-control semantics.
+- cbe7105: Allow authored hooks, tools, and channel callbacks to stop their active sandbox through `ctx.getSandbox().stop()`. Every built-in backend preserves the durable session for a later callback, and custom sandbox backend handles must now implement `stop()`.
+
+### Patch Changes
+
+- ea530ec: Update `eve add` to better support agent-based invocation of guided setup flows. Interactive setup links a Vercel project when needed; after each deployable setup, `/add` offers to add more by default, deploy to production, or finish.
+- a29cc8e: Update the bundled AI SDK to 7.0.58 and the `@ai-sdk/*` providers to their latest minors.
+- 39c76ca: AI Gateway models now use Exa by default for the built-in `web_search` tool. Agents can continue to select Parallel explicitly with `webSearch({ provider: "parallel" })`.
+- 261af74: Photon setup now shows an existing project's dedicated number when available, rather than allocating and showing a shared fallback number.
+- 55b5cc7: Teach newly scaffolded coding agents to discover integrations and follow the structured `eve add --headless` setup flow through completion.
+- 91cca9a: Slack now posts tool input previews separately from approval controls so large inputs no longer inflate button callbacks and approvals remain responsive.
+- 50f2d96: Conversation sessions no longer stall while an interactive authorization challenge is open: ordinary messages run as normal turns, while tasks defer unrelated input until their blocked authorization completes. Callbacks are bound to the exact challenge attempt and initiating connection principal, remain live across parked activity, and start a valid callback turn after the authorization park closes its boundary. Session timeouts are also honored during an open challenge, and `client.fetch` preserves query strings embedded in the request path.
+- 7449917: Stop completed and cancelled todo lists from being re-injected as user messages after compaction. Lists that still contain active work continue to be preserved in full.
+- 63a76f0: Local traces now record `agent.turn` with the turn's real duration instead of a zero-duration marker, and the separate `agent.turn.terminal` marker span is gone — terminal and transition events land on the turn span itself. `agent.session` window roots remain zero-duration markers because an idle session never closes.
+- a159596: Export telemetry for every step of multi-step turns when an OpenTelemetry consumer groups spans by completed local segments.
+- e1080e0: Reject HTML sign-in pages returned by Slack private file downloads and explain how to restore attachment access.
+- 52000dd: Build tool input schemas authored with Zod 3 instead of crashing during JSON Schema conversion.
+- f06e12e: Add a structured `eve add --non-interactive` flow with stable setup answers, component selection, and resumable setup blockers for coding agents.
+
 ## 0.31.3
 
 ### Patch Changes
