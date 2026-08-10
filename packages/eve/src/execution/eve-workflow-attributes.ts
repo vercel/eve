@@ -23,6 +23,9 @@
  * - `$eve.trigger`      — channel adapter kind (session/subagent rows)
  * - `$eve.title`        — truncated session title from the first user message
  * - `$eve.channel_request_id` — inbound channel request id
+ * - `$eve.invocation_token` — channel-local continuation token for an external invocation
+ * - `$eve.invocation_owner` — SHA-256 fingerprint of the invocation's initiating principal
+ * - `$eve.invocation_update` — durable claim and receipt for the latest external input update
  */
 
 import { ChannelRequestIdKey } from "#context/keys.js";

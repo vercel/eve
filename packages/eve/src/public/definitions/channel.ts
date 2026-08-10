@@ -44,7 +44,7 @@ export type {
   ChannelSource,
 };
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
-export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
+export { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, WS } from "#channel/routes.js";
 export type {
   AttachSessionFn,
   HttpRouteDefinition,
@@ -64,7 +64,7 @@ export type {
  * is a webhook. Override only when authoring a non-webhook route such as a
  * long-poll endpoint or an event-stream reader.
  */
-export type ChannelMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export type ChannelMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
 
 /**
  * Method-like discriminator used by compiled channel route entries.

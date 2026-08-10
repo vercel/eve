@@ -1,0 +1,165 @@
+---
+title: MCP
+description: Publish an eve agent as a durable MCP invocation service.
+---
+
+The MCP channel lets hosts such as Claude Code delegate durable work to an eve
+agent. It exposes the agent itself, not the agent's authored tools, skills,
+instructions, connections, or subagents.
+
+## Configure the channel
+
+For a remotely accessible MCP endpoint, start with OAuth resource
+authentication. Create `agent/channels/mcp.ts` and decorate your access-token
+verifier with `oauthResource()`:
+
+```ts
+import { oauthResource } from "eve/channels/auth";
+import { mcpChannel } from "eve/channels/mcp";
+import { verifyAccessToken } from "../lib/auth";
+
+export default mcpChannel({
+  auth: oauthResource(verifyAccessToken, {
+    issuer: process.env.AUTH_ISSUER!,
+    scopes: ["agent:invoke"],
+  }),
+});
+```
+
+`verifyAccessToken` is an ordinary `AuthFn<Request>`. It verifies the access
+token and returns a `SessionAuthContext`; it may use an eve strategy such as
+`jwtEcdsa()` or your identity provider's verifier. `oauthResource()` does not
+issue tokens or run an authorization server. It adds portable resource-server
+metadata to the policy so `mcpChannel()` can mount
+`/.well-known/oauth-protected-resource` and include its URL in authentication
+challenges.
+
+The `scopes` option advertises the scopes clients should request. Your
+underlying verifier remains responsible for signature or introspection,
+expiry, audience/resource, and scope enforcement.
+
+OAuth client registration remains between the MCP client and the authorization
+server. For MCP `2026-07-28`, prefer an authorization server that supports
+[Client ID Metadata Documents](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization#client-id-metadata-documents)
+for URL-based client IDs, or pre-register the client ID. Dynamic Client
+Registration is a deprecated compatibility fallback. eve publishes the
+authorization-server location in protected-resource metadata; it does not
+implement client registration, CIMD hosting, or an authorization server.
+
+By default the resource is the request origin plus `/mcp`. Set `resource` when
+a public gateway fronts a private eve origin, or `metadataPath` when the
+well-known route must be mounted elsewhere. Issuer and resource identifiers
+must use HTTPS without credentials, query, or fragment; loopback HTTP is
+accepted for local development.
+
+### Other auth modes
+
+`mcpChannel()` also accepts the same inbound auth strategies as any other eve
+channel. For preconfigured Vercel workload identity with a local-development
+fallback:
+
+```ts
+import { localDev, vercelOidc } from "eve/channels/auth";
+import { mcpChannel } from "eve/channels/mcp";
+
+export default mcpChannel({
+  auth: [vercelOidc(), localDev()],
+});
+```
+
+This form does not advertise an interactive OAuth login. A deployed caller
+must send a Vercel OIDC bearer token. `localDev()` needs no credential only
+while the process is running under `eve dev` or `vercel dev`; addressing a
+production process through a loopback host does not enable it. Static Basic,
+bearer, JWT, generic OIDC, and custom `AuthFn` policies work the same way, but
+clients must be configured with their credentials out of band.
+
+Authentication is required by default. Use `none()` only when you intentionally
+want a public MCP endpoint:
+
+```ts
+import { none } from "eve/channels/auth";
+import { mcpChannel } from "eve/channels/mcp";
+
+export default mcpChannel({
+  auth: none(),
+});
+```
+
+The `/mcp` endpoint validates `Host` and `Origin` before authentication.
+Browser protocol requests must be exact same-origin, and plain HTTP is accepted
+only on loopback; remote endpoints must use HTTPS. Put a same-origin backend or
+an authenticated server-side proxy in front of it when a browser application
+needs to connect. The public OAuth protected-resource metadata route is the
+exception: it serves cross-origin `GET`, `HEAD`, and `OPTIONS` requests so
+browser-hosted clients can discover the authorization server.
+
+When a protected request has no credentials, eve returns a bare Bearer
+challenge. A supplied Bearer token that every configured strategy rejects gets
+`error="invalid_token"`. Scope enforcement stays in the verifier; report a
+verified caller that lacks required scopes with a `ForbiddenError` carrying a
+Bearer `error="insufficient_scope"` challenge and the required `scope` value.
+`mcpChannel()` preserves that challenge and adds `resource_metadata`.
+
+The endpoint serves MCP `2026-07-28` directly and keeps a stateless
+`2025-11-25` compatibility path for existing Streamable HTTP clients. Current
+clients use `server/discover`; older clients can continue to initialize
+normally. eve does not retain an MCP transport session in either mode.
+
+## Invoke the agent
+
+The server name and `agent_start` description come from the compiled root
+agent. Current clients receive four compatibility tools:
+
+- `agent_start({ message, outputSchema? })`
+- `agent_get({ invocationId })`
+- `agent_update({ invocationId, responses })`
+- `agent_cancel({ invocationId })`
+
+`agent_start` creates one task-mode eve session and returns after durable
+acceptance. Keep the returned `invocationId` and call `agent_get` until the
+invocation is terminal, honoring `pollAfterMs` while it is working. A failed
+start whose response is ambiguous should not be retried automatically because
+each call creates a new invocation. Optional output schemas are limited to 64
+KiB, 32 levels, and 2,048 nodes; external `$ref` values are rejected.
+
+Every operation reruns the configured auth policy. With authenticated
+policies, invocation access is bound to the same principal that started it;
+knowing an invocation ID is not sufficient. Bearer tokens are neither
+persisted with the invocation nor forwarded to the agent's tools.
+
+With `none()`, every caller shares the anonymous principal, so the random
+invocation ID is a bearer capability. Keep it out of logs and URLs, and treat
+it as usable until the underlying workflow retention expires. When the
+workflow backend reports a retention deadline, responses include `expiresAt`.
+
+`agent_get` reconstructs active state from a bounded tail snapshot of the
+durable eve session event stream and does not start work or run another model.
+Terminal state comes directly from the workflow run without reading the event
+stream.
+
+Active invocations use three non-terminal states:
+
+- `working`: continue polling according to `pollAfterMs`.
+- `input_required`: present the structured `inputRequests` and pass answers to
+  `agent_update`. A successful update acknowledges the accepted answers with a
+  fresh `working` state; continue polling rather than submitting them again.
+- `authorization_required`: present each entry in `authorizations`, including
+  its sign-in URL, user code, or instructions when supplied. Connection
+  authorization completes through its callback and resumes the invocation
+  automatically; continue polling according to `pollAfterMs`.
+
+Cancellation is cooperative; poll the invocation until it reports `cancelled`
+or another terminal state.
+
+## Connect Claude Code
+
+```sh
+claude mcp add --transport http eve-agent https://<deployment>/mcp
+claude mcp login eve-agent
+claude mcp get eve-agent
+```
+
+MCP Tasks support and direct capability export are separate follow-ups. The
+compatibility tools already use a protocol-neutral invocation service so Tasks
+can map onto the same durable state machine later.

@@ -37,7 +37,7 @@ export function computeChannelRouteRegistrations(
 ): readonly NitroChannelRouteRegistration[] {
   const manifestChannels = preparedHost.compileResult.manifest.channels;
   const authoredNames = new Set<string>();
-  const authoredRoutes: NitroChannelRouteRegistration[] = [];
+  const authoredRoutes: OwnedChannelRouteRegistration[] = [];
   const disabledNames = new Set<string>();
   const allFrameworkNames = getAllFrameworkChannelNames();
 
@@ -55,33 +55,45 @@ export function computeChannelRouteRegistrations(
       continue;
     }
     authoredNames.add(entry.name);
-    authoredRoutes.push({ method: entry.method, route: entry.urlPath, cors: entry.cors });
+    authoredRoutes.push({
+      owner: entry.logicalPath,
+      registration: { method: entry.method, route: entry.urlPath, cors: entry.cors },
+    });
   }
 
   const activeFrameworkRoutes = getFrameworkChannelDefinitions()
     .filter((channel) => !authoredNames.has(channel.name) && !disabledNames.has(channel.name))
     .map(
-      (channel): NitroChannelRouteRegistration => ({
-        method: channel.method,
-        route: channel.urlPath,
-        cors: channel.cors,
+      (channel): OwnedChannelRouteRegistration => ({
+        owner: channel.logicalPath,
+        registration: {
+          method: channel.method,
+          route: channel.urlPath,
+          cors: channel.cors,
+        },
       }),
     );
 
-  // Concatenate framework defaults first, authored second. Each
-  // (method, route) pair is registered exactly once.
-  const seen = new Set<string>();
+  const ownerByRoute = new Map<string, string>();
   const merged: NitroChannelRouteRegistration[] = [];
-  for (const registration of [...activeFrameworkRoutes, ...authoredRoutes]) {
+  for (const { owner, registration } of [...activeFrameworkRoutes, ...authoredRoutes]) {
     const key = createChannelRouteKey(registration);
-    if (seen.has(key)) {
-      continue;
+    const existingOwner = ownerByRoute.get(key);
+    if (existingOwner !== undefined) {
+      throw new Error(
+        `Channel route collision for ${key}: "${existingOwner}" and "${owner}" both register the same route.`,
+      );
     }
-    seen.add(key);
+    ownerByRoute.set(key, owner);
     merged.push(registration);
   }
 
   return merged;
+}
+
+interface OwnedChannelRouteRegistration {
+  readonly owner: string;
+  readonly registration: NitroChannelRouteRegistration;
 }
 
 /**

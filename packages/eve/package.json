@@ -226,6 +226,11 @@
       "import": "./dist/src/public/channels/auth.js",
       "default": "./dist/src/public/channels/auth.js"
     },
+    "./channels/mcp": {
+      "types": "./dist/src/public/channels/mcp.d.ts",
+      "import": "./dist/src/public/channels/mcp.js",
+      "default": "./dist/src/public/channels/mcp.js"
+    },
     "./channels/slack": {
       "types": "./dist/src/public/channels/slack/index.d.ts",
       "import": "./dist/src/public/channels/slack/index.js",
@@ -358,6 +363,7 @@
     "eventsource-parser": "3.1.0",
     "experimental-ai-sdk-code-mode": "1.0.16",
     "gray-matter": "4.0.3",
+    "h3-mcp": "0.1.0",
     "jose": "6.2.3",
     "jsonc-parser": "3.3.1",
     "just-bash": "3.1.0",

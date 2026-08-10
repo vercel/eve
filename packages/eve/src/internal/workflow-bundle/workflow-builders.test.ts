@@ -52,6 +52,28 @@ describe("applyWorkflowTransform", () => {
     expect(transformed.code).not.toContain('"use step"');
   });
 
+  it("registers correctness-critical attribute storage under its bare builtin id", async () => {
+    const transformed = await transformWorkflowDirectives({
+      filename: "src/internal/workflow/builtins.ts",
+      mode: "step",
+      moduleSpecifier: "eve@1.2.3",
+      source: [
+        "export async function __builtin_set_strict_attributes(): Promise<void> {",
+        '  "use step";',
+        "}",
+        "",
+      ].join("\n"),
+    });
+
+    expect(
+      transformed.workflowManifest.steps?.["src/internal/workflow/builtins.ts"]
+        ?.__builtin_set_strict_attributes,
+    ).toEqual({ stepId: "__builtin_set_strict_attributes" });
+    expect(transformed.code).toContain(
+      'registerStepFunction("__builtin_set_strict_attributes", __builtin_set_strict_attributes);',
+    );
+  });
+
   it("replaces step functions with workflow proxies in workflow mode", async () => {
     const transformed = await applyWorkflowTransform(
       "src/execution/task.ts",

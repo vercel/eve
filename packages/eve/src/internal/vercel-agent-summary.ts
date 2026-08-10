@@ -142,7 +142,7 @@ export interface VercelEveConnectionEntry {
 
 export interface VercelEveChannelEntry {
   readonly name: string;
-  readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "WEBSOCKET";
+  readonly method: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "WEBSOCKET";
   readonly urlPath: string;
   readonly type: VercelEveChannelType;
   /**

@@ -102,6 +102,37 @@ describe("computeDevelopmentHostFingerprint", () => {
     expect(withRoute).not.toBe(base);
   });
 
+  it("rejects colliding authored channel routes with both source paths", async () => {
+    const collision = computeDevelopmentHostFingerprint(
+      await createHost({
+        channels: [
+          {
+            kind: "channel",
+            logicalPath: "channels/mcp.ts",
+            method: "GET",
+            name: "mcp",
+            sourceId: "channels/mcp.ts",
+            sourceKind: "module",
+            urlPath: "/.well-known/oauth-protected-resource",
+          },
+          {
+            kind: "channel",
+            logicalPath: "channels/oauth-metadata.ts",
+            method: "GET",
+            name: "oauth-metadata",
+            sourceId: "channels/oauth-metadata.ts",
+            sourceKind: "module",
+            urlPath: "/.well-known/oauth-protected-resource",
+          },
+        ],
+      }),
+    );
+
+    await expect(collision).rejects.toThrow(
+      'Channel route collision for GET /.well-known/oauth-protected-resource: "channels/mcp.ts" and "channels/oauth-metadata.ts" both register the same route.',
+    );
+  });
+
   it("treats configured environment values as structural", async () => {
     const host = await createHost();
     await writeFile(join(host.appRoot, ".env"), "EVE_HOST_FINGERPRINT_TEST=one\n");

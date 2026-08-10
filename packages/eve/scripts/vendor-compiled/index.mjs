@@ -17,6 +17,7 @@ import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
 import chatAdapterTwilio from "./@chat-adapter/twilio.mjs";
 import photonChatAdapterIMessage from "./@photon-ai/chat-adapter-imessage.mjs";
 
+import h3Mcp from "./h3-mcp.mjs";
 import opentelemetryApi from "./@opentelemetry/api.mjs";
 import opentelemetryOtlpTransformer from "./@opentelemetry/otlp-transformer.mjs";
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
@@ -63,6 +64,7 @@ export const MODULES = [
   envRunner,
   google,
   grayMatter,
+  h3Mcp,
   jose,
   jsoncParser,
   jsonSchema,

@@ -125,3 +125,43 @@ export async function __builtin_set_attributes(
     maxRetries: number;
   }
 ).maxRetries = EVE_INTERNAL_ATTRIBUTES_MAX_ATTEMPTS - 1;
+
+/** Correctness-critical counterpart to the best-effort telemetry writer. */
+export async function __builtin_set_strict_attributes(
+  changes: Array<{ key: string; value: string }>,
+  options: { allowReservedAttributes: true },
+): Promise<void> {
+  "use step";
+  if (changes.length === 0) return;
+  const g = globalThis as Record<symbol, unknown>;
+  const contextStorage = g[Symbol.for("WORKFLOW_STEP_CONTEXT_STORAGE")] as
+    | {
+        getStore: () => { workflowMetadata?: { workflowRunId?: string } } | undefined;
+      }
+    | undefined;
+  const runId = contextStorage?.getStore?.()?.workflowMetadata?.workflowRunId;
+  const world = g[Symbol.for("@workflow/world//cache")] as
+    | {
+        runs?: {
+          experimentalSetAttributes?: (
+            runId: string,
+            changes: Array<{ key: string; value: string }>,
+            options: { allowReservedAttributes: true },
+          ) => Promise<unknown>;
+        };
+      }
+    | undefined;
+  if (runId === undefined) {
+    throw new Error("__builtin_set_strict_attributes: no workflow run id available");
+  }
+  if (world?.runs?.experimentalSetAttributes === undefined) {
+    throw new Error("Strict workflow attribute storage is unavailable in the current world.");
+  }
+  await world.runs.experimentalSetAttributes(runId, changes, options);
+}
+
+(
+  __builtin_set_strict_attributes as typeof __builtin_set_strict_attributes & {
+    maxRetries: number;
+  }
+).maxRetries = EVE_INTERNAL_ATTRIBUTES_MAX_ATTEMPTS - 1;

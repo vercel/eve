@@ -10,6 +10,7 @@ import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import {
   attachAgentInfoRouteResponse,
+  attachRouteChannelName,
   attachRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
@@ -208,19 +209,22 @@ function buildRouteArgs(
   const to = createCrossChannelToFn(bundle.runtime, toCrossChannelTargets(bundle.channels));
 
   const args = attachRouteSessionCreator(
-    attachAgentInfoRouteResponse(
-      {
-        attachSession,
-        ...channelOperations,
-        params,
-        requestIp,
-        to,
-        waitUntil,
-      },
-      async () => {
-        const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-        return await handleAgentInfoRequest(config);
-      },
+    attachRouteChannelName(
+      attachAgentInfoRouteResponse(
+        {
+          attachSession,
+          ...channelOperations,
+          params,
+          requestIp,
+          to,
+          waitUntil,
+        },
+        async () => {
+          const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+          return await handleAgentInfoRequest(config);
+        },
+      ),
+      channelName,
     ),
     async (input) =>
       await bundle.runtime.createSession({

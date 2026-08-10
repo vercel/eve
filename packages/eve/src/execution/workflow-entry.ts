@@ -39,6 +39,11 @@ import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-c
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
+import {
+  INVOCATION_UPDATE_RECEIPT_ATTRIBUTE,
+  serializeInvocationUpdateIdentity,
+} from "#internal/invocation/attributes.js";
+import { setStrictWorkflowAttributes } from "#internal/workflow/set-strict-attributes.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
@@ -307,7 +312,13 @@ async function runDriverLoop(input: {
 
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
-  const commandInbox = createSessionCommandInbox();
+  const commandInbox = createSessionCommandInbox({
+    onInvocationUpdateClaim: async (identity) => {
+      await setStrictWorkflowAttributes({
+        [INVOCATION_UPDATE_RECEIPT_ATTRIBUTE]: serializeInvocationUpdateIdentity(identity),
+      });
+    },
+  });
   const stableCommandToken = sessionCommandHookToken(input.sessionState.sessionId);
   await commandInbox.claimStable(stableCommandToken);
   const sessionTimeout =

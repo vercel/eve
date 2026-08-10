@@ -304,10 +304,12 @@ const compiledDynamicModelDefinitionSchema: z.ZodType<CompiledDynamicModelDefini
 
 const channelMethodSchema = z.union([
   z.literal("GET"),
+  z.literal("HEAD"),
   z.literal("POST"),
   z.literal("PUT"),
   z.literal("PATCH"),
   z.literal("DELETE"),
+  z.literal("OPTIONS"),
   z.literal("WEBSOCKET"),
 ]);
 
