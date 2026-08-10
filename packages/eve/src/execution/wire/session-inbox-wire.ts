@@ -9,6 +9,12 @@ import {
   runMigrationChain,
   type VersionMigration,
 } from "#execution/durable-session-migrations/chain.js";
+import {
+  pickDeclaredFields,
+  resolveFieldSpecs,
+  WireFieldError,
+  type FieldTable,
+} from "#execution/wire/field-table.js";
 
 /**
  * The session inbox wire family: every payload persisted to a session's
@@ -59,21 +65,6 @@ export class SessionInboxWireError extends Error {
 /** Prefixes chain and schema failures alike, so messages read as one voice. */
 const WIRE_LABEL = "session inbox payload";
 
-function isOpaqueObject(value: unknown): value is object {
-  return typeof value === "object" && value !== null;
-}
-
-/** Field kinds the envelope declares; interiors stay opaque. */
-type FieldType = "object" | "object-or-null" | "object[]" | "string" | "turn-policy";
-
-const FIELD_CHECKS: Readonly<Record<FieldType, (value: unknown) => boolean>> = {
-  object: isOpaqueObject,
-  "object-or-null": (value) => value === null || isOpaqueObject(value),
-  "object[]": (value) => Array.isArray(value) && value.every(isOpaqueObject),
-  string: (value) => typeof value === "string",
-  "turn-policy": (value) => value === "queue" || value === "steer",
-};
-
 /**
  * v1, the current wire shape: payload kind → its envelope fields, where a
  * `?` suffix marks the field optional. `kind` and `version` are implicit.
@@ -104,13 +95,16 @@ export const SESSION_INBOX_V1_FIELDS = {
   },
   reset: { reason: "string?" },
   "session-timeout": {},
-} as const satisfies Readonly<
-  Record<string, Readonly<Record<string, `${FieldType}` | `${FieldType}?`>>>
->;
+} as const satisfies FieldTable;
 
 export type SessionInboxWire =
   | (DeliverHookPayload & { readonly payload?: DeliverPayload; readonly version: 1 })
-  | { readonly kind: "cancel"; readonly taskId?: string; readonly turnId?: string; readonly version: 1 }
+  | {
+      readonly kind: "cancel";
+      readonly taskId?: string;
+      readonly turnId?: string;
+      readonly version: 1;
+    }
   | { readonly kind: "clear"; readonly version: 1 }
   | { readonly kind: "compact"; readonly version: 1 }
   | { readonly kind: "reset"; readonly reason?: string; readonly version: 1 }
@@ -122,38 +116,29 @@ export type SessionInboxWire =
  */
 function parseWire(value: object): SessionInboxWire {
   const envelope = value as Record<string, unknown>;
-  const kind = envelope.kind;
-  const fields = (SESSION_INBOX_V1_FIELDS as Record<string, Record<string, string>>)[
-    typeof kind === "string" ? kind : ""
-  ];
-  if (fields === undefined) {
-    throw new SessionInboxWireError(
-      `${WIRE_LABEL} has an unrecognized kind ${JSON.stringify(kind)}; expected ${Object.keys(SESSION_INBOX_V1_FIELDS).join(" | ")}.`,
-    );
-  }
   if (envelope.version !== SESSION_INBOX_WIRE_VERSION) {
     throw new SessionInboxWireError(
       `${WIRE_LABEL} declares version ${JSON.stringify(envelope.version)}, expected ${SESSION_INBOX_WIRE_VERSION}.`,
     );
   }
 
-  const parsed: Record<string, unknown> = { kind, version: SESSION_INBOX_WIRE_VERSION };
-  for (const [field, spec] of Object.entries(fields)) {
-    const optional = spec.endsWith("?");
-    const type = (optional ? spec.slice(0, -1) : spec) as FieldType;
-    const candidate = envelope[field];
-    if (candidate === undefined) {
-      if (!optional) {
-        throw new SessionInboxWireError(`${WIRE_LABEL} is missing required field "${field}".`);
-      }
-      continue;
-    }
-    if (!FIELD_CHECKS[type](candidate)) {
-      throw new SessionInboxWireError(`${WIRE_LABEL} field "${field}" is not ${type}.`);
-    }
-    parsed[field] = candidate;
+  try {
+    const specs = resolveFieldSpecs({
+      discriminator: envelope.kind,
+      label: WIRE_LABEL,
+      table: SESSION_INBOX_V1_FIELDS,
+    });
+    return {
+      kind: envelope.kind,
+      version: SESSION_INBOX_WIRE_VERSION,
+      ...pickDeclaredFields({ label: WIRE_LABEL, specs, value: envelope }),
+    } as SessionInboxWire;
+  } catch (error) {
+    // Field-table failures are this family's failures: consumers catch one
+    // error class per wire family.
+    if (error instanceof WireFieldError) throw new SessionInboxWireError(error.message);
+    throw error;
   }
-  return parsed as SessionInboxWire;
 }
 
 /**
