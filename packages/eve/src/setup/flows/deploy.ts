@@ -53,11 +53,9 @@ export async function runDeployFlow(input: {
   signal?: AbortSignal;
   /** False when no TTY: an unlinked directory refuses instead of prompting. */
   interactive: boolean;
-  /** Production by default; integration setup can explicitly request a preview. */
-  target?: "production" | "preview";
   deps?: Partial<DeployFlowDeps>;
 }): Promise<DeployFlowResult> {
-  const { appRoot, prompter, interactive, signal, target = "production" } = input;
+  const { appRoot, prompter, interactive, signal } = input;
   const deps: DeployFlowDeps = { detectDeployment, ...input.deps };
 
   const project = await withSpinner(prompter, "Checking the current Vercel link...", async () => {
@@ -73,7 +71,7 @@ export async function runDeployFlow(input: {
 
   const state = inProjectSetupState(appRoot, project, { deploymentPending: true });
   const boxes: AnySetupBox<SetupState>[] = linked
-    ? [deployProject({ prompter, headless: !interactive, target, deps: deps.deployProject })]
+    ? [deployProject({ prompter, headless: !interactive, deps: deps.deployProject })]
     : [
         resolveProvisioning({
           asker: withAnswers({ deploy: "vercel" })(interactiveAsker(prompter)),
@@ -83,7 +81,7 @@ export async function runDeployFlow(input: {
           deps: deps.resolveProvisioning,
         }),
         linkVercelProject({ prompter, deps: deps.linkProject }),
-        deployProject({ prompter, headless: !interactive, target, deps: deps.deployProject }),
+        deployProject({ prompter, headless: !interactive, deps: deps.deployProject }),
       ];
 
   const sink = prompterSink(prompter);

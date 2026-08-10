@@ -115,7 +115,6 @@ export function createRegistrySession(deps: RegistrySessionDeps): RegistrySessio
           prompter: input.prompter,
           signal: input.signal,
           interactive: true,
-          target: "production",
         });
         return result(deployResult.kind === "deployed" ? "production" : undefined);
       }

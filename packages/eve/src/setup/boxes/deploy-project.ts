@@ -40,8 +40,6 @@ export interface DeployProjectOptions {
    * a plan or skips deploy with the channels).
    */
   ensureLinkedProject?: "interactive-vercel-link";
-  /** Deploy to production by default, or create a preview deployment. */
-  target?: "production" | "preview";
   /**
    * Headless mode: gates interactive `vercel` commands inside `perform`. The box
    * asks no questions, so the dispatch decision the gather faces used to encode
@@ -59,7 +57,6 @@ export interface DeployProjectOptions {
  */
 export interface DeployProjectInput {
   headless: boolean;
-  target: "production" | "preview";
 }
 
 /** The deploy facts `apply` records: the (re)deployed project and the cleared flags. */
@@ -110,7 +107,7 @@ export function deployProject(
     async gather(): Promise<DeployProjectInput> {
       // No questions: the deploy decision is the shouldRun gate, and the headless
       // dispatch is a composition-time fact, so one gather serves every mode.
-      return { headless: options.headless ?? false, target: options.target ?? "production" };
+      return { headless: options.headless ?? false };
     },
 
     async perform({ state, input, signal }): Promise<DeployProjectPayload> {
@@ -176,12 +173,11 @@ export function deployProject(
       // deploy.
       const deployArgs = [
         "deploy",
-        ...(input.target === "production" ? ["--prod"] : []),
+        "--prod",
         "--yes",
         ...(input.headless ? ["--non-interactive"] : []),
       ];
-      const targetLabel = input.target === "production" ? "production" : "preview";
-      const success = await withPhase(log, `Deploying the agent to Vercel ${targetLabel}...`, () =>
+      const success = await withPhase(log, "Deploying the agent to Vercel production...", () =>
         deps.runVercel(deployArgs, {
           cwd: projectPath,
           extraEnv: VERCEL_DEPLOY_ENV,
@@ -196,7 +192,7 @@ export function deployProject(
         // transient until a warning/error settles it) so the build failure is
         // visible instead of just the exit code.
         log.error(
-          `\`vercel deploy${input.target === "production" ? " --prod" : ""}\` failed. The deploy output above shows the cause; fix it, then retry.`,
+          "`vercel deploy --prod` failed. The deploy output above shows the cause; fix it, then retry.",
         );
         throw new Error("Deployment failed after channel setup.");
       }
