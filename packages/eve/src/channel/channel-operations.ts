@@ -24,6 +24,8 @@ interface BaseChannelSendOptions {
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly context?: readonly string[];
+  /** Stable provider delivery ID used to suppress retries within this session. */
+  readonly idempotencyKey?: string;
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly mode?: RunMode;
   readonly outputSchema?: JsonObject;

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
+import { createChannelIdempotencyGuard } from "#execution/channel-idempotency.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
@@ -129,6 +130,7 @@ describe("TurnControlReceiver", () => {
       {
         auth: undefined,
         caller: undefined,
+        idempotencyKey: undefined,
         kind: "deliver",
         payload: { message: "follow up" },
         payloads: [{ message: "follow up" }],
@@ -137,6 +139,26 @@ describe("TurnControlReceiver", () => {
       { kind: "deliver", payloads: [{ message: "legacy follow up" }] },
     ]);
     expect(bufferedSessionControls).toEqual(["clear", "compact", "expired"]);
+  });
+
+  it("drops keyed retries while retaining distinct and unkeyed deliveries", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+
+    await runReceiver(bufferedDeliveries, {
+      commandInbox: createCommandInbox([
+        { idempotencyKey: "initial", kind: "deliver", payloads: [{ message: "retry" }] },
+        { idempotencyKey: "next", kind: "deliver", payloads: [{ message: "next" }] },
+        { idempotencyKey: "next", kind: "deliver", payloads: [{ message: "next retry" }] },
+        { kind: "deliver", payloads: [{ message: "unkeyed" }] },
+      ]),
+      initialIdempotencyKey: "initial",
+    });
+
+    expect(bufferedDeliveries.map((delivery) => delivery.payloads[0]?.message)).toEqual([
+      "next",
+      "unkeyed",
+    ]);
   });
 
   it("forwards cancel and reset through the active turn's private hook", async () => {
@@ -169,12 +191,14 @@ function runReceiver(
   options: {
     readonly bufferedSessionControls?: Array<"clear" | "compact" | "expired" | "reset">;
     readonly commandInbox?: SessionCommandInbox;
+    readonly initialIdempotencyKey?: string;
   } = {},
 ): ReturnType<TurnControlReceiver["waitForAction"]> {
   const receiver = new TurnControlReceiver({
     bufferedDeliveries,
     bufferedSessionControls: options.bufferedSessionControls ?? [],
     commandInbox: options.commandInbox ?? createCommandInbox(),
+    idempotency: createChannelIdempotencyGuard(options.initialIdempotencyKey),
     token: "turn-control",
   });
   return receiver.waitForAction().finally(() => receiver.dispose());

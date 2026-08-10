@@ -35,12 +35,16 @@ describe("createChannelAddress", () => {
       runtime,
     });
 
-    const session = await address.send("hello", { auth: null });
+    const session = await address.send("hello", {
+      auth: null,
+      idempotencyKey: "delivery-1",
+    });
     await session.clear();
 
     expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
       command: {
         auth: null,
+        idempotencyKey: "delivery-1",
         kind: "send",
         payload: { message: "hello" },
         requestId: undefined,

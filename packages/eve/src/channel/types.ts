@@ -151,6 +151,7 @@ export type SessionCommand =
   | {
       readonly auth?: SessionAuthContext | null;
       readonly caller?: TurnCaller;
+      readonly idempotencyKey?: string;
       readonly kind: "send";
       readonly payload: DeliverPayload;
       readonly requestId?: string;
@@ -204,6 +205,8 @@ export interface DeliverHookPayload {
   readonly auth?: SessionAuthContext | null;
   /** Delegated caller waiting for this turn's settled result. */
   readonly caller?: TurnCaller;
+  /** Stable channel delivery ID used to suppress duplicate turns within a session. */
+  readonly idempotencyKey?: string;
   /** Inbound channel request id used only for workflow attributes. */
   readonly requestId?: string;
   readonly kind: "deliver";
@@ -374,6 +377,8 @@ export interface RunInput {
    * leave this undefined.
    */
   readonly capabilities?: SessionCapabilities;
+  /** Stable channel delivery ID used to suppress retries of the initial turn. */
+  readonly idempotencyKey?: string;
   /** Inbound channel request id used to correlate workflow attributes. */
   readonly requestId?: string;
   /**

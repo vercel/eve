@@ -33,6 +33,7 @@ import { emitTerminalSessionFailureStep } from "#execution/terminal-session-fail
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { disposeHook } from "#execution/hook-ownership.js";
 import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
+import { createChannelIdempotencyGuard } from "#execution/channel-idempotency.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
@@ -55,6 +56,7 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
  * and deserialized at each `"use step"` boundary.
  */
 export interface WorkflowEntryInput {
+  readonly idempotencyKey?: string;
   readonly input: RunInput["input"];
   readonly limits?: RunInput["limits"];
   readonly sessionTimeoutMs?: number | false;
@@ -183,6 +185,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       capabilities,
       driverWritable,
       initialInput: {
+        idempotencyKey: input.idempotencyKey,
         kind: "deliver",
         payloads: [
           {
@@ -284,7 +287,7 @@ function createSafeOuterWorkflowError(): Error {
 async function runDriverLoop(input: {
   readonly capabilities?: SessionCapabilities;
   readonly driverWritable: WritableStream<Uint8Array>;
-  readonly initialInput: HookPayload;
+  readonly initialInput: DeliverHookPayload;
   readonly crashCleanupState: CrashCleanupState;
   readonly mode: RunMode;
   readonly serializedContext: Record<string, unknown>;
@@ -308,6 +311,7 @@ async function runDriverLoop(input: {
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
   const commandInbox = createSessionCommandInbox();
+  const idempotency = createChannelIdempotencyGuard(input.initialInput.idempotencyKey);
   const stableCommandToken = sessionCommandHookToken(input.sessionState.sessionId);
   await commandInbox.claimStable(stableCommandToken);
   const sessionTimeout =
@@ -330,6 +334,7 @@ async function runDriverLoop(input: {
       bufferedSessionControls,
       capabilities: input.capabilities,
       commandInbox,
+      idempotency,
       controlToken: nextTurnControlToken(),
       delivery: args.delivery,
       mode: input.mode,
@@ -437,6 +442,7 @@ async function runDriverLoop(input: {
         bufferedDeliveries,
         bufferedSessionControls,
         commandInbox,
+        idempotency,
         driverWritable: input.driverWritable,
         sessionState: action.sessionState,
       });

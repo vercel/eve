@@ -138,6 +138,7 @@ export function createWorkflowRuntime(config: {
       const workflowInput: {
         -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
       } = {
+        idempotencyKey: input.idempotencyKey,
         input: input.input,
         limits: input.limits,
         serializedContext,

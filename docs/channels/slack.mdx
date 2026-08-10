@@ -266,6 +266,10 @@ Outbound text preserves bare `@` tokens as literal text. To mention a user, embe
 
 When a session starts without a `threadTs` (say, from a schedule's `to(slack, target).send(...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
 
+Inbound Events API deliveries use Slack's verified `event_id` as a durable session idempotency
+key. Retries can reach any application replica, but a session starts at most one turn while that
+key remains in its bounded recent-delivery window.
+
 The example below overrides `onAppMention` to gate on an authored message and posts the completed reply to the thread. Event handlers receive `(eventData, channel, ctx)`, with Slack platform handles on `channel.thread` and `channel.slack`:
 
 ```ts

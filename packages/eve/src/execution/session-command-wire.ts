@@ -27,6 +27,7 @@ export function sendCommandToDelivery(
   return {
     auth: command.auth,
     caller: command.caller,
+    idempotencyKey: command.idempotencyKey,
     kind: "deliver",
     payload: command.payload,
     payloads: [command.payload],
