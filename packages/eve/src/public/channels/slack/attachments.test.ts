@@ -464,3 +464,71 @@ describe("buildSlackTurnMessage", () => {
     expect(content[0]).toBe(fileParts[0]);
   });
 });
+
+describe("createSlackFetchFile", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const fileUrl = "https://files.slack.com/files-pri/T000/F000/cat.png";
+
+  function stubFetch(body: string | Buffer, init: { status?: number; contentType?: string } = {}) {
+    const headers = new Headers();
+    if (init.contentType !== undefined) {
+      headers.set("content-type", init.contentType);
+    }
+    const fetchMock = vi.fn(
+      async (_url: URL | string, _init: RequestInit) =>
+        new Response(body, { status: init.status ?? 200, headers }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("returns null for non-Slack URLs", async () => {
+    const fetch = createSlackFetchFile({ botToken: "xoxb-test" });
+    const result = await fetch("https://example.com/not-slack.png");
+    expect(result).toBeNull();
+  });
+
+  it("returns bytes and content-type for a real file response", async () => {
+    stubFetch(Buffer.from([0x89, 0x50, 0x4e, 0x47]), { contentType: "image/png" });
+    const fetch = createSlackFetchFile({ botToken: "xoxb-test" });
+    const result = await fetch(fileUrl);
+    expect(result?.mediaType).toBe("image/png");
+    expect(result?.bytes.subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  });
+
+  it("throws on HTML content-type — Slack login page under missing files:read scope (#1317)", async () => {
+    stubFetch("<html><body>Sign in to Slack</body></html>", { contentType: "text/html" });
+    const fetch = createSlackFetchFile({ botToken: "xoxb-test" });
+    await expect(fetch(fileUrl)).rejects.toThrow(
+      /files:read|Slack file fetch .* HTML login page/s,
+    );
+  });
+
+  it("throws when the body is HTML even if content-type is missing (#1317)", async () => {
+    stubFetch("<!DOCTYPE html>\n<html><body>slack workspace signin</body></html>");
+    const fetch = createSlackFetchFile({ botToken: "xoxb-test" });
+    await expect(fetch(fileUrl)).rejects.toThrow(/HTML login page/);
+  });
+
+  it("error message names the fix (files:read scope + reinstall)", async () => {
+    stubFetch("<html><body>Sign in</body></html>", { contentType: "text/html" });
+    const fetch = createSlackFetchFile({ botToken: "xoxb-test" });
+    try {
+      await fetch(fileUrl);
+      expect.unreachable("expected fetch to throw");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).toContain("files:read");
+      expect(message.toLowerCase()).toContain("reinstalled");
+    }
+  });
+
+  it("throws on non-2xx HTTP", async () => {
+    stubFetch("forbidden", { status: 403, contentType: "text/plain" });
+    const fetch = createSlackFetchFile({ botToken: "xoxb-test" });
+    await expect(fetch(fileUrl)).rejects.toThrow(/HTTP 403/);
+  });
+});
