@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
+import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import {
   appendTaskViewStep,
@@ -52,7 +53,9 @@ function createWorkingView(): TaskView {
   };
 }
 
-function mockCommandHook(payloads: readonly TaskRunInboundPayload[]): void {
+function mockCommandHook(
+  payloads: readonly (TaskRunInboundPayload | SubagentAuthorizationEventHookPayload)[],
+): void {
   const queue = [...payloads];
   const hook = {
     [Symbol.asyncIterator]: () => ({
@@ -62,7 +65,7 @@ function mockCommandHook(payloads: readonly TaskRunInboundPayload[]): void {
           : { done: true as const, value: undefined },
     }),
     token: "task-token",
-  } as Hook<TaskRunInboundPayload>;
+  } as Hook<TaskRunInboundPayload | SubagentAuthorizationEventHookPayload>;
   vi.mocked(createHook).mockReturnValue(hook);
 }
 
@@ -244,7 +247,7 @@ describe("taskRunWorkflow", () => {
     expect(wakeTaskParentStep).not.toHaveBeenCalled();
   });
 
-  it("holds a fast authorization event until the readiness barrier", async () => {
+  it("normalizes and holds a local authorization event until the readiness barrier", async () => {
     mockCommandHook([
       {
         callId: "call-task",
@@ -259,7 +262,7 @@ describe("taskRunWorkflow", () => {
           },
           type: "authorization.required",
         },
-        kind: "authorization-event",
+        kind: "subagent-authorization-event",
         subagentName: "research",
       },
       { command: { kind: "ready" }, kind: "task-command" },
@@ -272,7 +275,11 @@ describe("taskRunWorkflow", () => {
     });
 
     expect(appendedStatuses()).toEqual(["working", "input_required", "input_required"]);
-    expect(wakeTaskAuthorizationParentStep).toHaveBeenCalledTimes(1);
+    expect(wakeTaskAuthorizationParentStep).toHaveBeenCalledExactlyOnceWith({
+      request: expect.objectContaining({ kind: "authorization-event" }),
+      taskId: "task_abc123",
+      token: "parent-session-token",
+    });
     expect(vi.mocked(wakeTaskAuthorizationParentStep).mock.invocationCallOrder[0]).toBeGreaterThan(
       vi.mocked(appendTaskViewStep).mock.invocationCallOrder[2] ?? 0,
     );

@@ -449,9 +449,12 @@ describe("turn cancellation integration", () => {
         expectNoFailureEvents(cancelledTurn);
         expect(fixture.toolAborts()).toBe(1);
 
+        const started = filterEventsByType(cancelledTurn, "turn.started")[0];
+        if (started === undefined) throw new Error("Expected the cancelled turn to have started.");
+
         // The stable inbox remains owned while the session is parked, so a
-        // duplicate cancellation is durably accepted and consumed as a no-op.
-        const duplicate = await cancelViaRoute(run.runId);
+        // guarded duplicate is harmless even if another alias resolves first.
+        const duplicate = await cancelViaRoute(run.runId, { turnId: started.data.turnId });
         await expectCancelResponse(duplicate, { sessionId: run.runId, status: "accepted" });
 
         await waitForHook({ runId: run.runId }, { token: continuationToken });

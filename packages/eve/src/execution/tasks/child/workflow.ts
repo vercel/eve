@@ -1,5 +1,6 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
 
+import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   appendTaskViewStep,
@@ -33,6 +34,8 @@ export interface TaskRunWorkflowInput {
   readonly parentContinuationToken: string;
 }
 
+type TaskRunHookPayload = TaskRunInboundPayload | SubagentAuthorizationEventHookPayload;
+
 function isTaskRunFinished(view: TaskView, dispatchAcknowledged: boolean): boolean {
   if (!isTerminalTaskStatus(view.status) || !dispatchAcknowledged) return false;
 
@@ -64,7 +67,7 @@ function isTaskRunFinished(view: TaskView, dispatchAcknowledged: boolean): boole
 export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void> {
   "use workflow";
 
-  const commands = createHook<TaskRunInboundPayload>({ token: input.taskInboxToken });
+  const commands = createHook<TaskRunHookPayload>({ token: input.taskInboxToken });
   // The iterator shares the hook's durable cursor; create it before
   // claiming so conflict replay is consumed by getConflict(), not a
   // later iterator read.
@@ -92,14 +95,17 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     while (!isTaskRunFinished(view, dispatchAcknowledged)) {
       const next = await iterator.next();
       if (next.done === true) return;
-      if (next.value.kind === "task-command") dispatchAcknowledged = true;
-      if (next.value.kind === "subagent-input-request") {
-        pendingInputRequest = next.value;
+      const payload: TaskRunInboundPayload =
+        next.value.kind === "subagent-authorization-event"
+          ? { ...next.value, kind: "authorization-event" }
+          : next.value;
+      if (payload.kind === "task-command") dispatchAcknowledged = true;
+      if (payload.kind === "subagent-input-request") {
+        pendingInputRequest = payload;
       }
-      if (next.value.kind === "authorization-event") {
-        pendingAuthorizationEvent = next.value;
+      if (payload.kind === "authorization-event") {
+        pendingAuthorizationEvent = payload;
       }
-      const payload = next.value;
       const isExecutorResultAfterCancellation =
         view.status === "cancelled" && payload.kind === "runtime-action-result";
       const isTaskInputAnswer = payload.kind === "input-response";

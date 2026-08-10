@@ -15,6 +15,7 @@ const SCENARIO_TIMEOUT_MS = 360_000;
 const EVENT_TIMEOUT_MS = 30_000;
 const CODEWORD = "LANTERN-COMET-7319";
 const PARENT_RESULT = `PARENT_RECALLED=${CODEWORD}`;
+const REMOTE_MEMORY_TOKEN = "remote-memory-scenario-token";
 
 function createScriptedParentAgentSource(subagentName: string): string {
   const agentIdPattern = `<agent id="([^"]+)" name="${subagentName}">`;
@@ -93,6 +94,21 @@ import { eveChannel } from "eve/channels/eve";
 export default eveChannel({ auth: none() });
 `;
 
+const AUTHENTICATED_EVE_CHANNEL_SOURCE = `import { eveChannel } from "eve/channels/eve";
+
+export default eveChannel({
+  auth(request) {
+    if (request.headers.get("authorization") !== "Bearer ${REMOTE_MEMORY_TOKEN}") return null;
+    return {
+      attributes: {},
+      authenticator: "scenario-bearer",
+      principalId: "remote-memory-parent",
+      principalType: "service",
+    };
+  },
+});
+`;
+
 const MEMORY_AGENT_SOURCE = `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 
@@ -137,7 +153,7 @@ const AGENT_MESSAGING_DESCRIPTOR: ScenarioAppDescriptor = {
 const REMOTE_MEMORY_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
     "agent/agent.ts": MEMORY_AGENT_SOURCE,
-    "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
+    "agent/channels/eve.ts": AUTHENTICATED_EVE_CHANNEL_SOURCE,
     "agent/instructions.md":
       "Remember facts from earlier turns and answer follow-up questions from that history.\n",
   },
@@ -152,8 +168,10 @@ function createRemoteAgentMessagingDescriptor(remoteUrl: string): ScenarioAppDes
       "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
       "agent/instructions.md": "Run the scripted remote-memory-child exchanges.\n",
       "agent/subagents/remote-memory-child.ts": `import { defineRemoteAgent } from "eve";
+import { bearer } from "eve/agents/auth";
 
 export default defineRemoteAgent({
+  auth: bearer(${JSON.stringify(REMOTE_MEMORY_TOKEN)}),
   description: "Remember a fact and recall it in a later agent exchange.",
   url: ${JSON.stringify(remoteUrl)},
 });
@@ -211,7 +229,10 @@ describe("agent messaging", () => {
           });
           await expectRetainedChildConversation({
             childSessionId,
-            client: new Client({ host: remoteServer.url }),
+            client: new Client({
+              auth: { bearer: REMOTE_MEMORY_TOKEN },
+              host: remoteServer.url,
+            }),
           });
         } catch (error) {
           throw new Error(
