@@ -20,7 +20,6 @@ export interface TemplateEntry {
   model: string;
   readme: string;
   githubOwner: string;
-  githubPathPrefix?: string;
   githubRepo: string;
   slug: string;
   source: TemplateSource;
@@ -100,7 +99,6 @@ export const composeTemplateEntries = (
       ...curated,
       files,
       githubOwner: entry.github.owner,
-      githubPathPrefix: entry.github.pathPrefix,
       githubRepo: entry.github.repo,
       readme: data.readme,
       sourceRevision: data.sourceRevision,
