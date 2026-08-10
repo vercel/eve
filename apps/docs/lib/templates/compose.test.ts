@@ -52,6 +52,24 @@ describe("composeTemplateEntries", () => {
     expect(entry).not.toHaveProperty("github");
   });
 
+  it("includes a monorepo path in the pinned source URL", () => {
+    const monorepoEntry: TemplateManifestEntry = {
+      ...manifestEntry,
+      github: {
+        owner: "vercel",
+        repo: "eve-examples",
+        ref: "main",
+        pathPrefix: "example-template",
+      },
+    };
+
+    const [entry] = composeTemplateEntries([monorepoEntry], generated);
+
+    expect(entry.sourceRevisionHref).toBe(
+      "https://github.com/vercel/eve-examples/tree/0123456789abcdef0123456789abcdef01234567/example-template",
+    );
+  });
+
   it("throws when a manifest slug has no generated data", () => {
     expect(() => composeTemplateEntries([manifestEntry], { templates: {} })).toThrow(
       /No generated data for template "example"/,
