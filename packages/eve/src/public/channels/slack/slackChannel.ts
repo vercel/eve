@@ -37,6 +37,7 @@ import {
   defaultOnDirectMessage,
 } from "#public/channels/slack/defaults.js";
 import {
+  getSlackInboundContent,
   parseMessageEvent,
   type SlackEvent,
   slackEventBotUserId,
@@ -51,6 +52,7 @@ import {
 import {
   formatSlackInboundMessage,
   formatSlackThreadContext,
+  formatSlackUnfurlContext,
 } from "#public/channels/slack/model-context.js";
 import { isPrivateSlackConversation } from "#public/channels/slack/privacy.js";
 import {
@@ -1344,13 +1346,21 @@ async function deliverSlackMessage(input: {
       userId: message.author?.userId ?? "",
       userName: message.author?.userName,
     };
-    const attributedMessage = formatSlackInboundMessage(inboundContext, message);
+    const content = getSlackInboundContent(message);
+    const attributedMessage = formatSlackInboundMessage(inboundContext, {
+      text: content.modelText,
+      ts: message.ts,
+    });
     const turnMessage = buildSlackTurnMessage(
       threadContext === undefined ? attributedMessage : `${threadContext}\n\n${attributedMessage}`,
       fileParts,
     );
 
-    const channelContext = input.result.context ?? [];
+    const unfurlContext = formatSlackUnfurlContext(content.unfurls);
+    const channelContext = [
+      ...(input.result.context ?? []),
+      ...(unfurlContext === undefined ? [] : [unfurlContext]),
+    ];
     const title = input.isPrivateConversation
       ? PRIVATE_SLACK_RUN_TITLE
       : (input.result.title ?? message.markdown);
