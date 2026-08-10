@@ -2022,6 +2022,51 @@ describe("eveChannel — forwarded principal", () => {
     expect(options.mode).toBe("task");
   });
 
+  it("scopes create-once operations to the forwarded principal", async () => {
+    const otherUser: SessionAuthContext = {
+      ...FORWARDED_CURRENT,
+      attributes: { user_id: "U456" },
+      principalId: "slack:U456",
+      subject: "U456",
+    };
+    const first = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+    const second = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    const firstResponse = await first.fetch(
+      createJsonMessageRequest({
+        forwardedPrincipal: { current: FORWARDED_CURRENT },
+        message: "hi",
+        operationId: "shared-operation",
+      }),
+    );
+    const secondResponse = await second.fetch(
+      createJsonMessageRequest({
+        forwardedPrincipal: { current: otherUser },
+        message: "hi",
+        operationId: "shared-operation",
+      }),
+    );
+
+    expect(firstResponse.status).toBe(202);
+    expect(secondResponse.status).toBe(202);
+    const firstToken = first.send.mock.calls[0]?.[1]?.continuationToken;
+    const secondToken = second.send.mock.calls[0]?.[1]?.continuationToken;
+    expect(firstToken).toMatch(/^eve:op:[0-9a-f]{32}$/);
+    expect(secondToken).toMatch(/^eve:op:[0-9a-f]{32}$/);
+    expect(secondToken).not.toBe(firstToken);
+    await expect(secondResponse.json()).resolves.toMatchObject({
+      sessionId: "test-session-id",
+    });
+    expect(second.resolveSession).toHaveBeenCalledWith(secondToken);
+    expect(second.resolveSession).not.toHaveBeenCalledWith(firstToken);
+  });
+
   it("defaults the initiator to the forwarded current principal", async () => {
     const handler = createEveCreateHandler({
       trustedForwarders: () => true,

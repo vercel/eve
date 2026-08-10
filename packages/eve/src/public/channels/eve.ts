@@ -263,7 +263,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           body.operationId === undefined
             ? undefined
             : await deriveOperationContinuationToken({
-                auth: authResult,
+                auth: forwarded.auth,
                 operationId: body.operationId,
               });
         if (operationToken !== undefined) {
