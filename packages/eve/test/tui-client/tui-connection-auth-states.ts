@@ -126,6 +126,7 @@ const firstTurn: UnstampedMessageStreamEvent[] = [
 ];
 
 const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
+  { type: "turn.started", data: { sequence: next(), turnId: "turn-1" } },
   {
     type: "authorization.completed",
     data: {
@@ -133,20 +134,21 @@ const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
       outcome: "authorized",
       sequence: next(),
       stepIndex,
-      turnId,
+      turnId: "turn-1",
     },
   },
   {
     type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId },
+    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: "turn-1" },
   },
+  { type: "turn.completed", data: { sequence: next(), turnId: "turn-1" } },
   {
     type: "session.waiting",
     data: { continuationToken: "session-id", wait: "next-user-message" },
   },
 ];
 
-const secondTurnId = "turn-1";
+const secondTurnId = "turn-2";
 const secondTurn: UnstampedMessageStreamEvent[] = [
   { type: "turn.started", data: { sequence: next(), turnId: secondTurnId } },
   { type: "step.started", data: { sequence: next(), stepIndex, turnId: secondTurnId } },
@@ -175,6 +177,7 @@ const secondTurn: UnstampedMessageStreamEvent[] = [
 ];
 
 const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
+  { type: "turn.started", data: { sequence: next(), turnId: "turn-3" } },
   {
     type: "authorization.completed",
     data: {
@@ -183,13 +186,14 @@ const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
       reason: "access_denied",
       sequence: next(),
       stepIndex,
-      turnId: secondTurnId,
+      turnId: "turn-3",
     },
   },
   {
     type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: secondTurnId },
+    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: "turn-3" },
   },
+  { type: "turn.completed", data: { sequence: next(), turnId: "turn-3" } },
   {
     type: "session.waiting",
     data: { continuationToken: "session-id", wait: "next-user-message" },

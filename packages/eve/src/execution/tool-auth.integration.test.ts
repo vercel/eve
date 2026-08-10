@@ -52,6 +52,12 @@ function seedUserPrincipal(): void {
   });
 }
 
+const TEST_USER_PRINCIPAL = {
+  id: "user-1",
+  issuer: "test-idp",
+  type: "user",
+} as const;
+
 function authoredTool(input: {
   readonly name: string;
   readonly execute: (toolInput: unknown, ctx: ToolContext) => unknown;
@@ -283,7 +289,7 @@ describe("tool-hosted authorization", () => {
     expect(isAuthorizationSignal(result)).toBe(true);
     if (!isAuthorizationSignal(result)) throw new Error("expected signal");
     expect(receivedCallbackUrl).toBe(
-      "http://localhost:2000/eve/v1/connections/search_notion__mcp.notion.com_notion/callback/session_auth%3Aauth",
+      `http://localhost:2000/eve/v1/connections/search_notion__mcp.notion.com_notion/callback/${result.challenges[0]?.attemptId}/session_auth%3Aauth`,
     );
     expect(result.challenges[0]?.hookUrl).toBe(receivedCallbackUrl);
   });
@@ -459,8 +465,10 @@ describe("tool-hosted authorization", () => {
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
       loadContext().set(PendingAuthorizationResultKey, [
         {
+          attemptId: "attempt-list-groups",
           name: "list_groups__inline_auth",
           hookUrl: "https://app.example/callback",
+          principal: TEST_USER_PRINCIPAL,
           callback: {
             params: { code: "abc" },
             method: "GET",
@@ -503,8 +511,10 @@ describe("tool-hosted authorization", () => {
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
       loadContext().set(PendingAuthorizationResultKey, [
         {
+          attemptId: "attempt-sync-ticket",
           name: "sync_ticket__oauth_linear",
           hookUrl: "https://app.example/callback",
+          principal: TEST_USER_PRINCIPAL,
           callback: {
             params: { code: "abc" },
             method: "GET",
@@ -591,8 +601,10 @@ describe("tool-hosted authorization", () => {
         loadContext().set(CallbackBaseUrlKey, "https://app.example");
         loadContext().set(PendingAuthorizationResultKey, [
           {
+            attemptId: "attempt-list-groups",
             name: "list_groups__inline_auth",
             hookUrl: "https://app.example/callback",
+            principal: TEST_USER_PRINCIPAL,
             callback: {
               params: { code: "abc" },
               method: "GET",
@@ -638,8 +650,10 @@ describe("tool-hosted authorization", () => {
         loadContext().set(CallbackBaseUrlKey, "https://app.example");
         loadContext().set(PendingAuthorizationResultKey, [
           {
+            attemptId: "attempt-sync-ticket",
             name: "sync_ticket__oauth_github",
             hookUrl: "https://app.example/callback",
+            principal: TEST_USER_PRINCIPAL,
             callback: {
               params: { code: "abc" },
               method: "GET",

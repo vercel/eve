@@ -54,10 +54,10 @@ describe("createClientUrl", () => {
     expect(
       createClientUrl(
         "https://agent.example.com",
-        "/eve/v1/connections/auth-probe/callback/wrun_1%3Aauth?code=ok",
+        "/eve/v1/connections/auth-probe/callback/attempt_1/wrun_1%3Aauth?code=ok",
       ),
     ).toBe(
-      "https://agent.example.com/eve/v1/connections/auth-probe/callback/wrun_1%3Aauth?code=ok",
+      "https://agent.example.com/eve/v1/connections/auth-probe/callback/attempt_1/wrun_1%3Aauth?code=ok",
     );
   });
 

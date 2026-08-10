@@ -1202,12 +1202,14 @@ describe("turnStep", () => {
         state: setPendingAuthorization(session.state, {
           challenges: [
             {
+              attemptId: "attempt-statuspage",
               challenge: {
                 instructions: "Sign in to continue",
                 url: "https://idp.example/authorize",
               },
               hookUrl: "https://app.example/callback",
               name: "statuspage",
+              principal: { type: "app" },
             },
           ],
         }),
@@ -1667,7 +1669,7 @@ describe("turnStep", () => {
     ]);
   });
 
-  it("clears pending authorization after a matching callback resumes the turn", async () => {
+  it("resumes a legacy pending authorization without attempt metadata", async () => {
     const challenge = {
       challenge: {
         instructions: "Sign in to continue",
@@ -1719,6 +1721,7 @@ describe("turnStep", () => {
             authorizationCallback: {
               callback: { code: "oauth-code" },
               connectionName: "statuspage",
+              legacy: true,
             },
           },
         ],
@@ -1744,12 +1747,14 @@ describe("turnStep", () => {
 
   it("clears pending authorization after a matching callback resumes the turn", async () => {
     const challenge = {
+      attemptId: "attempt-statuspage",
       challenge: {
         instructions: "Sign in to continue",
         url: "https://idp.example/authorize",
       },
       hookUrl: "https://app.example/eve/v1/connections/statuspage/callback/sess-test:auth",
       name: "statuspage",
+      principal: { type: "app" } as const,
       resume: { nonce: "n1" },
     };
     const session = createStubSession({
@@ -1792,6 +1797,7 @@ describe("turnStep", () => {
         payloads: [
           {
             authorizationCallback: {
+              attemptId: "attempt-statuspage",
               callback: { code: "oauth-code" },
               connectionName: "statuspage",
             },

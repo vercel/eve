@@ -22,7 +22,7 @@ interface MockInbox extends SessionCommandInbox {
  * Scripted inbox: serves reads in order and records every authorization
  * window transition so tests can assert the window spans the whole wait.
  */
-function createMockInbox(reads: readonly ScriptedRead[]): MockInbox {
+function createMockInbox(reads: readonly ScriptedRead[], authorizationReady = false): MockInbox {
   const remaining = [...reads];
   const windowTransitions: boolean[] = [];
 
@@ -31,6 +31,9 @@ function createMockInbox(reads: readonly ScriptedRead[]): MockInbox {
     async claimAuthorization() {},
     async claimStable() {},
     consumeNext() {},
+    hasReadyAuthorization() {
+      return authorizationReady;
+    },
     async next() {
       const read = remaining.shift();
       if (read === undefined) throw new Error("Mock inbox exhausted.");
@@ -75,6 +78,13 @@ function cancelRead(): ScriptedRead {
   };
 }
 
+function messageRead(message: string): ScriptedRead {
+  return {
+    result: { done: false, value: { kind: "send", payload: { message } } },
+    source: "session",
+  };
+}
+
 // Routing never runs in these tests: scripted reads stop at authorization
 // instructions or exhaust before any deliver-kind turn payload.
 const sessionState = { sessionId: "ses-parked-wait" } as DurableSessionState;
@@ -113,6 +123,37 @@ describe("nextTurnDelivery", () => {
 
     expect(next.kind).toBe("authorization");
     expect(inbox.windowTransitions).toEqual([true, false]);
+  });
+
+  it("does not let buffered deliveries bypass a ready authorization callback", async () => {
+    const inbox = createMockInbox([authorizationRead()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [
+      { kind: "deliver", payloads: [{ message: "later" }] },
+    ];
+
+    const next = await nextTurnDelivery({
+      ...waitInput(inbox),
+      bufferedDeliveries,
+    });
+
+    expect(next.kind).toBe("authorization");
+    expect(bufferedDeliveries).toHaveLength(1);
+  });
+
+  it("buffers task deliveries until the authorization callback arrives", async () => {
+    const inbox = createMockInbox([messageRead("deferred"), authorizationRead()]);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+
+    const next = await nextTurnDelivery({
+      ...waitInput(inbox),
+      bufferedDeliveries,
+      deferDeliveries: true,
+    });
+
+    expect(next.kind).toBe("authorization");
+    expect(bufferedDeliveries).toMatchObject([
+      { kind: "deliver", payloads: [{ message: "deferred" }] },
+    ]);
   });
 
   it("reports a closed authorization hook", async () => {

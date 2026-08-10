@@ -222,7 +222,7 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
     }
 
     if (
-      event.type === "session.waiting" ||
+      (event.type === "session.waiting" && completedEvent !== undefined) ||
       event.type === "session.completed" ||
       event.type === "session.failed"
     ) {

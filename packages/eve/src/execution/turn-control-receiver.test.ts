@@ -205,6 +205,7 @@ function createCommandInbox(
     claimAuthorization: vi.fn(),
     claimStable: vi.fn(),
     consumeNext: vi.fn(),
+    hasReadyAuthorization: vi.fn(() => false),
     next: vi.fn(() => {
       const value = queue.shift();
       return value === undefined

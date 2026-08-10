@@ -326,9 +326,11 @@ describe("connection_search", () => {
         (ctx) => {
           ctx.set(PendingAuthorizationResultKey, [
             {
+              attemptId: "attempt-notion",
               callback: { method: "GET", params: {} },
               hookUrl: "https://agent.example.com/eve/v1/connections/notion/callback/auth",
               name: "notion",
+              principal: { type: "app" },
             },
           ]);
         },

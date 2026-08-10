@@ -137,11 +137,15 @@ import { normalizeUserContent, resolveAssistantStepText } from "#harness/message
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
   type AuthorizationSignal,
+  getSupersededAuthorizationChallenges,
   isAuthorizationSignal,
   setPendingAuthorization,
 } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
-import { createAuthorizationRequiredEvent } from "#protocol/message.js";
+import {
+  createAuthorizationCompletedEvent,
+  createAuthorizationRequiredEvent,
+} from "#protocol/message.js";
 import {
   classifyModelCallError,
   EmptyModelResponseError,
@@ -2173,6 +2177,22 @@ async function handleStepResult(input: {
     const { challenges } = authSignal;
 
     if (emit) {
+      for (const superseded of getSupersededAuthorizationChallenges(
+        baseSession.state,
+        challenges,
+      )) {
+        await emit(
+          createAuthorizationCompletedEvent({
+            authorization: superseded.challenge,
+            name: superseded.name,
+            outcome: "failed",
+            reason: "Superseded by a newer authorization attempt.",
+            sequence: emissionState.sequence,
+            stepIndex: emissionState.stepIndex,
+            turnId: emissionState.turnId,
+          }),
+        );
+      }
       for (const ch of challenges) {
         await emit(
           createAuthorizationRequiredEvent({

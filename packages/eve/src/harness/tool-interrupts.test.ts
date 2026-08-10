@@ -20,9 +20,11 @@ import { ToolOutputSerializationError } from "#harness/tool-output-serialization
 function signalWithVerifier(): AuthorizationSignal {
   return requestAuthorization([
     {
+      attemptId: "attempt-linear",
       name: "linear",
       challenge: { url: "https://idp.example/auth" },
       hookUrl: "https://app.example/cb",
+      principal: { id: "user-1", type: "user" },
       resume: { verifier: "pkce-secret" },
     },
   ]);
@@ -66,11 +68,13 @@ describe("redactSignalResume", () => {
     const redacted = redactSignalResume(signalWithVerifier());
     expect(isAuthorizationSignal(redacted)).toBe(true);
     expect(redacted.challenges[0]).toEqual({
+      attemptId: "attempt-linear",
       name: "linear",
       challenge: { url: "https://idp.example/auth" },
       hookUrl: "https://app.example/cb",
     });
     expect(redacted.challenges[0]).not.toHaveProperty("resume");
+    expect(redacted.challenges[0]).not.toHaveProperty("principal");
   });
 });
 

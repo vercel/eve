@@ -5325,6 +5325,7 @@ describe("createToolLoopHarness", () => {
     function createAuthSignals() {
       const full = requestAuthorization([
         {
+          attemptId: "attempt-protected-action",
           name: "protected_action",
           challenge: {
             url: "https://idp.example/auth",
@@ -5332,6 +5333,7 @@ describe("createToolLoopHarness", () => {
             userCode: "GFI-QLM",
           },
           hookUrl: "https://app.example/callback",
+          principal: { type: "app" },
           resume: { nonce: "n1" },
         },
       ]);

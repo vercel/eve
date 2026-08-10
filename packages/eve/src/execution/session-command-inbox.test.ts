@@ -191,6 +191,7 @@ describe("createSessionCommandInbox", () => {
       result: resolved(send("first")),
       source: "session",
     });
+    expect(inbox.hasReadyAuthorization()).toBe(false);
     inbox.setAuthorizationWindow(false);
     inbox.consumeNext();
 
@@ -208,6 +209,44 @@ describe("createSessionCommandInbox", () => {
     await expect(closedRead).resolves.toEqual({
       result: resolved(authCallback("weather")),
       source: "authorization",
+    });
+    inbox.consumeNext();
+    await inbox.dispose();
+  });
+
+  it("lets an older callback supersede an unconsumed offered session read", async () => {
+    const sessionRead = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(
+      createMockHook({ reads: [sessionRead.promise], token: "stable" }),
+      createMockHook({
+        reads: [Promise.resolve(resolved(authCallback("weather")))],
+        token: "session:auth",
+      }),
+    );
+    const inbox = createSessionCommandInbox();
+    await inbox.claimStable("stable");
+    await inbox.claimAuthorization("session:auth");
+
+    const losingRead = inbox.nextWithSource();
+    await Promise.resolve();
+    sessionRead.resolve(resolved(send("later session read")));
+    await expect(losingRead).resolves.toEqual({
+      result: resolved(send("later session read")),
+      source: "session",
+    });
+
+    inbox.setAuthorizationWindow(true);
+    expect(inbox.hasReadyAuthorization()).toBe(true);
+    await expect(inbox.nextWithSource()).resolves.toEqual({
+      result: resolved(authCallback("weather")),
+      source: "authorization",
+    });
+    inbox.consumeNext();
+    inbox.setAuthorizationWindow(false);
+
+    await expect(inbox.nextWithSource()).resolves.toEqual({
+      result: resolved(send("later session read")),
+      source: "session",
     });
     inbox.consumeNext();
     await inbox.dispose();

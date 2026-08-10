@@ -15,7 +15,7 @@ import type { ConnectionAuthorizationChallenge } from "#public/connections/error
 import {
   type AuthorizationSignal,
   consumeAuthorizationResult,
-  getHookUrl,
+  createAuthorizationAttempt,
   requestAuthorization,
 } from "#harness/authorization.js";
 import type { JsonValue } from "#public/types/json.js";
@@ -141,7 +141,7 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const ctx: AlsContext = loadContext();
-  const principal = resolveConnectionPrincipal(scope, interactive, ctx);
+  const principal = result.principal ?? resolveConnectionPrincipal(scope, interactive, ctx);
   const token = await interactive.completeAuthorization({
     callbackUrl: result.hookUrl,
     connection,
@@ -167,12 +167,15 @@ export async function startScopedAuthorization(
   const { scope, authorization, connection } = input;
   if (!supportsInteractiveAuthorization(authorization)) return undefined;
 
-  const hookUrl = getHookUrl(scope);
-  if (hookUrl === undefined) return undefined;
+  const attempt = createAuthorizationAttempt(scope);
+  if (attempt === undefined) return undefined;
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const principal = resolveConnectionPrincipal(scope, interactive);
-  const callbackUrl = resolveAuthorizationCallbackUrl({ authorization, callbackUrl: hookUrl });
+  const callbackUrl = resolveAuthorizationCallbackUrl({
+    authorization,
+    callbackUrl: attempt.hookUrl,
+  });
   const { challenge, resume } = await interactive.startAuthorization({
     callbackUrl,
     connection,
@@ -180,9 +183,11 @@ export async function startScopedAuthorization(
   });
   return requestAuthorization([
     {
+      attemptId: attempt.attemptId,
       challenge: stampChallengeDisplayName(challenge, authorization),
       hookUrl: callbackUrl,
       name: scope,
+      principal,
       resume,
     },
   ]);

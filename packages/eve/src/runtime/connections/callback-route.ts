@@ -23,7 +23,10 @@
  */
 
 import { resumeHook } from "#internal/workflow/runtime.js";
-import { EVE_CONNECTION_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
+import {
+  EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
+  EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
+} from "#protocol/routes.js";
 import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { buildAuthorizationCompletePage } from "#runtime/connections/authorization-complete-page.js";
@@ -45,19 +48,22 @@ export const HTTP_CONNECTION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/connections/
  * methods route through the same handler.
  */
 const HANDLED_METHODS: readonly ChannelMethod[] = ["GET", "POST"];
+const ROUTE_KINDS = ["attempt", "legacy"] as const;
+type CallbackRouteKind = (typeof ROUTE_KINDS)[number];
 
 /**
  * Returns the framework-shipped channel definitions that mount the
  * connection callback route at {@link EVE_CONNECTION_CALLBACK_ROUTE_PATTERN}.
  *
- * Returns one definition per accepted HTTP method (see
- * {@link HANDLED_METHODS}). The framework channel resolver mounts each
- * `(method, urlPath)` pair as a separate Nitro route; sharing one URL
- * pattern across multiple methods is not supported by the channel
- * model.
+ * Returns one definition per accepted HTTP method and route generation. The
+ * legacy shape remains mounted for callbacks minted by already-pinned runs.
+ * The framework channel resolver mounts each `(method, urlPath)` pair as a
+ * separate Nitro route.
  */
 export function getConnectionCallbackChannelDefinitions(): readonly ResolvedChannelDefinition[] {
-  return HANDLED_METHODS.map((method) => buildCallbackChannelDefinition(method));
+  return ROUTE_KINDS.flatMap((kind) =>
+    HANDLED_METHODS.map((method) => buildCallbackChannelDefinition(method, kind)),
+  );
 }
 
 /**
@@ -67,24 +73,34 @@ export function getConnectionCallbackChannelDefinitions(): readonly ResolvedChan
  * of a silent no-op.
  */
 export function getConnectionCallbackChannelNames(): ReadonlySet<string> {
-  return new Set(HANDLED_METHODS.map(channelNameForMethod));
+  return new Set(getConnectionCallbackChannelDefinitions().map((definition) => definition.name));
 }
 
-function buildCallbackChannelDefinition(method: ChannelMethod): ResolvedChannelDefinition {
-  const name = channelNameForMethod(method);
+function buildCallbackChannelDefinition(
+  method: ChannelMethod,
+  kind: CallbackRouteKind,
+): ResolvedChannelDefinition {
+  const name = channelNameForMethod(method, kind);
   return {
     name,
     method,
-    urlPath: EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
-    fetch: handleConnectionCallbackRequest,
+    urlPath:
+      kind === "attempt"
+        ? EVE_CONNECTION_CALLBACK_ROUTE_PATTERN
+        : EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN,
+    fetch:
+      kind === "attempt" ? handleConnectionCallbackRequest : handleLegacyConnectionCallbackRequest,
     logicalPath: `framework://channels/${name}`,
-    sourceId: `eve:framework:connection-callback-${method.toLowerCase()}`,
+    sourceId: `eve:framework:connection-callback-${kind}-${method.toLowerCase()}`,
     sourceKind: "module",
   };
 }
 
-function channelNameForMethod(method: ChannelMethod): string {
-  return `${HTTP_CONNECTION_CALLBACK_CHANNEL_NAME_PREFIX}/${method.toLowerCase()}`;
+function channelNameForMethod(method: ChannelMethod, kind: CallbackRouteKind): string {
+  const suffix = method.toLowerCase();
+  return kind === "attempt"
+    ? `${HTTP_CONNECTION_CALLBACK_CHANNEL_NAME_PREFIX}/${suffix}`
+    : `${HTTP_CONNECTION_CALLBACK_CHANNEL_NAME_PREFIX}/legacy/${suffix}`;
 }
 
 /**
@@ -96,13 +112,35 @@ export async function handleConnectionCallbackRequest(
   request: Request,
   ctx: RouteContext,
 ): Promise<Response> {
+  return handleCallbackRequest(request, ctx, false);
+}
+
+async function handleLegacyConnectionCallbackRequest(
+  request: Request,
+  ctx: RouteContext,
+): Promise<Response> {
+  return handleCallbackRequest(request, ctx, true);
+}
+
+async function handleCallbackRequest(
+  request: Request,
+  ctx: RouteContext,
+  legacy: boolean,
+): Promise<Response> {
   const name = ctx.params.name;
+  const attemptId = ctx.params.attemptId;
   const token = ctx.params.token;
   if (typeof name !== "string" || name.length === 0) {
     return Response.json({ error: "Missing connection name.", ok: false }, { status: 400 });
   }
   if (typeof token !== "string" || token.length === 0) {
     return Response.json({ error: "Missing callback token.", ok: false }, { status: 400 });
+  }
+  if (!legacy && (typeof attemptId !== "string" || attemptId.length === 0)) {
+    return Response.json(
+      { error: "Missing authorization attempt ID.", ok: false },
+      { status: 400 },
+    );
   }
 
   const callback = await projectAuthorizationCallback(request);
@@ -112,9 +150,12 @@ export async function handleConnectionCallbackRequest(
   // this hook upfront (before any turns run) so it always exists
   // when the callback arrives.
   try {
+    const authorizationCallback = legacy
+      ? { callback, connectionName: name, legacy: true as const }
+      : { attemptId: attemptId!, callback, connectionName: name };
     await resumeHook(token, {
       kind: "deliver" as const,
-      payloads: [{ authorizationCallback: { connectionName: name, callback } }],
+      payloads: [{ authorizationCallback }],
     });
   } catch {
     return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });

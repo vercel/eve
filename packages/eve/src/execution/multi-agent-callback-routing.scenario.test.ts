@@ -156,6 +156,7 @@ describe("multi-agent callback routing", () => {
   let remoteAgentOrigin: string;
 
   beforeAll(async () => {
+    const authorizationAttemptId = "attempt-linear";
     const nextRoot = await mkdtemp(join(tmpdir(), "eve-callback-routing-"));
 
     for (const agent of DEPLOYMENT_AGENTS) {
@@ -210,7 +211,11 @@ describe("multi-agent callback routing", () => {
           routed.servicePath === createEveCallbackRoutePath(callbackToken)) ||
         (request.method === "GET" &&
           routed.servicePath ===
-            createEveConnectionCallbackRoutePath("linear", authHookToken(sessionId)));
+            createEveConnectionCallbackRoutePath(
+              "linear",
+              authorizationAttemptId,
+              authHookToken(sessionId),
+            ));
 
       if (!servesPath) {
         response.writeHead(404).end();
@@ -354,11 +359,13 @@ describe("multi-agent callback routing", () => {
       ctx.set(SessionIdKey, sessionId);
       ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(deploymentOrigin));
 
-      const hookUrl = contextStorage.run(ctx, () => getHookUrl("linear"));
+      const attemptId = "attempt-linear";
+      const hookUrl = contextStorage.run(ctx, () => getHookUrl("linear", attemptId));
 
       expect(hookUrl).toBe(
         `${deploymentOrigin}${agent.publicRoutePrefix}${createEveConnectionCallbackRoutePath(
           "linear",
+          attemptId,
           authHookToken(sessionId),
         )}`,
       );
@@ -368,7 +375,11 @@ describe("multi-agent callback routing", () => {
       expect(response.status).toBe(200);
       expect(serviceRequests.get(agent.serviceName)).toContainEqual({
         method: "GET",
-        servicePath: createEveConnectionCallbackRoutePath("linear", authHookToken(sessionId)),
+        servicePath: createEveConnectionCallbackRoutePath(
+          "linear",
+          attemptId,
+          authHookToken(sessionId),
+        ),
       });
     });
   }

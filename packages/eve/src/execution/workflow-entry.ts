@@ -290,9 +290,9 @@ async function runDriverLoop(input: {
   readonly sessionState: DurableSessionState;
   readonly sessionTimeoutDeadline?: Date;
 }): Promise<DriverLoopOutcome> {
-  // Payloads collected for a multi-challenge authorization park accumulate
-  // across intervening turns until every expected callback has reported.
-  const collectedAuthPayloads: DeliverPayload[] = [];
+  // One payload per exact authorization attempt accumulates across
+  // intervening turns. Replaced attempts are pruned at each park.
+  const collectedAuthPayloads = new Map<string, DeliverPayload>();
   /**
    * Waits for the next parked-session activity. While an authorization
    * challenge is open (`expected > 0`), callback reads surface through the
@@ -304,33 +304,56 @@ async function runDriverLoop(input: {
    * (or the hook closed), the collected payloads resume the challenge.
    */
   const nextParkedActivity = async (park: {
-    readonly expected: number;
+    readonly expectedAttemptIds: readonly string[];
     readonly sessionState: DurableSessionState;
   }): Promise<
     | { readonly kind: "authorization-resume"; readonly payloads: DeliverPayload[] }
     | Exclude<NextTurnInstruction, { kind: "authorization" }>
   > => {
+    const expectedAttemptIds = new Set(park.expectedAttemptIds);
+    for (const attemptId of collectedAuthPayloads.keys()) {
+      if (!expectedAttemptIds.has(attemptId)) collectedAuthPayloads.delete(attemptId);
+    }
+
     while (true) {
-      // A previous park can have collected every callback this park expects:
-      // the challenge set is re-derived from durable state and only shrinks
-      // through consumed callbacks, so resume without waiting.
-      if (park.expected > 0 && collectedAuthPayloads.length >= park.expected) {
-        return { kind: "authorization-resume", payloads: collectedAuthPayloads.splice(0) };
+      if (
+        expectedAttemptIds.size > 0 &&
+        [...expectedAttemptIds].every((attemptId) => collectedAuthPayloads.has(attemptId))
+      ) {
+        const payloads = [...expectedAttemptIds].map(
+          (attemptId) => collectedAuthPayloads.get(attemptId)!,
+        );
+        collectedAuthPayloads.clear();
+        return { kind: "authorization-resume", payloads };
       }
 
       const next = await nextTurnDelivery({
-        awaitAuthorizationCallbacks: park.expected > 0,
+        awaitAuthorizationCallbacks: expectedAttemptIds.size > 0,
         bufferedDeliveries,
         bufferedSessionControls,
         commandInbox,
+        deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,
         driverWritable: input.driverWritable,
         sessionState: park.sessionState,
       });
       if (next.kind !== "authorization") return next;
 
-      collectedAuthPayloads.push(...next.payloads);
+      for (const payload of next.payloads) {
+        const callback = payload["authorizationCallback"] as
+          | { readonly attemptId?: unknown }
+          | undefined;
+        if (
+          typeof callback?.attemptId === "string" &&
+          expectedAttemptIds.has(callback.attemptId) &&
+          !collectedAuthPayloads.has(callback.attemptId)
+        ) {
+          collectedAuthPayloads.set(callback.attemptId, payload);
+        }
+      }
       if (next.closed) {
-        return { kind: "authorization-resume", payloads: collectedAuthPayloads.splice(0) };
+        const payloads = [...collectedAuthPayloads.values()];
+        collectedAuthPayloads.clear();
+        return { kind: "authorization-resume", payloads };
       }
     }
   };
@@ -458,7 +481,7 @@ async function runDriverLoop(input: {
       // intervening turns because every park re-derives
       // `authorizationNames` from durable session state.
       const next = await nextParkedActivity({
-        expected: action.authorizationNames?.length ?? 0,
+        expectedAttemptIds: action.authorizationAttemptIds ?? [],
         sessionState: action.sessionState,
       });
 

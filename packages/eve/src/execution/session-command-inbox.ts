@@ -50,6 +50,8 @@ export interface SessionCommandInbox {
   claimAuthorization(token: string): Promise<void>;
   claimStable(token: string): Promise<void>;
   consumeNext(): void;
+  /** Whether an authorization read is already eligible to be consumed. */
+  hasReadyAuthorization(): boolean;
   next(): Promise<IteratorResult<SessionInboxPayload>>;
   /**
    * Like {@link next} but reports which hook family produced the read.
@@ -225,6 +227,12 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
       await Promise.all(active.map(async (state) => await disposeHook(state.hook)));
     },
 
+    hasReadyAuthorization(): boolean {
+      if (authorization?.enabled !== true || authorization.resolved === undefined) return false;
+      if (offeredRead !== undefined) return offeredRead.state === authorization;
+      return ready[0]?.state === authorization;
+    },
+
     next: nextRead,
 
     async nextWithSource(): Promise<{
@@ -250,6 +258,16 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
       }
       if (open) {
         if (!authorization.enabled) enable(authorization);
+        if (
+          offeredRead !== undefined &&
+          offeredRead.state !== authorization &&
+          authorization.resolved !== undefined &&
+          authorization.resolved.order < offeredRead.order
+        ) {
+          enqueue(offeredRead);
+          offeredRead = undefined;
+          offered = null;
+        }
         if (offered !== null) arm(authorization);
         return;
       }

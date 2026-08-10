@@ -23,8 +23,14 @@ import {
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { getHarnessEmissionState } from "#harness/emission.js";
+import {
+  emitTurnPreamble,
+  getHarnessEmissionState,
+  isHarnessBetweenTurns,
+  setHarnessEmissionState,
+} from "#harness/emission.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
+import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -56,11 +62,8 @@ import {
   clearPendingAuthorization,
   getPendingAuthorization,
   PendingAuthorizationResultKey,
-  type AuthorizationResult,
 } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { AuthorizationCallback } from "#runtime/connections/types.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -90,10 +93,8 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 /**
  * Result of one durable harness step, consumed by the turn workflow.
  *
- * `park` carries `hasPendingInputBatch`, `hasPendingAuthorization`, and
- * `pendingRuntimeActionKeys` so the turn workflow can pick the right
- * {@link import("#execution/next-driver-action.js").NextDriverAction}
- * arm without re-reading the session.
+ * `park` carries the pending fields needed to choose a
+ * {@link import("#execution/next-driver-action.js").NextDriverAction} without re-reading state.
  *
  * `cancelled` converts the harness's cancellation throw into a *returned*
  * result so workflow-core never classifies the abort as a step failure or
@@ -127,6 +128,7 @@ export type DurableStepResult =
     }
   | {
       readonly action: "park";
+      readonly authorizationAttemptIds?: readonly string[];
       readonly authorizationNames?: readonly string[];
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
@@ -180,46 +182,27 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   // Completion event names are collected here; emission happens after
   // the `emit` function is created below.
   const pendingAuth = getPendingAuthorization(durableSession.state);
-  let completedAuths:
-    | Array<{ name: string; authorization: ConnectionAuthorizationChallenge }>
-    | undefined;
+  let completedAuths: ReturnType<typeof matchAuthorizationCallbacks>["matches"] | undefined;
   if (pendingAuth && input.input?.kind === "deliver") {
-    const authResults: Array<{ name: string } & AuthorizationResult> = [];
-    const completed: Array<{ name: string; authorization: ConnectionAuthorizationChallenge }> = [];
-    const remainingPayloads: DeliverPayload[] = [];
-    for (const payload of input.input.payloads) {
-      const cb = payload["authorizationCallback"] as
-        | { connectionName: string; callback: AuthorizationCallback }
-        | undefined;
-      if (cb) {
-        const challenge = pendingAuth.challenges.find((c) => c.name === cb.connectionName);
-        if (challenge) {
-          authResults.push({
-            name: challenge.name,
-            resume: challenge.resume,
-            callback: cb.callback,
-            hookUrl: challenge.hookUrl,
-          });
-          completed.push({ name: challenge.name, authorization: challenge.challenge });
-        }
-      } else {
-        remainingPayloads.push(payload);
-      }
-    }
-    if (authResults.length > 0) {
+    const { matches, remainingPayloads } = matchAuthorizationCallbacks(
+      pendingAuth,
+      input.input.payloads,
+    );
+    input = { ...input, input: { ...input.input, payloads: remainingPayloads } };
+    if (matches.length > 0) {
+      const authResults = matches.map((match) => match.result);
       ctx.set(PendingAuthorizationResultKey, authResults);
       durableSession = {
         ...durableSession,
         state: clearPendingAuthorization(
           durableSession.state,
-          authResults.map((result) => result.name),
+          authResults.map((result) => result.attemptId ?? result.name),
         ),
       };
-      completedAuths = completed;
-      input =
-        remainingPayloads.length > 0
-          ? { ...input, input: { ...input.input, payloads: remainingPayloads } }
-          : { ...input, input: undefined };
+      completedAuths = matches;
+      if (remainingPayloads.length === 0) {
+        input = { ...input, input: undefined };
+      }
     }
   }
 
@@ -393,19 +376,23 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // or the pending batch would re-park and later re-dispatch.
     throwIfTurnAborted(input.abortSignal);
     stepResult = await runStep(ctx, initialSession, async (enrichedSession) => {
-      const schemaSession = resolveEffectiveOutputSchema({
+      let schemaSession = resolveEffectiveOutputSchema({
         agentOutputSchema: effectiveAgent.turnAgent.outputSchema,
         input: resolved,
         mode,
         session: enrichedSession,
       });
       if (completedAuths) {
-        const emissionState = getHarnessEmissionState(schemaSession.state);
-        for (const { name, authorization } of completedAuths) {
+        let emissionState = getHarnessEmissionState(schemaSession.state);
+        if (isHarnessBetweenTurns(schemaSession)) {
+          emissionState = await emitTurnPreamble(handleEvent, {}, emissionState, runtimeIdentity);
+          schemaSession = setHarnessEmissionState(schemaSession, emissionState);
+        }
+        for (const { authorization, result } of completedAuths) {
           await handleEvent(
             createAuthorizationCompletedEvent({
               authorization,
-              name,
+              name: result.name,
               outcome: "authorized",
               sequence: emissionState.sequence,
               stepIndex: emissionState.stepIndex,
@@ -565,6 +552,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
  * the right `NextDriverAction` arm at the park boundary.
  */
 function derivePendingState(session: HarnessSession): {
+  readonly authorizationAttemptIds?: readonly string[];
   readonly authorizationNames?: readonly string[];
   readonly hasPendingAuthorization: boolean;
   readonly hasPendingInputBatch: boolean;
@@ -573,6 +561,9 @@ function derivePendingState(session: HarnessSession): {
   const batch = getPendingRuntimeActionBatch(session.state);
   const pendingAuth = getPendingAuthorization(session.state);
   const base = {
+    authorizationAttemptIds: pendingAuth?.challenges.flatMap((challenge) =>
+      challenge.attemptId === undefined ? [] : [challenge.attemptId],
+    ),
     authorizationNames: pendingAuth?.challenges.map((c) => c.name),
     hasPendingAuthorization: pendingAuth !== undefined,
     hasPendingInputBatch: hasPendingInputBatch(session.state),

@@ -57,6 +57,7 @@ export async function nextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly commandInbox: SessionCommandInbox;
+  readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
 }): Promise<NextTurnInstruction> {
@@ -76,6 +77,7 @@ async function awaitNextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly commandInbox: SessionCommandInbox;
+  readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
 }): Promise<NextTurnInstruction> {
@@ -84,6 +86,7 @@ async function awaitNextTurnDelivery(input: {
       bufferedDeliveries: input.bufferedDeliveries,
       bufferedSessionControls: input.bufferedSessionControls,
       commandInbox: input.commandInbox,
+      deferDeliveries: input.deferDeliveries,
     });
 
     if (nextAction.kind === "authorization") {
@@ -123,13 +126,18 @@ async function waitForNextSessionAction(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly commandInbox: SessionCommandInbox;
+  readonly deferDeliveries?: boolean;
 }): Promise<NextSessionAction> {
   const pendingSessionControl = input.bufferedSessionControls.shift();
   if (pendingSessionControl !== undefined) {
     return { kind: pendingSessionControl };
   }
 
-  if (input.bufferedDeliveries.length > 0) {
+  if (
+    input.deferDeliveries !== true &&
+    !input.commandInbox.hasReadyAuthorization() &&
+    input.bufferedDeliveries.length > 0
+  ) {
     return {
       delivery: takeBufferedTurnDelivery(input.bufferedDeliveries),
       kind: "delivery",
@@ -172,10 +180,19 @@ async function waitForNextSessionAction(input: {
     }
 
     if (first.value.kind === "deliver") {
+      if (input.deferDeliveries === true) {
+        input.bufferedDeliveries.push(first.value);
+        continue;
+      }
       return { delivery: first.value, kind: "delivery" };
     }
 
-    return { delivery: sendCommandToDelivery(first.value), kind: "delivery" };
+    const delivery = sendCommandToDelivery(first.value);
+    if (input.deferDeliveries === true) {
+      input.bufferedDeliveries.push(delivery);
+      continue;
+    }
+    return { delivery, kind: "delivery" };
   }
 }
 

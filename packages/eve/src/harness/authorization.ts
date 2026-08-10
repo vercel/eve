@@ -4,12 +4,13 @@
  * Public API:
  * - {@link requestAuthorization} — return from execute to suspend for auth
  * - {@link getAuthorizationResult} — read the callback on resume
- * - {@link getHookUrl} — build a callback URL for external systems
+ * - {@link createAuthorizationAttempt} — mint one correlated callback URL
  * - {@link isAuthorizationSignal} — type guard
  *
  * ## Resume lifecycle
  *
- * `resume` is how an interactive strategy carries data from
+ * `attemptId` binds the callback to one challenge generation, while `resume`
+ * carries strategy data from
  * `startAuthorization` to `completeAuthorization` across the park:
  *
  * 1. `startAuthorization` returns `{ challenge, resume? }`. The runtime
@@ -34,9 +35,10 @@ import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { AuthorizationCallback } from "#runtime/connections/types.js";
+import type { AuthorizationCallback, ConnectionPrincipal } from "#runtime/connections/types.js";
 import type { JsonValue } from "#public/types/json.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
+import { createUlid } from "#shared/ulid.js";
 
 const AUTHORIZATION_BRAND = "__eveAuthorization" as const;
 const AUTHORIZATION_PENDING_BRAND = "__eveAuthorizationPending" as const;
@@ -46,9 +48,13 @@ const AUTHORIZATION_PENDING_BRAND = "__eveAuthorizationPending" as const;
 // ---------------------------------------------------------------------------
 
 export interface AuthorizationChallenge {
+  /** Opaque identity of this exact authorization attempt. */
+  readonly attemptId?: string;
   readonly name: string;
   readonly challenge: ConnectionAuthorizationChallenge;
   readonly hookUrl: string;
+  /** Principal passed to `startAuthorization`; omitted from model-facing copies. */
+  readonly principal?: ConnectionPrincipal;
   /**
    * Opaque resume value from the strategy's `startAuthorization`,
    * journaled across the park. Absent for provider-owned flows.
@@ -71,9 +77,11 @@ export interface AuthorizationPendingModelOutput {
 }
 
 export interface AuthorizationResult {
+  readonly attemptId?: string;
   readonly resume?: JsonValue;
   readonly callback: AuthorizationCallback;
   readonly hookUrl: string;
+  readonly principal?: ConnectionPrincipal;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +112,7 @@ export function requestAuthorization(
 export function redactSignalResume(signal: AuthorizationSignal): AuthorizationSignal {
   return requestAuthorization(
     signal.challenges.map((entry) => ({
+      attemptId: entry.attemptId,
       name: entry.name,
       challenge: entry.challenge,
       hookUrl: entry.hookUrl,
@@ -150,23 +159,31 @@ export function consumeAuthorizationResult(name: string): AuthorizationResult | 
 }
 
 /**
- * Builds a callback URL for external systems. `name` identifies the
- * callback in the URL path (e.g. a connection name or custom label).
+ * Builds a callback URL for external systems. `name` and `attemptId` identify
+ * the exact challenge in the URL path.
  *
- * The URL embeds a per-authorization hook token derived from the
- * session ID and name (`${sessionId}:auth:${name}`). This token is
- * independent of the continuation token, so channel re-keying
- * mid-turn does not invalidate the callback URL.
+ * The URL embeds the session's authorization hook token (`${sessionId}:auth`).
+ * It is independent of the continuation token, so channel re-keying mid-turn
+ * does not invalidate the callback URL.
  *
  * Returns `undefined` if the session context isn't available.
  */
-export function getHookUrl(name: string): string | undefined {
+export function getHookUrl(name: string, attemptId: string): string | undefined {
   const ctx = loadContext();
   const sessionId = ctx.get(SessionIdKey);
   const baseUrl = ctx.get(CallbackBaseUrlKey);
   if (!sessionId || !baseUrl) return undefined;
   const token = authHookToken(sessionId);
-  return `${baseUrl}${createEveConnectionCallbackRoutePath(name, token)}`;
+  return `${baseUrl}${createEveConnectionCallbackRoutePath(name, attemptId, token)}`;
+}
+
+/** Mints the identity and callback URL for one interactive authorization attempt. */
+export function createAuthorizationAttempt(
+  name: string,
+): { readonly attemptId: string; readonly hookUrl: string } | undefined {
+  const attemptId = createUlid();
+  const hookUrl = getHookUrl(name, attemptId);
+  return hookUrl === undefined ? undefined : { attemptId, hookUrl };
 }
 
 export function isAuthorizationSignal(value: unknown): value is AuthorizationSignal {
@@ -264,25 +281,59 @@ export function setPendingAuthorization(
   sessionState: Record<string, unknown> | undefined,
   value: PendingAuthorizationState,
 ): Record<string, unknown> {
-  return { ...sessionState, [PENDING_AUTHORIZATION_KEY]: value };
+  const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
+  const superseded = getSupersededAuthorizationChallenges(sessionState, value.challenges);
+  return {
+    ...sessionState,
+    [PENDING_AUTHORIZATION_KEY]: {
+      challenges: [
+        ...previous.filter((challenge) => !superseded.includes(challenge)),
+        ...value.challenges,
+      ],
+    },
+  };
+}
+
+/** Existing same-scope attempts replaced by newer attempts for the same principal. */
+export function getSupersededAuthorizationChallenges(
+  sessionState: Record<string, unknown> | undefined,
+  replacements: readonly AuthorizationChallenge[],
+): readonly AuthorizationChallenge[] {
+  const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
+  return previous.filter((candidate) =>
+    replacements.some(
+      (replacement) =>
+        candidate.name === replacement.name &&
+        samePrincipal(candidate.principal, replacement.principal),
+    ),
+  );
+}
+
+function samePrincipal(
+  left: ConnectionPrincipal | undefined,
+  right: ConnectionPrincipal | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  if (left.type === "app" || right.type === "app") return left.type === right.type;
+  return left.id === right.id && left.issuer === right.issuer;
 }
 
 export function clearPendingAuthorization(
   sessionState: Record<string, unknown> | undefined,
-  names?: readonly string[],
+  attemptIds?: readonly string[],
 ): Record<string, unknown> | undefined {
   if (sessionState === undefined || sessionState[PENDING_AUTHORIZATION_KEY] === undefined) {
     return sessionState;
   }
 
-  if (names !== undefined) {
-    if (names.length === 0) return sessionState;
+  if (attemptIds !== undefined) {
+    if (attemptIds.length === 0) return sessionState;
 
     const pending = getPendingAuthorization(sessionState);
     if (pending !== undefined) {
-      const completedNames = new Set(names);
+      const completedAttemptIds = new Set(attemptIds);
       const challenges = pending.challenges.filter(
-        (challenge) => !completedNames.has(challenge.name),
+        (challenge) => !completedAttemptIds.has(challenge.attemptId ?? challenge.name),
       );
       if (challenges.length > 0) {
         return {

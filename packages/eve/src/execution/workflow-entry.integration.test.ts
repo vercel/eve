@@ -20,7 +20,11 @@ import { ConnectionAuthorizationRequiredError } from "#public/connections/errors
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { isEventId } from "#protocol/event-id.js";
 import type { ToolContext } from "#public/definitions/tool.js";
-import type { AuthorizationDefinition, TokenResult } from "#runtime/connections/types.js";
+import type {
+  AuthorizationDefinition,
+  ConnectionPrincipal,
+  TokenResult,
+} from "#runtime/connections/types.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#shared/tool-schema.js";
 
@@ -57,6 +61,7 @@ function buildSerializedContext(overrides: {
 
 interface WeatherAuthRuntime {
   completeCalls(): number;
+  completedPrincipals(): readonly ConnectionPrincipal[];
   runtime: ReturnType<typeof createTestRuntime>;
 }
 
@@ -68,6 +73,7 @@ interface WeatherAuthRuntime {
  */
 function createWeatherAuthRuntime(agentName: string): WeatherAuthRuntime {
   let completeCalls = 0;
+  const completedPrincipals: ConnectionPrincipal[] = [];
   const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
     principalType: "user",
     async getToken(): Promise<TokenResult> {
@@ -83,8 +89,9 @@ function createWeatherAuthRuntime(agentName: string): WeatherAuthRuntime {
         resume: { nonce: "weather-nonce" },
       };
     },
-    async completeAuthorization({ callback, resume }): Promise<TokenResult> {
+    async completeAuthorization({ callback, principal, resume }): Promise<TokenResult> {
       completeCalls += 1;
+      completedPrincipals.push(principal);
       expect(callback.params.code).toBe("oauth-code");
       expect(resume).toEqual({ nonce: "weather-nonce" });
       return { token: "weather-token" };
@@ -140,7 +147,35 @@ function createWeatherAuthRuntime(agentName: string): WeatherAuthRuntime {
       execute: getWeatherTool.execute,
     },
   };
-  return { completeCalls: () => completeCalls, runtime };
+  return {
+    completeCalls: () => completeCalls,
+    completedPrincipals: () => completedPrincipals,
+    runtime,
+  };
+}
+
+function authorizationAttemptId(events: readonly MessageStreamEvent[]): string {
+  const required = filterEventsByType(events, "authorization.required")[0];
+  const webhookUrl = required?.data.webhookUrl;
+  if (webhookUrl === undefined) throw new Error("Missing authorization callback URL.");
+  const segments = new URL(webhookUrl).pathname.split("/");
+  const callbackIndex = segments.lastIndexOf("callback");
+  const attemptId = segments[callbackIndex + 1];
+  if (callbackIndex === -1 || attemptId === undefined) {
+    throw new Error("Authorization callback URL is missing its attempt ID.");
+  }
+  return decodeURIComponent(attemptId);
+}
+
+function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string): void {
+  expect(filterEventsByType(events, "turn.started")).toHaveLength(1);
+  const eventTurnIds = events.flatMap((event) => {
+    if (!("data" in event) || typeof event.data !== "object" || event.data === null) return [];
+    if (!("turnId" in event.data) || typeof event.data.turnId !== "string") return [];
+    return [event.data.turnId];
+  });
+  expect(eventTurnIds.length).toBeGreaterThan(0);
+  expect(new Set(eventTurnIds)).toEqual(new Set([turnId]));
 }
 
 describe("workflowEntry integration", () => {
@@ -196,6 +231,7 @@ describe("workflowEntry integration", () => {
           payloads: [
             {
               authorizationCallback: {
+                attemptId: authorizationAttemptId(firstTurn),
                 callback: {
                   method: "GET",
                   params: { code: "oauth-code" },
@@ -213,6 +249,7 @@ describe("workflowEntry integration", () => {
         const completed = filterEventsByType(authorizedTurn, "authorization.completed");
 
         expect(completeCalls()).toBe(1);
+        expectSingleTurn(authorizedTurn, "turn_1");
         expect(authorizedTurn.at(-1)?.type).toBe("session.waiting");
         expect(completed).toHaveLength(1);
         expect(completed[0]?.data).toMatchObject({
@@ -259,7 +296,9 @@ describe("workflowEntry integration", () => {
   });
 
   it("runs ordinary deliveries while an authorization challenge stays open", async () => {
-    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-auth-open");
+    const { completeCalls, completedPrincipals, runtime } = createWeatherAuthRuntime(
+      "workflow-entry-auth-open",
+    );
     const continuationToken = "http:workflow-entry-auth-open";
 
     await runtime.run(async () => {
@@ -284,7 +323,7 @@ describe("workflowEntry integration", () => {
       const stream = captureEvents(run);
 
       try {
-        await stream.nextUntil(
+        const firstTurn = await stream.nextUntil(
           "initial auth-required event",
           (event) => event.type === "authorization.required",
         );
@@ -299,6 +338,13 @@ describe("workflowEntry integration", () => {
         // turn instead of queueing behind the callback.
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
+          auth: {
+            attributes: {},
+            authenticator: "test-idp",
+            issuer: "test-idp",
+            principalId: "user-2",
+            principalType: "user",
+          },
           kind: "send",
           payload: { message: "Quick status note while I sign in." },
         });
@@ -324,6 +370,7 @@ describe("workflowEntry integration", () => {
           payloads: [
             {
               authorizationCallback: {
+                attemptId: authorizationAttemptId(firstTurn),
                 callback: {
                   method: "GET",
                   params: { code: "oauth-code" },
@@ -339,6 +386,7 @@ describe("workflowEntry integration", () => {
           (event) => event.type === "session.waiting",
         );
         const completed = filterEventsByType(callbackTurn, "authorization.completed");
+        expectSingleTurn(callbackTurn, "turn_2");
         expect(completed).toHaveLength(1);
         expect(completed[0]?.data).toMatchObject({
           name: "weather",
@@ -349,6 +397,13 @@ describe("workflowEntry integration", () => {
         // (No waitForHook here: it only reports never-received hooks, and
         // the continuation hook already received the intervening message.)
         await resumeHook(continuationToken, {
+          auth: {
+            attributes: {},
+            authenticator: "test-idp",
+            issuer: "test-idp",
+            principalId: "user-1",
+            principalType: "user",
+          },
           kind: "send",
           payload: { message: "Use the get_weather tool to check the weather in Lisbon." },
         });
@@ -358,6 +413,9 @@ describe("workflowEntry integration", () => {
           (event) => event.type === "session.waiting",
         );
         expect(completeCalls()).toBe(1);
+        expect(completedPrincipals()).toEqual([
+          expect.objectContaining({ id: "user-1", type: "user" }),
+        ]);
         expect(
           toolTurn.some(
             (event) =>
@@ -366,6 +424,158 @@ describe("workflowEntry integration", () => {
               event.data.message.includes("authorized with weather-token"),
           ),
         ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("defers ordinary deliveries while a task waits for authorization", async () => {
+    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-task-auth-open");
+    const continuationToken = "http:workflow-entry-task-auth-open";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+          serializedContext: buildSerializedContext({
+            auth: {
+              attributes: {},
+              authenticator: "test-idp",
+              issuer: "test-idp",
+              principalId: "user-1",
+              principalType: "user",
+            },
+            channelKind: "http",
+            continuationToken,
+            mode: "task",
+          }),
+        },
+      ]);
+      const stream = captureEvents(run);
+
+      try {
+        const firstTurn = await stream.nextUntil(
+          "initial task auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        await resumeHook(continuationToken, {
+          kind: "send",
+          payload: { message: "This must not become a second task turn." },
+        });
+        await resumeHook(`${run.runId}:auth`, {
+          kind: "deliver",
+          payloads: [
+            {
+              authorizationCallback: {
+                attemptId: authorizationAttemptId(firstTurn),
+                callback: { method: "GET", params: { code: "oauth-code" } },
+                connectionName: "weather",
+              },
+            },
+          ],
+        });
+
+        const completion = await stream.nextUntil(
+          "authorized task completion",
+          (event) => event.type === "session.completed",
+        );
+        const allEvents = [...firstTurn, ...completion];
+        expect(filterEventsByType(allEvents, "turn.started")).toHaveLength(1);
+        expect(filterEventsByType(allEvents, "message.received")).toHaveLength(1);
+        expect(filterEventsByType(allEvents, "authorization.completed")).toHaveLength(1);
+        expect(filterEventsByType(allEvents, "session.waiting")).toHaveLength(0);
+        expect(completeCalls()).toBe(1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("ignores stale and duplicate callbacks after a challenge is replaced", async () => {
+    const { completeCalls, runtime } = createWeatherAuthRuntime("workflow-entry-auth-replaced");
+    const continuationToken = "http:workflow-entry-auth-replaced";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+          serializedContext: buildSerializedContext({
+            auth: {
+              attributes: {},
+              authenticator: "test-idp",
+              issuer: "test-idp",
+              principalId: "user-1",
+              principalType: "user",
+            },
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureEvents(run);
+
+      try {
+        const firstAttempt = await stream.nextUntil(
+          "first auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        await stream.nextUntil(
+          "first authorization park",
+          (event) => event.type === "session.waiting",
+        );
+
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        await resumeHook(continuationToken, {
+          kind: "send",
+          payload: { message: "Use the get_weather tool to check the weather in Lisbon." },
+        });
+        const replacementAttempt = await stream.nextUntil(
+          "replacement auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        expect(filterEventsByType(replacementAttempt, "authorization.completed")).toMatchObject([
+          { data: { name: "weather", outcome: "failed" } },
+        ]);
+        await stream.nextUntil(
+          "replacement authorization park",
+          (event) => event.type === "session.waiting",
+        );
+
+        const stalePayload = {
+          authorizationCallback: {
+            attemptId: authorizationAttemptId(firstAttempt),
+            callback: { method: "GET", params: { code: "stale-oauth-code" } },
+            connectionName: "weather",
+          },
+        };
+        await resumeHook(`${run.runId}:auth`, { kind: "deliver", payloads: [stalePayload] });
+        await resumeHook(`${run.runId}:auth`, { kind: "deliver", payloads: [stalePayload] });
+
+        await resumeHook(`${run.runId}:auth`, {
+          kind: "deliver",
+          payloads: [
+            {
+              authorizationCallback: {
+                attemptId: authorizationAttemptId(replacementAttempt),
+                callback: { method: "GET", params: { code: "oauth-code" } },
+                connectionName: "weather",
+              },
+            },
+          ],
+        });
+
+        const callbackTurn = await stream.nextUntil(
+          "replacement authorization callback turn",
+          (event) => event.type === "session.waiting",
+        );
+        expect(filterEventsByType(callbackTurn, "authorization.completed")).toHaveLength(1);
+        expect(completeCalls()).toBe(1);
       } finally {
         stream.dispose();
         await run.cancel();
@@ -399,7 +609,7 @@ describe("workflowEntry integration", () => {
       const stream = captureEvents(run);
 
       try {
-        await stream.nextUntil(
+        const firstTurn = await stream.nextUntil(
           "initial auth-required event",
           (event) => event.type === "authorization.required",
         );
@@ -425,6 +635,7 @@ describe("workflowEntry integration", () => {
           payloads: [
             {
               authorizationCallback: {
+                attemptId: authorizationAttemptId(firstTurn),
                 callback: {
                   method: "GET",
                   params: { code: "oauth-code" },

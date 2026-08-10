@@ -141,6 +141,7 @@ describe("message stream protocol", () => {
 
     const webhookUrl = `https://eve.example.com${createEveConnectionCallbackRoutePath(
       "linear",
+      "attempt-1",
       "abc",
     )}`;
     const full = createAuthorizationRequiredEvent({
