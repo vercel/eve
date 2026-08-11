@@ -26,6 +26,7 @@ export {
   type ChannelMutationResult,
   type EnsureChannelOptions,
   type SlackConnectorSlug,
+  type WebAuthentication,
   type WebPackageVersions,
 } from "./update/channels.js";
 

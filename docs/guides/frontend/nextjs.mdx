@@ -76,6 +76,32 @@ export default withEve(nextConfig, {
 });
 ```
 
+## Scaffold Sign in with Vercel
+
+Programmatic scaffold consumers can generate Web Chat with Better Auth's Vercel provider instead of the default fail-closed placeholder:
+
+```ts
+import { ensureChannel } from "eve/setup/scaffold";
+
+await ensureChannel({
+  kind: "web",
+  projectRoot,
+  webAuthentication: "sign-in-with-vercel",
+});
+```
+
+The generated app expects these environment variables in Preview and Production:
+
+- `VERCEL_APP_CLIENT_ID`
+- `VERCEL_APP_CLIENT_SECRET`
+- `BETTER_AUTH_SECRET`
+
+The caller must create the Vercel App and register `/api/auth/callback/vercel` for the project. To limit sign-in to the owning team, create the app with `signInFrom: "owning-team"`. The scaffold does not provision or manage the OAuth app.
+
+Local development remains open through `localDev()`. Production page requests and eve routes resolve the same verified Better Auth session. Omitting `webAuthentication` preserves the default `placeholderAuth()` scaffold.
+
+The authenticated variant defaults to stable Next.js `16.3.0` because Better Auth's Next.js peer range does not accept prerelease versions. Set `webPackageVersions.nextPackageVersion` only when the selected version satisfies Better Auth's peer dependency.
+
 ## Call the hook
 
 With `withEve()` in `next.config.ts`, the eve routes are same-origin, so client code can call [`useEveAgent`](./overview) without naming a host. Cookie-based auth (Auth.js or any session cookie) needs no extra wiring, since the browser already sends those cookies on every eve request. For non-cookie schemes, attach the credentials yourself:

@@ -31,6 +31,7 @@ const RELEASE_AGE_POLICY =
 const TEST_WEB_PACKAGE_VERSIONS = {
   evePackage: TEST_EVE_PACKAGE,
   aiPackageVersion: "7.0.0",
+  betterAuthPackageVersion: "1.6.26-test",
   nextPackageVersion: "16.2.6",
   reactPackageVersion: "19.2.6",
   reactDomPackageVersion: "19.2.6",
@@ -247,6 +248,7 @@ describe("ensureChannel", () => {
       "withEve",
     );
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
+    expect(packageJson).not.toContain('"better-auth"');
     expect(packageJson).toContain('"next": "16.2.6"');
     expect(packageJson).toContain('"build:eve": "eve build"');
     expect(packageJson).toContain('"dev": "next dev"');
@@ -272,6 +274,66 @@ describe("ensureChannel", () => {
         2,
       )}\n`,
     );
+  });
+
+  test("writes a Sign in with Vercel authenticated Web Chat app", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "private-agent", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webAuthentication: "sign-in-with-vercel",
+      webPackageVersions: {
+        ...TEST_WEB_PACKAGE_VERSIONS,
+        nextPackageVersion: undefined,
+      },
+    });
+
+    expect(result).toMatchObject({ kind: "web", action: "created" });
+    expect(result.filesWritten).toEqual(
+      expect.arrayContaining([
+        join(projectRoot, "app/_components/web-chat-auth.tsx"),
+        join(projectRoot, "app/api/auth/[...all]/route.ts"),
+        join(projectRoot, "lib/auth-client.ts"),
+        join(projectRoot, "lib/auth.ts"),
+      ]),
+    );
+
+    const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(packageJson.dependencies["better-auth"]).toBe("1.6.26-test");
+    expect(packageJson.dependencies.next).toBe("16.3.0");
+
+    const pageSource = await readFile(join(projectRoot, "app/page.tsx"), "utf8");
+    expect(pageSource).toContain("auth.api.getSession");
+    expect(pageSource).toContain("<SignIn />");
+    expect(pageSource).toContain("<AccountControl");
+
+    const authSource = await readFile(join(projectRoot, "lib/auth.ts"), "utf8");
+    expect(authSource).toContain('requireEnvironmentVariable("BETTER_AUTH_SECRET")');
+    expect(authSource).toContain("process.env.VERCEL_PROJECT_PRODUCTION_URL");
+    expect(authSource).toContain('clientId: requireEnvironmentVariable("VERCEL_APP_CLIENT_ID")');
+
+    const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
+    expect(channelSource).toContain("auth.api.getSession");
+    expect(channelSource).toContain('authenticator: "better-auth:vercel"');
+    expect(channelSource).toContain("vercelOidc()");
+    expect(channelSource).toContain("localDev()");
+    expect(channelSource).not.toContain("placeholderAuth");
+
+    const accountSource = await readFile(
+      join(projectRoot, "app/_components/web-chat-auth.tsx"),
+      "utf8",
+    );
+    expect(accountSource).toContain('className="size-9 cursor-pointer');
+    expect(accountSource).toContain("Log out");
+    expect(accountSource).not.toContain("__EVE_INIT_APP_NAME__");
   });
 
   test("overrides an incompatible node engine when adding Web Chat", async () => {
