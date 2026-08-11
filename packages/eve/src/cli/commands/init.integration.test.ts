@@ -236,6 +236,21 @@ describe("runInitCommand", () => {
     expect(output.errors).toEqual([]);
   });
 
+  it("exits after init without starting a handoff when selected", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-exit-handoff-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitHandoff.mockResolvedValue("exit");
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(parentDirectory, "my-agent");
+    await expect(pathExists(join(projectPath, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.errors).toEqual([]);
+  });
+
   it("uses an explicit init package spec for fresh project scaffolds", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-package-spec-"));
     const output = logger();

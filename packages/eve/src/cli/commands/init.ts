@@ -511,6 +511,7 @@ export async function runInitCommand(
     if (error instanceof WizardCancelledError) return;
     throw error;
   }
+  if (handoff === "exit") return;
   if (handoff !== "eve-dev") {
     logger.log(pc.dim(`$ ${handoff}`));
     if (

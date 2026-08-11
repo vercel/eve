@@ -92,10 +92,11 @@ describe("selectInitHandoff", () => {
       onSelect: (options) => {
         expect(options.message).toBe("How would you like to continue?");
         expect(options.initialValue).toBe("eve-dev");
-        expect(options.options.map((option) => option.value)).toEqual(["eve-dev", "codex"]);
+        expect(options.options.map((option) => option.value)).toEqual(["eve-dev", "codex", "exit"]);
         expect(options.options.map((option) => option.focusHint)).toEqual([
           "talk to 'weather-bot' in your terminal",
           "build 'weather-bot' using Codex",
+          "return to your terminal",
         ]);
         // Hints are focus-only, like the dev TUI lists, so no always-on hint is set.
         expect(options.options.every((option) => option.hint === undefined)).toBe(true);

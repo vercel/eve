@@ -155,11 +155,6 @@ export async function prepareSlackSetup(
   );
   const slug = await deps.deriveSlackConnectorSlug(context.appRoot);
   if (credentials === "environment") return { credentials, slug };
-  if (context.environment.vercel.kind === "unavailable") {
-    throw new Error(
-      "Vercel Connect requires an authenticated Vercel CLI. Run `vercel login`, then retry Slack setup.",
-    );
-  }
   const project = await context.resolveVercelProject("Slack");
   if (project.projectId.length === 0) throw new Error(SLACK_REQUIRES_VERCEL);
   const lookup = await deps.inspectConnectors(

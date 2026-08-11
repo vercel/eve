@@ -32,15 +32,23 @@ function deps(): SlackSetupDeps {
     reconcileSlackUid: vi.fn(async () => true),
   };
 }
-function contexts(answers: Record<string, unknown>, assume = false) {
+function contexts(
+  answers: Record<string, unknown>,
+  assume = false,
+  auth: "authenticated" | "logged-out" = "authenticated",
+) {
   const base = headlessAsker();
-  return createSetupContexts({
-    appRoot: "/project",
-    asker: withAnswers(answers)(assume ? withPolicy("assume")(base) : base),
-    environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
-    prompter: createFakePrompter().prompter,
-    resolveVercelProject: vi.fn(async () => ({ orgId: "team", projectId: "project" })),
-  });
+  const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
+  return {
+    ...createSetupContexts({
+      appRoot: "/project",
+      asker: withAnswers(answers)(assume ? withPolicy("assume")(base) : base),
+      environment: integrationSetupEnvironment(auth, { kind: "unresolved" }),
+      prompter: createFakePrompter().prompter,
+      resolveVercelProject,
+    }),
+    resolveVercelProject,
+  };
 }
 
 describe("Slack setup", () => {
@@ -83,5 +91,15 @@ describe("Slack setup", () => {
     await applySlackSetup(plan, ctx.apply, effects);
     const options = vi.mocked(effects.provisionSlackbot).mock.calls[0]?.[4];
     expect(await options?.selectConnector?.([], undefined)).toBe(connector);
+  });
+  it("allows the project resolver to authenticate and link Vercel Connect", async () => {
+    const effects = deps();
+    const ctx = contexts({ "slack-credentials": "vercel" }, false, "logged-out");
+
+    await expect(prepareSlackSetup(ctx.prepare, effects)).resolves.toMatchObject({
+      credentials: "vercel-connect",
+      project: { orgId: "team", projectId: "project" },
+    });
+    expect(ctx.resolveVercelProject).toHaveBeenCalledWith("Slack");
   });
 });

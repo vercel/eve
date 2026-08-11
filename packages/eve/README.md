@@ -124,9 +124,10 @@ npx eve@latest init my-agent
 
 `eve init` writes a new agent with eve's default model. Pass `--channel-web-nextjs` to add the
 Web Chat application. It installs dependencies, initializes Git, and starts the
-development server. Targeting an existing project directory (`eve init .`) adds
-the agent files and missing dependencies instead. It does not create a Vercel
-project or deploy the agent.
+development server. When it finds a supported coding-agent REPL, the handoff
+menu can open that REPL instead or exit. Targeting an existing project directory
+(`eve init .`) adds the agent files and missing dependencies instead. It does
+not create a Vercel project or deploy the agent.
 
 CLI commands:
 
