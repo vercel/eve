@@ -19,14 +19,7 @@ test("installs the discovered iMessage registry item through the headless setup 
 
 test("completes the synthetic provider setup decision tree", () => {
   expect(events.map((event) => event.type)).toEqual(
-    expect.arrayContaining([
-      "authorization.required",
-      "authorization.completed",
-      "phone.requested",
-      "project.created",
-      "phone.registered",
-      "setup.completed",
-    ]),
+    expect.arrayContaining(["project.created", "phone.registered", "setup.completed"]),
   );
   const registration = events.find((event) => event.type === "phone.registered");
   expect(registration?.data?.phoneNumber).toBe("+15551234567");
@@ -35,7 +28,7 @@ test("completes the synthetic provider setup decision tree", () => {
 test("creates an iMessage channel and leaves the project valid", () => {
   const channelPath = "agent/channels/imessage.ts";
   expect(existsSync(channelPath)).toBe(true);
-  expect(readFileSync(channelPath, "utf8")).toContain('type: "mock-imessage"');
+  expect(readFileSync(channelPath, "utf8")).toContain("photonIMessageChannel");
 });
 
 function readJsonLines(path: string): Array<{

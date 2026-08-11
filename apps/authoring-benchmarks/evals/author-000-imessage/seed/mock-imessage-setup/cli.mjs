@@ -38,8 +38,6 @@ if (!values["non-interactive"]) {
     error: { message: "This deterministic setup requires --non-interactive." },
   });
 } else if (answers.phoneNumber === undefined) {
-  record("authorization.required", { url: "https://mock-imessage.invalid/authorize" });
-  record("authorization.completed");
   record("phone.requested");
   finish({
     kind: "blocked",

@@ -4,6 +4,7 @@ import type { Sandbox } from "@vercel/agent-eval";
 
 const TARBALL_PATH = "__authoring_eval__/eve.tgz";
 const REGISTRY_ROOT = "__authoring_eval__/registry";
+const SEED_ROOT = "__authoring_eval__/seed";
 
 export interface SetupAuthoringEvalOptions {
   readonly agentsMd?: boolean;
@@ -20,15 +21,28 @@ export async function setupAuthoringEval(
     throw new Error("EVE_AUTHORING_TARBALL is not set. Run through pnpm benchmark:authoring.");
   }
 
+  await run(sandbox, "bash", [
+    "-lc",
+    `mkdir -p ${SEED_ROOT} && cp -a seed/. ${SEED_ROOT}/ && rm -rf seed package.json package-lock.json`,
+  ]);
   await sandbox.writeFiles({
     // agent-eval accepts Buffer at runtime, but its public type currently names only string.
     // @ts-expect-error binary sandbox uploads are supported
     [TARBALL_PATH]: readFileSync(tarball),
   });
-  await run(sandbox, "npm", ["install", "--package-lock=false"]);
+  const tarballPath = `${sandbox.getWorkingDirectory()}/${TARBALL_PATH}`;
+  await run(sandbox, "bash", [
+    "-lc",
+    `mkdir -p ${SEED_ROOT}/eve-cli/node_modules/eve && tar -xzf ${shellQuote(tarballPath)} --strip-components=1 -C ${SEED_ROOT}/eve-cli/node_modules/eve`,
+  ]);
+  await run(sandbox, "bash", [
+    "-lc",
+    `AI_AGENT=benchmark npm_config_user_agent=npm/11 EVE_INIT_PACKAGE_SPEC=${shellQuote(tarballPath)} node ${SEED_ROOT}/eve-cli/node_modules/eve/bin/eve.js init .`,
+  ]);
+  await run(sandbox, "npm", ["pkg", "set", `dependencies.eve=file:${TARBALL_PATH}`]);
 
   if (options.syntheticImessage === true) await installSyntheticImessageWorld(sandbox);
-  if (options.agentsMd === true) await writeAgentsMd(sandbox);
+  if (options.agentsMd !== true) await removeScaffoldedAgentGuidance(sandbox);
 }
 
 async function installSyntheticImessageWorld(sandbox: Sandbox): Promise<void> {
@@ -42,9 +56,13 @@ async function installSyntheticImessageWorld(sandbox: Sandbox): Promise<void> {
       {
         path: "registry/channels/mock-imessage.ts",
         content: [
-          'import { defineChannel } from "eve/channels";',
+          'import { photonIMessageChannel } from "eve/channels/photon";',
           "",
-          'export default defineChannel({ type: "mock-imessage" });',
+          "async function mockCredentials() {",
+          '  return { projectId: "mock-imessage-project", projectSecret: "mock-imessage-secret" };',
+          "}",
+          "",
+          "export default photonIMessageChannel({ credentials: mockCredentials });",
           "",
         ].join("\n"),
         type: "registry:file",
@@ -83,26 +101,24 @@ async function installSyntheticImessageWorld(sandbox: Sandbox): Promise<void> {
     [`${REGISTRY_ROOT}/registry.json`]: JSON.stringify(catalog),
     [`${REGISTRY_ROOT}/channel/mock-imessage.json`]: JSON.stringify(channel),
   });
-  await run(sandbox, "npm", ["install", "--save", "--package-lock=false", "./mock-imessage-setup"]);
+  await run(sandbox, "npm", [
+    "install",
+    "--save",
+    "--package-lock=false",
+    `./${SEED_ROOT}/mock-imessage-setup`,
+  ]);
   await run(sandbox, "bash", [
     "-lc",
     `nohup python3 -m http.server 4173 --directory ${REGISTRY_ROOT} >__authoring_eval__/registry.log 2>&1 </dev/null &`,
   ]);
 }
 
-async function writeAgentsMd(sandbox: Sandbox): Promise<void> {
-  await sandbox.writeFiles({
-    "AGENTS.md": [
-      "# eve: read the installed docs before coding",
-      "",
-      "Use the version-matched documentation in `node_modules/eve/docs/` and the eve registry CLI.",
-      "Prefer non-interactive commands intended for coding agents. Ask only for facts owned by the user.",
-      "Do not invent credentials or claim an external action completed before its command confirms it.",
-      "Verify the project before giving a concise deployment handoff.",
-      "",
-    ].join("\n"),
-    "CLAUDE.md": "@AGENTS.md\n",
-  });
+async function removeScaffoldedAgentGuidance(sandbox: Sandbox): Promise<void> {
+  await run(sandbox, "rm", ["-f", "AGENTS.md", "CLAUDE.md"]);
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 async function run(sandbox: Sandbox, command: string, args: string[]): Promise<void> {

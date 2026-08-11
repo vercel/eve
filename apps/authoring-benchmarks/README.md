@@ -15,16 +15,20 @@ Each directory under `evals/` is a standard agent-eval fixture:
 
 - `PROMPT.md` describes a realistic outcome without naming its implementation.
 - `EVAL.ts` contains hidden deterministic assertions.
-- the remaining files are the starter project visible to the coding agent.
+- `seed/` contains benchmark support moved out of sight before the coding agent runs.
+
+The setup hook creates the subject project with the selected package's real `eve init`, so each
+case evaluates the scaffolded source, package policy, and coding-agent instructions from that
+exact eve revision rather than a manually maintained approximation.
 
 Experiment files under `experiments/` define treatments independently from cases. The
-initial pair compares an unprompted baseline with an `AGENTS.md` treatment that directs the
-agent to eve's version-matched installed documentation.
+initial pair compares a baseline that removes the scaffolded coding-agent guidance with the
+unaltered `eve init` project, including its version-matched `AGENTS.md` and `CLAUDE.md`.
 
 The initial iMessage case keeps real eve registry discovery, `eve add`, the registry setup
 protocol, package installation, and project validation. Only the external provider is
-synthetic. A fixture-owned setup package implements a deterministic authorization → user
-input → project creation → phone registration decision tree and records events under
+synthetic. A fixture-owned setup package implements a deterministic user input → project
+creation → phone registration decision tree and records events under
 `__authoring_eval__/world-events.jsonl`. This tests an agent's setup decisions without
 coupling the authoring suite to Photon or live external services.
 
