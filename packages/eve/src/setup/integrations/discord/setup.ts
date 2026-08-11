@@ -66,11 +66,6 @@ export async function prepareDiscordSetup(
   context: SetupPrepareContext,
   deps: DiscordSetupDeps = defaultDeps,
 ): Promise<DiscordSetupPlan> {
-  if (context.environment.vercel.kind === "unavailable") {
-    throw new Error(
-      "Discord setup requires an authenticated Vercel CLI. Run `vercel login`, then retry.",
-    );
-  }
   context.presenter.log.info(
     "Create a Discord application or open an existing one, then go to Bot → Reset Token and copy the new bot token.\nCreate: https://discord.com/developers/applications?new_application=true\nExisting applications: https://discord.com/developers/applications",
   );

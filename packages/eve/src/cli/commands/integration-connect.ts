@@ -5,7 +5,10 @@ import {
   setupConnectionConnector,
   type SetupConnectionConnectorOptions,
 } from "#setup/connection-connector.js";
-import { runLinkFlow, type LinkFlowDeps } from "#setup/flows/link.js";
+import {
+  ensureVercelProject,
+  type EnsureVercelProjectDeps,
+} from "#setup/flows/ensure-vercel-project.js";
 import { createHeadlessPrompter } from "#setup/headless.js";
 import { SetupPrerequisiteRequired } from "#setup/integrations/shared/prerequisite.js";
 import { resolveIntegrationVercelProject } from "#setup/integrations/shared/vercel-project.js";
@@ -14,6 +17,7 @@ import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { createRegistrySetupClient } from "#setup/registry-setup-client.js";
 import { isEveProject } from "#setup/scaffold/index.js";
 import { updateConnectionConnectorUid } from "#setup/scaffold/update/update-connection-connector.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import type { RegistryCommandLogger } from "./registry.js";
@@ -26,17 +30,17 @@ export interface IntegrationConnectOptions {
 
 export interface IntegrationConnectDependencies {
   createPrompter?: () => Prompter;
+  ensureVercelProject: typeof ensureVercelProject;
+  ensureVercelProjectDeps?: Partial<EnsureVercelProjectDeps>;
   readProjectLink: typeof readProjectLink;
-  runLinkFlow: typeof runLinkFlow;
-  linkFlowDeps?: Partial<LinkFlowDeps>;
   setupConnectionConnector: typeof setupConnectionConnector;
   cleanupCreatedConnectionConnector: typeof cleanupCreatedConnectionConnector;
   updateConnectionConnectorUid: typeof updateConnectionConnectorUid;
 }
 
 const defaultDependencies: IntegrationConnectDependencies = {
+  ensureVercelProject,
   readProjectLink,
-  runLinkFlow,
   setupConnectionConnector,
   cleanupCreatedConnectionConnector,
   updateConnectionConnectorUid,
@@ -69,18 +73,19 @@ export async function runIntegrationConnect(input: {
         deps: { readProjectLink: dependencies.readProjectLink },
       });
     } else {
-      const link = await dependencies.runLinkFlow({
-        appRoot: input.appRoot,
-        prompter,
-        signal,
-        projectSelection: "create-or-link",
-        teamSelectMessage: () =>
-          `You need to link to a project to use ${input.slug} through Vercel Connect.\n\nSelect your team`,
-        deps: dependencies.linkFlowDeps,
-      });
-      if (link.kind === "cancelled") return;
-      project = await dependencies.readProjectLink(input.appRoot);
-      if (project === undefined) throw new Error("Project link was not found after linking.");
+      try {
+        project = await dependencies.ensureVercelProject({
+          appRoot: input.appRoot,
+          prompter,
+          signal,
+          teamSelectMessage: () =>
+            `You need to link to a project to use ${input.slug} through Vercel Connect.\n\nSelect your team`,
+          deps: dependencies.ensureVercelProjectDeps,
+        });
+      } catch (error) {
+        if (error instanceof WizardCancelledError) return;
+        throw error;
+      }
     }
   }
 

@@ -98,7 +98,7 @@ eve registry view @acme/my-extension
 eve add @acme/my-extension
 ```
 
-`eve add` asks before running setup declared by an official item and runs multiple declared flows in declaration order. Product-level packages can offer independently installable components: `eve add linear` lets you select the Linear Channel, Linear MCP, or both, with both selected by default. `--yes` installs a package's default components and accepts detected or recommended setup answers.
+`eve add` asks before running setup declared by an official item and runs multiple declared flows in declaration order. Product-level packages can offer independently installable components: `eve add linear` lets you select the Linear Channel, Linear MCP, or both, with both selected by default. Interactive Vercel-backed setup signs in and creates or links a project when needed instead of stopping with a prerequisite. `--yes` installs a package's default components and accepts detected or recommended setup answers.
 
 Coding agents should use `eve add <item> --non-interactive`, adding `--yes` to accept recommended setup values and reduce setup round trips. Explicit `--answer` values take precedence. This mode never opens an eve prompt. When a component or setup decision is missing, the NDJSON terminal event includes a stable question key and a safe continuation command; add the requested answer to that command. Supply answers with repeatable `--answer 'key=<JSON value>'` options. Follow a reported `eve link` prerequisite before retrying Vercel Connect setup. Do not put secrets in command-line answers; use the integration's documented environment variable or secret store.
 

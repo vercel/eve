@@ -23,11 +23,12 @@ function deps(): DiscordSetupDeps {
 function contexts(
   answers: Record<string, unknown>,
   resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" })),
+  auth: Parameters<typeof integrationSetupEnvironment>[0] = "authenticated",
 ) {
   return createSetupContexts({
     appRoot: "/project",
     asker: withAnswers(answers)(headlessAsker()),
-    environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
+    environment: integrationSetupEnvironment(auth, { kind: "unresolved" }),
     prompter: createFakePrompter().prompter,
     resolveVercelProject,
   });
@@ -63,5 +64,14 @@ describe("Discord setup", () => {
       prepareDiscordSetup(contexts(ANSWERS, resolveVercelProject).prepare, effects),
     ).rejects.toThrow("eve link");
     expect(effects.provisionConnector).not.toHaveBeenCalled();
+  });
+  it("routes logged-out setup through the project resolver", async () => {
+    const effects = deps();
+    const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
+
+    await expect(
+      prepareDiscordSetup(contexts(ANSWERS, resolveVercelProject, "logged-out").prepare, effects),
+    ).resolves.toMatchObject({ project: { orgId: "team", projectId: "project" } });
+    expect(resolveVercelProject).toHaveBeenCalledWith("Discord");
   });
 });

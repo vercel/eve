@@ -111,4 +111,23 @@ describe("Photon setup", () => {
     ).rejects.toThrow("eve link");
     expect(effects.provisionProject).not.toHaveBeenCalled();
   });
+  it("routes unavailable Connect setup through the project resolver", async () => {
+    const effects = deps();
+    const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
+
+    await expect(
+      preparePhotonSetup(
+        contexts(
+          { ...ANSWERS, "photon-credentials": "vercel" },
+          "cli-missing",
+          resolveVercelProject,
+        ).prepare,
+        effects,
+      ),
+    ).resolves.toMatchObject({
+      credentials: "vercel-connect",
+      vercelProject: { orgId: "team", projectId: "project" },
+    });
+    expect(resolveVercelProject).toHaveBeenCalledWith("Photon");
+  });
 });

@@ -103,11 +103,6 @@ export async function preparePhotonSetup(
       required: true,
     }),
   );
-  if (credentials === "vercel-connect" && context.environment.vercel.kind === "unavailable") {
-    throw new Error(
-      "Vercel Connect requires an authenticated Vercel CLI. Run `vercel login`, then retry Photon setup.",
-    );
-  }
   const defaultName = `eve · ${agentName || "agent"}`;
   const project = await context.asker.askEditable({
     key: "photon-project-source",

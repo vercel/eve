@@ -62,11 +62,6 @@ export async function prepareLinearSetup(
   context: SetupPrepareContext,
   deps: LinearSetupDeps = defaultDeps,
 ): Promise<LinearSetupPlan> {
-  if (context.environment.vercel.kind === "unavailable") {
-    throw new Error(
-      "Linear setup requires an authenticated Vercel CLI. Run `vercel login`, then retry.",
-    );
-  }
   const project = await context.resolveVercelProject("Linear");
   const defaultSlug = linearSafeConnectorSlug(await deps.deriveConnectorSlug(context.appRoot));
   const slug = linearSafeConnectorSlug(

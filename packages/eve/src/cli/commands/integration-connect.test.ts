@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import { runIntegrationConnect, runIntegrationConnectCommand } from "./integration-connect.js";
 
@@ -17,8 +18,8 @@ function dependencies(overrides: Record<string, unknown> = {}) {
   const fake = createFakePrompter();
   return {
     createPrompter: () => fake.prompter,
+    ensureVercelProject: vi.fn(async () => PROJECT),
     readProjectLink: vi.fn(async () => PROJECT),
-    runLinkFlow: vi.fn(async () => ({ kind: "done" as const })),
     setupConnectionConnector: vi.fn(async () => ({
       kind: "existing" as const,
       connectorUid: "linear/real",
@@ -58,8 +59,7 @@ describe("runIntegrationConnect", () => {
   });
 
   it("links an unlinked project before connector setup", async () => {
-    const readProjectLink = vi.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce(PROJECT);
-    const deps = dependencies({ readProjectLink });
+    const deps = dependencies({ readProjectLink: vi.fn(async () => undefined) });
 
     await runIntegrationConnect({
       appRoot: "/project",
@@ -68,12 +68,12 @@ describe("runIntegrationConnect", () => {
       dependencies: deps,
     });
 
-    expect(deps.runLinkFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ appRoot: "/project", projectSelection: "create-or-link" }),
+    expect(deps.ensureVercelProject).toHaveBeenCalledWith(
+      expect.objectContaining({ appRoot: "/project" }),
     );
   });
 
-  it("requires a linked project without starting the link flow non-interactively", async () => {
+  it("requires a linked project without starting interactive resolution", async () => {
     const deps = dependencies({ readProjectLink: vi.fn(async () => undefined) });
 
     await expect(
@@ -87,7 +87,26 @@ describe("runIntegrationConnect", () => {
     ).rejects.toMatchObject({
       prerequisite: expect.objectContaining({ code: "vercel-project-link", command: "eve link" }),
     });
-    expect(deps.runLinkFlow).not.toHaveBeenCalled();
+    expect(deps.ensureVercelProject).not.toHaveBeenCalled();
+    expect(deps.setupConnectionConnector).not.toHaveBeenCalled();
+  });
+
+  it("keeps a cancelled project link as a clean setup cancellation", async () => {
+    const deps = dependencies({
+      readProjectLink: vi.fn(async () => undefined),
+      ensureVercelProject: vi.fn(async () => {
+        throw new WizardCancelledError();
+      }),
+    });
+
+    await expect(
+      runIntegrationConnect({
+        appRoot: "/project",
+        slug: "linear",
+        service: "mcp.linear.app",
+        dependencies: deps,
+      }),
+    ).resolves.toBeUndefined();
     expect(deps.setupConnectionConnector).not.toHaveBeenCalled();
   });
 

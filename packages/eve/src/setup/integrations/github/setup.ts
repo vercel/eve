@@ -103,11 +103,6 @@ export async function prepareGitHubSetup(
   context: SetupPrepareContext,
   deps: GitHubSetupDeps = defaultDeps,
 ): Promise<GitHubSetupPlan> {
-  if (context.environment.vercel.kind === "unavailable") {
-    throw new Error(
-      "GitHub setup requires an authenticated Vercel CLI. Run `vercel login`, then retry.",
-    );
-  }
   const events = await context.asker.askMany(githubEventsQuestion);
   const project = await context.resolveVercelProject("GitHub");
   return { events, project, slug: await deps.deriveConnectorSlug(context.appRoot) };

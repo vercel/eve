@@ -7,8 +7,9 @@ Use `photonIMessageChannel` to receive and reply to iMessages through a Photon p
 
 Run `eve add channel/photon-imessage` to create or use a Photon project and register
 your phone number. It then asks whether to configure Vercel Connect or portable
-credentials. With Vercel Connect, eve creates the connector and configures
-Photon’s webhook through Connect. The channel resolves credentials lazily when
+credentials. With Vercel Connect, eve signs you in and creates or links a Vercel
+project when needed, then creates the connector and configures Photon’s webhook
+through Connect. The channel resolves credentials lazily when
 the adapter first initializes:
 
 ```ts title="agent/channels/photon.ts"
