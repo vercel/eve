@@ -358,6 +358,9 @@ async function waitForRuntimeActionResults(input: {
         payloads: value.delivery.payloads,
         sessionState: input.cursor.sessionState,
       });
+      if (routed.sessionState !== undefined) {
+        await input.cursor.adopt({ sessionState: routed.sessionState });
+      }
       if (routed.kind === "cancel-turn") {
         return routed.kind;
       }

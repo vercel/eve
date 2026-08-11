@@ -148,4 +148,8 @@ export {
   isInputResponse,
 } from "#runtime/input/types.js";
 
-export { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";
+export {
+  resolveTextToResponse,
+  resolveTextToResponses,
+  type ResolveTextOptions,
+} from "#channel/resolve-text.js";

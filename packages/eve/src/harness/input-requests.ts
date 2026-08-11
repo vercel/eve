@@ -256,7 +256,9 @@ function resolveTextMessageInput(
     return stepInput;
   }
 
-  const responses = resolveTextToResponses(stepInput.message, pendingBatch.requests);
+  const responses = resolveTextToResponses(stepInput.message, pendingBatch.requests, {
+    preserveUnmatchedQuestionText: false,
+  });
   if (responses.length === 0) {
     return stepInput;
   }

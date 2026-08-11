@@ -233,8 +233,8 @@ export interface EveMessageToolMetadata {
  * UI-facing projection of a pending HITL input request on a tool part. `prompt`
  * is the question, `display` selects the control (`"confirmation"`, `"select"`,
  * or `"text"`), `options` lists selectable choices (each with a `label` and
- * optional `style`), and `allowFreeform` permits a typed response alongside the
- * options. `kind` identifies the framework-owned request source. `requestId`
+ * optional `style`), and `allowFreeform` controls whether the UI offers typed
+ * input alongside the options. `kind` identifies the framework-owned request source. `requestId`
  * is the stable identifier the client returns in the responding
  * {@link InputResponse}.
  */

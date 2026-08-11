@@ -89,7 +89,9 @@ The built-in `ask_question` tool lets the model pause and ask the user, rather t
 
 - `prompt`: the question to put to the user.
 - `options`: an optional list of choices to offer. Channels render these as buttons or a select menu.
-- `allowFreeform`: whether the user may answer with free text instead of picking an option.
+- `allowFreeform`: whether the channel should offer free-text input alongside the options.
+
+`allowFreeform` controls the channel UI. If a plain-text reply does not match an option, eve still delivers it as text so the model can handle it or ask again instead of leaving the session parked.
 
 `ask_question` is part of the [default harness](/docs/concepts/default-harness), so it is available without you defining anything. It produces the same `input.requested` pause as an approval, and resumes the same way.
 

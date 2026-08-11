@@ -4,6 +4,7 @@ import {
   clearProxyInputRequestsForChild,
   getProxyInputRequests,
   hasProxyInputRequests,
+  markProxyInputRequestsAnswered,
   upsertProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -115,6 +116,28 @@ describe("clearProxyInputRequestsForChild", () => {
     const session = createSession();
     const next = clearProxyInputRequestsForChild(session, "missing");
     expect(next).toBe(session);
+  });
+});
+
+describe("markProxyInputRequestsAnswered", () => {
+  it("marks only routed request ids while retaining lifecycle entries", () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        ["req-a", { childContinuationToken: "child-a", kind: "question" }],
+        ["req-b", { childContinuationToken: "child-a", kind: "question" }],
+      ],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+
+    const next = markProxyInputRequestsAnswered(session, new Set(["req-a"]));
+
+    expect(getProxyInputRequests(next.state)).toEqual(
+      new Map([
+        ["req-a", { answered: true, childContinuationToken: "child-a", kind: "question" }],
+        ["req-b", { childContinuationToken: "child-a", kind: "question" }],
+      ]),
+    );
   });
 });
 

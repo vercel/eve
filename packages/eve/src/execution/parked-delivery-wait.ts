@@ -25,7 +25,7 @@ export interface AuthorizationCallbackInstruction {
 }
 
 /** What the parked driver should do with the next session activity. */
-export type NextTurnInstruction =
+export type NextTurnInstruction = (
   | { readonly kind: "clear" }
   | { readonly kind: "compact" }
   | { readonly kind: "expired" }
@@ -37,7 +37,8 @@ export type NextTurnInstruction =
       readonly kind: "turn";
       readonly deliver: DeliverHookPayload;
       readonly remainder: DeliverPayload;
-    };
+    }
+) & { readonly sessionState?: DurableSessionState };
 
 /**
  * Awaits the next delivery that requires driver action while the session
@@ -81,6 +82,9 @@ async function awaitNextTurnDelivery(input: {
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
 }): Promise<NextTurnInstruction> {
+  let sessionState = input.sessionState;
+  let sessionStateChanged = false;
+
   while (true) {
     const nextAction = await waitForNextSessionAction({
       bufferedDeliveries: input.bufferedDeliveries,
@@ -94,23 +98,29 @@ async function awaitNextTurnDelivery(input: {
     }
 
     if (nextAction.kind !== "delivery") {
-      return { kind: nextAction.kind };
+      return sessionStateChanged
+        ? { kind: nextAction.kind, sessionState }
+        : { kind: nextAction.kind };
     }
 
     const deliver = nextAction.delivery;
     if (deliver === null) {
-      return { kind: "closed" };
+      return sessionStateChanged ? { kind: "closed", sessionState } : { kind: "closed" };
     }
 
     const routed = await routeDeliverToChildren({
       auth: deliver.auth,
       parentWritable: input.driverWritable,
       payloads: deliver.payloads,
-      sessionState: input.sessionState,
+      sessionState,
     });
+    if (routed.sessionState !== undefined && routed.sessionState !== sessionState) {
+      sessionState = routed.sessionState;
+      sessionStateChanged = true;
+    }
 
     if (routed.kind === "cancel-turn") {
-      return { kind: "cancel-turn" };
+      return sessionStateChanged ? { kind: "cancel-turn", sessionState } : { kind: "cancel-turn" };
     }
 
     if (routed.remainder === undefined) {
@@ -118,7 +128,9 @@ async function awaitNextTurnDelivery(input: {
       continue;
     }
 
-    return { deliver, kind: "turn", remainder: routed.remainder };
+    return sessionStateChanged
+      ? { deliver, kind: "turn", remainder: routed.remainder, sessionState }
+      : { deliver, kind: "turn", remainder: routed.remainder };
   }
 }
 

@@ -484,6 +484,10 @@ async function runDriverLoop(input: {
         expectedAttemptIds: action.authorizationAttemptIds ?? [],
         sessionState: action.sessionState,
       });
+      if (next.sessionState !== undefined) {
+        action = { ...action, sessionState: next.sessionState };
+        input.crashCleanupState.lastSessionState = next.sessionState;
+      }
 
       if (next.kind === "authorization-resume") {
         action = await runTurn({

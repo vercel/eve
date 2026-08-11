@@ -66,6 +66,7 @@ import {
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import {
   createDurableSessionState,
+  createDurableSessionStateFromDurableSession,
   type DurableSessionState,
   readDurableSession,
 } from "#execution/durable-session-store.js";
@@ -83,6 +84,7 @@ import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/s
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
+import { markProxyInputRequestsAnswered } from "#harness/proxy-input-requests.js";
 import {
   createWorkflowRuntime,
   startWorkflowPreferLatest,
@@ -608,7 +610,7 @@ export function resolveEffectiveOutputSchema(input: {
   return session;
 }
 
-export type RoutedDeliverResult =
+export type RoutedDeliverResult = (
   | {
       readonly kind: "cancel-turn";
     }
@@ -616,12 +618,15 @@ export type RoutedDeliverResult =
       readonly kind: "continue";
       /** `undefined` when the entire payload was routed to descendants. */
       readonly remainder: DeliverPayload | undefined;
-    };
+    }
+) & { readonly sessionState?: DurableSessionState };
 
 /**
  * Splits an inbound deliver payload into parent-local and
  * proxied-child buckets and forwards the child buckets via
- * `resumeHook`. Read-only: never appends a snapshot.
+ * `resumeHook`. Routed proxy entries are marked answered in projected state;
+ * they remain until child settlement because cancellation uses them to detect
+ * an already-emitted descendant waiting boundary.
  */
 export async function routeProxiedDeliverStep(input: {
   readonly auth?: SessionAuthContext | null;
@@ -646,7 +651,25 @@ export async function routeProxiedDeliverStep(input: {
     );
   }
 
-  return routed.parentAction ?? { kind: "continue", remainder: routed.forSelf };
+  const routedRequestIds = new Set(
+    routed.forChildren.flatMap((entry) =>
+      entry.payload.inputResponses.map((response) => response.requestId),
+    ),
+  );
+  const result: RoutedDeliverResult =
+    routed.parentAction === undefined
+      ? { kind: "continue", remainder: routed.forSelf }
+      : routed.parentAction;
+  if (routedRequestIds.size === 0) {
+    return result;
+  }
+
+  return {
+    ...result,
+    sessionState: createDurableSessionStateFromDurableSession({
+      session: markProxyInputRequestsAnswered(durableSession, routedRequestIds),
+    }),
+  };
 }
 
 /** Starts a per-turn child workflow for the current driver session. */

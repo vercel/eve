@@ -1,20 +1,28 @@
 import type { InputOption, InputRequest, InputResponse } from "#runtime/input/types.js";
 
+export interface ResolveTextOptions {
+  /** Preserve unmatched text as a question response instead of leaving it unresolved. */
+  readonly preserveUnmatchedQuestionText?: boolean;
+}
+
 /**
  * Maps freeform text to an {@link InputResponse} for a single request.
  *
- * Emitters import this utility to resolve text-based user input against
- * pending request options. The harness and runtime do not call it.
+ * Emitters and the harness use this utility to resolve text-based user input
+ * against pending request options. Emitters preserve unmatched question text
+ * by default; the harness disables that fallback so unrelated synthesized
+ * messages remain user context.
  *
  * Resolution order:
  * 1. Exact option ID (case-insensitive)
  * 2. Exact option label (case-insensitive)
  * 3. 1-based numeric index into the options array
- * 4. Freeform text if {@link InputRequest.allowFreeform} is not `false`
+ * 4. Freeform text for questions, or requests that otherwise accept it
  */
 export function resolveTextToResponse(
   text: string,
   request: InputRequest,
+  options: ResolveTextOptions = {},
 ): InputResponse | undefined {
   const trimmed = text.trim();
   if (trimmed.length === 0) {
@@ -31,7 +39,10 @@ export function resolveTextToResponse(
   }
 
   const acceptsFreeform =
-    request.allowFreeform === true || request.options === undefined || request.options.length === 0;
+    (request.kind === "question" && options.preserveUnmatchedQuestionText !== false) ||
+    request.allowFreeform === true ||
+    request.options === undefined ||
+    request.options.length === 0;
 
   if (acceptsFreeform && trimmed.length > 0) {
     return { requestId: request.requestId, text: trimmed };
@@ -47,11 +58,12 @@ export function resolveTextToResponse(
 export function resolveTextToResponses(
   text: string,
   requests: readonly InputRequest[],
+  options: ResolveTextOptions = {},
 ): readonly InputResponse[] {
   const responses: InputResponse[] = [];
 
   for (const request of requests) {
-    const response = resolveTextToResponse(text, request);
+    const response = resolveTextToResponse(text, request, options);
     if (response !== undefined) {
       responses.push(response);
     }

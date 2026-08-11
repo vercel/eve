@@ -20,7 +20,7 @@ import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { setPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -224,20 +224,31 @@ describe("routeProxiedDeliverStep", () => {
     });
     installSessionStoreMocks([session]);
 
-    await expect(
-      routeProxiedDeliverStep({
-        auth,
-        parentWritable: createTestWritable(),
-        payload: {
-          inputResponses: [{ optionId: "approve", requestId: "request-1" }],
-        },
-        sessionState: createStubSessionState({
-          continuationToken: "parent-token",
-          hasProxyInputRequests: true,
-          sessionId: "parent-session",
-        }),
+    const routed = await routeProxiedDeliverStep({
+      auth,
+      parentWritable: createTestWritable(),
+      payload: {
+        inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+      },
+      sessionState: createStubSessionState({
+        continuationToken: "parent-token",
+        hasProxyInputRequests: true,
+        sessionId: "parent-session",
       }),
-    ).resolves.toEqual({ kind: "continue", remainder: undefined });
+    });
+    expect(routed).toEqual({
+      kind: "continue",
+      remainder: undefined,
+      sessionState: expect.objectContaining({ hasProxyInputRequests: true }),
+    });
+    expect(getProxyInputRequests(routed.sessionState?.snapshot?.session.state)).toEqual(
+      new Map([
+        [
+          "request-1",
+          { answered: true, childContinuationToken: "child-token", kind: "tool-approval" },
+        ],
+      ]),
+    );
 
     expect(resumeHookMock).toHaveBeenCalledWith("child-token", {
       auth,

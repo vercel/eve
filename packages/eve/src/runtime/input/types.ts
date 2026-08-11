@@ -48,7 +48,7 @@ export const inputRequestSchema = z
     allowFreeform: z
       .boolean()
       .describe(
-        "Whether the user may answer with freeform text instead of selecting one of the provided options.",
+        "Whether channels should offer freeform input alongside the provided options. Plain-text channels may still preserve an unmatched reply as text.",
       )
       .optional(),
     display: z

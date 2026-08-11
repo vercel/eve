@@ -17,6 +17,7 @@ const APPROVAL_REQUEST: InputRequest = {
 
 const SELECT_REQUEST: InputRequest = {
   action: { callId: "call-2", input: {}, kind: "tool-call", toolName: "ask_question" },
+  allowFreeform: false,
   display: "select",
   kind: "question",
   options: [
@@ -92,15 +93,35 @@ describe("resolveTextToResponse", () => {
     });
   });
 
-  it("does not match out-of-range numeric index", () => {
-    expect(resolveTextToResponse("0", SELECT_REQUEST)).toBeUndefined();
-    expect(resolveTextToResponse("4", SELECT_REQUEST)).toBeUndefined();
+  it("preserves out-of-range numeric question input as text", () => {
+    expect(resolveTextToResponse("0", SELECT_REQUEST)).toEqual({
+      requestId: "req-2",
+      text: "0",
+    });
+    expect(resolveTextToResponse("4", SELECT_REQUEST)).toEqual({
+      requestId: "req-2",
+      text: "4",
+    });
   });
 
-  it("returns undefined when text does not match any option and freeform is disabled", () => {
+  it("returns undefined when approval text does not match any option", () => {
     expect(resolveTextToResponse("yes", APPROVAL_REQUEST)).toBeUndefined();
     expect(resolveTextToResponse("sure", APPROVAL_REQUEST)).toBeUndefined();
-    expect(resolveTextToResponse("maybe", SELECT_REQUEST)).toBeUndefined();
+  });
+
+  it("preserves unmatched question input as text", () => {
+    expect(resolveTextToResponse("analyze both", SELECT_REQUEST)).toEqual({
+      requestId: "req-2",
+      text: "analyze both",
+    });
+  });
+
+  it("leaves unmatched question input unresolved when preservation is disabled", () => {
+    expect(
+      resolveTextToResponse("analyze both", SELECT_REQUEST, {
+        preserveUnmatchedQuestionText: false,
+      }),
+    ).toBeUndefined();
   });
 
   it("falls back to freeform text when allowFreeform is true", () => {
@@ -151,9 +172,9 @@ describe("resolveTextToResponses", () => {
     ]);
   });
 
-  it("returns empty array when nothing matches", () => {
+  it("returns responses only for requests that accept the text", () => {
     const responses = resolveTextToResponses("gibberish", [APPROVAL_REQUEST, SELECT_REQUEST]);
-    expect(responses).toEqual([]);
+    expect(responses).toEqual([{ requestId: "req-2", text: "gibberish" }]);
   });
 
   it("resolves against empty requests", () => {

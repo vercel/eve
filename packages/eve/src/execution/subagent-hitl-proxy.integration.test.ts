@@ -150,6 +150,26 @@ function buildApprovalRequest(requestId: string): InputRequest {
   };
 }
 
+function buildOptionsQuestionRequest(requestId: string): InputRequest {
+  return {
+    action: {
+      callId: requestId,
+      input: {},
+      kind: "tool-call",
+      toolName: "ask_question",
+    },
+    allowFreeform: false,
+    display: "select",
+    kind: "question",
+    options: [
+      { id: "first", label: "First" },
+      { id: "second", label: "Second" },
+    ],
+    prompt: "Which should I analyze?",
+    requestId,
+  };
+}
+
 function buildEmptySession(continuationToken: string, sessionId: string): HarnessSession {
   return {
     agent: {
@@ -244,6 +264,7 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
         {
           childContinuationToken: "subagent:parent:call-1",
           kind: "tool-approval",
+          request: approvalRequest,
         },
       ],
     ]);
@@ -309,6 +330,64 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
         childContinuationToken: "subagent:parent:call-1",
         payload: {
           inputResponses: [{ optionId: "approve", requestId: "req-approve-1" }],
+        },
+      },
+    ]);
+  });
+
+  it("routes unmatched text to a child waiting on an options-only question", async () => {
+    const request = buildOptionsQuestionRequest("req-question-1");
+    const slackishAdapter: ChannelAdapter<SlackishCtx> = {
+      ...buildSlackishAdapter(),
+      state: { pendingRequests: [request] },
+    };
+    const bundle = buildMockBundle([slackishAdapter]);
+    const ctx = new ContextContainer();
+    ctx.set(BundleKey, bundle);
+    ctx.set(ChannelKey, slackishAdapter as ChannelAdapter);
+
+    const adapterCtx = buildAdapterContext<SlackishCtx>(slackishAdapter, ctx);
+    const deliverResult = await slackishAdapter.deliver?.(
+      { message: "Analyze both, one by one." },
+      adapterCtx,
+    );
+
+    expect(deliverResult).toEqual({
+      inputResponses: [
+        {
+          requestId: "req-question-1",
+          text: "Analyze both, one by one.",
+        },
+      ],
+    });
+    expect(adapterCtx.state.pendingRequests).toEqual([]);
+
+    const parkedSession = upsertProxyInputRequests({
+      entries: [
+        [
+          "req-question-1",
+          { childContinuationToken: "subagent:parent:call-question-1", kind: "question" },
+        ],
+      ],
+      forChildContinuationToken: "subagent:parent:call-question-1",
+      session: buildEmptySession("parent-token", "sess-parent"),
+    });
+    const routed = routeDeliverPayload({
+      payload: deliverResult as DeliverPayload,
+      state: parkedSession.state,
+    });
+
+    expect(routed.forSelf).toBeUndefined();
+    expect(routed.forChildren).toEqual([
+      {
+        childContinuationToken: "subagent:parent:call-question-1",
+        payload: {
+          inputResponses: [
+            {
+              requestId: "req-question-1",
+              text: "Analyze both, one by one.",
+            },
+          ],
         },
       },
     ]);

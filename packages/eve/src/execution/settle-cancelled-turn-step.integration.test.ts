@@ -5,6 +5,10 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
+import {
+  markProxyInputRequestsAnswered,
+  upsertProxyInputRequests,
+} from "#harness/proxy-input-requests.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import {
   AGENT_HANDLES_STATE_KEY,
@@ -121,6 +125,41 @@ describe("settleCancelledTurnStep handle store", () => {
           PARKED_HANDLE,
         ],
       });
+    });
+  });
+
+  it("does not duplicate a waiting boundary after forwarding a descendant answer", async () => {
+    const runtime = createTestRuntime({ agent: { name: "settle-cancel-handles" } });
+    const session = markProxyInputRequestsAnswered(
+      upsertProxyInputRequests({
+        entries: [
+          ["request-1", { childContinuationToken: "subagent:child-running", kind: "question" }],
+        ],
+        forChildContinuationToken: "subagent:child-running",
+        session: setHarnessEmissionState(createCancelledTurnSession([RUNNING_HANDLE]), {
+          sequence: 3,
+          sessionStarted: true,
+          stepIndex: 1,
+          turnId: "",
+        }),
+      }),
+      new Set(["request-1"]),
+    );
+    let emittedChunks = 0;
+
+    await runtime.run(async () => {
+      const result = await settleCancelledTurnStep({
+        parentWritable: new WritableStream<Uint8Array>({
+          write() {
+            emittedChunks += 1;
+          },
+        }),
+        serializedContext: buildSerializedContext(),
+        sessionState: createDurableSessionState({ session }),
+      });
+
+      expect(emittedChunks).toBe(0);
+      expect(result.sessionState.hasProxyInputRequests).toBe(false);
     });
   });
 });

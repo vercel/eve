@@ -1,4 +1,5 @@
 import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
+import { resolveTextToResponse } from "#channel/resolve-text.js";
 import {
   emitTurnEpilogue,
   getHarnessEmissionState,
@@ -80,7 +81,27 @@ export function routeDeliverPayload(input: {
   readonly state: SessionStateMap | undefined;
 }): RoutedDeliverPayload {
   const entries = getProxyInputRequests(input.state);
-  const inputResponses = input.payload.inputResponses ?? [];
+  const inputResponses = [...(input.payload.inputResponses ?? [])];
+  let resolvedTextMessage = false;
+
+  if (typeof input.payload.message === "string") {
+    const answeredRequestIds = new Set(inputResponses.map((response) => response.requestId));
+    for (const [requestId, route] of entries) {
+      if (
+        route.answered === true ||
+        route.request === undefined ||
+        answeredRequestIds.has(requestId)
+      ) {
+        continue;
+      }
+      const response = resolveTextToResponse(input.payload.message, route.request);
+      if (response !== undefined) {
+        inputResponses.push(response);
+        answeredRequestIds.add(requestId);
+        resolvedTextMessage = true;
+      }
+    }
+  }
 
   const responsesByChild = new Map<string, InputResponse[]>();
   const unroutedResponses: InputResponse[] = [];
@@ -89,7 +110,7 @@ export function routeDeliverPayload(input: {
   for (const response of inputResponses) {
     const route = entries.get(response.requestId);
 
-    if (route === undefined) {
+    if (route === undefined || route.answered === true) {
       unroutedResponses.push(response);
       continue;
     }
@@ -120,7 +141,11 @@ export function routeDeliverPayload(input: {
   const remainder: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(input.payload)) {
-    if (key === "inputResponses" || value === undefined) {
+    if (
+      key === "inputResponses" ||
+      (key === "message" && resolvedTextMessage) ||
+      value === undefined
+    ) {
       continue;
     }
 

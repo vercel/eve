@@ -190,13 +190,26 @@ class DurableSessionReadTimeoutError extends Error {
 export function createDurableSessionState(input: {
   readonly session: HarnessSession;
 }): DurableSessionState {
-  const snapshot: DurableSessionSnapshot = {
+  return createDurableSessionStateFromDurableSession({
     session: projectToDurableSession(input.session),
+  });
+}
+
+/** Creates projected state after a step mutates an already-durable session. */
+export function createDurableSessionStateFromDurableSession(input: {
+  readonly session: DurableSession;
+}): DurableSessionState {
+  const snapshot: DurableSessionSnapshot = {
+    session: input.session,
     version: DURABLE_SESSION_VERSION,
   };
 
   return {
-    ...projectSessionState({ session: input.session }),
+    continuationToken: input.session.continuationToken,
+    emissionState: getHarnessEmissionState(input.session.state),
+    hasProxyInputRequests: hasProxyInputRequests(input.session.state),
+    sessionId: input.session.sessionId,
+    version: DURABLE_SESSION_VERSION,
     snapshot,
   };
 }
