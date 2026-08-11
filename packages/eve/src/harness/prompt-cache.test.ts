@@ -90,6 +90,78 @@ describe("detectPromptCachePath", () => {
       detectPromptCachePath(makeObjectModel("amazon-bedrock", "amazon.nova-pro-v1:0")),
     ).toEqual({ kind: "none" });
   });
+
+  it("returns none for a Bedrock application inference profile with an opaque model id", () => {
+    // An application inference profile id can be opaque and omit the `anthropic`
+    // family even though it targets an Anthropic model.
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "my-team-prod-claude-profile")),
+    ).toEqual({ kind: "none" });
+    expect(
+      detectPromptCachePath(
+        makeObjectModel("amazon-bedrock", "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abcdef0123456789"),
+      ),
+    ).toEqual({ kind: "none" });
+  });
+});
+
+describe("detectPromptCachePath eve.cachePath override", () => {
+  it("honors an explicit anthropic-direct override on an opaque Bedrock inference profile", () => {
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "my-team-prod-claude-profile"), {
+        eve: { cachePath: "anthropic-direct" },
+      }),
+    ).toEqual({ kind: "anthropic-direct" });
+  });
+
+  it("lets an explicit override take precedence over inference", () => {
+    // Inference would say `none`; the explicit override wins.
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "amazon.nova-pro-v1:0"), {
+        eve: { cachePath: "anthropic-direct" },
+      }),
+    ).toEqual({ kind: "anthropic-direct" });
+  });
+
+  it("supports none as an explicit opt-out", () => {
+    expect(
+      detectPromptCachePath(makeObjectModel("anthropic.messages"), { eve: { cachePath: "none" } }),
+    ).toEqual({ kind: "none" });
+  });
+
+  it("falls back to inference when no override is declared", () => {
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0"), {}),
+    ).toEqual({ kind: "anthropic-direct" });
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0"), {
+        eve: {},
+      }),
+    ).toEqual({ kind: "anthropic-direct" });
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0")),
+    ).toEqual({ kind: "anthropic-direct" });
+  });
+
+  it("leaves ordinary non-Anthropic providers unchanged", () => {
+    expect(detectPromptCachePath(makeObjectModel("openai.chat"))).toEqual({ kind: "none" });
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "amazon.nova-pro-v1:0")),
+    ).toEqual({ kind: "none" });
+  });
+
+  it("throws on an unrecognized override value", () => {
+    expect(() =>
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "opaque-profile"), {
+        eve: { cachePath: "bedrock" },
+      }),
+    ).toThrow(/providerOptions\.eve\.cachePath/);
+    expect(() =>
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "opaque-profile"), {
+        eve: { cachePath: "anthropic" },
+      }),
+    ).toThrow(/Expected one of/);
+  });
 });
 
 describe("getAnthropicCacheMarker", () => {

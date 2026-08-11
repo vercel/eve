@@ -104,6 +104,43 @@ Supported values are `"provider-default"`, `"none"`, `"minimal"`, `"low"`,
 which levels are available and how they map to provider-native settings. Use
 `modelOptions.providerOptions` when you need provider-specific reasoning controls.
 
+## Prompt caching override
+
+Eve automatically selects a prompt-caching path for each turn. For Anthropic
+models it places cache breakpoints on the stable system, tool, and
+conversation prefix; for models routed through the AI Gateway it forwards
+gateway auto-caching. Detection normally infers the path from the resolved
+model's provider name and model id — direct Anthropic providers, and
+`@ai-sdk/amazon-bedrock` Converse models whose id carries the `anthropic`
+family (for example `anthropic.claude-...`), are recognized automatically.
+
+Some backends hide the underlying family behind an opaque identifier. An AWS
+Bedrock **application inference profile** id can omit the `anthropic` family
+even though it targets an Anthropic model, so automatic detection returns no
+cache path and repeated turns are billed as fully uncached input. Declare the
+path explicitly through the eve-owned `providerOptions.eve` namespace on
+`modelOptions`:
+
+```ts title="agent/agent.ts"
+import { bedrock } from "@ai-sdk/amazon-bedrock";
+
+export default defineAgent({
+  model: bedrock(
+    "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123",
+  ),
+  modelOptions: {
+    providerOptions: {
+      eve: { cachePath: "anthropic-direct" },
+    },
+  },
+});
+```
+
+`eve.cachePath` accepts `"anthropic-direct"` (force the Anthropic breakpoint
+path) or `"none"` (opt the model out of caching). An explicit value takes
+precedence over inference; models without an override keep their existing
+automatic behavior, and an unrecognized value fails fast at turn start.
+
 ## Compaction
 
 Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `thresholdPercent` to compact sooner:
