@@ -25,7 +25,7 @@ import {
 } from "#shared/agent-definition.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import {
-  runtimeModelCatalog,
+  createRuntimeModelCatalog,
   type RuntimeModelCatalog,
   type RuntimeModelMetadata,
 } from "#runtime/agent/model-catalog.js";
@@ -144,6 +144,7 @@ export async function loadDynamicRuntimeModelDefinition(input: {
 
 export async function resolveRuntimeModelSelection(input: {
   readonly catalog?: RuntimeModelCatalog;
+  readonly durability: "durable" | "live";
   readonly selection: PublicAgentDynamicModelResult;
   readonly state: ContextAccessor;
 }): Promise<ResolvedRuntimeModelSelection> {
@@ -161,11 +162,12 @@ export async function resolveRuntimeModelSelection(input: {
       : parseProviderOptionsRecord(selection.modelOptions.providerOptions);
 
   const selectedModel = selection.model;
+  const catalog = input.catalog ?? runtimeModelCatalogForState(input.state);
   if (typeof selectedModel === "string") {
     const id = formatLanguageModelGatewayId(selectedModel);
     const metadata = await resolveSelectionMetadata({
       cacheKey: `gateway:${normalizeCatalogModelId(id)}`,
-      catalog: input.catalog ?? runtimeModelCatalog,
+      catalog,
       contextWindowTokens: selection.modelContextWindowTokens,
       load: (catalog) => catalog.getByGatewayId(id),
       modelLabel: id,
@@ -182,6 +184,11 @@ export async function resolveRuntimeModelSelection(input: {
   }
 
   validateRuntimeLanguageModel(selectedModel);
+  if (input.durability === "durable") {
+    throw new Error(
+      'Dynamic model selection returned a provider object, but durable model selections must be serializable. Return a model id string, or use a "step.started" model resolver.',
+    );
+  }
 
   const formattedId = formatLanguageModelGatewayId(selectedModel);
   const topLevelProvider = selectedModel.provider.split(".")[0]!;
@@ -189,8 +196,8 @@ export async function resolveRuntimeModelSelection(input: {
     cacheKey:
       topLevelProvider === "gateway"
         ? `gateway:${normalizeCatalogModelId(selectedModel.modelId)}`
-        : `provider:${topLevelProvider}:${normalizeCatalogModelId(selectedModel.modelId)}`,
-    catalog: input.catalog ?? runtimeModelCatalog,
+        : `provider:${selectedModel.provider}:${normalizeCatalogModelId(selectedModel.modelId)}`,
+    catalog,
     contextWindowTokens: selection.modelContextWindowTokens,
     load: (catalog) =>
       topLevelProvider === "gateway"
@@ -209,6 +216,17 @@ export async function resolveRuntimeModelSelection(input: {
       providerOptions,
     },
   };
+}
+
+const runtimeModelCatalogsByState = new WeakMap<ContextAccessor, RuntimeModelCatalog>();
+
+function runtimeModelCatalogForState(state: ContextAccessor): RuntimeModelCatalog {
+  const existing = runtimeModelCatalogsByState.get(state);
+  if (existing !== undefined) return existing;
+
+  const catalog = createRuntimeModelCatalog();
+  runtimeModelCatalogsByState.set(state, catalog);
+  return catalog;
 }
 
 const RUNTIME_MODEL_METADATA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;

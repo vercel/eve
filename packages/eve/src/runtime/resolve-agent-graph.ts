@@ -320,10 +320,7 @@ async function resolveRuntimeSubagent(input: {
       ? { description: input.sourceRef.description }
       : {
           dynamic: await resolveDynamicSubagentDefinition({
-            definition: {
-              ...input.sourceRef,
-              ...input.sourceRef.configResolver,
-            },
+            definition: input.sourceRef.configResolver,
             moduleMap: input.moduleMap,
             nodeId: input.sourceRef.nodeId,
           }),

@@ -179,10 +179,15 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
       messages: processed,
     };
 
+    const providerOptions = requireSessionModelReference(session).providerOptions;
     if (input.cachePath.kind === "gateway-auto") {
-      stepResult.providerOptions = mergeGatewayAutoCaching(
-        requireSessionModelReference(session).providerOptions,
-      ) as NonNullable<typeof stepResult.providerOptions>;
+      stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<
+        typeof stepResult.providerOptions
+      >;
+    } else if (providerOptions !== undefined) {
+      stepResult.providerOptions = providerOptions as NonNullable<
+        typeof stepResult.providerOptions
+      >;
     }
 
     return stepResult;

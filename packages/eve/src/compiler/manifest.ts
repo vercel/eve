@@ -725,6 +725,10 @@ const compiledDynamicSubagentDefinitionSchema = z
   .object({
     build: compiledAgentBuildDefinitionSchema.optional(),
     eventNames: z.array(z.string()).readonly(),
+    exportName: z.string().optional(),
+    logicalPath: z.string(),
+    sourceId: z.string(),
+    sourceKind: z.literal("module"),
   })
   .strict();
 const compiledSubagentNodeSchema: z.ZodType<CompiledSubagentNode> = z.union([

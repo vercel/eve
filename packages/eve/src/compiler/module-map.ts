@@ -85,7 +85,7 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
           agentRoot: subagent.agent.agentRoot,
           importSpecifierStyle,
           manifest: subagent.agent,
-          additionalModuleRef: subagent.configResolver === undefined ? undefined : subagent,
+          additionalModuleRef: subagent.configResolver,
           moduleMapDirectory,
           nextBindingName() {
             return `module_${nextBindingIndex++}`;

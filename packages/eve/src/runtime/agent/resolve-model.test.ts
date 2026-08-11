@@ -78,6 +78,7 @@ describe("dynamic runtime model resolution", () => {
     );
 
     const resolved = await resolveRuntimeModelSelection({
+      durability: "live",
       selection: result as never,
       state: new ContextContainer(),
     });
@@ -98,11 +99,13 @@ describe("dynamic runtime model resolution", () => {
 
     const first = await resolveRuntimeModelSelection({
       catalog,
+      durability: "live",
       selection: "openai/gpt-5.5",
       state,
     });
     const second = await resolveRuntimeModelSelection({
       catalog,
+      durability: "live",
       selection: "openai/gpt-5.5",
       state,
     });
@@ -120,6 +123,7 @@ describe("dynamic runtime model resolution", () => {
     const state = new ContextContainer();
     await resolveRuntimeModelSelection({
       catalog: createCatalog(),
+      durability: "live",
       selection: "openai/gpt-5.5",
       state,
     });
@@ -129,6 +133,7 @@ describe("dynamic runtime model resolution", () => {
     await expect(
       resolveRuntimeModelSelection({
         catalog: resumedCatalog,
+        durability: "live",
         selection: "openai/gpt-5.5",
         state: resumedState,
       }),
@@ -149,6 +154,7 @@ describe("dynamic runtime model resolution", () => {
 
     await resolveRuntimeModelSelection({
       catalog: createCatalog(),
+      durability: "live",
       selection: "openai/gpt-5.5",
       state,
     });
@@ -172,10 +178,20 @@ describe("dynamic runtime model resolution", () => {
     const state = new ContextContainer();
 
     await expect(
-      resolveRuntimeModelSelection({ catalog, selection: "openai/gpt-5.5", state }),
+      resolveRuntimeModelSelection({
+        catalog,
+        durability: "live",
+        selection: "openai/gpt-5.5",
+        state,
+      }),
     ).rejects.toThrow("catalog unavailable");
     await expect(
-      resolveRuntimeModelSelection({ catalog, selection: "openai/gpt-5.5", state }),
+      resolveRuntimeModelSelection({
+        catalog,
+        durability: "live",
+        selection: "openai/gpt-5.5",
+        state,
+      }),
     ).resolves.toMatchObject({ reference: { id: "openai/gpt-5.5" } });
 
     expect(getByGatewayId).toHaveBeenCalledTimes(2);
@@ -187,6 +203,7 @@ describe("dynamic runtime model resolution", () => {
 
     const resolved = await resolveRuntimeModelSelection({
       catalog,
+      durability: "live",
       selection: model,
       state: new ContextContainer(),
     });
@@ -205,11 +222,12 @@ describe("dynamic runtime model resolution", () => {
   it("rejects missing, malformed, and unknown selections", async () => {
     const state = new ContextContainer();
 
-    await expect(resolveRuntimeModelSelection({ selection: null as never, state })).rejects.toThrow(
-      /returned no model/,
-    );
+    await expect(
+      resolveRuntimeModelSelection({ durability: "live", selection: null as never, state }),
+    ).rejects.toThrow(/returned no model/);
     await expect(
       resolveRuntimeModelSelection({
+        durability: "live",
         selection: {
           contextWindowTokens: 128_000,
           model: "openai/gpt-5.5-mini",
@@ -220,10 +238,27 @@ describe("dynamic runtime model resolution", () => {
     await expect(
       resolveRuntimeModelSelection({
         catalog: createCatalog(null),
+        durability: "live",
         selection: "custom/unknown",
         state,
       }),
     ).rejects.toThrow(/Return modelContextWindowTokens/);
+  });
+
+  it("rejects durable provider objects before catalog lookup", async () => {
+    const catalog = createCatalog();
+
+    await expect(
+      resolveRuntimeModelSelection({
+        catalog,
+        durability: "durable",
+        selection: createLanguageModel("openai.responses", "gpt-5.5"),
+        state: new ContextContainer(),
+      }),
+    ).rejects.toThrow(/durable model selections must be serializable/);
+
+    expect(catalog.getByGatewayId).not.toHaveBeenCalled();
+    expect(catalog.getByProviderModelId).not.toHaveBeenCalled();
   });
 });
 

@@ -214,6 +214,9 @@ describe("compileAgentManifest", () => {
 
     expect(compiled.subagents[0]?.configResolver).toMatchObject({
       eventNames: ["session.started", "turn.started"],
+      logicalPath: "agent.ts",
+      sourceId: "agent.ts",
+      sourceKind: "module",
     });
     expect("config" in compiled.subagents[0]!.agent).toBe(false);
     expect(compiled.subagents[0]?.description).toBeUndefined();
@@ -242,6 +245,9 @@ describe("compileAgentManifest", () => {
     expect(compiled.subagents[0]?.configResolver).toMatchObject({
       build: { externalDependencies: ["just-bash"] },
       eventNames: ["session.started"],
+      logicalPath: "agent.ts",
+      sourceId: "agent.ts",
+      sourceKind: "module",
     });
     expect("config" in compiled.subagents[0]!.agent).toBe(false);
     expect(mocks.compileAgentConfig).toHaveBeenCalledTimes(1);

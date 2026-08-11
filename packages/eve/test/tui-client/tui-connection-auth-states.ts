@@ -98,7 +98,7 @@ const next = () => ++sequence;
 const firstTurn: UnstampedMessageStreamEvent[] = [
   { type: "session.started", data: {} },
   { type: "turn.started", data: { sequence: next(), turnId } },
-  { type: "step.started", data: { sequence: next(), stepIndex, turnId } },
+  { type: "step.started", data: { modelId: "eve-mock/test", sequence: next(), stepIndex, turnId } },
   {
     type: "authorization.required",
     data: {
@@ -151,7 +151,10 @@ const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
 const secondTurnId = "turn-2";
 const secondTurn: UnstampedMessageStreamEvent[] = [
   { type: "turn.started", data: { sequence: next(), turnId: secondTurnId } },
-  { type: "step.started", data: { sequence: next(), stepIndex, turnId: secondTurnId } },
+  {
+    type: "step.started",
+    data: { modelId: "eve-mock/test", sequence: next(), stepIndex, turnId: secondTurnId },
+  },
   {
     type: "authorization.required",
     data: {

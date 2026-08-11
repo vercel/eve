@@ -22,6 +22,7 @@ import {
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import { toErrorMessage } from "#shared/errors.js";
 
 const ALLOWED_DYNAMIC_MODEL_EVENTS = new Set<DynamicToolEventName>([
   "session.started",
@@ -30,6 +31,26 @@ const ALLOWED_DYNAMIC_MODEL_EVENTS = new Set<DynamicToolEventName>([
 ]);
 
 export type ActiveDynamicModelSelection = LiveDynamicModelSelection;
+
+const DYNAMIC_MODEL_SELECTION_ERROR_CODE = "EVE_DYNAMIC_MODEL_SELECTION_FAILED";
+
+export class DynamicModelSelectionError extends Error {
+  readonly code = DYNAMIC_MODEL_SELECTION_ERROR_CODE;
+  override readonly name = "DynamicModelSelectionError";
+
+  constructor(error: unknown) {
+    super(toErrorMessage(error), { cause: error });
+  }
+}
+
+export function isDynamicModelSelectionError(error: unknown): error is DynamicModelSelectionError {
+  return (
+    error instanceof DynamicModelSelectionError ||
+    (typeof error === "object" &&
+      error !== null &&
+      (error as { readonly code?: unknown }).code === DYNAMIC_MODEL_SELECTION_ERROR_CODE)
+  );
+}
 
 function isDynamicModelEventName(value: string): value is DynamicToolEventName {
   return ALLOWED_DYNAMIC_MODEL_EVENTS.has(value as DynamicToolEventName);
@@ -80,31 +101,31 @@ export async function dispatchDynamicModelEvent(input: {
   if (!isDynamicModelEventName(input.event.type)) return;
   if (!input.dynamicModel.eventNames.includes(input.event.type)) return;
 
-  const definition = await loadDynamicRuntimeModelDefinition({
-    dynamicModel: input.dynamicModel,
-    scope: input.scope,
-  });
-  const handler = definition.events[input.event.type];
+  setSelectionForEvent(input.ctx, input.event.type, null);
+  try {
+    const definition = await loadDynamicRuntimeModelDefinition({
+      dynamicModel: input.dynamicModel,
+      scope: input.scope,
+    });
+    const handler = definition.events[input.event.type];
 
-  if (handler === undefined) {
-    throw new Error(
-      `Dynamic model resolver is missing its compiled "${input.event.type}" handler.`,
-    );
+    if (handler === undefined) {
+      throw new Error(
+        `Dynamic model resolver is missing its compiled "${input.event.type}" handler.`,
+      );
+    }
+
+    const rawResult = await handler(input.event, buildResolveContext(input.ctx, input.messages));
+    const selection = await resolveRuntimeModelSelection({
+      durability: input.event.type === "step.started" ? "live" : "durable",
+      selection: rawResult as never,
+      state: input.ctx,
+    });
+
+    setSelectionForEvent(input.ctx, input.event.type, selection);
+  } catch (error) {
+    throw isDynamicModelSelectionError(error) ? error : new DynamicModelSelectionError(error);
   }
-
-  const rawResult = await handler(input.event, buildResolveContext(input.ctx, input.messages));
-  const selection = await resolveRuntimeModelSelection({
-    selection: rawResult as never,
-    state: input.ctx,
-  });
-
-  if (input.event.type !== "step.started" && selection.model !== undefined) {
-    throw new Error(
-      `Dynamic model resolver (${input.event.type}) returned a provider object, but session- and turn-scoped model selections must be serializable. Return a model id string for this scope, or use "step.started".`,
-    );
-  }
-
-  setSelectionForEvent(input.ctx, input.event.type, selection);
 }
 
 function setSelectionForEvent(

@@ -1,7 +1,7 @@
 import { AGENT_TOOL_NAME, isImplicitAgentToolAvailable } from "#runtime/framework-tools/agent.js";
 import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
-import type { ResolvedAgent } from "#runtime/types.js";
+import type { ResolvedAgent, ResolvedAgentDefinition } from "#runtime/types.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import type { InternalAgentModelDefinition } from "#shared/agent-definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -41,8 +41,8 @@ interface RuntimeTurnAgentBase {
    */
   readonly compactionModel?: RuntimeModelReference;
   readonly nodeId?: string;
-  readonly outputSchema?: import("#runtime/types.js").ResolvedAgentDefinition["outputSchema"];
-  readonly reasoning?: import("#runtime/types.js").ResolvedAgentDefinition["reasoning"];
+  readonly outputSchema?: ResolvedAgentDefinition["outputSchema"];
+  readonly reasoning?: ResolvedAgentDefinition["reasoning"];
   readonly tools: readonly PreparedRuntimeTool[];
   readonly workspaceSpec: WorkspaceRuntimeSpec;
 }

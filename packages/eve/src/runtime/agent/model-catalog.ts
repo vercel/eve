@@ -81,5 +81,3 @@ function parseCatalogResponse(value: unknown) {
   }
   return parsed.data;
 }
-
-export const runtimeModelCatalog = createRuntimeModelCatalog();

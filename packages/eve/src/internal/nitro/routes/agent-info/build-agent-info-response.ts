@@ -253,7 +253,7 @@ export function buildAgentInfoResponse(
               providerOptions: config.model.providerOptions,
               reasoning: config.reasoning,
               source: config.model.source ? toSource(config.model.source) : undefined,
-              routing: { kind: "gateway", target: config.model.id.split("/")[0]! },
+              routing: resolveStaticAgentModelRouting(data.manifest),
             }
           : {
               reasoning: config.reasoning,
@@ -323,6 +323,13 @@ export function buildAgentInfoResponse(
       rootEntries: [...agent.workspaceSpec.rootEntries],
     },
   };
+}
+
+function resolveStaticAgentModelRouting(manifest: CompiledAgentManifest): ModelRouting {
+  if (manifest.config.model === undefined) {
+    throw new Error("Resolved static agent config does not match its compiled manifest.");
+  }
+  return manifest.config.model.routing;
 }
 
 function buildChannelInfo(agent: ResolvedAgent): AgentInfoChannels {

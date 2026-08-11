@@ -11,6 +11,7 @@ import {
   type CompiledSubagentNode,
   createCompiledSubagentNodeId,
 } from "#compiler/manifest.js";
+import type { CompiledDynamicSubagentDefinition } from "#compiler/remote-agent-node.js";
 import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
@@ -169,7 +170,9 @@ async function compileSubagentDefinition(input: {
       ...input,
       agentConfigDefinition: dynamic === undefined ? definition : undefined,
       configResolver:
-        dynamic === undefined ? undefined : { ...dynamic.definition, build: dynamic.build },
+        dynamic === undefined
+          ? undefined
+          : { ...configModule, ...dynamic.definition, build: dynamic.build },
     })),
   };
 }
@@ -180,10 +183,7 @@ async function compileSubagent(input: {
   readonly compileAgentResources: CompileAgentResourcesFn;
   readonly context: ManifestCompileContext;
   readonly agentConfigDefinition?: unknown;
-  readonly configResolver?: {
-    readonly build?: { readonly externalDependencies?: readonly string[] };
-    readonly eventNames: readonly string[];
-  };
+  readonly configResolver?: CompiledDynamicSubagentDefinition;
   readonly externalDependencies?: readonly string[];
   readonly parentNodeId: string;
   readonly source: LocalSubagentSourceRef;
@@ -205,41 +205,6 @@ async function compileSubagent(input: {
     input.externalDependencies,
     input.configResolver?.build?.externalDependencies,
   );
-  const agent =
-    input.configResolver === undefined
-      ? await input.compileAgentNodeManifest(sourceManifest, input.context, {
-          agentConfigDefinition: input.agentConfigDefinition,
-          allowWorkflowConfig: false,
-          externalDependencies: inheritedExternalDependencies,
-        })
-      : undefined;
-  const resources =
-    input.configResolver === undefined
-      ? undefined
-      : await input.compileAgentResources(sourceManifest, input.context, {
-          externalDependencies: inheritedExternalDependencies,
-        });
-
-  let description: string | undefined;
-  if (input.configResolver === undefined) {
-    description = agent!.config.description;
-    if (!description) {
-      throw new Error(
-        `Local subagent "${input.source.logicalPath}" is missing a "description" field on its agent config. Add \`description\` to \`defineAgent({ ... })\` so the parent agent can decide when to delegate to this subagent.`,
-      );
-    }
-  }
-
-  const descendants = await compileSubagentGraph({
-    appRoot: input.appRoot,
-    compileAgentNodeManifest: input.compileAgentNodeManifest,
-    context: input.context,
-    compileAgentResources: input.compileAgentResources,
-    externalDependencies:
-      agent?.config.build?.externalDependencies ?? inheritedExternalDependencies,
-    parentNodeId: nodeId,
-    subagents: input.source.manifest.subagents,
-  });
   const nodeBase = {
     entryPath: input.source.entryPath,
     logicalPath: input.source.logicalPath,
@@ -249,23 +214,60 @@ async function compileSubagent(input: {
     sourceId: input.source.sourceId,
     sourceKind: "module" as const,
   };
-  return input.configResolver === undefined
-    ? {
-        descendants,
-        node: {
-          ...nodeBase,
-          agent: { ...agent!, remoteAgents: [...descendants.remoteAgents] },
-          description: description!,
-        },
-      }
-    : {
-        descendants,
-        node: {
-          ...nodeBase,
-          agent: { ...resources!, remoteAgents: [...descendants.remoteAgents] },
-          configResolver: input.configResolver,
-        },
-      };
+
+  if (input.configResolver === undefined) {
+    const agent = await input.compileAgentNodeManifest(sourceManifest, input.context, {
+      agentConfigDefinition: input.agentConfigDefinition,
+      allowWorkflowConfig: false,
+      externalDependencies: inheritedExternalDependencies,
+    });
+    const description = agent.config.description;
+    if (!description) {
+      throw new Error(
+        `Local subagent "${input.source.logicalPath}" is missing a "description" field on its agent config. Add \`description\` to \`defineAgent({ ... })\` so the parent agent can decide when to delegate to this subagent.`,
+      );
+    }
+
+    const descendants = await compileSubagentGraph({
+      appRoot: input.appRoot,
+      compileAgentNodeManifest: input.compileAgentNodeManifest,
+      context: input.context,
+      compileAgentResources: input.compileAgentResources,
+      externalDependencies:
+        agent.config.build?.externalDependencies ?? inheritedExternalDependencies,
+      parentNodeId: nodeId,
+      subagents: input.source.manifest.subagents,
+    });
+    return {
+      descendants,
+      node: {
+        ...nodeBase,
+        agent: { ...agent, remoteAgents: [...descendants.remoteAgents] },
+        description,
+      },
+    };
+  }
+
+  const resources = await input.compileAgentResources(sourceManifest, input.context, {
+    externalDependencies: inheritedExternalDependencies,
+  });
+  const descendants = await compileSubagentGraph({
+    appRoot: input.appRoot,
+    compileAgentNodeManifest: input.compileAgentNodeManifest,
+    context: input.context,
+    compileAgentResources: input.compileAgentResources,
+    externalDependencies: inheritedExternalDependencies,
+    parentNodeId: nodeId,
+    subagents: input.source.manifest.subagents,
+  });
+  return {
+    descendants,
+    node: {
+      ...nodeBase,
+      agent: { ...resources, remoteAgents: [...descendants.remoteAgents] },
+      configResolver: input.configResolver,
+    },
+  };
 }
 
 const compileLocalSubagent = compileSubagent;

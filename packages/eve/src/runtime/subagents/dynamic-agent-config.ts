@@ -58,7 +58,6 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     description: definition.description,
     model: await normalizeDurableModelSelection({
       catalog: input.catalog,
-      name: input.name,
       selection: {
         model: definition.model,
         modelContextWindowTokens: definition.modelContextWindowTokens,
@@ -76,7 +75,6 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     if (definition.compaction.model !== undefined) {
       compaction.model = await normalizeDurableModelSelection({
         catalog: input.catalog,
-        name: input.name,
         selection: {
           model: definition.compaction.model,
           modelContextWindowTokens: definition.compaction.modelContextWindowTokens,
@@ -105,19 +103,14 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
 
 async function normalizeDurableModelSelection(input: {
   readonly catalog?: RuntimeModelCatalog;
-  readonly name: string;
   readonly selection: Parameters<typeof resolveRuntimeModelSelection>[0]["selection"];
   readonly state: ContextAccessor;
 }): Promise<DynamicSubagentModelReference> {
   const resolved = await resolveRuntimeModelSelection({
     catalog: input.catalog,
+    durability: "durable",
     selection: input.selection,
     state: input.state,
   });
-  if (resolved.model !== undefined) {
-    throw new Error(
-      `Dynamic subagent "${input.name}" must return model IDs as strings so its agent config can cross durable workflow boundaries.`,
-    );
-  }
   return resolved.reference;
 }

@@ -37,7 +37,10 @@ import {
   SessionCallbackKey,
 } from "#context/keys.js";
 import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
-import { getActiveDynamicModelSelection } from "#context/dynamic-model-lifecycle.js";
+import {
+  getActiveDynamicModelSelection,
+  isDynamicModelSelectionError,
+} from "#context/dynamic-model-lifecycle.js";
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
@@ -581,6 +584,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let emissionState = getHarnessEmissionState(session.state);
     const store = contextStorage.getStore();
     const parent = store?.get(ParentSessionKey);
+    const hasDelegatedCaller = parent !== undefined || store?.get(SessionCallbackKey) !== undefined;
     const emit = createInstrumentationHandleEvent({
       agentName: config.runtimeIdentity?.agentName,
       handleEvent: baseEmit,
@@ -591,6 +595,41 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       sessionId: session.sessionId,
       turnId: activeTurnId(emissionState),
     });
+    const failModelSelection = async (
+      error: unknown,
+      failureState: ReturnType<typeof getHarnessEmissionState>,
+    ): Promise<StepResult> => {
+      throwIfTurnAborted(config.abortSignal);
+      if (turnSpan) {
+        recordErrorOnSpan(turnSpan, error);
+      }
+      if (!emit) {
+        throw error;
+      }
+
+      const errorId = createErrorId();
+      const message = toErrorMessage(error);
+      log.error("model selection failed terminally", {
+        error,
+        errorId,
+        sessionId: session.sessionId,
+        turnId: failureState.turnId,
+      });
+      await emitFailedStep(emit, failureState, {
+        code: "MODEL_SELECTION_FAILED",
+        details: { errorId },
+        message,
+        sessionId: session.sessionId,
+      });
+
+      return {
+        next:
+          config.mode === "task" || hasDelegatedCaller
+            ? { done: true, isError: true, output: message }
+            : { done: true, output: "" },
+        session,
+      };
+    };
 
     if (config.clearOnly === true) {
       session = {
@@ -699,12 +738,22 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
     if (pending.outcome === "unresolved") {
       if (emit && pending.deferredMessage === true && hasStepInput(input)) {
-        emissionState = await emitTurnPreamble(
-          emit,
-          preambleStepInput ?? {},
-          emissionState,
-          config.runtimeIdentity,
-        );
+        try {
+          emissionState = await emitTurnPreamble(
+            emit,
+            preambleStepInput ?? {},
+            emissionState,
+            config.runtimeIdentity,
+          );
+        } catch (error) {
+          if (!isDynamicModelSelectionError(error)) throw error;
+          return failModelSelection(error, {
+            sessionStarted: true,
+            sequence: emissionState.sequence,
+            stepIndex: 0,
+            turnId: `turn_${emissionState.sequence}`,
+          });
+        }
         emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
         return {
           next: null,
@@ -736,12 +785,22 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // --- Turn preamble ------------------------------------------------------
 
     if (emit && hasStepInput(input)) {
-      emissionState = await emitTurnPreamble(
-        emit,
-        preambleStepInput ?? {},
-        emissionState,
-        config.runtimeIdentity,
-      );
+      try {
+        emissionState = await emitTurnPreamble(
+          emit,
+          preambleStepInput ?? {},
+          emissionState,
+          config.runtimeIdentity,
+        );
+      } catch (error) {
+        if (!isDynamicModelSelectionError(error)) throw error;
+        return failModelSelection(error, {
+          sessionStarted: true,
+          sequence: emissionState.sequence,
+          stepIndex: 0,
+          turnId: `turn_${emissionState.sequence}`,
+        });
+      }
       session = setHarnessEmissionState(session, emissionState);
 
       if (turnSpan) {
@@ -802,28 +861,31 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // --- Model + tools ------------------------------------------------------
 
     // Direct harness unit tests may run without an ambient context.
-    const ctx = contextStorage.getStore();
-    const hasDelegatedCaller =
-      ctx?.get(ParentSessionKey) !== undefined || ctx?.get(SessionCallbackKey) !== undefined;
-    if (ctx !== undefined && config.dispatchDynamicModelEvent !== undefined) {
-      await config.dispatchDynamicModelEvent({
+    const ctx = store;
+    let resolvedModel: Awaited<ReturnType<typeof resolveActiveRuntimeModel>>;
+    try {
+      if (ctx !== undefined && config.dispatchDynamicModelEvent !== undefined) {
+        await config.dispatchDynamicModelEvent({
+          ctx,
+          event: {
+            data: {
+              sequence: emissionState.sequence,
+              stepIndex: emissionState.stepIndex,
+              turnId: emissionState.turnId,
+            },
+            type: "step.started",
+          } as UnstampedMessageStreamEvent,
+          messages,
+        });
+      }
+      resolvedModel = await resolveActiveRuntimeModel({
+        config,
         ctx,
-        event: {
-          data: {
-            sequence: emissionState.sequence,
-            stepIndex: emissionState.stepIndex,
-            turnId: emissionState.turnId,
-          },
-          type: "step.started",
-        } as UnstampedMessageStreamEvent,
-        messages,
+        session,
       });
+    } catch (error) {
+      return failModelSelection(error, emissionState);
     }
-    const resolvedModel = await resolveActiveRuntimeModel({
-      config,
-      ctx,
-      session,
-    });
     session = resolvedModel.session;
     const model = resolvedModel.model;
 

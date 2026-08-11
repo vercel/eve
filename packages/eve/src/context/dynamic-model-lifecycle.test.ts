@@ -224,11 +224,15 @@ describe("dynamic model lifecycle", () => {
       }),
     ).rejects.toThrow(/must be serializable/);
 
-    expect(ctx.get(SessionDynamicModelReferenceKey)).toBeUndefined();
+    expect(ctx.get(SessionDynamicModelReferenceKey)).toBeNull();
   });
 
   it("propagates resolver exceptions without selecting a fallback", async () => {
     const ctx = new ContextContainer();
+    ctx.set(TurnDynamicModelReferenceKey, {
+      contextWindowTokens: 100_000,
+      id: "openai/previous-turn",
+    });
     const moduleMap = createModuleMap({
       default: {
         model: defineDynamic({
@@ -251,7 +255,8 @@ describe("dynamic model lifecycle", () => {
       }),
     ).rejects.toThrow("flag service unavailable");
 
-    expect(ctx.get(TurnDynamicModelReferenceKey)).toBeUndefined();
+    expect(ctx.get(TurnDynamicModelReferenceKey)).toBeNull();
+    expect(getActiveDynamicModelSelection(ctx)).toBeNull();
   });
 
   it("rejects null and malformed selections", async () => {
@@ -276,6 +281,7 @@ describe("dynamic model lifecycle", () => {
       });
 
     await expect(dispatch()).rejects.toThrow(/returned no model/);
+    expect(ctx.get(SessionDynamicModelReferenceKey)).toBeNull();
 
     result = {
       contextWindowTokens: 128_000,

@@ -48,14 +48,24 @@ describe("compiledAgentManifestSchema", () => {
           agentRoot: "/app/agent/subagents/research",
           appRoot: "/app",
         }),
-        configResolver: { eventNames: ["session.started"] },
+        configResolver: {
+          eventNames: ["session.started"],
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module",
+        },
       }),
     ).toBe(true);
     expect(parses({})).toBe(false);
     expect(
       parses({
         description: "Research requests.",
-        configResolver: { eventNames: ["session.started"] },
+        configResolver: {
+          eventNames: ["session.started"],
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module",
+        },
       }),
     ).toBe(false);
   });

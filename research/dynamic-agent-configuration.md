@@ -1,5 +1,5 @@
 ---
-issue: 1945
+issue: "1945"
 status: proposed
 last_updated: "2026-08-11"
 ---

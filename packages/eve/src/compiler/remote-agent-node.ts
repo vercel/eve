@@ -5,7 +5,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { Node } from "#shared/node.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 
-export interface CompiledDynamicSubagentDefinition {
+export interface CompiledDynamicSubagentDefinition extends Readonly<ModuleSourceRef> {
   readonly build?: {
     readonly externalDependencies?: readonly string[];
   };

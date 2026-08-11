@@ -150,7 +150,12 @@ describe("resolveRuntimeAgentGraph", () => {
             agentRoot: "/app/agent/subagents/researcher",
             appRoot: "/app",
           }),
-          configResolver: { eventNames: ["session.started"] },
+          configResolver: {
+            eventNames: ["session.started"],
+            logicalPath: "agent.ts",
+            sourceId: "agent.ts",
+            sourceKind: "module",
+          },
           entryPath: "/app/agent/subagents/researcher/agent.ts",
           logicalPath: "subagents/researcher",
           name: "researcher",
@@ -169,7 +174,7 @@ describe("resolveRuntimeAgentGraph", () => {
           [ROOT_COMPILED_AGENT_NODE_ID]: { modules: {} },
           "subagents/researcher": {
             modules: {
-              "subagents/researcher": { default: dynamic },
+              "agent.ts": { default: dynamic },
             },
           },
         },
