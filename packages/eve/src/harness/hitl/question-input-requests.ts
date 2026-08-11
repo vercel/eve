@@ -11,12 +11,12 @@ import {
   compactStepInput,
   finishResolvedInput,
   responsesForBatches,
-} from "#harness/pending-input-resolution.js";
+} from "#harness/hitl/pending-input-resolution.js";
 import type {
   InputDomainResolverInput,
   ResolvePendingInputResult,
   ToolResponsePart,
-} from "#harness/pending-input-resolution.js";
+} from "#harness/hitl/pending-input-resolution.js";
 
 export type QuestionInputRequest = InputRequest & { readonly kind: "question" };
 

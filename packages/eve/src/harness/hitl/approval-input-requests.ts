@@ -13,19 +13,19 @@ import {
   compactStepInput,
   finishResolvedInput,
   responsesForBatches,
-} from "#harness/pending-input-resolution.js";
+} from "#harness/hitl/pending-input-resolution.js";
 import type {
   InputDomainResolverInput,
   ResolvedInputActionBatch,
   ResolvePendingInputResult,
   ToolResponsePart,
-} from "#harness/pending-input-resolution.js";
+} from "#harness/hitl/pending-input-resolution.js";
 import {
   buildQuestionToolResponsePart,
   findAnsweredQuestionBatches,
   resolveQuestionBatches,
-} from "#harness/question-input-requests.js";
-import type { QuestionInputRequest } from "#harness/question-input-requests.js";
+} from "#harness/hitl/question-input-requests.js";
+import type { QuestionInputRequest } from "#harness/hitl/question-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 
 const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";

@@ -7,23 +7,23 @@ import {
   getApprovedTools,
   hasAnsweredApprovalBatch,
   resolveApprovalInputBatches,
-} from "#harness/approval-input-requests.js";
-import type { RejectedActionBatch } from "#harness/approval-input-requests.js";
+} from "#harness/hitl/approval-input-requests.js";
+import type { RejectedActionBatch } from "#harness/hitl/approval-input-requests.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
 import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
-import { compactStepInput } from "#harness/pending-input-resolution.js";
+import { compactStepInput } from "#harness/hitl/pending-input-resolution.js";
 import type {
   ResolvePendingInputResult,
   ResolvedStepInput,
-} from "#harness/pending-input-resolution.js";
-import { resolveQuestionOnlyInputBatches } from "#harness/question-input-requests.js";
+} from "#harness/hitl/pending-input-resolution.js";
+import { resolveQuestionOnlyInputBatches } from "#harness/hitl/question-input-requests.js";
 import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
 import {
   clearPendingSessionLimitPrompt,
   isSessionLimitInputBatch,
   resolveSessionLimitInput,
-} from "#harness/session-limit-input-requests.js";
+} from "#harness/hitl/session-limit-input-requests.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
 
 export { getApprovedTools, clearPendingSessionLimitPrompt };

@@ -9,11 +9,11 @@ import {
   compactStepInput,
   finishResolvedInput,
   responsesForBatches,
-} from "#harness/pending-input-resolution.js";
+} from "#harness/hitl/pending-input-resolution.js";
 import type {
   InputDomainResolverInput,
   ResolvePendingInputResult,
-} from "#harness/pending-input-resolution.js";
+} from "#harness/hitl/pending-input-resolution.js";
 import {
   isSessionLimitContinuationRequest,
   resolveSessionLimitContinuation,
