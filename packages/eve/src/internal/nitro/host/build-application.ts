@@ -40,7 +40,10 @@ import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
+import { resolveCoDeployedEveServicePrefix } from "#internal/vercel/vercel-service-config-operations.js";
+import { parseVercelServicesConfig } from "#internal/vercel/vercel-services-config.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { isObject } from "#shared/guards.js";
 
 function trimTrailingSlash(path: string): string {
   return path.replace(/[\\/]+$/, "");
@@ -97,111 +100,6 @@ async function writeOptionalApplicationBuildProfile(input: {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeEntrypoint(rootDir: string, entrypoint: unknown): string | null {
-  if (typeof entrypoint !== "string" || entrypoint.trim().length === 0) {
-    return null;
-  }
-
-  return resolve(rootDir, entrypoint);
-}
-
-function normalizeServiceRoot(rootDir: string, service: Record<string, unknown>): string | null {
-  if (typeof service.root === "string" && service.root.trim().length > 0) {
-    return resolve(rootDir, service.root);
-  }
-
-  return normalizeEntrypoint(rootDir, service.entrypoint);
-}
-
-function normalizeServicePrefix(service: Record<string, unknown>): string {
-  if (typeof service.routePrefix === "string") {
-    return service.routePrefix.trim();
-  }
-
-  if (typeof service.mount === "string") {
-    return service.mount.trim();
-  }
-
-  if (
-    isRecord(service.mount) &&
-    typeof service.mount.path === "string" &&
-    service.mount.path.trim().length > 0
-  ) {
-    return service.mount.path.trim();
-  }
-
-  return "";
-}
-
-function normalizeServiceCollection(
-  value: unknown,
-): readonly Record<string, unknown>[] | undefined {
-  if (isRecord(value)) {
-    return Object.values(value).filter(isRecord);
-  }
-
-  if (Array.isArray(value)) {
-    return value.filter(isRecord);
-  }
-
-  return undefined;
-}
-
-/**
- * Resolve the route prefix an eve service is mounted under when it is
- * co-deployed behind a host web service (Next.js, Nuxt, SvelteKit etc.).
- *
- * Any service whose framework is not `eve` is treated as a host that proxies
- * eve's transport routes behind a prefix. A standalone eve deployment (no host
- * service) returns `undefined` so its output stays routable at the root.
- */
-function resolveCoDeployedEveServicePrefix(input: {
-  appRoots: readonly string[];
-  configRoot: string;
-  config: unknown;
-}): string | undefined {
-  if (!isRecord(input.config)) {
-    return undefined;
-  }
-
-  const services =
-    normalizeServiceCollection(input.config.experimentalServices) ??
-    normalizeServiceCollection(input.config.experimentalServicesV2) ??
-    normalizeServiceCollection(input.config.services);
-
-  if (services === undefined) {
-    return undefined;
-  }
-
-  let hasHostService = false;
-  let servicePrefix: string | undefined;
-
-  for (const service of services) {
-    if (service.framework !== "eve") {
-      hasHostService = true;
-      continue;
-    }
-
-    const eveEntrypoint = normalizeServiceRoot(input.configRoot, service);
-    const routePrefix = normalizeServicePrefix(service);
-
-    if (
-      eveEntrypoint !== null &&
-      input.appRoots.includes(eveEntrypoint) &&
-      routePrefix.length > 0 &&
-      routePrefix !== "/"
-    ) {
-      servicePrefix = routePrefix;
-    }
-  }
-
-  return hasHostService ? servicePrefix : undefined;
-}
-
 async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
   appRoot: string,
   agentRoot: string,
@@ -211,9 +109,11 @@ async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
 
   if (outputDirectory !== undefined) {
     try {
-      const config = JSON.parse(
-        await readFile(join(outputDirectory, "config.json"), "utf8"),
-      ) as unknown;
+      const configPath = join(outputDirectory, "config.json");
+      const config = parseVercelServicesConfig(
+        JSON.parse(await readFile(configPath, "utf8")) as unknown,
+        configPath,
+      );
       const servicePrefix = resolveCoDeployedEveServicePrefix({
         appRoots,
         configRoot: await resolveVercelOutputConfigRoot(outputDirectory),
@@ -238,7 +138,10 @@ async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
       join(currentDir, ".vercel", "output", "config.json"),
     ]) {
       try {
-        const config = JSON.parse(await readFile(configPath, "utf8")) as unknown;
+        const config = parseVercelServicesConfig(
+          JSON.parse(await readFile(configPath, "utf8")) as unknown,
+          configPath,
+        );
         const configRoot = configPath.endsWith("vercel.json")
           ? currentDir
           : await resolveVercelOutputConfigRoot(dirname(configPath));
@@ -276,13 +179,11 @@ async function resolveVercelOutputConfigRoot(outputDirectory: string): Promise<s
       await readFile(join(projectRoot, ".vercel", "project.json"), "utf8"),
     ) as unknown;
 
-    if (
-      isRecord(projectConfig) &&
-      isRecord(projectConfig.settings) &&
-      typeof projectConfig.settings.rootDirectory === "string" &&
-      projectConfig.settings.rootDirectory.trim().length > 0
-    ) {
-      return resolve(projectRoot, projectConfig.settings.rootDirectory);
+    if (isObject(projectConfig) && isObject(projectConfig.settings)) {
+      const rootDirectory = projectConfig.settings.rootDirectory;
+      if (typeof rootDirectory === "string" && rootDirectory.trim().length > 0) {
+        return resolve(projectRoot, rootDirectory);
+      }
     }
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
