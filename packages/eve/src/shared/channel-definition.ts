@@ -71,6 +71,15 @@ export interface GenericChannelDefinition<
    */
   context?(state: NonNullable<TState>, session: SessionHandle): TCtx;
 
+  /**
+   * Reconciles state supplied by a resumed `send()` with durable channel state.
+   * When omitted, resumed deliveries preserve the existing state unchanged.
+   */
+  updateState?(
+    state: NonNullable<TState>,
+    incoming: Readonly<NonNullable<TState>>,
+  ): NonNullable<TState>;
+
   readonly routes: readonly RouteDefinition<TState>[];
   receive?(
     input: GenericReceiveInput<TReceiveTarget>,

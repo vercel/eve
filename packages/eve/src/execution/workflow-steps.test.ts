@@ -35,6 +35,7 @@ import {
 import { createTurnWorkflowInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { projectToDurableSession } from "#execution/session.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import { defineTool } from "#public/definitions/tool.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
@@ -168,12 +169,14 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
   };
 }
 
-function createSerializedContext(): Record<string, unknown> {
+function createSerializedContext(
+  adapter: ChannelAdapter = threadContextAdapter,
+): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, {
     adapterRegistry: {
-      adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      adaptersByKind: new Map([[adapter.kind, adapter]]),
     },
     compiledArtifactsSource: {} as never,
     graph: {
@@ -189,7 +192,7 @@ function createSerializedContext(): Record<string, unknown> {
     toolRegistry: {},
     turnAgent: TestTurnAgent,
   } as never);
-  ctx.set(ChannelKey, threadContextAdapter);
+  ctx.set(ChannelKey, adapter);
   ctx.set(ContinuationTokenKey, "http:thread-context");
   ctx.set(ModeKey, "conversation");
   ctx.set(SessionIdKey, "session-1");
@@ -1016,6 +1019,57 @@ describe("dispatchRuntimeActionsStep", () => {
 });
 
 describe("turnStep", () => {
+  it("reconciles deliver-time channel state before handling the turn", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: { done: true, output: "ok" },
+        session: stepSession,
+      });
+    });
+    const adapter: ChannelAdapter = {
+      kind: "stateful",
+      state: { headSha: "old-head" },
+      updateState(state, incoming) {
+        return { ...state, ...incoming };
+      },
+      deliver(payload, ctx) {
+        expect(ctx.state.headSha).toBe("new-head");
+        return { message: payload.message };
+      },
+    };
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const result = await turnStep({
+      input: sendCommandToDelivery({
+        adapterState: { headSha: "new-head" },
+        kind: "send",
+        payload: { message: "review the update" },
+      }),
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(adapter),
+      sessionState: createStubSessionState(),
+    });
+
+    const channel = result.serializedContext[ChannelKey.name] as {
+      state: { headSha?: string };
+    };
+    expect(channel.state.headSha).toBe("new-head");
+  });
+
   it("uses the selected dynamic subagent model for execution identity", async () => {
     const session = createStubSession();
     installSessionStoreMocks([session]);

@@ -41,6 +41,7 @@ const ADAPTER_NON_EVENT_FIELDS: ReadonlySet<string> = new Set([
   "createAdapterContext",
   "fetchFile",
   "instrumentation",
+  "updateState",
 ]);
 
 /**
@@ -166,6 +167,10 @@ function carriesAdapterBehavior(adapter: ChannelAdapter): boolean {
   }
 
   if (adapter.createAdapterContext !== undefined) {
+    return true;
+  }
+
+  if (adapter.updateState !== undefined) {
     return true;
   }
 

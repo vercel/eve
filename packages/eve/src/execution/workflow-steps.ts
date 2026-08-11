@@ -34,7 +34,10 @@ import { matchAuthorizationCallbacks } from "#execution/authorization-callback-m
 import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
-import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import {
+  extractAdapterStateFromPayloads,
+  sendCommandToDelivery,
+} from "#execution/session-command-wire.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import {
@@ -158,9 +161,18 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
   let durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
-  const adapter = ctx.require(ChannelKey);
+  let adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+  let incomingAdapterState: Readonly<Record<string, unknown>> | undefined;
+  if (input.input?.kind === "deliver") {
+    const delivery = extractAdapterStateFromPayloads(input.input.payloads);
+    incomingAdapterState = delivery.adapterState;
+    input = {
+      ...input,
+      input: { ...input.input, payloads: delivery.payloads },
+    };
+  }
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -219,6 +231,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });
+
+  if (incomingAdapterState !== undefined && adapter.updateState !== undefined) {
+    adapter = {
+      ...adapter,
+      state: adapter.updateState(adapter.state ?? {}, incomingAdapterState),
+    };
+    setChannelContext(ctx, adapter);
+  }
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
 

@@ -227,6 +227,21 @@ describe("defineChannel", () => {
     expect(typeof adapter["turn.cancelled"]).toBe("function");
   });
 
+  it("wires a channel state reconciler onto the built adapter", () => {
+    const channel = defineChannel({
+      state: { durable: "keep", inbound: "old" },
+      routes: [POST("/x", async () => new Response("ok"))],
+      updateState(state, incoming) {
+        return { ...state, inbound: incoming.inbound };
+      },
+    });
+
+    const adapter = getAdapter(channel);
+    expect(
+      adapter.updateState?.(adapter.state ?? {}, { durable: "replace", inbound: "new" }),
+    ).toEqual({ durable: "keep", inbound: "new" });
+  });
+
   it("falls back to open metadata for channels without metadata()", () => {
     const channel = defineChannel({
       routes: [POST("/x", async () => new Response("ok"))],

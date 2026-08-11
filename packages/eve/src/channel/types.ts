@@ -149,6 +149,7 @@ export interface DeliverPayload {
 /** One command accepted by a durable session inbox. */
 export type SessionCommand =
   | {
+      readonly adapterState?: Readonly<Record<string, unknown>>;
       readonly auth?: SessionAuthContext | null;
       readonly caller?: TurnCaller;
       readonly kind: "send";

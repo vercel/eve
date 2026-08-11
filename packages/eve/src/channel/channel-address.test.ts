@@ -55,6 +55,35 @@ describe("createChannelAddress", () => {
     });
   });
 
+  it("forwards fresh channel state through an existing address", async () => {
+    interface State {
+      headSha: string;
+    }
+    const runtime = createRuntime();
+    const address = createChannelAddress<State>({
+      adapter: { kind: "github" },
+      channelName: "github",
+      continuationToken: "repo:pull:1",
+      runtime,
+    });
+
+    await address.send("review the update", {
+      auth: null,
+      state: { headSha: "new-head" },
+    });
+
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
+      command: {
+        auth: null,
+        kind: "send",
+        payload: { message: "review the update" },
+        requestId: undefined,
+        adapterState: { headSha: "new-head" },
+      },
+      continuationToken: "github:repo:pull:1",
+    });
+  });
+
   it("binds every control directly to the namespaced continuation token", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({

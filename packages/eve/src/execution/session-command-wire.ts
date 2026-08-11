@@ -1,5 +1,7 @@
 import type { DeliverHookPayload, DeliverPayload, SessionCommand } from "#channel/types.js";
 
+const ADAPTER_STATE_PAYLOAD_FIELD = "$eve.adapterState";
+
 /**
  * The durable delivery envelope plus a transitional single-payload mirror.
  *
@@ -24,12 +26,43 @@ export interface WireDeliverHookPayload extends DeliverHookPayload {
 export function sendCommandToDelivery(
   command: Extract<SessionCommand, { readonly kind: "send" }>,
 ): WireDeliverHookPayload {
+  const payload =
+    command.adapterState === undefined
+      ? command.payload
+      : { ...command.payload, [ADAPTER_STATE_PAYLOAD_FIELD]: command.adapterState };
   return {
     auth: command.auth,
     caller: command.caller,
     kind: "deliver",
-    payload: command.payload,
-    payloads: [command.payload],
+    payload,
+    payloads: [payload],
     requestId: command.requestId,
+  };
+}
+
+/**
+ * Removes framework-owned channel state from delivery payloads before adapters
+ * observe them. Keeping this metadata inside the established payload envelope
+ * lets deployment-pinned session drivers preserve it across upgrades.
+ */
+export function extractAdapterStateFromPayloads(payloads: readonly DeliverPayload[]): {
+  readonly adapterState?: Readonly<Record<string, unknown>>;
+  readonly payloads: readonly DeliverPayload[];
+} {
+  let adapterState: Readonly<Record<string, unknown>> | undefined;
+  let changed = false;
+  const sanitized = payloads.map((payload) => {
+    if (!Object.hasOwn(payload, ADAPTER_STATE_PAYLOAD_FIELD)) return payload;
+    changed = true;
+    const { [ADAPTER_STATE_PAYLOAD_FIELD]: candidate, ...rest } = payload;
+    if (typeof candidate === "object" && candidate !== null && !Array.isArray(candidate)) {
+      adapterState = candidate as Readonly<Record<string, unknown>>;
+    }
+    return rest;
+  });
+
+  return {
+    ...(adapterState === undefined ? {} : { adapterState }),
+    payloads: changed ? sanitized : payloads,
   };
 }

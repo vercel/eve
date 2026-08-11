@@ -77,8 +77,12 @@ export function createChannelAddress<TState = undefined>(input: {
     continuationToken: input.continuationToken,
     async deliver(sendInput, options) {
       const payload = normalizeSendInput(sendInput);
+      const state = (options as { readonly state?: TState }).state;
       const caller = sessionCallbackToTurnCaller(options.callback);
       const commandWithoutCaller = {
+        ...(state === undefined
+          ? {}
+          : { adapterState: state as Readonly<Record<string, unknown>> }),
         auth: options.auth,
         kind: "send" as const,
         payload: {
@@ -107,7 +111,6 @@ export function createChannelAddress<TState = undefined>(input: {
         );
       }
 
-      const state = (options as { readonly state?: TState }).state;
       const adapter =
         state === undefined
           ? input.adapter

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import {
+  extractAdapterStateFromPayloads,
+  sendCommandToDelivery,
+} from "#execution/session-command-wire.js";
 
 describe("sendCommandToDelivery", () => {
   it("emits the deliver envelope with the single-payload compat mirror", () => {
@@ -12,6 +15,7 @@ describe("sendCommandToDelivery", () => {
       subagentName: "child",
     } as const;
     const wire = sendCommandToDelivery({
+      adapterState: { headSha: "new-head" },
       auth: null,
       caller,
       kind: "send",
@@ -23,12 +27,16 @@ describe("sendCommandToDelivery", () => {
       auth: null,
       caller,
       kind: "deliver",
-      payload,
-      payloads: [payload],
+      payload: { "$eve.adapterState": { headSha: "new-head" }, message: "hello" },
+      payloads: [{ "$eve.adapterState": { headSha: "new-head" }, message: "hello" }],
       requestId: "req-1",
     });
     // The 0.30.3–0.30.8 parked decode reads `.payload`; everything else reads
     // `payloads`. Both views must reference the same delivery.
     expect(wire.payloads[0]).toBe(wire.payload);
+    expect(extractAdapterStateFromPayloads(wire.payloads)).toEqual({
+      adapterState: { headSha: "new-head" },
+      payloads: [payload],
+    });
   });
 });
