@@ -23,54 +23,67 @@ export async function setupAuthoringEval(
     throw new Error("EVE_AUTHORING_TARBALL is not set. Run through pnpm benchmark:authoring.");
   }
 
-  await run(sandbox, "bash", [
-    "-lc",
-    `mkdir -p ${SEED_ROOT} && cp -a seed/. ${SEED_ROOT}/ && rm -rf seed package.json package-lock.json`,
-  ]);
-  await sandbox.writeFiles({
-    // agent-eval accepts Buffer at runtime, but its public type currently names only string.
-    // @ts-expect-error binary sandbox uploads are supported
-    [TARBALL_PATH]: readFileSync(tarball),
-  });
+  await measure("prepare fixture", () =>
+    run(sandbox, "bash", [
+      "-lc",
+      `mkdir -p ${SEED_ROOT} && cp -a seed/. ${SEED_ROOT}/ && rm -rf seed package.json package-lock.json`,
+    ]),
+  );
+  await measure("upload eve tarball", () =>
+    sandbox.writeFiles({
+      // agent-eval accepts Buffer at runtime, but its public type currently names only string.
+      // @ts-expect-error binary sandbox uploads are supported
+      [TARBALL_PATH]: readFileSync(tarball),
+    }),
+  );
   const tarballPath = `${sandbox.getWorkingDirectory()}/${TARBALL_PATH}`;
-  await run(sandbox, "npm", [
-    "install",
-    "--prefix",
-    `${SEED_ROOT}/eve-cli`,
-    "--package-lock=false",
-    "--registry=https://registry.npmjs.org",
-    tarballPath,
-  ]);
+  await measure("install bootstrap eve CLI", () =>
+    run(sandbox, "npm", [
+      "install",
+      "--prefix",
+      `${SEED_ROOT}/eve-cli`,
+      "--package-lock=false",
+      "--registry=https://registry.npmjs.org",
+      tarballPath,
+    ]),
+  );
   const cliPath = `${sandbox.getWorkingDirectory()}/${SEED_ROOT}/eve-cli/node_modules/eve/bin/eve.js`;
-  await run(sandbox, "bash", [
-    "-lc",
-    [
-      `rm -rf ${SCAFFOLD_ROOT}`,
-      `cd /tmp`,
-      `AI_AGENT=benchmark npm_config_user_agent=npm/11 EVE_INIT_PACKAGE_SPEC=${shellQuote(tarballPath)} node ${shellQuote(cliPath)} init ${SCAFFOLD_ROOT.slice("/tmp/".length)}`,
-      `rm -rf ${SCAFFOLD_ROOT}/.git`,
-      `cp -a ${SCAFFOLD_ROOT}/. ${shellQuote(sandbox.getWorkingDirectory())}/`,
-      `rm -rf ${SCAFFOLD_ROOT}`,
-    ].join(" && "),
-  ]);
-  await run(sandbox, "npm", ["pkg", "set", `dependencies.eve=file:${TARBALL_PATH}`]);
-  await run(sandbox, "npm", [
-    "install",
-    "--save-dev",
-    "--package-lock=false",
-    "--registry=https://registry.npmjs.org",
-    "vitest@4.1.10",
-  ]);
+  await measure("scaffold subject", () =>
+    run(sandbox, "bash", [
+      "-lc",
+      [
+        `rm -rf ${SCAFFOLD_ROOT}`,
+        `cd /tmp`,
+        `AI_AGENT=benchmark npm_config_user_agent=npm/11 EVE_INIT_PACKAGE_SPEC=${shellQuote(tarballPath)} node ${shellQuote(cliPath)} init ${SCAFFOLD_ROOT.slice("/tmp/".length)}`,
+        `rm -rf ${SCAFFOLD_ROOT}/.git`,
+        `cp -a ${SCAFFOLD_ROOT}/. ${shellQuote(sandbox.getWorkingDirectory())}/`,
+        `rm -rf ${SCAFFOLD_ROOT} ${SEED_ROOT}/eve-cli`,
+      ].join(" && "),
+    ]),
+  );
+  await measure("install eval dependencies", async () => {
+    await run(sandbox, "npm", ["pkg", "set", `dependencies.eve=file:${TARBALL_PATH}`]);
+    await run(sandbox, "npm", [
+      "install",
+      "--save-dev",
+      "--package-lock=false",
+      "--registry=https://registry.npmjs.org",
+      "vitest@4.1.10",
+    ]);
+  });
 
   if (options.syntheticImessage === true) {
-    await installSyntheticImessageWorld(sandbox);
-    await sandbox.writeFiles({
-      ".claude/settings.json": JSON.stringify({
-        env: { EVE_DEV_OFFICIAL_REGISTRY_URL: SYNTHETIC_REGISTRY_URL },
-      }),
+    await measure("install synthetic iMessage world", async () => {
+      await installSyntheticImessageWorld(sandbox);
+      await sandbox.writeFiles({
+        ".claude/settings.json": JSON.stringify({
+          env: { EVE_DEV_OFFICIAL_REGISTRY_URL: SYNTHETIC_REGISTRY_URL },
+        }),
+      });
     });
   }
-  if (options.agentsMd !== true) await removeScaffoldedAgentGuidance(sandbox);
+  if (options.agentsMd !== true)
+    await measure("remove agent guidance", () => removeScaffoldedAgentGuidance(sandbox));
 }
 
 async function installSyntheticImessageWorld(sandbox: Sandbox): Promise<void> {
@@ -142,6 +155,17 @@ async function installSyntheticImessageWorld(sandbox: Sandbox): Promise<void> {
 
 async function removeScaffoldedAgentGuidance(sandbox: Sandbox): Promise<void> {
   await run(sandbox, "rm", ["-f", "AGENTS.md", "CLAUDE.md"]);
+}
+
+async function measure<T>(label: string, operation: () => Promise<T>): Promise<T> {
+  const startedAt = performance.now();
+  try {
+    return await operation();
+  } finally {
+    console.log(
+      `[authoring-benchmark] setup ${label}: ${(performance.now() - startedAt).toFixed(0)}ms`,
+    );
+  }
 }
 
 function shellQuote(value: string): string {
