@@ -31,9 +31,13 @@ export async function setupAuthoringEval(
     [TARBALL_PATH]: readFileSync(tarball),
   });
   const tarballPath = `${sandbox.getWorkingDirectory()}/${TARBALL_PATH}`;
-  await run(sandbox, "bash", [
-    "-lc",
-    `mkdir -p ${SEED_ROOT}/eve-cli/node_modules/eve && tar -xzf ${shellQuote(tarballPath)} --strip-components=1 -C ${SEED_ROOT}/eve-cli/node_modules/eve`,
+  await run(sandbox, "npm", [
+    "install",
+    "--prefix",
+    `${SEED_ROOT}/eve-cli`,
+    "--package-lock=false",
+    "--registry=https://registry.npmjs.org",
+    tarballPath,
   ]);
   await run(sandbox, "bash", [
     "-lc",
