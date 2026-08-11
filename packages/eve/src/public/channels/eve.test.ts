@@ -2067,6 +2067,32 @@ describe("eveChannel — forwarded principal", () => {
     expect(second.resolveSession).not.toHaveBeenCalledWith(firstToken);
   });
 
+  it("rejects create-once operations for a forwarded anonymous principal", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        forwardedPrincipal: {
+          current: {
+            attributes: {},
+            authenticator: "none",
+            principalId: "anonymous",
+            principalType: "anonymous",
+          },
+        },
+        message: "hi",
+        operationId: "shared-operation",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.resolveSession).not.toHaveBeenCalled();
+    expect(handler.send).not.toHaveBeenCalled();
+  });
+
   it("defaults the initiator to the forwarded current principal", async () => {
     const handler = createEveCreateHandler({
       trustedForwarders: () => true,

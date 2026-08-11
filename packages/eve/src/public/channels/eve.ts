@@ -253,7 +253,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
 
-        if (body.operationId !== undefined && authResult.principalType === "anonymous") {
+        if (body.operationId !== undefined && forwarded.auth.principalType === "anonymous") {
           return Response.json(
             { error: "operationId requires an authenticated principal.", ok: false },
             { status: 400 },
