@@ -9,7 +9,7 @@ describe("createLlmsIndex", () => {
     expect(output).not.toMatch(/^---/);
     expect(output).toContain("## Introduction");
     expect(output).toContain("## Build");
-    expect(output).toContain("## Integrations");
+    expect(output).toContain("## Integrate");
     expect(output).toContain("## Operate");
     expect(output).not.toContain("## Application Integration");
     expect(output).toContain("## Core Concepts");

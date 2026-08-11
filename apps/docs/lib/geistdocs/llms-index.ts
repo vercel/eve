@@ -14,7 +14,6 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 - [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure a model, understand its layout, and run it locally.
 - [Tutorial](${EVE_ORIGIN}/docs/tutorial/first-agent.md): Build an agent with tools, durable state, and an interface.
-- [Terminal UI](${EVE_ORIGIN}/docs/guides/dev-tui.md): Work with a local or deployed agent from the interactive terminal UI.
 
 ## Build
 
@@ -34,7 +33,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Dynamic Capabilities](${EVE_ORIGIN}/docs/guides/dynamic-capabilities.md): Resolve models, tools, skills, subagents, and instructions at runtime.
 - [Workflow Tool](${EVE_ORIGIN}/docs/guides/dynamic-workflows.md): Let the model orchestrate subagents through the experimental Workflow tool.
 
-## Integrations
+## Integrate
 
 - [Add Integrations](${EVE_ORIGIN}/docs/install-integrations.md): Discover and add official or third-party integrations.
 - [Extensions](${EVE_ORIGIN}/docs/extensions.md): Package and mount reusable eve capabilities.
@@ -54,6 +53,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Self-Hosting](${EVE_ORIGIN}/docs/guides/deployment/self-hosting.md): Run eve as a Node service or container.
 - [Authentication](${EVE_ORIGIN}/docs/guides/auth-and-route-protection.md): Secure an agent's HTTP routes and establish caller identity.
 - [Observability](${EVE_ORIGIN}/docs/guides/instrumentation.md): Trace agents with OpenTelemetry and inspect workflow metadata.
+- [Terminal UI](${EVE_ORIGIN}/docs/guides/dev-tui.md): Work with a local or deployed agent from the interactive terminal UI.
 
 ## Core Concepts
 
