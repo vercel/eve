@@ -30,7 +30,7 @@
     "test:scenario": "turbo run test:scenario",
     "test:unit": "turbo run test:unit",
     "typecheck": "turbo run typecheck",
-    "version-packages": "changeset version",
+    "version-packages": "changeset version && node ./scripts/materialize-registry-release-requirements.mjs",
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
     "test:tui": "pnpm --filter eve run test:tui",
     "update:extension-contracts": "node ./scripts/extension-capability-contracts.mjs"

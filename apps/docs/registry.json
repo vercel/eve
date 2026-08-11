@@ -1200,7 +1200,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "slack"]
           },
-          "requires": ">=0.31.4",
+          "requires": ">=0.27.8",
           "docs": "/docs/channels/slack",
           "implementation": "native"
         }
@@ -1221,7 +1221,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "discord"]
           },
-          "requires": ">=0.31.4",
+          "requires": ">=0.30.0",
           "docs": "/docs/channels/discord",
           "implementation": "native"
         }
@@ -1308,7 +1308,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "github"]
           },
-          "requires": ">=0.31.4",
+          "requires": ">=0.30.7",
           "docs": "/docs/channels/github",
           "implementation": "native"
         }
@@ -1328,7 +1328,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "linear"]
           },
-          "requires": ">=0.31.4",
+          "requires": ">=0.30.6",
           "docs": "/docs/channels/linear",
           "implementation": "native"
         }
@@ -1348,7 +1348,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "web"]
           },
-          "requires": ">=0.31.4",
+          "requires": ">=0.27.8",
           "docs": "/docs/channels/eve",
           "implementation": "native"
         }
@@ -1852,7 +1852,7 @@
             "bin": "eve",
             "args": ["integration", "setup", "photon"]
           },
-          "requires": ">=0.31.4",
+          "requires": ">=0.29.0",
           "docs": "/docs/channels/photon",
           "implementation": "native"
         }
