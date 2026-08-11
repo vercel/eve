@@ -36,7 +36,12 @@ function parseLegacyServiceCollection(
   value: JsonValue | undefined,
 ): readonly VercelServiceConfig[] | undefined {
   if (value === undefined) return undefined;
-  const entries = Array.isArray(value) ? value : Object.values(parseJsonObject(value));
+  let entries: readonly JsonValue[];
+  try {
+    entries = Array.isArray(value) ? value : Object.values(parseJsonObject(value));
+  } catch {
+    return undefined;
+  }
   return entries.flatMap((entry) => {
     try {
       return [parseJsonObject(entry) as VercelServiceConfig];
