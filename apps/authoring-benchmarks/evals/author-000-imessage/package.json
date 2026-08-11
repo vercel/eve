@@ -1,0 +1,23 @@
+{
+  "name": "eve-authoring-imessage-eval",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "postinstall": "node install-eve-wrapper.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ai": "^7.0.0",
+    "eve": "file:__authoring_eval__/eve.tgz",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.0",
+    "vitest": "^4.0.0"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}

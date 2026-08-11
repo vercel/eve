@@ -16,6 +16,7 @@ coverage/
 
 # Test artifacts
 .vitest/
+apps/authoring-benchmarks/results/
 .extension-contracts-cache/
 packages/eve/.workflow-vitest/
 packages/eve/.generated/

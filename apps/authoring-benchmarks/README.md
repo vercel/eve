@@ -1,86 +1,73 @@
-# eve authoring benchmarks
+# eve authoring evals
 
-This private app measures how coding harnesses configure an eve project. It is
-separate from `e2e/`: those evals exercise an already-authored agent over HTTP,
-while these benchmarks give a coding agent a disposable workspace and grade its
-commands, external-system interactions, resulting source, and final handoff.
+This private workspace measures how coding agents author and modify eve projects. It uses
+[`@vercel/agent-eval`](https://github.com/vercel-labs/agent-eval) for coding-agent execution,
+Vercel Sandbox or local Docker isolation, hidden Vitest graders, transcripts, repeated runs,
+model matrices, and result reporting.
 
-## Photon starting point
+These evals are separate from `e2e/`. Runtime e2e suites exercise an already-authored agent
+over HTTP; authoring evals give a coding agent a disposable project and grade the resulting
+files, commands, validation, and any synthetic world events.
 
-The first case asks:
+## Cases and treatments
 
-> Let me talk to this agent via iMessage.
+Each directory under `evals/` is a standard agent-eval fixture:
 
-It runs Pi through AI SDK `HarnessAgent` in Vercel Sandbox. The case has three
-independent pieces:
+- `PROMPT.md` describes a realistic outcome without naming its implementation.
+- `EVAL.ts` contains hidden deterministic assertions.
+- the remaining files are the starter project visible to the coding agent.
 
-- `cases/photon-imessage.ts` owns the prompt and deterministic graders.
-- `user-simulator.ts` supplies one phone number and fails any other request for
-  user input.
-- `world/photon-world.ts` simulates Photon, Vercel CLI, and browser effects at
-  their process/network boundaries. eve itself has no benchmark-specific
-  provider flags.
+Experiment files under `experiments/` define treatments independently from cases. The
+initial pair compares an unprompted baseline with an `AGENTS.md` treatment that directs the
+agent to eve's version-matched installed documentation.
 
-The current world uses one inherited Node preload to route Photon `fetch` calls
-to a sandbox-local stateful server. Vercel and browser calls use executables
-placed first in `PATH`. These are transport details behind `BenchmarkWorld` and
-can move to network-policy forwarding without changing cases or graders.
+The initial iMessage case keeps real eve registry discovery, `eve add`, the registry setup
+protocol, package installation, and project validation. Only the external provider is
+synthetic. A fixture-owned setup package implements a deterministic authorization → user
+input → project creation → phone registration decision tree and records events under
+`__authoring_eval__/world-events.jsonl`. This tests an agent's setup decisions without
+coupling the authoring suite to Photon or live external services.
 
-## Run
+Until agent-eval supports controlled follow-up turns, the phone number is included in the
+initial prompt. The hidden grader still verifies that the agent passes that value through the
+structured non-interactive setup protocol.
 
-The benchmark requires Vercel Sandbox credentials and a model credential usable
-by the Pi harness.
+## Subject package
 
-```sh
-pnpm --filter @eve-internal/authoring-benchmarks benchmark:photon
-pnpm --filter @eve-internal/authoring-benchmarks benchmark:photon -- --model <pi-model-id>
-pnpm benchmark:authoring photon-imessage --verbose
-pnpm benchmark:authoring photon-imessage --summarize
-pnpm benchmark:authoring photon-imessage --summarize --summary-model openai/gpt-5.4-mini
-```
-
-By default the sandbox fetches the current `origin/main` from `vercel/eve` for
-every run; it does not use the invoking checkout's potentially stale local
-`main`. Override either value for a branch or fork reachable from the sandbox:
+By default, the runner builds and packs eve from the current checkout's exact `HEAD`. Set both
+variables below to evaluate a reachable branch or SHA from another checkout:
 
 ```sh
 EVE_BENCHMARK_REPOSITORY=https://github.com/<owner>/eve.git \
-EVE_BENCHMARK_REVISION=<branch> \
-  pnpm --filter @eve-internal/authoring-benchmarks benchmark:photon
+EVE_BENCHMARK_REVISION=<branch-or-SHA> \
+  pnpm benchmark:authoring author-000-imessage
 ```
 
-The first run for a case/revision builds a reusable Vercel Sandbox template:
-it clones, installs, and builds eve, creates the fresh project, and installs its
-dependencies before snapshotting. The runner resolves branch names such as
-`origin/main` to a commit SHA before constructing the cache identity, so repeated
-commands reuse the same template until that branch actually advances. Later
-runs fork that snapshot and perform only run-scoped setup. Changing the subject
-commit or benchmark bootstrap version intentionally creates a new template.
-Each concurrent eval still gets an isolated sandbox fork and workspace; they
-share the immutable prepared snapshot, not mutable run state.
+Remote revisions are resolved to a commit SHA before checkout. The built tarball is cached at
+`.eve/authoring-benchmarks/packages/<sha>/eve.tgz`, so repeated runs use exactly the same eve
+package without relying on a published version or a mutable monorepo path. Remove that file to
+force a package rebuild.
 
-The CLI prints each setup phase and a heartbeat every 15 seconds while sandbox
-or model work is in flight. Pass `--verbose` to also stream normalized
-HarnessAgent diagnostics. Pass `--summarize` to have a separate inexpensive LLM
-read the transcript, tool activity, world events, checks, and run error and print
-a concise operator summary. It defaults to `openai/gpt-5.4-mini`; override it
-with `--summary-model`. The summary is also persisted in the run artifact.
+## Run
 
-Run artifacts are written to `.eve/authoring-benchmarks/`, relative to the
-repository root when invoked through the commands above. The CLI prints the
-absolute artifact path when a run finishes. Each JSON artifact contains the
-transcript, normalized tool calls, HarnessAgent diagnostics, setup-world events,
-usage, checks, and any caught error.
+```sh
+pnpm benchmark:authoring author-000-imessage
+pnpm benchmark:authoring --all
+pnpm benchmark:authoring --dry
+pnpm benchmark:authoring author-000-imessage --force
+```
 
-If startup fails before the artifact can be assembled, the CLI prints the
-sandbox process's stdout/stderr directly. The Photon world also records its
-successful interactions in the artifact's `worldEvents`; there is intentionally
-no separate persistent sandbox log to hunt down.
+The command runs both `baseline` and `agents-md` treatments. Agent-eval writes transcripts,
+validation output, token usage, and summaries under `apps/authoring-benchmarks/results/`.
+Use its playground command to inspect or compare results.
 
-## Known first-iteration constraints
+`@vercel/agent-eval` chooses Vercel Sandbox when credentials are available and can otherwise
+use local Docker. The configured coding agent uses Vercel AI Gateway, so an applicable Gateway
+credential is required.
 
-- The Vercel shim covers the Photon happy-path commands only. Unhandled commands
-  fail rather than silently succeeding.
-- The user simulator recognizes direct phone-number questions using a narrow
-  deterministic matcher. A cheap model-backed classifier can replace it later
-  without changing the case contract.
+## Adding a case
+
+Copy an existing fixture, give it the next `author-NNN-*` name, then edit its prompt, hidden
+grader, and starter project. Prefer final source and deterministic event assertions over an
+LLM judge. Add a synthetic command or API world only when the task genuinely needs external
+state, and mock the external boundary rather than eve itself.
