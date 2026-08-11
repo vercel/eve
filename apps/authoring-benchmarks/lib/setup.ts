@@ -38,17 +38,16 @@ export async function setupAuthoringEval(
     }),
   );
   const tarballPath = `${sandbox.getWorkingDirectory()}/${TARBALL_PATH}`;
-  await measure(timings, "install bootstrap eve CLI", () =>
-    run(sandbox, "npm", [
-      "install",
-      "--prefix",
+  await measure(timings, "extract bootstrap eve CLI", () =>
+    run(sandbox, "tar", [
+      "-xzf",
+      TARBALL_PATH,
+      "-C",
       `${SEED_ROOT}/eve-cli`,
-      "--package-lock=false",
-      "--registry=https://registry.npmjs.org",
-      tarballPath,
+      "--strip-components=1",
     ]),
   );
-  const cliPath = `${sandbox.getWorkingDirectory()}/${SEED_ROOT}/eve-cli/node_modules/eve/bin/eve.js`;
+  const cliPath = `${sandbox.getWorkingDirectory()}/${SEED_ROOT}/eve-cli/bin/eve.js`;
   await measure(timings, "scaffold subject", () =>
     run(sandbox, "bash", [
       "-lc",
@@ -62,17 +61,6 @@ export async function setupAuthoringEval(
       ].join(" && "),
     ]),
   );
-  await measure(timings, "install eval dependencies", async () => {
-    await run(sandbox, "npm", ["pkg", "set", `dependencies.eve=file:${TARBALL_PATH}`]);
-    await run(sandbox, "npm", [
-      "install",
-      "--save-dev",
-      "--package-lock=false",
-      "--registry=https://registry.npmjs.org",
-      "vitest@4.1.10",
-    ]);
-  });
-
   if (options.syntheticImessage === true) {
     await measure(timings, "install synthetic iMessage world", async () => {
       await installSyntheticImessageWorld(sandbox);
@@ -83,6 +71,15 @@ export async function setupAuthoringEval(
       });
     });
   }
+  await measure(timings, "install eval dependencies", async () => {
+    await run(sandbox, "npm", [
+      "install",
+      "--save-dev",
+      "--package-lock=false",
+      "--registry=https://registry.npmjs.org",
+      "vitest@4.1.10",
+    ]);
+  });
   if (options.agentsMd !== true)
     await measure(timings, "remove agent guidance", () => removeScaffoldedAgentGuidance(sandbox));
   await sandbox.writeFiles({
@@ -146,10 +143,9 @@ async function installSyntheticImessageWorld(sandbox: Sandbox): Promise<void> {
     [`${REGISTRY_ROOT}/channel/photon-imessage.json`]: JSON.stringify(channel),
   });
   await run(sandbox, "npm", [
-    "install",
-    "--save",
-    "--package-lock=false",
-    `./${SEED_ROOT}/mock-imessage-setup`,
+    "pkg",
+    "set",
+    `dependencies.@eve-internal/mock-imessage-setup=file:${SEED_ROOT}/mock-imessage-setup`,
   ]);
   await run(sandbox, "bash", [
     "-lc",
