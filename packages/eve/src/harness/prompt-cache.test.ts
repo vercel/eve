@@ -90,6 +90,39 @@ describe("detectPromptCachePath", () => {
       detectPromptCachePath(makeObjectModel("amazon-bedrock", "amazon.nova-pro-v1:0")),
     ).toEqual({ kind: "none" });
   });
+
+  it("returns none for an opaque Bedrock inference profile id without a hint (#1314)", () => {
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "us.app-profile-7f3a2b1c")),
+    ).toEqual({ kind: "none" });
+  });
+
+  it("returns anthropic-direct for an opaque Bedrock inference profile id with an explicit anthropic hint (#1314)", () => {
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "us.app-profile-7f3a2b1c"), {
+        bedrockInferenceProfileTarget: "anthropic",
+      }),
+    ).toEqual({ kind: "anthropic-direct" });
+  });
+
+  it("hint does not override a contradictory provider id (#1314)", () => {
+    // Provider is not Bedrock — the hint is gated on `providerName.includes("bedrock")`
+    // so it cannot accidentally mark an unrelated provider as anthropic-direct.
+    expect(
+      detectPromptCachePath(makeObjectModel("openai.chat", "gpt-5"), {
+        bedrockInferenceProfileTarget: "anthropic",
+      }),
+    ).toEqual({ kind: "none" });
+  });
+
+  it("hint does not disable an inferred anthropic-direct (heuristics first) (#1314)", () => {
+    expect(
+      detectPromptCachePath(
+        makeObjectModel("amazon-bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
+        { bedrockInferenceProfileTarget: "anthropic" },
+      ),
+    ).toEqual({ kind: "anthropic-direct" });
+  });
 });
 
 describe("getAnthropicCacheMarker", () => {

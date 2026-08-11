@@ -9,6 +9,24 @@ export type PromptCachePath =
   | { readonly kind: "none" };
 
 /**
+ * Optional author-supplied hints about the resolved model that are not
+ * recoverable from the `LanguageModel` surface.
+ *
+ * The motivating case is AWS Bedrock application inference profiles (#1314):
+ * the profile id can be opaque and omit `anthropic`, so a Bedrock-resolved
+ * Anthropic model classifies as `none` and receives no cache points. An
+ * agent's `modelOptions.providerOptions.bedrock.inferenceProfileTarget` can
+ * declare the underlying provider family (`"anthropic"`) explicitly.
+ */
+export interface PromptCacheHint {
+  /**
+   * The declared provider family of the resolved Bedrock application
+   * inference profile, when it is not recoverable from the profile id.
+   */
+  readonly bedrockInferenceProfileTarget?: "anthropic";
+}
+
+/**
  * Cache marker injected on the Anthropic-direct path.
  *
  * The marker carries two provider namespaces because Anthropic models are
@@ -49,8 +67,17 @@ const ANTHROPIC_CACHE_MARKER: AnthropicCacheMarker = Object.freeze({
  * Detects which prompt caching path applies to a resolved model.
  *
  * Runs once per harness step right after `resolveModel()`.
+ *
+ * `hints` carries declaration-side knowledge that the `LanguageModel` surface
+ * cannot express (e.g. the underlying provider family of an opaque Bedrock
+ * application inference profile — #1314). Hints are consulted after the
+ * provider-name and model-id heuristics so an explicit declaration cannot
+ * accidentally disable an inferred cache path.
  */
-export function detectPromptCachePath(model: LanguageModel): PromptCachePath {
+export function detectPromptCachePath(
+  model: LanguageModel,
+  hints?: PromptCacheHint,
+): PromptCachePath {
   if (typeof model === "string") {
     return { kind: "gateway-auto" };
   }
@@ -65,8 +92,13 @@ export function detectPromptCachePath(model: LanguageModel): PromptCachePath {
   // model id (e.g. `anthropic.claude-3-5-sonnet-20241022-v2:0`), so it must be
   // matched on the model id rather than the provider name.
   const modelId = typeof model.modelId === "string" ? model.modelId.toLowerCase() : "";
-  if (providerName.includes("bedrock") && modelId.includes("anthropic")) {
-    return { kind: "anthropic-direct" };
+  if (providerName.includes("bedrock")) {
+    if (modelId.includes("anthropic")) {
+      return { kind: "anthropic-direct" };
+    }
+    if (hints?.bedrockInferenceProfileTarget === "anthropic") {
+      return { kind: "anthropic-direct" };
+    }
   }
 
   return { kind: "none" };
