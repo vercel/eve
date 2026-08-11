@@ -38,13 +38,17 @@ export async function setupAuthoringEval(
     }),
   );
   const tarballPath = `${sandbox.getWorkingDirectory()}/${TARBALL_PATH}`;
-  await measure(timings, "extract bootstrap eve CLI", () =>
-    run(sandbox, "bash", [
-      "-lc",
-      `mkdir -p ${SEED_ROOT}/eve-cli && tar -xzf ${TARBALL_PATH} -C ${SEED_ROOT}/eve-cli --strip-components=1`,
+  await measure(timings, "install bootstrap eve CLI", () =>
+    run(sandbox, "npm", [
+      "install",
+      "--prefix",
+      `${SEED_ROOT}/eve-cli`,
+      "--package-lock=false",
+      "--registry=https://registry.npmjs.org",
+      tarballPath,
     ]),
   );
-  const cliPath = `${sandbox.getWorkingDirectory()}/${SEED_ROOT}/eve-cli/bin/eve.js`;
+  const cliPath = `${sandbox.getWorkingDirectory()}/${SEED_ROOT}/eve-cli/node_modules/eve/bin/eve.js`;
   await measure(timings, "scaffold subject", () =>
     run(sandbox, "bash", [
       "-lc",
