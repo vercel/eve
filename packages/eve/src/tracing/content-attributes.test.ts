@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { withoutDeclinedContent } from "#tracing/content-attributes.js";
 
 const ATTRIBUTES = {
+  "agent.channel.delivery.input": '{"message":"private"}',
   "ai.prompt.messages": "what the user said",
   "ai.response.finish_reason": "stop",
   "ai.response.text": "what the model said",
@@ -44,6 +45,7 @@ describe("withoutDeclinedContent", () => {
     expect(
       withoutDeclinedContent(ATTRIBUTES, { recordInputs: true, recordOutputs: false }),
     ).toEqual({
+      "agent.channel.delivery.input": '{"message":"private"}',
       "ai.prompt.messages": "what the user said",
       "ai.response.finish_reason": "stop",
       "gen_ai.request.model": "test-model",

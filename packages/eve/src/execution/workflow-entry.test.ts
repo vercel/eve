@@ -11,6 +11,7 @@ import {
   resolveInitialTurnCallerStep,
 } from "#execution/delegated-parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import {
@@ -22,7 +23,6 @@ import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
-import { dispatchTurnStep } from "#execution/workflow-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
@@ -58,9 +58,9 @@ vi.mock("./create-session-step.js", () => ({
 }));
 
 vi.mock("./route-child-delivery.js", () => ({
-  routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads, sessionState }) => ({
+  routeDeliverToChildren: vi.fn().mockImplementation(async ({ delivery, sessionState }) => ({
     kind: "continue",
-    remainder: payloads[0],
+    remainder: delivery,
     sessionState,
   })),
 }));
@@ -75,7 +75,7 @@ vi.mock("./terminate-child-sessions-step.js", () => ({
   terminateChildSessionsStep: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("./workflow-steps.js", () => ({
+vi.mock("./dispatch-turn-step.js", () => ({
   dispatchTurnStep: vi.fn().mockImplementation(async () => ({ runId: "turn-run" })),
 }));
 
@@ -843,7 +843,7 @@ describe("workflowEntry", () => {
       serializedContext: createSerializedContext(),
     });
 
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toMatchObject({
       auth: undefined,
       requestId: "req_followup",
       kind: "deliver",
@@ -976,7 +976,7 @@ describe("workflowEntry", () => {
 
     expect(result).toEqual({ output: "after delivery" });
     expect(dispatchTurnStep).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toMatchObject({
       auth: undefined,
       kind: "deliver",
       payloads: [{ message: "not for the child" }],
@@ -1410,7 +1410,7 @@ describe("workflowEntry", () => {
 
     expect(result).toEqual({ output: "" });
     expect(nonTurnHookTokens()).toEqual(["slack:C01:", "slack:C01:1800000000.123456"]);
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toMatchObject({
       kind: "deliver",
       payloads: [{ message: "follow up" }],
     });

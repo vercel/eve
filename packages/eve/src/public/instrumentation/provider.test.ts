@@ -60,6 +60,18 @@ describe("defineInstrumentation", () => {
     expect(isInstrumentationProvider(provider)).toBe(true);
   });
 
+  it("exposes channel delivery lifecycle events", () => {
+    const provider = defineInstrumentation({
+      events: {
+        "channel.delivery.started": (event) => void event.delivery.deliveryId,
+        "channel.delivery.completed": (event) => void event.outcome,
+        "channel.delivery.failed": (event) => void event.errorCode,
+      },
+    });
+
+    expect(isInstrumentationProvider(provider)).toBe(true);
+  });
+
   it("preserves the authored fields", () => {
     const setup = (): void => {};
     const declaration = defineInstrumentation({ setup });

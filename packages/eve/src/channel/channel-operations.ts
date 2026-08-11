@@ -1,6 +1,7 @@
 import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
 import {
   createChannelAddressFn,
   type ChannelAddressDeliveryOptions,
@@ -91,7 +92,7 @@ export interface InternalChannelSource<TState = undefined> extends ChannelSource
 export function createChannelOperations<TState = undefined>(input: {
   readonly adapter: ChannelAdapter<any>;
   readonly channelName: string;
-  readonly metadata?: { readonly requestId?: string };
+  readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
 }): ChannelReceiveContext<TState> {

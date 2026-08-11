@@ -1,5 +1,6 @@
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { contextStorage } from "#context/container.js";
+import { instrumentChannelDelivery } from "#harness/channel-delivery-instrumentation.js";
 import type {
   InstrumentationActionFailedEvent,
   InstrumentationActionStartedEvent,
@@ -31,6 +32,7 @@ import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions
 
 export interface CreateInstrumentationHandleEventInput {
   readonly agentName?: string;
+  readonly channelKind?: string;
   readonly getAttemptScope?: () => InstrumentationAttemptScope | undefined;
   readonly handleEvent?: HandleEventFn;
   readonly hooks?: InstrumentationHooks;
@@ -57,6 +59,39 @@ export function createInstrumentationHandleEvent(
     await handleEvent(event, messages);
     const lifecycleEvent = toLifecycleEvent(event, input, activeTurnId);
     if (event.type === "turn.started") activeTurnId = event.data.turnId;
+    if (
+      event.type === "turn.cancelled" ||
+      event.type === "turn.completed" ||
+      event.type === "turn.failed" ||
+      event.type === "session.completed" ||
+      event.type === "session.failed"
+    ) {
+      const ctx = contextStorage.getStore();
+      if (ctx !== undefined) {
+        await instrumentChannelDelivery({
+          ctx,
+          error:
+            event.type === "turn.failed" || event.type === "session.failed"
+              ? new Error(event.data.message)
+              : undefined,
+          errorCode:
+            event.type === "turn.failed" || event.type === "session.failed"
+              ? event.data.code
+              : undefined,
+          hooks,
+          includeTurn:
+            event.type === "turn.cancelled" ||
+            event.type === "turn.completed" ||
+            event.type === "turn.failed",
+          outcome:
+            event.type === "turn.failed" || event.type === "session.failed"
+              ? "failed"
+              : event.type === "turn.cancelled"
+                ? "cancelled"
+                : "completed",
+        });
+      }
+    }
     if (lifecycleEvent !== undefined) await hooks.publish(lifecycleEvent);
     if (event.type === "actions.requested") {
       await publishActionStarts(event, input, hooks, publishedActions);
@@ -257,6 +292,7 @@ function toLifecycleEvent(
     case "session.started":
       return {
         agentName: input.agentName,
+        channelKind: input.channelKind,
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId ?? input.sessionId,

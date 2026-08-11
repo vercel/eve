@@ -33,4 +33,18 @@ describe("sendCommandToDelivery", () => {
     // `payloads`. Both views must reference the same delivery.
     expect(wire.payloads[0]).toBe(wire.payload);
   });
+
+  it("preserves delivery identity on the durable envelope", () => {
+    const delivery = {
+      channelKind: "channel:slack",
+      channelName: "slack",
+      deliveryId: "delivery-1",
+      requestId: "request-1",
+    };
+
+    expect(
+      sendCommandToDelivery({ delivery, kind: "send", payload: { message: "hello" } })
+        .deliveryMetadata,
+    ).toEqual([{ ...delivery, payloadIndex: 0 }]);
+  });
 });

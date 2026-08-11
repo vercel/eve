@@ -86,6 +86,36 @@ describe("createChannelAddress", () => {
     );
   });
 
+  it("mints a distinct delivery identity for each channel operation", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      metadata: {
+        channelKind: "channel:slack",
+        channelName: "slack",
+        requestId: "request-1",
+      },
+      runtime,
+    });
+
+    await address.send("first", { auth: null });
+    await address.send("second", { auth: null });
+
+    const calls = vi.mocked(runtime.dispatchContinuation).mock.calls;
+    const first = calls[0]?.[0].command;
+    const second = calls[1]?.[0].command;
+    expect(first?.kind === "send" ? first.delivery : undefined).toMatchObject({
+      channelKind: "channel:slack",
+      channelName: "slack",
+      requestId: "request-1",
+    });
+    expect(first?.kind === "send" ? first.delivery?.deliveryId : undefined).not.toBe(
+      second?.kind === "send" ? second.delivery?.deliveryId : undefined,
+    );
+  });
+
   it("binds every control directly to the namespaced continuation token", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({

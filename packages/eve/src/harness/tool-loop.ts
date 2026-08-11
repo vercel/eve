@@ -32,6 +32,7 @@ import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
 import {
   AuthKey,
+  ChannelInstrumentationKey,
   ParentSessionKey,
   ParentTraceContextKey,
   SessionCallbackKey,
@@ -601,6 +602,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let activeAttemptScope: InstrumentationAttemptScope | undefined;
     const emit = createInstrumentationHandleEvent({
       agentName: config.runtimeIdentity?.agentName,
+      channelKind: store?.get(ChannelInstrumentationKey)?.kind,
       getAttemptScope: () => activeAttemptScope,
       handleEvent: baseEmit,
       hooks: config.instrumentation?.hooks,

@@ -233,6 +233,14 @@ async function withTimeout(
 
 /** Model and SDK tool children are scoped to an attempt; durable pairs are not. */
 function stateOwner(event: InstrumentationEvent): InstrumentationStateOwner {
+  if (
+    event.type === "channel.delivery.started" ||
+    event.type === "channel.delivery.cancelled" ||
+    event.type === "channel.delivery.completed" ||
+    event.type === "channel.delivery.failed"
+  ) {
+    return { sessionId: event.sessionId, turnId: event.turnId };
+  }
   if (!("scope" in event)) return {};
   if (event.type.startsWith("action.") || event.type.startsWith("input.")) {
     return { sessionId: event.scope.sessionId, turnId: event.scope.turnId };

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { ActiveChannelDeliveriesKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   createActionResultEvent,
@@ -11,13 +12,18 @@ import {
   createStepCompletedEvent,
   createStepStartedEvent,
   createTurnCompletedEvent,
+  createTurnCancelledEvent,
+  createTurnFailedEvent,
   createTurnStartedEvent,
 } from "#protocol/message.js";
 import {
   createInstrumentationHandleEvent,
   publishInputResolutions,
 } from "#harness/instrumentation-native-events.js";
-import type { InstrumentationHooks } from "#harness/instrumentation-lifecycle.js";
+import type {
+  InstrumentationEvent,
+  InstrumentationHooks,
+} from "#harness/instrumentation-lifecycle.js";
 import {
   actionIdempotencyKey,
   inputIdempotencyKey,
@@ -27,6 +33,57 @@ import {
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 
 describe("createInstrumentationHandleEvent", () => {
+  it.each([
+    ["completed", createTurnCompletedEvent({ sequence: 0, turnId: "turn_0" })],
+    ["cancelled", createTurnCancelledEvent({ sequence: 0, turnId: "turn_0" })],
+    [
+      "failed",
+      createTurnFailedEvent({
+        code: "MODEL_CALL_FAILED",
+        message: "failed",
+        sequence: 0,
+        turnId: "turn_0",
+      }),
+    ],
+  ] as const)("terminates active channel deliveries when a turn is %s", async (outcome, event) => {
+    const ctx = new ContextContainer();
+    ctx.set(ActiveChannelDeliveriesKey, [
+      {
+        delivery: {
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: "delivery-1",
+        },
+        rootSessionId: "session-1",
+        sequence: 0,
+        sessionId: "session-1",
+        turnId: "turn_0",
+      },
+    ]);
+    const events: InstrumentationEvent[] = [];
+    const handleEvent = createInstrumentationHandleEvent({
+      handleEvent: async () => {},
+      hooks: {
+        capturesContent: false,
+        publish: async (published) => {
+          events.push(published);
+        },
+      },
+      sessionId: "session-1",
+    })!;
+
+    await contextStorage.run(ctx, () => handleEvent(event));
+
+    expect(
+      events.find((published) => published.type.startsWith("channel.delivery.")),
+    ).toMatchObject({
+      errorCode: outcome === "failed" ? "MODEL_CALL_FAILED" : undefined,
+      outcome,
+      type: `channel.delivery.${outcome}`,
+    });
+    expect(ctx.get(ActiveChannelDeliveriesKey)).toBeUndefined();
+  });
+
   it("publishes native lifecycle transitions after durable handling", async () => {
     const order: string[] = [];
     const hooks: InstrumentationHooks = {

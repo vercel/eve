@@ -154,6 +154,56 @@ export function inputIdempotencyKey(sessionId: string, turnId: string, requestId
   return `input:${sessionId}:${turnId}:${requestId}`;
 }
 
+export function channelDeliveryIdempotencyKey(sessionId: string, deliveryId: string): string {
+  return `channel-delivery:${sessionId}:${deliveryId}`;
+}
+
+export interface InstrumentationChannelDeliveryRef {
+  readonly channelKind: string;
+  readonly channelName: string;
+  readonly deliveryId: string;
+  readonly requestId?: string;
+  readonly requestTraceContext?: InstrumentationTraceContext;
+}
+
+/** Known framework delivery input; adapter-specific fields are never projected. */
+export interface InstrumentationChannelDeliveryInput {
+  readonly context?: readonly string[];
+  readonly inputResponses?: readonly InstrumentationInputResponse[];
+  readonly message?: unknown;
+  readonly outputSchema?: unknown;
+}
+
+interface InstrumentationChannelDeliveryScope {
+  readonly agentName?: string;
+  readonly delivery: InstrumentationChannelDeliveryRef;
+  readonly idempotencyKey: string;
+  readonly rootSessionId: string;
+  readonly sequence?: number;
+  readonly sessionId: string;
+  readonly turnId?: string;
+}
+
+export interface InstrumentationChannelDeliveryStartedEvent extends InstrumentationChannelDeliveryScope {
+  readonly parentTraceContext?: InstrumentationTraceContext;
+  readonly type: "channel.delivery.started";
+  /** Content. Absent unless this provider declared `capture: "content"`. */
+  readonly input?: InstrumentationChannelDeliveryInput;
+}
+
+export type InstrumentationChannelDeliveryOutcome = "cancelled" | "completed" | "failed";
+
+export interface InstrumentationChannelDeliveryTerminalEvent extends InstrumentationChannelDeliveryScope {
+  readonly type:
+    | "channel.delivery.cancelled"
+    | "channel.delivery.completed"
+    | "channel.delivery.failed";
+  /** Content. Absent unless this provider declared `capture: "content"`. */
+  readonly error?: unknown;
+  readonly errorCode?: string;
+  readonly outcome: InstrumentationChannelDeliveryOutcome;
+}
+
 /** Framework-owned reason an agent suspended for user input. */
 export type InstrumentationInputKind = "question" | "session-limit" | "tool-approval";
 
@@ -481,6 +531,10 @@ export interface InstrumentationProviderDefinition {
   /** Defaults to `"metadata"`. See {@link InstrumentationCapture}. */
   readonly capture?: InstrumentationCapture;
   readonly events?: {
+    readonly "channel.delivery.started"?: InstrumentationEventHandler<InstrumentationChannelDeliveryStartedEvent>;
+    readonly "channel.delivery.cancelled"?: InstrumentationEventHandler<InstrumentationChannelDeliveryTerminalEvent>;
+    readonly "channel.delivery.completed"?: InstrumentationEventHandler<InstrumentationChannelDeliveryTerminalEvent>;
+    readonly "channel.delivery.failed"?: InstrumentationEventHandler<InstrumentationChannelDeliveryTerminalEvent>;
     readonly "step.attempt.started"?: InstrumentationEventHandler<InstrumentationStepAttemptStartedEvent>;
     readonly "step.attempt.completed"?: InstrumentationEventHandler<InstrumentationStepAttemptCompletedEvent>;
     readonly "step.attempt.failed"?: InstrumentationEventHandler<InstrumentationStepAttemptFailedEvent>;
@@ -527,6 +581,8 @@ export type InstrumentationHooksInput =
 
 /** Events that pair a start with its terminal under one `idempotencyKey`. */
 export type InstrumentationCorrelatedEvent =
+  | InstrumentationChannelDeliveryStartedEvent
+  | InstrumentationChannelDeliveryTerminalEvent
   | InstrumentationInputRequestedEvent
   | InstrumentationInputResolvedEvent
   | InstrumentationActionStartedEvent

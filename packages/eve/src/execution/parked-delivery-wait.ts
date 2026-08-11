@@ -37,7 +37,7 @@ export type NextTurnInstruction =
   | {
       readonly kind: "turn";
       readonly deliver: DeliverHookPayload;
-      readonly remainder: DeliverPayload;
+      readonly remainder: DeliverHookPayload;
       readonly sessionState: DurableSessionState;
     };
 
@@ -107,9 +107,8 @@ async function awaitNextTurnDelivery(input: {
     }
 
     const routed = await routeDeliverToChildren({
-      auth: deliver.auth,
+      delivery: deliver,
       parentWritable: input.driverWritable,
-      payloads: deliver.payloads,
       sessionState,
     });
     sessionState = routed.sessionState;
@@ -181,6 +180,12 @@ async function waitForNextSessionAction(input: {
     }
 
     if (first.value.kind === "cancel") {
+      continue;
+    }
+
+    // Child results also arrive through this inbox, but the runtime-action
+    // collector owns them. They are not channel deliveries.
+    if (first.value.kind === "runtime-action-result") {
       continue;
     }
 

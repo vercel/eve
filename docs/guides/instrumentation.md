@@ -58,6 +58,28 @@ You are responsible for ensuring any observability or eval provider is approved 
 
 The third configurable surface, [runtime context events](#runtime-context), attaches per-model-call values to these spans.
 
+## Channel delivery traces
+
+Instrumentation providers receive `channel.delivery.started` followed by
+`channel.delivery.completed`, `channel.delivery.cancelled`, or
+`channel.delivery.failed` for every inbound channel operation. The lifecycle
+covers durable processing through the terminal state of the resulting turn, not
+messages an adapter sends back to Slack, Telegram, Twilio, or another platform.
+Several deliveries can coalesce into one turn while retaining separate lifecycle
+pairs, and an adapter can consume a delivery without starting a turn.
+
+Each operation has a framework-owned `deliveryId` distinct from its optional
+platform request ID. Metadata-only providers receive identity, channel, session,
+and outcome fields. Content providers additionally receive only eve's known
+message, context, input-response, and output-schema fields; adapter-specific
+payload fields are never projected.
+
+The built-in OpenTelemetry provider maps each pair to an
+`agent.channel.delivery` consumer span under the durable session window. When
+`traceChannelRequests: true` creates an inbound HTTP server span, the delivery
+span links to it with `eve.link.type=channel.request` rather than using the
+short-lived request span as its parent.
+
 ## Runtime context
 
 _Runtime context_ is an [AI SDK concept](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text): a user-defined object that flows through a generation lifecycle. eve exposes it through `events["step.started"]`, a callback that runs once eve has assembled the model input for an attempt and returns `{ runtimeContext }`. Because eve registers the AI SDK's OpenTelemetry integration with runtime context enabled, those returned values ride onto the model-call span and its children. The field is named `runtimeContext`, not `metadata`, because AI SDK v7 carries per-call attributes on runtime context rather than a dedicated metadata field.

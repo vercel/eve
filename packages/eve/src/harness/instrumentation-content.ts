@@ -3,6 +3,8 @@ import type { InstrumentationEvent } from "#harness/instrumentation-lifecycle.js
 /** Returns an immutable event projection with conversation content removed. */
 export function withoutInstrumentationContent(event: InstrumentationEvent): InstrumentationEvent {
   switch (event.type) {
+    case "channel.delivery.started":
+      return Object.freeze({ ...event, input: undefined });
     case "action.started":
       return Object.freeze({ ...event, input: undefined });
     case "action.completed":
@@ -30,6 +32,7 @@ export function withoutInstrumentationContent(event: InstrumentationEvent): Inst
     case "step.attempt.failed":
     case "tool.call.failed":
     case "turn.failed":
+    case "channel.delivery.failed":
       return Object.freeze({ ...event, error: undefined });
     default:
       return event;

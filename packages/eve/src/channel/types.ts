@@ -85,6 +85,20 @@ export interface SessionTraceContext {
   readonly traceId: string;
 }
 
+/** Framework-owned identity for one inbound channel operation. */
+export interface ChannelDeliveryMetadata {
+  readonly channelKind: string;
+  readonly channelName: string;
+  readonly deliveryId: string;
+  readonly requestId?: string;
+  readonly requestTraceContext?: SessionTraceContext;
+}
+
+/** Associates delivery metadata with one payload in a durable envelope. */
+export interface ChannelDeliveryMetadataEntry extends ChannelDeliveryMetadata {
+  readonly payloadIndex: number;
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -159,6 +173,7 @@ export type SessionCommand =
       readonly caller?: TurnCaller;
       readonly kind: "send";
       readonly payload: DeliverPayload;
+      readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
@@ -211,6 +226,8 @@ export interface DeliverHookPayload {
   readonly auth?: SessionAuthContext | null;
   /** Delegated caller waiting for this turn's settled result. */
   readonly caller?: TurnCaller;
+  /** Additive durable metadata. Absent on envelopes written by older deployments. */
+  readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
   /** Inbound channel request id used only for workflow attributes. */
   readonly requestId?: string;
   readonly kind: "deliver";
@@ -370,6 +387,8 @@ export interface RunInput {
    */
   readonly channelName?: string;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  /** Inbound channel operation that created this session. */
+  readonly delivery?: ChannelDeliveryMetadata;
   /**
    * Authenticated caller principal for this session. `null` means the
    * request was accepted with no credentials.

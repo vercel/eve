@@ -3,6 +3,7 @@ import { callAdapterEventHandler } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { ChannelInstrumentationKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
   createDurableSessionState,
@@ -103,6 +104,7 @@ export async function settleCancelledTurnStep(input: {
         const emit =
           createInstrumentationHandleEvent({
             agentName: bundle.turnAgent.id,
+            channelKind: ctx.get(ChannelInstrumentationKey)?.kind,
             handleEvent: baseEmit,
             hooks: instrumentation?.hooks,
             sessionId: session.sessionId,

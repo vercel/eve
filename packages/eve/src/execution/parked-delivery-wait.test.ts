@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
@@ -90,6 +90,13 @@ function messageRead(message: string): ScriptedRead {
   };
 }
 
+function runtimeActionResultRead(): ScriptedRead {
+  return {
+    result: { done: false, value: { kind: "runtime-action-result", results: [] } },
+    source: "session",
+  };
+}
+
 // Routing never runs in these tests: scripted reads stop at authorization
 // instructions or exhaust before any deliver-kind turn payload.
 const sessionState = { sessionId: "ses-parked-wait" } as DurableSessionState;
@@ -106,6 +113,14 @@ function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelive
 }
 
 describe("nextTurnDelivery", () => {
+  beforeEach(() => {
+    vi.mocked(routeDeliverToChildren).mockImplementation(async ({ delivery, sessionState }) => ({
+      kind: "continue",
+      remainder: delivery,
+      sessionState,
+    }));
+  });
+
   afterEach(() => {
     vi.mocked(routeDeliverToChildren).mockReset();
   });
@@ -132,6 +147,20 @@ describe("nextTurnDelivery", () => {
 
     expect(next.kind).toBe("authorization");
     expect(inbox.windowTransitions).toEqual([true, false]);
+  });
+
+  it("ignores child results already owned by the runtime-action collector", async () => {
+    const inbox = createMockInbox([runtimeActionResultRead(), messageRead("follow up")]);
+
+    const next = await nextTurnDelivery({
+      ...waitInput(inbox),
+      awaitAuthorizationCallbacks: false,
+    });
+
+    expect(next).toMatchObject({
+      kind: "turn",
+      remainder: { kind: "deliver", payloads: [{ message: "follow up" }] },
+    });
   });
 
   it("does not let buffered deliveries bypass a ready authorization callback", async () => {
@@ -195,7 +224,7 @@ describe("nextTurnDelivery", () => {
       })
       .mockResolvedValueOnce({
         kind: "continue",
-        remainder: { message: "parent turn" },
+        remainder: { kind: "deliver", payloads: [{ message: "parent turn" }] },
         sessionState: retiredState,
       });
 

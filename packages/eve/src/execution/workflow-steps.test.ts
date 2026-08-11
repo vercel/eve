@@ -33,18 +33,15 @@ import {
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import { createTurnWorkflowInput } from "#execution/durable-session-migrations/turn-workflow.js";
+import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { defineTool } from "#public/definitions/tool.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
-import {
-  dispatchTurnStep,
-  routeProxiedDeliverStep,
-  resolveEffectiveOutputSchema,
-  turnStep,
-} from "#execution/workflow-steps.js";
+import { routeProxiedDeliverStep } from "#execution/route-proxied-deliver-step.js";
+import { resolveEffectiveOutputSchema, turnStep } from "#execution/workflow-steps.js";
 import {
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
   turnWorkflowReference,
@@ -342,6 +339,40 @@ describe("routeProxiedDeliverStep", () => {
     await routeProxiedDeliverStep(input);
 
     expect(resumeHookMock.mock.calls.map(([token]) => token)).toEqual(["child-a", "child-b"]);
+  });
+
+  it("preserves metadata when the descendant wholly owns the delivery", async () => {
+    const session = upsertProxyInputRequests({
+      entries: [["request-1", { childContinuationToken: "child-token", kind: "tool-approval" }]],
+      forChildContinuationToken: "child-token",
+      session: createStubSession({ sessionId: "parent-session" }),
+    });
+    installSessionStoreMocks([session]);
+    const metadata = {
+      channelKind: "channel:slack",
+      channelName: "slack",
+      deliveryId: "delivery-1",
+      payloadIndex: 0,
+      requestId: "request-http-1",
+    };
+
+    await routeProxiedDeliverStep({
+      delivery: {
+        deliveryMetadata: [metadata],
+        kind: "deliver",
+        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "request-1" }] }],
+      },
+      parentWritable: createTestWritable(),
+      sessionState: createStubSessionState({
+        hasProxyInputRequests: true,
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "child-token",
+      expect.objectContaining({ deliveryMetadata: [metadata] }),
+    );
   });
 });
 

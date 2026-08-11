@@ -27,6 +27,7 @@ import {
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { createAgentActionInstrumentation } from "#tracing/agent-action-instrumentation.js";
 import { createAgentApprovalInstrumentation } from "#tracing/agent-approval-instrumentation.js";
+import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channel-delivery-instrumentation.js";
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import type {
@@ -478,6 +479,15 @@ export function createAgentOtelInstrumentation(
     return state;
   };
 
+  const channelDeliveries = createAgentChannelDeliveryInstrumentation({
+    ensureSessionContext,
+    frameworkVersion: input.frameworkVersion,
+    idGenerator: input.idGenerator,
+    recordInputs,
+    stateStore: input.stateStore,
+    tracer: input.tracer,
+  });
+
   const advanceSessionWindow = (
     sessionId: string,
     session: AgentSessionTraceState,
@@ -518,6 +528,7 @@ export function createAgentOtelInstrumentation(
       // what stops the projection from being built upstream.
       capture: recordInputs || recordOutputs ? "content" : "metadata",
       events: {
+        ...channelDeliveries,
         "action.completed": actions.events["action.completed"],
         "action.failed": actions.events["action.failed"],
         async "action.started"(event, ctx) {

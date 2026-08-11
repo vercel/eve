@@ -1,4 +1,5 @@
 import { contextStorage, loadContext } from "#context/container.js";
+import { ActiveChannelDeliveriesKey } from "#context/keys.js";
 import { ContextKey } from "#context/key.js";
 import { type JsonValue, parseJsonValue } from "#shared/json.js";
 import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
@@ -81,6 +82,7 @@ export function preserveSerializedInstrumentationState(
     InstrumentationStateKey,
     InstrumentationActionScopeKey,
     InstrumentationInputScopeKey,
+    ActiveChannelDeliveriesKey,
   ]) {
     const state = interrupted[key.name];
     if (state !== undefined) preserved = { ...preserved, [key.name]: state };
