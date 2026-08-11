@@ -5,6 +5,7 @@ import type { Sandbox } from "@vercel/agent-eval";
 const TARBALL_PATH = "__authoring_eval__/eve.tgz";
 const REGISTRY_ROOT = "__authoring_eval__/registry";
 const SEED_ROOT = "__authoring_eval__/seed";
+const SCAFFOLD_ROOT = "/tmp/eve-authoring-subject";
 
 export interface SetupAuthoringEvalOptions {
   readonly agentsMd?: boolean;
@@ -39,9 +40,17 @@ export async function setupAuthoringEval(
     "--registry=https://registry.npmjs.org",
     tarballPath,
   ]);
+  const cliPath = `${sandbox.getWorkingDirectory()}/${SEED_ROOT}/eve-cli/node_modules/eve/bin/eve.js`;
   await run(sandbox, "bash", [
     "-lc",
-    `AI_AGENT=benchmark npm_config_user_agent=npm/11 EVE_INIT_PACKAGE_SPEC=${shellQuote(tarballPath)} node ${SEED_ROOT}/eve-cli/node_modules/eve/bin/eve.js init .`,
+    [
+      `rm -rf ${SCAFFOLD_ROOT}`,
+      `cd /tmp`,
+      `AI_AGENT=benchmark npm_config_user_agent=npm/11 EVE_INIT_PACKAGE_SPEC=${shellQuote(tarballPath)} node ${shellQuote(cliPath)} init ${SCAFFOLD_ROOT.slice("/tmp/".length)}`,
+      `rm -rf ${SCAFFOLD_ROOT}/.git`,
+      `cp -a ${SCAFFOLD_ROOT}/. ${shellQuote(sandbox.getWorkingDirectory())}/`,
+      `rm -rf ${SCAFFOLD_ROOT}`,
+    ].join(" && "),
   ]);
   await run(sandbox, "npm", ["pkg", "set", `dependencies.eve=file:${TARBALL_PATH}`]);
 
