@@ -47,6 +47,12 @@ npx eve@latest init my-agent
 This creates a new `my-agent` directory, installs its dependencies, initializes Git, and starts
 the interactive terminal UI.
 
+To start with another AI Gateway model, pass its model ID:
+
+```bash
+npx eve@latest init my-agent --model openai/gpt-5.6-terra
+```
+
 To add eve to an existing project, pass a path:
 
 ```bash
