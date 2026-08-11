@@ -137,7 +137,7 @@ CLI commands:
 - `eve build` — compile `.eve/` and build the host output
 - `eve start` — serve the built `.output/` app
 - `eve dev` — start the local runtime and REPL
-- `eve model <model-id>` — change the root agent's AI Gateway model
+- `eve set [--model <model-id>] [--reasoning <effort>]` — change root model settings
 - `eve extension init <name>` — create a new extension package
 - `eve extension build` — build an extension package
 

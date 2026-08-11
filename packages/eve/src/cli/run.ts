@@ -240,11 +240,16 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     );
 
   program
-    .command("model <model>")
-    .description("Change the root agent model (provider/model-id).")
-    .action(async (model: string) => {
-      const { runModelCommand } = await import("#cli/commands/model.js");
-      await runModelCommand(logger, appRoot, model);
+    .command("set")
+    .description("Change root agent model settings.")
+    .option("--model <model>", "Set the agent model (provider/model-id)")
+    .option(
+      "--reasoning <effort>",
+      "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
+    )
+    .action(async (options: { model?: string; reasoning?: string }) => {
+      const { runSetCommand } = await import("#cli/commands/set.js");
+      await runSetCommand(logger, appRoot, options);
     });
 
   registerProjectCommands({ program, logger, appRoot });

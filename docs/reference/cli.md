@@ -1,6 +1,6 @@
 ---
 title: "CLI"
-description: "Reference for every eve CLI command: init, info, build, start, dev, logs, trace, link, deploy, eval, channels, and extension."
+description: "Reference for every eve CLI command: init, set, info, build, start, dev, logs, trace, link, deploy, eval, channels, and extension."
 ---
 
 The `eve` binary (`bin: eve`) runs from your app root, and every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve dev`.
@@ -26,7 +26,7 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve channels list`           | List user-authored channels                                                                                                                           |
 | `eve extension init [target]` | Create a new extension package                                                                                                                        |
 | `eve extension build`         | Build the current package as an extension                                                                                                             |
-| `eve model <model>`           | Change the root agent's AI Gateway model                                                                                                              |
+| `eve set`                     | Change the root agent's model and reasoning effort                                                                                                    |
 | `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                                     |
 | `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                                          |
 
@@ -83,19 +83,27 @@ eve extension build
 
 Builds the complete agent-shaped extension tree into its configured dist root, emits declarations and compatibility metadata, and fills the package `exports` map. The original TypeScript source is not required in the published package.
 
-## Change the model
+## Set model settings
 
-Change the root agent's AI Gateway model without opening the dev TUI:
+Change the root agent's AI Gateway model and reasoning effort without opening the dev TUI:
 
 ```bash
-eve model openai/gpt-5.5
+eve set \
+  --model openai/gpt-5.6-sol \
+  --reasoning high
 ```
 
-The command writes the `provider/model-id` to `agent/agent.ts` with the same
-validation and source edit as `/model openai/gpt-5.5` in the local dev TUI. It
-does not configure model credentials. Models defined with `defineDynamic`, an
-environment expression, or a provider-authored SDK model must be changed in
-`agent.ts`.
+Pass either flag by itself to change one setting. When you pass both, eve writes
+them to `agent/agent.ts` in one source edit. `--reasoning` accepts
+`provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`;
+`provider-default` removes the authored `reasoning` field.
+
+The command uses the same model ID validation and source editor as `/model` in
+the local dev TUI. It does not configure model credentials. The `--model` flag
+cannot rewrite models defined with `defineDynamic`, an environment expression,
+or a provider-authored SDK model; change those models in `agent.ts`.
+`--reasoning` can still update an editable root config when its model comes from
+an SDK call.
 
 ## Registry items
 

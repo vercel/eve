@@ -7,11 +7,11 @@ import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
-const { runModelCommand } = vi.hoisted(() => ({
-  runModelCommand: vi.fn(async () => {}),
+const { runSetCommand } = vi.hoisted(() => ({
+  runSetCommand: vi.fn(async () => {}),
 }));
 
-vi.mock("#cli/commands/model.js", () => ({ runModelCommand }));
+vi.mock("#cli/commands/set.js", () => ({ runSetCommand }));
 
 async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
@@ -56,20 +56,36 @@ describe("CLI command registration", () => {
 
     const help = output.join("\n");
     expect(help).toContain("init [options] [target]");
-    expect(help).toContain("model <model>");
+    expect(help).toContain("set [options]");
     expect(help).toContain("link");
     expect(help).toContain("deploy");
     expect(help).toContain("registry");
     expect(help).not.toContain("setup [options] <item>");
   });
 
-  it("forwards the selected model to the model command", async () => {
+  it("forwards model settings to the set command", async () => {
     const logger = { error: vi.fn(), log: vi.fn() };
-    runModelCommand.mockClear();
+    runSetCommand.mockClear();
 
-    await runCli(["model", "openai/gpt-5.5"], logger);
+    await runCli(["set", "--model", "openai/gpt-5.6-sol", "--reasoning", "high"], logger);
 
-    expect(runModelCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), "openai/gpt-5.5");
+    expect(runSetCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), {
+      model: "openai/gpt-5.6-sol",
+      reasoning: "high",
+    });
+  });
+
+  it("lists model and reasoning options for the set command", async () => {
+    const output: string[] = [];
+
+    await runCli(["set", "--help"], {
+      error: (message) => output.push(message),
+      log: (message) => output.push(message),
+    });
+
+    const help = output.join("\n");
+    expect(help).toContain("--model <model>");
+    expect(help).toContain("--reasoning <effort>");
   });
 
   it("lists registry installation and setup options", async () => {
