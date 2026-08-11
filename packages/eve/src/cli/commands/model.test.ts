@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { stripAnsi } from "#cli/ui/terminal-text.js";
+
 import { runModelCommand, type ModelCommandDependencies } from "./model.js";
 
 function logger() {
@@ -41,7 +43,7 @@ describe("runModelCommand", () => {
       appRoot: "/project",
       slug: "openai/gpt-5.5",
     });
-    expect(output.logs.join("\n")).toContain(
+    expect(stripAnsi(output.logs.join("\n"))).toContain(
       "Model changed to openai/gpt-5.5. Live on your next prompt.",
     );
     expect(output.errors).toEqual([]);
