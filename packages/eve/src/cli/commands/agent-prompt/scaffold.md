@@ -4,8 +4,8 @@ First settle the target: a new project, or the agent added to an existing
 directory? For a new project, propose a name and ask the user to confirm it; for
 an existing one, ask for the directory.
 
-For a new project, run (append `--channel-web-nextjs` only if the user wants Web
-Chat):
+For a new project, run (append `--model provider/model-id` when the user chose a
+model, and `--channel-web-nextjs` only if the user wants Web Chat):
 
     npx eve@latest init <name>
 

@@ -220,11 +220,12 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
+    .option("--model <model>", "Set the agent model (provider/model-id)")
     .option("-y, --yes", "Accepted for compatibility; has no effect")
     .action(
       async (
         target: string | undefined,
-        options: { channelWebNextjs?: boolean; yes?: boolean },
+        options: { channelWebNextjs?: boolean; model?: string; yes?: boolean },
       ) => {
         if (options.yes) {
           logger.error("warning: --yes has no effect for eve init.");
@@ -233,6 +234,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         const { runInitCommand } = await import("#cli/commands/init.js");
         await runInitCommand(logger, appRoot, target, {
           channelWebNextjs: options.channelWebNextjs,
+          model: options.model,
         });
       },
     );

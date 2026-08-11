@@ -26,7 +26,7 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve channels list`           | List user-authored channels                                                                                                                           |
 | `eve extension init [target]` | Create a new extension package                                                                                                                        |
 | `eve extension build`         | Build the current package as an extension                                                                                                             |
-| `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                                     |
+| `eve add <item>`              | Install a registry item, or change the root agent model with `model/<model-id>`                                                                       |
 | `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                                          |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
@@ -34,7 +34,7 @@ When `eve build` fails on discovery errors, it prints the full diagnostics repor
 ## `eve init`
 
 ```bash
-eve init [target] [--channel-web-nextjs]
+eve init [target] [--model <provider/model-id>] [--channel-web-nextjs]
 ```
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
@@ -47,9 +47,10 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 
 After scaffolding, a human terminal usually continues into `eve dev`. If a coding-agent REPL is on `PATH`, the handoff menu can open it instead or exit without starting either process. Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                   | Type | Default | Description                                                                                          |
-| ---------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `--channel-web-nextjs` | flag | off     | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead. |
+| Flag                   | Type   | Default                     | Description                                                                                          |
+| ---------------------- | ------ | --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `--model <model>`      | string | `anthropic/claude-sonnet-5` | Set the root agent's AI Gateway model ID.                                                            |
+| `--channel-web-nextjs` | flag   | off                         | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead. |
 
 ## `eve extension`
 
@@ -80,6 +81,21 @@ eve extension build
 ```
 
 Builds the complete agent-shaped extension tree into its configured dist root, emits declarations and compatibility metadata, and fills the package `exports` map. The original TypeScript source is not required in the published package.
+
+## Change the model
+
+Change the root agent's AI Gateway model without opening the dev TUI:
+
+```bash
+eve add model/openai/gpt-5.5
+```
+
+The `model/` prefix selects eve's built-in model action; the remainder is the
+`provider/model-id` written to `agent/agent.ts`. The command applies the same
+validation and source edit as `/model openai/gpt-5.5` in the local dev TUI. It
+does not install a registry item or configure model credentials. Models defined
+with `defineDynamic`, an environment expression, or a provider-authored SDK
+model must be changed in `agent.ts`.
 
 ## Registry items
 

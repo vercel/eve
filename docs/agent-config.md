@@ -17,6 +17,10 @@ export default defineAgent({
 });
 ```
 
+For a static AI Gateway model ID, you can make the same source change from the
+project root with `eve add model/anthropic/claude-opus-4.8` or from the local
+dev TUI with `/model anthropic/claude-opus-4.8`.
+
 The root `agent.ts` can be omitted when no runtime config is needed. In that case, eve defaults
 to `anthropic/claude-sonnet-5`. When `agent.ts` is present, `model` is required.
 

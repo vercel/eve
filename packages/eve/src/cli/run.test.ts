@@ -140,7 +140,7 @@ describe("CLI command registration", () => {
 });
 
 describe("eve init compatibility flags", () => {
-  it("lists --yes as an accepted compatibility flag", async () => {
+  it("lists the supported init options", async () => {
     const output: string[] = [];
 
     await runCli(["init", "--help"], {
@@ -148,7 +148,9 @@ describe("eve init compatibility flags", () => {
       log: (message) => output.push(message),
     });
 
-    expect(output.join("\n")).toContain("-y, --yes");
+    const help = output.join("\n");
+    expect(help).toContain("-y, --yes");
+    expect(help).toContain("--model <model>");
   });
 
   it("still rejects unknown init options", async () => {

@@ -31,6 +31,9 @@ The transcript remains in your terminal scrollback after you exit. Run `/help` i
 
 `/model`, `/add`, `/deploy`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects to a server with `--url`.
 
+To make the same direct model change without opening the TUI, run
+`eve add model/provider/model-id` from the project root.
+
 ## Work with the agent
 
 Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.

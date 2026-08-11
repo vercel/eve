@@ -23,6 +23,7 @@ describe("initAgentInstructions", () => {
     expect(instructions).toContain("ask the user to confirm it");
     expect(instructions).toContain("Web Chat");
     expect(instructions).toContain("--channel-web-nextjs");
+    expect(instructions).toContain("--model provider/model-id");
     // `npx` runs without a prior install and is package-manager agnostic, so the
     // pre-scaffold guide renders the universal `npx eve dev` through the shared
     // prompt renderer rather than a launcher-specific command.
