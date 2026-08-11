@@ -229,7 +229,7 @@ installed package must stay external in hosted output, list it in
 
 ## Other defineAgent fields
 
-`defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API](./reference/typescript-api).
+`defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
 | Field          | Type                                    | Default          | Description                                                                                                                                                                                                   |
 | -------------- | --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -257,5 +257,5 @@ During `eve dev`, ordinary dependencies are bundled into each retained runtime g
 ## What to read next
 
 - [Default harness](./concepts/default-harness) for the loop and built-in tools this config drives
-- [TypeScript API](./reference/typescript-api) for every `defineAgent` field and type
+- [TypeScript API Reference](./reference/typescript-api) for every `defineAgent` field and type
 - [Subagents](./subagents) for the `description` requirement and child-agent config

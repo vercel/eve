@@ -14,7 +14,7 @@ A browser UI is a client of the agent's HTTP routes (the [eve channel](../../cha
 
 The per-framework pages below walk through the wiring step by step: [Next.js](./nextjs), [Nuxt](./nuxt), and [SvelteKit](./sveltekit).
 
-For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [TypeScript SDK](../client/overview) directly.
+For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [Client SDK](../client/overview) directly.
 
 ## Authenticate browser requests
 
@@ -329,5 +329,5 @@ const support = useEveAgent({ agent: "support" });
 
 - [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the event stream and session cursor
 - [Channels](../../channels/overview): the HTTP routes the hook talks to
-- [TypeScript SDK](../client/overview): the lower-level client underneath the frontend hooks
+- [Client SDK](../client/overview): the lower-level client underneath the frontend hooks
 - [Next.js](./nextjs): step-by-step setup for wiring eve into a Next.js app

@@ -14,6 +14,7 @@
     "subagents",
     "evals",
     "guides/state",
+    "guides/session-context",
     "schedules",
     "guides/hooks",
     "guides/dynamic-capabilities",
@@ -34,7 +35,6 @@
     "concepts",
     "patterns",
     "...reference",
-    "guides/session-context",
     "responsible-use"
   ]
 }

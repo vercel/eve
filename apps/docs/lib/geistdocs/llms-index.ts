@@ -28,6 +28,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Subagents](${EVE_ORIGIN}/docs/subagents.md): Delegate work to copies of the root agent or declared specialists.
 - [Evals](${EVE_ORIGIN}/docs/evals/overview.md): Define repeatable scored checks and run them with \`eve eval\`.
 - [Durable State](${EVE_ORIGIN}/docs/guides/state.md): Persist per-session memory across step boundaries.
+- [Session Context](${EVE_ORIGIN}/docs/guides/session-context.md): Use session metadata and runtime accessors in authored code.
 - [Schedules](${EVE_ORIGIN}/docs/schedules.md): Run prompts or handlers on a cron cadence.
 - [Hooks](${EVE_ORIGIN}/docs/guides/hooks.md): Subscribe to runtime stream events.
 - [Dynamic Capabilities](${EVE_ORIGIN}/docs/guides/dynamic-capabilities.md): Resolve models, tools, skills, subagents, and instructions at runtime.
@@ -44,7 +45,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Next.js](${EVE_ORIGIN}/docs/guides/frontend/nextjs.md): Mount eve routes and use the React client in Next.js.
 - [Nuxt](${EVE_ORIGIN}/docs/guides/frontend/nuxt.md): Mount eve routes and use the Vue client in Nuxt.
 - [SvelteKit](${EVE_ORIGIN}/docs/guides/frontend/sveltekit.md): Mount eve routes and use the Svelte client in SvelteKit.
-- [TypeScript SDK](${EVE_ORIGIN}/docs/guides/client/overview.md): Call an eve app from scripts, services, tests, or custom UIs.
+- [Client SDK](${EVE_ORIGIN}/docs/guides/client/overview.md): Call an eve app from scripts, services, tests, or custom UIs.
 
 ## Operate
 
@@ -72,9 +73,8 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Reference and Discovery
 
-- [TypeScript API](${EVE_ORIGIN}/docs/reference/typescript-api.md): Find public \`define*\` helpers, runtime context, and import paths.
+- [TypeScript API Reference](${EVE_ORIGIN}/docs/reference/typescript-api.md): Find public \`define*\` helpers, runtime context, and import paths.
 - [CLI Reference](${EVE_ORIGIN}/docs/reference/cli.md): Find every eve command and option.
-- [Session Context](${EVE_ORIGIN}/docs/guides/session-context.md): Use session metadata and runtime accessors in authored code.
 - [Responsible Use](${EVE_ORIGIN}/docs/responsible-use.md): Review deployer responsibilities and safeguards.
 - [Documentation Map](${EVE_ORIGIN}/sitemap.md): Browse every documentation, integration, and template page with type and summary metadata.
 - [Agent Instructions](${EVE_ORIGIN}/agents.md): Read operational guidance for coding agents working with eve.

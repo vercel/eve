@@ -75,7 +75,7 @@ Runtime accessors live on the subpath that owns the concern:
 - `getSkill(identifier)` — handle for a named skill visible to the current agent (`eve/skills`)
 - `getContext(key)`, `requireContext(key)`, `hasContext(key)`, `setContext(key)`, `ensureContext(key, factory)` — unified context helpers (`eve/context`)
 
-The complete API reference, including types and lower-level runtime primitives, is in the [TypeScript API documentation](https://eve.dev/docs/reference/typescript-api).
+The complete API reference, including types and lower-level runtime primitives, is in the [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api).
 
 ## Tiny Example
 
@@ -154,7 +154,7 @@ These files ship inside the installed package at `node_modules/eve/docs/`:
 - [Getting Started](https://eve.dev/docs/getting-started) — install, scaffold, and run locally
 - [Project Layout](https://eve.dev/docs/getting-started#project-layout) — every authored directory in depth
 - [`agent.ts`](https://eve.dev/docs/agent-config) — agent config reference
-- [TypeScript API](https://eve.dev/docs/reference/typescript-api) — complete `define*` and runtime helper reference
+- [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api) — complete `define*` and runtime helper reference
 - [Vercel Deployment](https://eve.dev/docs/guides/deployment/overview) — deploy to production
 
 By authoring concern: [Tools](https://eve.dev/docs/tools) · [Channels](https://eve.dev/docs/channels/overview) · [Hooks](https://eve.dev/docs/guides/hooks) · [Skills](https://eve.dev/docs/skills) · [Sandbox](https://eve.dev/docs/sandbox) · [Connections](https://eve.dev/docs/connections) · [Subagents](https://eve.dev/docs/subagents) · [Schedules](https://eve.dev/docs/schedules) · [Evals](https://eve.dev/docs/evals/overview)

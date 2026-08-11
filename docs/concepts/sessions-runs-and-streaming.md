@@ -237,7 +237,7 @@ The lookup is opt-in; requests without the parameter get no header. The TypeScri
 
 For scripts, server-to-server calls, tests, evals, and custom UIs, `eve/client` wraps these routes in a typed client so you don't hand-roll the POST and NDJSON stream loop.
 
-Start with the [TypeScript SDK](../guides/client/overview) guide. It covers basic usage, sending messages, session state, streaming, and per-turn `outputSchema` results.
+Start with the [Client SDK](../guides/client/overview) guide. It covers basic usage, sending messages, session state, streaming, and per-turn `outputSchema` results.
 
 ## Inspect the agent over HTTP
 
@@ -264,5 +264,5 @@ The order is structural, not incidental. By the time a resolver or hook reads ch
 
 - [Execution model & durability](./execution-model-and-durability): what makes a session durable and how parked work resumes.
 - [Channels](../channels/overview): how platform addresses map to durable sessions.
-- [TypeScript SDK](../guides/client/overview): call these routes from scripts and server-side code.
+- [Client SDK](../guides/client/overview): call these routes from scripts and server-side code.
 - [Frontend](../guides/frontend/overview): `useEveAgent` instead of raw routes.

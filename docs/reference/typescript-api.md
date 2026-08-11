@@ -1,5 +1,5 @@
 ---
-title: "TypeScript API"
+title: "TypeScript API Reference"
 description: "The define* helpers, the runtime ctx, and where each one is imported from."
 ---
 
