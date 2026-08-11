@@ -1,4 +1,4 @@
-import { defineChannel, POST } from "eve/channels";
+import { defineChannel, POST, type TurnPolicy } from "eve/channels";
 
 const AUTH = {
   attributes: { source: "cancellation-eval" },
@@ -15,11 +15,16 @@ const AUTH = {
  * knowing the runtime session id.
  */
 export default defineChannel({
+  turnPolicy: "queue",
   routes: [
     POST("/threads/:threadId/messages", async (request, { from, params }) => {
-      const body = (await request.json().catch(() => ({}))) as { message?: string };
+      const body = (await request.json().catch(() => ({}))) as {
+        message?: string;
+        turnPolicy?: TurnPolicy;
+      };
       const session = await from(params.threadId ?? "").send(body.message ?? "", {
         auth: AUTH,
+        turnPolicy: body.turnPolicy,
       });
       return Response.json({ ok: true, sessionId: session.id });
     }),

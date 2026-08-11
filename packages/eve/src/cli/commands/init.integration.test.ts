@@ -76,6 +76,7 @@ function dependencies(
   spawnCodingAgentRepl: ReturnType<typeof vi.fn<InitCommandDependencies["spawnCodingAgentRepl"]>>;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
   tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
+  validateModelSlug: ReturnType<typeof vi.fn<InitCommandDependencies["validateModelSlug"]>>;
 } {
   return {
     addAgentToProject: (options: AddAgentToProjectOptions) => {
@@ -110,6 +111,7 @@ function dependencies(
     spawnCodingAgentRepl: vi.fn(async () => true),
     spawnPackageManager: vi.fn(async () => true),
     tryInitializeGit: vi.fn(async () => gitResult),
+    validateModelSlug: vi.fn(async () => null),
   };
 }
 
@@ -187,6 +189,60 @@ describe("runInitCommand", () => {
     expect(output.messages[2]).toContain("Installed dependencies");
     expect(output.messages[2]).toContain("in 13.2s");
     expect(output.messages[3]).toContain("$ eve dev");
+  });
+
+  it("creates a new agent with model settings selected by init options", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-model-"));
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(
+      output,
+      parentDirectory,
+      "my-agent",
+      { model: "openai/gpt-5.5", reasoning: "high" },
+      deps,
+    );
+
+    const projectPath = join(parentDirectory, "my-agent");
+    const agentSource = await readFile(join(projectPath, "agent/agent.ts"), "utf8");
+    expect(agentSource).toContain('model: "openai/gpt-5.5"');
+    expect(agentSource).toContain('reasoning: "high"');
+    expect(deps.validateModelSlug).toHaveBeenCalledWith(
+      expect.stringContaining(".eve-init-"),
+      "openai/gpt-5.5",
+    );
+  });
+
+  it("omits authored reasoning when init uses the provider default", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-reasoning-default-"));
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(
+      output,
+      parentDirectory,
+      "my-agent",
+      { reasoning: "provider-default" },
+      deps,
+    );
+
+    const agentSource = await readFile(join(parentDirectory, "my-agent", "agent/agent.ts"), "utf8");
+    expect(agentSource).not.toContain("reasoning:");
+  });
+
+  it("rejects an invalid --model before creating the project", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-model-invalid-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.validateModelSlug.mockResolvedValue("Unknown model.");
+
+    await expect(
+      runInitCommand(output, parentDirectory, "my-agent", { model: "unknown/model" }, deps),
+    ).rejects.toThrow("Unknown model.");
+
+    await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
   it("opens the selected coding-agent REPL instead of starting eve dev", async () => {
@@ -779,6 +835,26 @@ describe("runInitCommand", () => {
     ]);
     expect(output.messages.join("\n")).toContain("Added an eve agent to ");
     expect(output.messages.join("\n")).not.toContain("Overrode package.json engines.node");
+  });
+
+  it("adds an agent to an existing project with model settings selected by init options", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-model-"));
+    const projectRoot = await createHostProject(parentDirectory);
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(
+      output,
+      parentDirectory,
+      "host-app",
+      { model: "openai/gpt-5.5", reasoning: "high" },
+      deps,
+    );
+
+    const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
+    expect(agentSource).toContain('model: "openai/gpt-5.5"');
+    expect(agentSource).toContain('reasoning: "high"');
+    expect(deps.validateModelSlug).toHaveBeenCalledWith(projectRoot, "openai/gpt-5.5");
   });
 
   it("overrides an incompatible existing node engine declaration and warns for eve init .", async () => {

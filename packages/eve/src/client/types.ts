@@ -6,6 +6,7 @@ import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
+import type { TurnPolicy } from "#channel/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -108,6 +109,9 @@ export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutpu
 
 /** Options shared by message sends and HITL responses on a client session. */
 export interface SendTurnOptions<TOutput = unknown> {
+  /** Policy for a message sent while the fixed session has an active turn. */
+  readonly turnPolicy?: TurnPolicy;
+
   /**
    * Ephemeral client/page context for the next model call only.
    *

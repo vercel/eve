@@ -24,6 +24,12 @@ npx eve@latest init my-agent
 
 The command creates `my-agent/`, installs dependencies, and initializes Git. If a supported coding-agent REPL is available, eve offers to start the development server, open the REPL, or exit after scaffolding.
 
+Pass an AI Gateway model ID or reasoning effort when you do not want the defaults:
+
+```bash
+npx eve@latest init my-agent --model openai/gpt-5.5 --reasoning high
+```
+
 ## Run the agent
 
 From the project root, run the generated development command:

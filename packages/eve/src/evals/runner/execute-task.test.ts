@@ -426,6 +426,7 @@ describe("executeTask", () => {
     expect(server.cancels).toEqual(["parent-session"]);
     expect(server.posts[1]?.body).toEqual({
       message: "continue child",
+      turnPolicy: "queue",
     });
     expect(outcome.result.sessions?.map((session) => session.sessionId)).toEqual([
       "parent-session",
@@ -548,6 +549,7 @@ describe("executeTask", () => {
     expect(new URL(server.posts[0]!.url).pathname).toBe("/eve/v1/session/channel-session");
     expect(server.posts[0]?.body).toEqual({
       message: "continue please",
+      turnPolicy: "queue",
     });
     expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
   });

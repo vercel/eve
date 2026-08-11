@@ -27,6 +27,8 @@ read, and continues the same eve session for every message in an iMessage
 conversation. A new accepted message cooperatively cancels an active turn and
 steers its replacement turn.
 
+Set `turnPolicy: "queue"` when every response should finish before Photon starts the next message.
+
 Customize inbound dispatch with `onMessage`. Return `null` to ignore a message:
 
 ```ts

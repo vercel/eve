@@ -1,5 +1,5 @@
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
@@ -158,6 +158,8 @@ export interface GitHubChannelConfig {
   readonly progress?: GitHubProgressConfig;
   readonly pullRequestContext?: GitHubPullRequestContextConfig;
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
 
   /**
    * Invoked for every `@mention` of the bot in an issue/PR timeline comment or
@@ -231,6 +233,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
 
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
     kindHint: "github",
+    turnPolicy: config.turnPolicy,
     state: initialGitHubState(),
 
     context(state, session) {

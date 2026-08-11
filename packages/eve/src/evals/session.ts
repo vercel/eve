@@ -170,11 +170,11 @@ export class EvalSessionDriver implements EveEvalSession {
     message: SendTurnInput["message"],
     options: SendTurnOptions = {},
   ): Promise<EveEvalTurn> {
-    return await (await this.#start({ ...options, message })).result();
+    return await (await this.#start({ turnPolicy: "queue", ...options, message })).result();
   }
 
   async start(message: string, options: SendTurnOptions = {}): Promise<EveEvalLiveTurn> {
-    return await this.#start({ ...options, message });
+    return await this.#start({ turnPolicy: "queue", ...options, message });
   }
 
   async #start(input: SendTurnPayload): Promise<EveEvalLiveTurn> {

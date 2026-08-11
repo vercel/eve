@@ -29,7 +29,10 @@ describe("TurnControlReceiver", () => {
   });
 
   it("forwards a buffered delivery and consumes it once the turn accepts", async () => {
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "hello" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
+    };
     installControlHook([
       deliveryRequest("req-1"),
       { kind: "turn-delivery-accepted", requestId: "req-1" },
@@ -48,7 +51,10 @@ describe("TurnControlReceiver", () => {
   });
 
   it("re-buffers the outstanding delivery when the turn cancels its request", async () => {
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "hello" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
+    };
     installControlHook([
       deliveryRequest("req-1"),
       { kind: "turn-delivery-cancelled", requestId: "req-1" },
@@ -66,7 +72,7 @@ describe("TurnControlReceiver", () => {
   it("keeps earlier remainders ahead of an unresolved delivery when the turn terminates", async () => {
     const outstanding: DeliverHookPayload = {
       kind: "deliver",
-      payloads: [{ message: "outstanding" }],
+      payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
     };
     const earlierRemainder: DeliverHookPayload = {
       kind: "deliver",
@@ -133,10 +139,57 @@ describe("TurnControlReceiver", () => {
         payload: { message: "follow up" },
         payloads: [{ message: "follow up" }],
         requestId: undefined,
+        turnPolicy: undefined,
       },
       { kind: "deliver", payloads: [{ message: "legacy follow up" }] },
     ]);
     expect(bufferedSessionControls).toEqual(["clear", "compact", "expired"]);
+  });
+
+  it("buffers a steering message before cancelling the active turn", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+    vi.mocked(forwardTurnCancellationStep).mockImplementation(async () => {
+      expect(bufferedDeliveries).toEqual([
+        expect.objectContaining({
+          payloads: [{ message: "replace this turn" }],
+          turnPolicy: "steer",
+        }),
+      ]);
+      return true;
+    });
+
+    await runReceiver(bufferedDeliveries, {
+      commandInbox: createCommandInbox([
+        {
+          kind: "send",
+          payload: { message: "replace this turn" },
+          turnPolicy: "steer",
+        },
+      ]),
+    });
+
+    expect(forwardTurnCancellationStep).toHaveBeenCalledWith({
+      payload: {},
+      token: "turn-control:cancel",
+    });
+  });
+
+  it("does not cancel for queued messages or input responses", async () => {
+    installControlHook([parkResult()], true);
+
+    await runReceiver([], {
+      commandInbox: createCommandInbox([
+        { kind: "send", payload: { message: "later" }, turnPolicy: "queue" },
+        {
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "yes", requestId: "input-1" }] },
+          turnPolicy: "steer",
+        },
+      ]),
+    });
+
+    expect(forwardTurnCancellationStep).not.toHaveBeenCalled();
   });
 
   it("forwards cancel and reset through the active turn's private hook", async () => {

@@ -1,8 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
-const registryPath = join("apps", "docs", "registry.json");
-const evePackagePath = join("packages", "eve", "package.json");
+const registryPath = new URL("../apps/docs/registry.json", import.meta.url);
+const evePackagePath = new URL("../packages/eve/package.json", import.meta.url);
 const minimumVersionPattern = /^>=(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/u;
 const versionPattern = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/u;
 

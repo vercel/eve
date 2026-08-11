@@ -9,7 +9,7 @@ import {
 } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
 import type { Session } from "#channel/session.js";
-import type { Runtime, SessionAuthContext } from "#channel/types.js";
+import type { Runtime, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 /**
@@ -17,6 +17,7 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
  */
 export interface CrossChannelSendOptions {
   readonly auth: SessionAuthContext | null;
+  readonly turnPolicy?: TurnPolicy;
 }
 
 /** Message delivery bound to one channel-specific proactive target. */
@@ -40,6 +41,7 @@ export interface CrossChannelTarget {
   readonly definition: CompiledChannel;
   readonly receive?: CompiledChannel["receive"];
   readonly adapter?: ChannelAdapter;
+  readonly turnPolicy?: CompiledChannel["turnPolicy"];
 }
 
 /**
@@ -61,6 +63,7 @@ export function toCrossChannelTargets(
             definition: channel.definition,
             receive: channel.receive,
             adapter: channel.adapter,
+            turnPolicy: channel.turnPolicy,
           },
         ],
   );
@@ -85,6 +88,7 @@ export function createCrossChannelToFn(
             target: target as Readonly<Record<string, unknown>>,
             auth: options.auth,
           },
+          turnPolicy: options.turnPolicy,
           describeMissingReceive: () =>
             `ctx.to(): channel "${targetChannel.name}" does not implement receive(). ` +
             `Declare a receive hook on the channel to accept cross-channel sessions.`,
@@ -98,12 +102,13 @@ export function createCrossChannelToFn(
 
 interface InvokeChannelReceiveInput {
   readonly runtime: Runtime;
-  readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter">;
+  readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter" | "turnPolicy">;
   readonly input: {
     readonly message: string | UserContent;
     readonly target: Readonly<Record<string, unknown>>;
     readonly auth: SessionAuthContext | null;
   };
+  readonly turnPolicy?: TurnPolicy;
   readonly describeMissingReceive: () => string;
   readonly describeMissingAdapter: () => string;
 }
@@ -122,6 +127,7 @@ export async function invokeChannelReceive(args: InvokeChannelReceiveInput): Pro
     adapter: args.target.adapter,
     channelName: args.target.name,
     runtime: args.runtime,
+    turnPolicy: args.turnPolicy ?? args.target.turnPolicy,
   });
   return await args.target.receive(args.input, channelOperations);
 }

@@ -3,6 +3,7 @@ import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
+import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { blockingCreateInPlaceEntries } from "../create-in-place.js";
@@ -53,6 +54,7 @@ export function resolveEvePackageContract(
 interface TemplateContext {
   appName: string;
   model: string;
+  reasoning?: AgentReasoningDefinition;
   eveVersion: string;
   aiPackageVersion: string;
   connectPackageVersion: string;
@@ -93,18 +95,31 @@ export function byokProviderEnvVar(modelId: string): string {
  * subset `eve init` writes when adding an agent to an existing project, where
  * everything outside `agent/` belongs to the host app.
  */
-export function agentTemplateFiles(model: string): Record<string, string> {
+export function agentTemplateFiles(
+  model: string,
+  reasoning?: AgentReasoningDefinition,
+): Record<string, string> {
   return {
-    "agent/agent.ts": BASE_AGENT_TEMPLATE.replaceAll("__EVE_INIT_MODEL__", model),
+    "agent/agent.ts": BASE_AGENT_TEMPLATE.replaceAll("__EVE_INIT_MODEL__", model).replaceAll(
+      "__EVE_INIT_REASONING__",
+      reasoningTemplateLine(reasoning),
+    ),
     "agent/channels/eve.ts": WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"],
     "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
   };
+}
+
+function reasoningTemplateLine(reasoning: AgentReasoningDefinition | undefined): string {
+  return reasoning === undefined || reasoning === "provider-default"
+    ? ""
+    : `  reasoning: "${reasoning}",\n`;
 }
 
 function renderTemplate(content: string, ctx: TemplateContext): string {
   return content
     .replaceAll("__EVE_INIT_APP_NAME__", ctx.appName)
     .replaceAll("__EVE_INIT_MODEL__", ctx.model)
+    .replaceAll("__EVE_INIT_REASONING__", reasoningTemplateLine(ctx.reasoning))
     .replaceAll("__EVE_INIT_BYOK_PROVIDER__", modelProviderSlug(ctx.model))
     .replaceAll("__EVE_INIT_BYOK_ENV_VAR__", byokProviderEnvVar(ctx.model))
     .replaceAll("__EVE_INIT_PACKAGE_VERSION__", formatEveDependencySpecifier(ctx.eveVersion))
@@ -126,7 +141,7 @@ const BASE_AGENT_TEMPLATE = `import { defineAgent } from "eve";
 
 export default defineAgent({
   model: "__EVE_INIT_MODEL__",
-});
+__EVE_INIT_REASONING__});
 `;
 
 // The agent reaches the model through a provider key the user supplies via the
@@ -139,7 +154,7 @@ const BYOK_AGENT_TEMPLATE = `import { defineAgent } from "eve";
 
 export default defineAgent({
   model: "__EVE_INIT_MODEL__",
-  modelOptions: {
+__EVE_INIT_REASONING__  modelOptions: {
     providerOptions: {
       gateway: {
         byok: {
@@ -355,6 +370,7 @@ async function assertCanCreateInPlace(
 export interface ScaffoldBaseProjectOptions {
   projectName: string;
   model: string;
+  reasoning?: AgentReasoningDefinition;
   /**
    * The manager that owns command execution and manager-specific generated
    * project files for this scaffold.
@@ -404,6 +420,7 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
   const ctx: TemplateContext = {
     appName: basename(targetRoot),
     model: options.model,
+    reasoning: options.reasoning,
     eveVersion: evePackage.version,
     aiPackageVersion: resolveVersionToken(
       "aiPackageVersion",

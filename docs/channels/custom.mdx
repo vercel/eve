@@ -109,6 +109,26 @@ await session.reset({ reason: "Retire this session" });
 await session.getEventStream({ startIndex: 12 });
 ```
 
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. An accepted message arriving during an active turn is durably buffered before eve cancels that turn and starts the message as a replacement turn. Configure `turnPolicy: "queue"` on `defineChannel(...)` when active turns should finish in order, or override one send:
+
+```ts
+export default defineChannel({
+  turnPolicy: "queue",
+  routes: [
+    POST("/messages", async (request, { from }) => {
+      const body = await request.json();
+      await from(body.threadId).send(body.message, {
+        auth: null,
+        turnPolicy: "steer",
+      });
+      return new Response(null, { status: 202 });
+    }),
+  ],
+});
+```
+
+The same override is available on fixed `Session.send(...)` and cross-channel `to(...).send(...)`. `respond(...)` never steers: it delivers only addressed input responses. Use `cancel()` when you need to stop work without a replacement message.
+
 Attaching does no lookup. The first operation reports whether the ID is active.
 Call `resolveSession(address)` only when you explicitly need to snapshot an
 address's current owner as a fixed handle.

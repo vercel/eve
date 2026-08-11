@@ -44,6 +44,7 @@ describe("createChannelAddress", () => {
         kind: "send",
         payload: { message: "hello" },
         requestId: undefined,
+        turnPolicy: "steer",
       },
       continuationToken: "slack:C1:T1",
     });
@@ -53,6 +54,36 @@ describe("createChannelAddress", () => {
       command: { kind: "clear" },
       sessionId: "sess_1",
     });
+  });
+
+  it("uses the channel policy unless a send overrides it", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+      turnPolicy: "queue",
+    });
+
+    await address.send("queued", { auth: null });
+    await address.send("replace", { auth: null, turnPolicy: "steer" });
+    await address.respond([{ optionId: "yes", requestId: "input-1" }], { auth: null });
+
+    expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ command: expect.objectContaining({ turnPolicy: "queue" }) }),
+    );
+    expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        command: expect.objectContaining({ turnPolicy: "steer" }),
+      }),
+    );
+    expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ command: expect.objectContaining({ turnPolicy: undefined }) }),
+    );
   });
 
   it("binds every control directly to the namespaced continuation token", async () => {

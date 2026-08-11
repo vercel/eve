@@ -10,6 +10,7 @@ import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { formatNodeEngineOverrideWarning, type NodeEngineOverride } from "#setup/node-engine.js";
 import {
   detectInvokingPackageManager,
@@ -28,6 +29,7 @@ import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
 import { blockingCreateInPlaceEntries } from "#setup/scaffold/create-in-place.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
+import { validateModelSlug } from "#setup/flows/model-source-change.js";
 import type { WorkspaceRootMutation } from "#setup/scaffold/workspace-root.js";
 import {
   DEFAULT_EVE_PACKAGE_CONTRACT,
@@ -50,6 +52,10 @@ export interface InitCliLogger {
 export interface InitCommandOptions {
   /** Add the Web Chat channel (a Next.js app). Set by `--channel-web-nextjs`. */
   channelWebNextjs?: boolean;
+  /** Model id written to the root agent config. Set by `--model`. */
+  model?: string;
+  /** Reasoning effort written to the root agent config. Set by `--reasoning`. */
+  reasoning?: AgentReasoningDefinition;
 }
 
 export interface InitCommandDependencies {
@@ -65,6 +71,7 @@ export interface InitCommandDependencies {
   spawnCodingAgentRepl: typeof spawnCodingAgentRepl;
   spawnPackageManager: typeof spawnPackageManager;
   tryInitializeGit: typeof tryInitializeGit;
+  validateModelSlug: typeof validateModelSlug;
 }
 
 const defaultDependencies: InitCommandDependencies = {
@@ -80,6 +87,7 @@ const defaultDependencies: InitCommandDependencies = {
   spawnCodingAgentRepl,
   spawnPackageManager,
   tryInitializeGit,
+  validateModelSlug,
 };
 
 const CURRENT_DIRECTORY_PROJECT_NAME = ".";
@@ -162,10 +170,16 @@ async function addToExistingProject(
     );
   }
 
+  if (options.model !== undefined) {
+    const rejection = await dependencies.validateModelSlug(targetPath, options.model);
+    if (rejection !== null) throw new Error(rejection);
+  }
+
   const manager = await dependencies.detectPackageManager(targetPath);
   const result = await dependencies.addAgentToProject({
     projectRoot: targetPath,
-    model: DEFAULT_AGENT_MODEL_ID,
+    model: options.model ?? DEFAULT_AGENT_MODEL_ID,
+    reasoning: options.reasoning,
     packageManager: manager.kind,
     evePackage,
   });
@@ -210,10 +224,15 @@ async function scaffoldProject(
   const stagingDirectory = await mkdtemp(join(parentPath, ".eve-init-"));
   const workspaceRootMutations: WorkspaceRootMutation[] = [];
   try {
+    if (options.model !== undefined) {
+      const rejection = await dependencies.validateModelSlug(stagingDirectory, options.model);
+      if (rejection !== null) throw new Error(rejection);
+    }
     const stagedProjectName = createInPlace ? basename(projectPath) : projectName;
     const scaffoldOptions = {
       projectName: stagedProjectName,
-      model: DEFAULT_AGENT_MODEL_ID,
+      model: options.model ?? DEFAULT_AGENT_MODEL_ID,
+      reasoning: options.reasoning,
       evePackage,
       targetDirectory: stagingDirectory,
       workspaceProbeDirectory: projectPath,

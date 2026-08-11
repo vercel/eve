@@ -66,7 +66,7 @@ You don't write workflow code directly. Workflow primitives (`start()`, `resumeH
 
 Some work has to wait, including a human approving a [tool](../tools), an interactive OAuth sign-in for a [connection](../connections), or a long-running [subagent](../subagents). At those points the turn parks durably. The workflow suspends and holds no compute until the input it's waiting on arrives (a click, a callback, a child completing), even if that's much later. When it does, the conversation picks up exactly where it left off.
 
-## Message delivery and queueing
+## Message delivery and steering
 
 eve does not maintain a durable FIFO queue of user messages for a session. An
 ID-addressed HTTP delivery and a channel-address delivery both target the
@@ -79,14 +79,11 @@ channel alias. Rekeying replaces only that channel alias. An HTTP-created
 session has the stable ID alias and no channel continuation token. Competing
 channel input is not forwarded to the owner.
 
-When a session is waiting, a delivery through its ID or current channel address
-wakes the session and starts the next turn. When a turn is already active, the
-inbox may accept additional deliveries, but the runtime only drains them at
-specific workflow boundaries. If more than one delivery is ready when the driver
-checks, eve may fold them into the next turn; that drain is best-effort and
-depends on workflow and transport timing.
+When a session is waiting, a delivery through its ID or current channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`: while a turn is active, the session driver durably buffers the replacement before requesting cooperative cancellation. The interrupted turn emits `turn.cancelled` followed by `session.waiting`, then the replacement starts with a new turn ID. Partial output and completed side effects are not rolled back.
 
-So don't rely on concurrent sends to the same session behaving like a typical ordered chat queue. For deterministic behavior, send one user turn at a time and wait for `session.waiting` before sending the next message to the same session. If your channel can receive bursts while the agent is working, keep your own per-session queue in the channel or app layer, then deliver the next message after the session parks again. Separate sessions still run independently.
+`turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the driver checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
+
+Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy is part of the same durable delivery command as the message, so concurrent senders cannot separate replacement ownership from cancellation intent. Separate sessions still run independently.
 
 ## Subagents
 

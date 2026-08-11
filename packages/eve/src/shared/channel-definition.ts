@@ -3,7 +3,7 @@ import type { UserContent } from "ai";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 
 /**
  * Enriched return shape from a channel's {@link ChannelAdapter.fetchFile}
@@ -50,6 +50,8 @@ export interface GenericChannelDefinition<
   TReceiveTarget = Record<string, unknown>,
   TMetadata extends Record<string, unknown> = Record<string, unknown>,
 > {
+  /** Policy used by message sends that do not provide an explicit override. */
+  readonly turnPolicy?: TurnPolicy;
   readonly state?: TState;
   /**
    * CORS policy for this channel's HTTP routes. `true` enables H3/Nitro's

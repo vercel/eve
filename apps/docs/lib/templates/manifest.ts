@@ -72,6 +72,35 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
+    slug: "eve-llm-council-template",
+    title: "LLM council",
+    setupPrompt:
+      "Set up the LLM council template in my current workspace using https://github.com/vercel/eve-examples/tree/main/eve-llm-council-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
+    description:
+      "A Next.js LLM council that sends one prompt to four models in parallel, streams their answers, and asks a judge model for a concise answer with per-model agreement scores.",
+    sourceHref: "https://github.com/vercel/eve-examples/tree/main/eve-llm-council-template",
+    category: "Example",
+    model: "anthropic/claude-opus-5",
+    integrations: ["Web chat"],
+    source: "Vercel Templates",
+    github: {
+      owner: "vercel",
+      repo: "eve-examples",
+      ref: "main",
+      pathPrefix: "eve-llm-council-template",
+    },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/eve.ts",
+      "agent/instructions.md",
+      "agent/lib/schemas.ts",
+      "agent/subagents/claude/agent.ts",
+      "agent/subagents/grok/agent.ts",
+      "agent/subagents/kimi/agent.ts",
+      "agent/subagents/openai/agent.ts",
+    ],
+  },
+  {
     slug: "eve-design-template",
     title: "Design",
     setupPrompt:
