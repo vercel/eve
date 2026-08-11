@@ -692,7 +692,7 @@ describe("resolvePendingInput", () => {
       kind: "tool-approval",
       options: [
         { id: "approve", label: "Yes" },
-        { id: "deny", label: "No" },
+        { id: "cancel", label: "No" },
       ],
       prompt: "Approve tool call: bash",
       requestId,
@@ -711,7 +711,7 @@ describe("resolvePendingInput", () => {
     const deferred = consumeDeferredStepInput({
       input: {
         inputResponses: [
-          { requestId: "approval-1", optionId: "deny" },
+          { requestId: "approval-1", optionId: "cancel" },
           { requestId: "approval-2", optionId: "approve" },
         ],
       },
@@ -966,7 +966,7 @@ describe("pending input batch collection", () => {
       kind: "tool-approval",
       options: [
         { id: "approve", label: "Yes" },
-        { id: "deny", label: "No" },
+        { id: "cancel", label: "No" },
       ],
       prompt: "Approve tool call: bash",
       requestId,
@@ -1163,7 +1163,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
       kind: "tool-approval",
       options: [
         { id: "approve", label: "Yes" },
-        { id: "deny", label: "No" },
+        { id: "cancel", label: "No" },
       ],
       prompt: "Approve tool call: bash",
       requestId: "approval-1",
@@ -1182,6 +1182,24 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
       session: createHarnessSession(),
     });
   }
+
+  it("rejects a session-limit batch containing a model-anchored request", () => {
+    const session = appendPendingInputBatch({
+      requests: [
+        createSessionLimitContinuationRequest({
+          sessionId: "sess-test",
+          violation: { kind: "input", limit: 12, usedTokens: 12 },
+        }),
+        approvalRequest(),
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+
+    expect(() => resolvePendingInput({ session })).toThrow(
+      "Session-limit pending input batches must contain only session-limit requests.",
+    );
+  });
 
   it("resolves a continue answer without appending tool messages", () => {
     const result = resolvePendingInput({
@@ -1322,7 +1340,7 @@ describe("clearPendingSessionLimitPrompt", () => {
           kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
-            { id: "deny", label: "No" },
+            { id: "cancel", label: "No" },
           ],
           prompt: "Approve tool call: bash",
           requestId: "approval-1",

@@ -7477,7 +7477,7 @@ describe("createToolLoopHarness", () => {
           kind: "tool-approval",
           options: [
             { id: "approve", label: "Yes" },
-            { id: "deny", label: "No" },
+            { id: "cancel", label: "No" },
           ],
           prompt: "Approve tool call: bash",
           requestId: "approval-1",
@@ -7555,7 +7555,7 @@ describe("createToolLoopHarness", () => {
 
     // The original approval still resolves afterwards.
     const denied = await createToolLoopHarness(config)(answered.session, {
-      inputResponses: [{ requestId: "approval-1", optionId: "deny" }],
+      inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
     });
     expect(hasPendingInputBatch(denied.session.state)).toBe(false);
     expect(denied.session.history.at(-1)).toEqual({
@@ -7624,7 +7624,7 @@ describe("createToolLoopHarness", () => {
               kind: "tool-approval",
               options: [
                 { id: "approve", label: "Yes" },
-                { id: "deny", label: "No" },
+                { id: "cancel", label: "No" },
               ],
               prompt: "Approve tool call: bash",
               requestId: "approval-1",
@@ -8117,7 +8117,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(config);
 
     const first = await runStep(session, {
-      inputResponses: [{ optionId: "deny", requestId: "approval-1" }],
+      inputResponses: [{ optionId: "cancel", requestId: "approval-1" }],
       message: "Use this instead.",
     });
 

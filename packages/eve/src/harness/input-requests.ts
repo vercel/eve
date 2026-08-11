@@ -6,7 +6,7 @@ import type {
 } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
-import { classifyInputRequest, isApprovalRequest } from "#harness/input-request-class.js";
+import { isApprovalRequest } from "#harness/input-request-class.js";
 import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending-input-batches.js";
 import {
   getPendingInputBatches,
@@ -35,6 +35,8 @@ const IGNORED_INPUT_REASON = "Ignored because the user continued without respond
 const TOOL_EXECUTION_DENIED_CODE = "TOOL_EXECUTION_DENIED";
 const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution was denied.";
 const TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE = "Invalid approval response.";
+const SESSION_LIMIT_BATCH_INVARIANT_MESSAGE =
+  "Session-limit pending input batches must contain only session-limit requests.";
 
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 
@@ -69,8 +71,8 @@ export function hasStepInput(input?: StepInput): boolean {
  *
  * Pending requests live in ordered batches, one per parked assistant turn.
  * A batch resolves as a unit when one delivery answers every `"required"`
- * request in it (see {@link classifyInputRequest}); its withheld model
- * output is then restored behind the current history. Responses that answer
+ * request in it; its withheld model output is then restored behind the
+ * current history. Responses that answer
  * only part of a batch wait in the deferred step input until the rest
  * arrives.
  *
@@ -91,153 +93,417 @@ export function resolvePendingInput(input: {
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
 }): ResolvePendingInputResult {
-  const { stepInput } = input;
-  let session = input.session;
-  const baseHistory = [...(input.history ?? session.history)];
-
-  const batches = getPendingInputBatches(session.state);
+  const baseHistory = [...(input.history ?? input.session.history)];
+  const batches = getPendingInputBatches(input.session.state);
 
   // No pending batches -- pass through to the model call.
   if (batches.length === 0) {
-    return { outcome: "continue", messages: baseHistory, session };
+    return { outcome: "continue", messages: baseHistory, session: input.session };
   }
 
-  const limitBatch = batches.find((batch) =>
-    batch.requests.some((request) => isSessionLimitContinuationRequest(request)),
-  );
-
+  const route = routePendingInput(batches);
+  const deferTurnInput = hasTailApprovalResponse(baseHistory);
   // A session-limit prompt owns text matching even when other batches are
   // open. Otherwise a bare option word remains ambiguous across batches.
+  const textResolutionBatch =
+    route.kind === "session-limit" ? route.batch : batches.length === 1 ? batches[0] : undefined;
   const resolvedStepInput: (StepInput & { readonly messageConsumed?: boolean }) | undefined =
-    limitBatch !== undefined
-      ? resolveTextMessageInput(limitBatch, stepInput)
-      : batches.length === 1
-        ? resolveTextMessageInput(batches[0]!, stepInput)
-        : stepInput;
+    textResolutionBatch === undefined
+      ? input.stepInput
+      : resolveTextMessageInput(textResolutionBatch, input.stepInput);
   const responses = canonicalizeInputResponses(resolvedStepInput?.inputResponses ?? []);
 
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     const deferredInput = compactStepInput(resolvedStepInput);
+    let session = input.session;
     if (deferredInput.context !== undefined || deferredInput.outputSchema !== undefined) {
       session = queueDeferredStepInput(session, deferredInput);
     }
     return { outcome: "unresolved", messages: baseHistory, session };
   }
 
-  const responseIds = new Set(responses.map((response) => response.requestId));
-  const eligibleBatches = limitBatch === undefined ? batches : [limitBatch];
-  let resolvedBatches = eligibleBatches.filter(
-    (batch) =>
-      batch.requests.some((request) => responseIds.has(request.requestId)) &&
-      !hasUnansweredRequiredRequest({ pendingBatch: batch, responses }),
-  );
+  switch (route.kind) {
+    case "session-limit":
+      return resolveSessionLimitInput({
+        baseHistory,
+        batches,
+        deferTurnInput,
+        pendingBatch: route.batch,
+        resolvedStepInput,
+        responses,
+        session: input.session,
+      });
+    case "approval":
+      return resolveApprovalInputBatches({
+        approvalBatches: route.approvalBatches,
+        baseHistory,
+        batches: route.batches,
+        deferTurnInput,
+        questionBatches: route.questionBatches,
+        resolveApprovalKey: input.resolveApprovalKey,
+        resolvedStepInput,
+        responses,
+        session: input.session,
+      });
+    case "question":
+      return resolveQuestionOnlyInputBatches({
+        baseHistory,
+        batches: route.batches,
+        deferTurnInput,
+        resolvedStepInput,
+        responses,
+        session: input.session,
+      });
+  }
+}
 
-  if (limitBatch === undefined) {
-    const firstApprovalIndex = resolvedBatches.findIndex((batch) =>
-      batch.requests.some((request) => isApprovalRequest(request)),
-    );
-    if (firstApprovalIndex >= 0) {
-      // Anything after this batch would hide its approval response from AI
-      // SDK's tail-tool-message scan. Its responses replay on the next step.
-      resolvedBatches = resolvedBatches.slice(0, firstApprovalIndex + 1);
+type PendingInputRoute =
+  | { readonly batch: PendingInputBatch; readonly kind: "session-limit" }
+  | {
+      readonly approvalBatches: readonly PendingInputBatch[];
+      readonly batches: readonly PendingInputBatch[];
+      readonly kind: "approval";
+      readonly questionBatches: readonly PendingInputBatch[];
+    }
+  | { readonly batches: readonly PendingInputBatch[]; readonly kind: "question" };
+
+type PendingInputBatchDomain = "approval" | "question" | "session-limit";
+
+type InputDomainResolverInput = {
+  readonly baseHistory: ModelMessage[];
+  readonly batches: readonly PendingInputBatch[];
+  readonly deferTurnInput: boolean;
+  readonly resolvedStepInput: ResolvedStepInput | undefined;
+  readonly responses: readonly InputResponse[];
+  readonly session: HarnessSession;
+};
+
+/** Selects the one domain that owns this delivery without mutating session state. */
+function routePendingInput(batches: readonly PendingInputBatch[]): PendingInputRoute {
+  const classified = batches.map((batch) => ({ batch, domain: classifyPendingInputBatch(batch) }));
+  const limitBatch = classified.find(({ domain }) => domain === "session-limit")?.batch;
+  if (limitBatch !== undefined) {
+    return { batch: limitBatch, kind: "session-limit" };
+  }
+
+  const approvalBatches = classified
+    .filter(({ domain }) => domain === "approval")
+    .map(({ batch }) => batch);
+  if (approvalBatches.length > 0) {
+    return {
+      approvalBatches,
+      batches,
+      kind: "approval",
+      questionBatches: classified
+        .filter(({ domain }) => domain === "question")
+        .map(({ batch }) => batch),
+    };
+  }
+
+  return { batches, kind: "question" };
+}
+
+function classifyPendingInputBatch(batch: PendingInputBatch): PendingInputBatchDomain {
+  let hasApproval = false;
+  let hasQuestion = false;
+  let hasSessionLimit = false;
+
+  for (const request of batch.requests) {
+    switch (request.kind) {
+      case "tool-approval":
+        hasApproval = true;
+        break;
+      case "question":
+        hasQuestion = true;
+        break;
+      case "session-limit":
+        hasSessionLimit = true;
+        break;
+      default: {
+        const unhandled: never = request.kind;
+        throw new TypeError(`Unhandled pending input request kind: ${String(unhandled)}`);
+      }
     }
   }
 
-  const openBatches = batches.filter((batch) => !resolvedBatches.includes(batch));
-  const leftoverResponses = responses.filter((response) =>
-    openBatches.some((batch) =>
-      batch.requests.some((request) => request.requestId === response.requestId),
-    ),
-  );
+  if (hasSessionLimit) {
+    if (hasApproval || hasQuestion) {
+      throw new TypeError(SESSION_LIMIT_BATCH_INVARIANT_MESSAGE);
+    }
+    return "session-limit";
+  }
+
+  return hasApproval ? "approval" : "question";
+}
+
+function resolveSessionLimitInput(
+  input: InputDomainResolverInput & {
+    readonly pendingBatch: PendingInputBatch;
+  },
+): ResolvePendingInputResult {
+  const responseIds = new Set(input.responses.map((response) => response.requestId));
+  const answered =
+    input.pendingBatch.requests.some((request) => responseIds.has(request.requestId)) &&
+    input.pendingBatch.requests.every((request) => responseIds.has(request.requestId));
+  if (!answered) {
+    return {
+      deferredMessage: true,
+      outcome: "unresolved",
+      messages: [...input.baseHistory],
+      session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
+    };
+  }
+
+  const openBatches = input.batches.filter((batch) => batch !== input.pendingBatch);
+  const leftoverResponses = responsesForBatches(input.responses, openBatches);
   const limitBlocked = openBatches.some((batch) =>
     batch.requests.some((request) => isSessionLimitContinuationRequest(request)),
   );
+  const messages = [...input.baseHistory];
+  appendResolvedBatchTranscript(messages, input.pendingBatch, []);
+  const session = removePendingInputBatches(input.session, [input.pendingBatch]);
+  const limitContinuation = resolveSessionLimitContinuation({
+    requests: input.pendingBatch.requests,
+    responses: input.responses,
+  });
+
+  return finishResolvedInput({
+    deferTurnInput: input.deferTurnInput || limitBlocked,
+    leftoverResponses,
+    limitContinuation,
+    messages,
+    resolvedStepInput: input.resolvedStepInput,
+    session,
+  });
+}
+
+function resolveApprovalInputBatches(
+  input: InputDomainResolverInput & {
+    readonly approvalBatches: readonly PendingInputBatch[];
+    readonly questionBatches: readonly PendingInputBatch[];
+    readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
+  },
+): ResolvePendingInputResult {
+  const responseIds = new Set(input.responses.map((response) => response.requestId));
+  const answeredApprovalBatches = new Set(
+    input.approvalBatches.filter((batch) =>
+      batch.requests.every(
+        (request) => !isApprovalRequest(request) || responseIds.has(request.requestId),
+      ),
+    ),
+  );
+  const answeredQuestionBatches = new Set(
+    findAnsweredQuestionBatches(input.questionBatches, input.responses),
+  );
+  let resolvedBatches = input.batches.filter(
+    (batch) => answeredApprovalBatches.has(batch) || answeredQuestionBatches.has(batch),
+  );
+  const firstApprovalIndex = resolvedBatches.findIndex((batch) =>
+    batch.requests.some((request) => isApprovalRequest(request)),
+  );
+  if (firstApprovalIndex >= 0) {
+    // Anything after this batch would hide its approval response from AI
+    // SDK's tail-tool-message scan. Its responses replay on the next step.
+    resolvedBatches = resolvedBatches.slice(0, firstApprovalIndex + 1);
+  }
+
+  const openBatches = input.batches.filter((batch) => !resolvedBatches.includes(batch));
+  const leftoverResponses = responsesForBatches(input.responses, openBatches);
 
   if (resolvedBatches.length === 0) {
-    if (limitBlocked) {
-      // The budget gate owns the session until its prompt is answered.
-      session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
-      return { deferredMessage: true, outcome: "unresolved", messages: baseHistory, session };
-    }
-
-    if (resolvedStepInput?.message === undefined) {
-      // Partial responses wait for the rest of their batch;
-      // `consumeDeferredStepInput` coalesces them with the next delivery.
-      session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
-      return { outcome: "unresolved", messages: baseHistory, session };
-    }
-
-    const sole = batches.length === 1 ? batches[0] : undefined;
-    if (sole !== undefined && !sole.requests.some((request) => isApprovalRequest(request))) {
-      // A follow-up message behind a single question-only batch keeps its
-      // pre-collection behavior: mark the unanswered requests ignored so
-      // the model can continue with the message.
-      const toolParts = buildToolResponseParts(sole, []);
-      const messages: ModelMessage[] = [...baseHistory, ...sole.responseMessages];
-      if (toolParts.length > 0) {
-        messages.push({ content: toolParts, role: "tool" });
-      }
-
-      const rejected = buildRejectedActionBatch(sole, []);
-      session = removePendingInputBatches(session, [sole]);
-
+    if (input.resolvedStepInput?.message === undefined) {
       return {
-        consumedMessage: resolvedStepInput.messageConsumed,
-        outcome: "resolved",
-        messages,
-        rejectedActions: rejected === undefined ? undefined : [rejected],
-        session,
+        outcome: "unresolved",
+        messages: [...input.baseHistory],
+        session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
       };
     }
 
     // The message runs as an ordinary turn; every batch stays open and
     // answerable. Stray partial responses wait in the deferred input.
-    if (leftoverResponses.length > 0) {
-      session = queueDeferredStepInput(session, { inputResponses: leftoverResponses });
-    }
+    const session =
+      leftoverResponses.length === 0
+        ? input.session
+        : queueDeferredStepInput(input.session, { inputResponses: leftoverResponses });
     return {
-      consumedMessage: resolvedStepInput.messageConsumed,
+      consumedMessage: input.resolvedStepInput.messageConsumed,
       outcome: "continue",
-      messages: baseHistory,
+      messages: [...input.baseHistory],
       session,
     };
   }
 
-  let limitContinuation: { readonly granted: boolean } | undefined;
-  let resolvesApprovalBatch = false;
-  const resumesApprovalBatch = hasTailApprovalResponse(baseHistory);
-  const messages: ModelMessage[] = [...baseHistory];
-  const rejectedActions: RejectedActionBatch[] = [];
+  const approvalBatch = resolvedBatches.find((batch) =>
+    batch.requests.some((request) => isApprovalRequest(request)),
+  );
+  const questionBatches = resolvedBatches.filter((batch) => batch !== approvalBatch);
+  const questions = resolveQuestionBatches({
+    batches: questionBatches,
+    messages: [...input.baseHistory],
+    responses: input.responses,
+  });
+  const approval =
+    approvalBatch === undefined
+      ? { messages: questions, session: input.session }
+      : resolveApprovalBatch({
+          batch: approvalBatch,
+          messages: questions,
+          resolveApprovalKey: input.resolveApprovalKey,
+          responses: input.responses,
+          session: input.session,
+        });
 
-  for (const batch of resolvedBatches) {
-    resolvesApprovalBatch ||= batch.requests.some((request) => isApprovalRequest(request));
-    limitContinuation ??= resolveSessionLimitContinuation({
-      requests: batch.requests,
-      responses,
-    });
+  return finishResolvedInput({
+    deferTurnInput: approvalBatch !== undefined || input.deferTurnInput,
+    leftoverResponses,
+    messages: approval.messages,
+    rejectedActions: approval.rejectedActions,
+    resolvedStepInput: input.resolvedStepInput,
+    session: removePendingInputBatches(approval.session, resolvedBatches),
+  });
+}
 
-    // Record approved tools before dropping the batch.
-    session = recordApprovedTools({
-      pendingBatch: batch,
-      resolveApprovalKey: input.resolveApprovalKey,
-      responses,
-      session,
-    });
+function resolveApprovalBatch(input: {
+  readonly batch: PendingInputBatch;
+  readonly messages: ModelMessage[];
+  readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
+  readonly responses: readonly InputResponse[];
+  readonly session: HarnessSession;
+}): ResolvedApprovalBatch {
+  const sessionWithApprovals = recordApprovedTools({
+    pendingBatch: input.batch,
+    resolveApprovalKey: input.resolveApprovalKey,
+    responses: input.responses,
+    session: input.session,
+  });
+  const toolParts = buildApprovalBatchToolResponseParts(input.batch, input.responses);
+  appendResolvedBatchTranscript(input.messages, input.batch, toolParts);
+  const rejected = buildRejectedActionBatch(input.batch, input.responses);
 
-    const toolParts = buildToolResponseParts(batch, responses);
-    messages.push(...batch.responseMessages);
-    if (toolParts.length > 0) {
-      messages.push({ content: toolParts, role: "tool" });
+  return {
+    messages: input.messages,
+    rejectedActions: rejected === undefined ? undefined : [rejected],
+    session: sessionWithApprovals,
+  };
+}
+
+function resolveQuestionOnlyInputBatches(
+  input: InputDomainResolverInput,
+): ResolvePendingInputResult {
+  const resolvedBatches = findAnsweredQuestionBatches(input.batches, input.responses);
+  const openBatches = input.batches.filter((batch) => !resolvedBatches.includes(batch));
+  const leftoverResponses = responsesForBatches(input.responses, openBatches);
+
+  if (resolvedBatches.length === 0) {
+    if (input.resolvedStepInput?.message === undefined) {
+      return {
+        outcome: "unresolved",
+        messages: [...input.baseHistory],
+        session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
+      };
     }
 
-    const rejected = buildRejectedActionBatch(batch, responses);
-    if (rejected !== undefined) {
-      rejectedActions.push(rejected);
+    const sole = input.batches.length === 1 ? input.batches[0] : undefined;
+    if (sole === undefined) {
+      const session =
+        leftoverResponses.length === 0
+          ? input.session
+          : queueDeferredStepInput(input.session, { inputResponses: leftoverResponses });
+      return {
+        consumedMessage: input.resolvedStepInput.messageConsumed,
+        outcome: "continue",
+        messages: [...input.baseHistory],
+        session,
+      };
     }
+
+    // A follow-up message behind one question-only batch marks its unanswered
+    // requests ignored so the model can continue with the message.
+    const resolved = resolveQuestionBatches({
+      batches: [sole],
+      messages: [...input.baseHistory],
+      responses: [],
+    });
+    return {
+      consumedMessage: input.resolvedStepInput.messageConsumed,
+      outcome: "resolved",
+      messages: resolved,
+      session: removePendingInputBatches(input.session, [sole]),
+    };
   }
 
-  session = removePendingInputBatches(session, resolvedBatches);
+  const resolved = resolveQuestionBatches({
+    batches: resolvedBatches,
+    messages: [...input.baseHistory],
+    responses: input.responses,
+  });
 
+  return finishResolvedInput({
+    deferTurnInput: input.deferTurnInput,
+    leftoverResponses,
+    messages: resolved,
+    resolvedStepInput: input.resolvedStepInput,
+    session: removePendingInputBatches(input.session, resolvedBatches),
+  });
+}
+
+type ResolvedStepInput = StepInput & { readonly messageConsumed?: boolean };
+
+function findAnsweredQuestionBatches(
+  batches: readonly PendingInputBatch[],
+  responses: readonly InputResponse[],
+): PendingInputBatch[] {
+  const responseIds = new Set(responses.map((response) => response.requestId));
+  return batches.filter((batch) =>
+    batch.requests.some((request) => responseIds.has(request.requestId)),
+  );
+}
+
+function responsesForBatches(
+  responses: readonly InputResponse[],
+  batches: readonly PendingInputBatch[],
+): readonly InputResponse[] {
+  return responses.filter((response) =>
+    batches.some((batch) =>
+      batch.requests.some((request) => request.requestId === response.requestId),
+    ),
+  );
+}
+
+type ResolvedApprovalBatch = {
+  readonly messages: ModelMessage[];
+  readonly rejectedActions?: readonly RejectedActionBatch[];
+  readonly session: HarnessSession;
+};
+
+function resolveQuestionBatches(input: {
+  readonly batches: readonly PendingInputBatch[];
+  readonly messages: ModelMessage[];
+  readonly responses: readonly InputResponse[];
+}): ModelMessage[] {
+  const responseMap = new Map(input.responses.map((response) => [response.requestId, response]));
+  for (const batch of input.batches) {
+    const toolParts = batch.requests.map((request) =>
+      buildQuestionToolResponsePart(
+        request as QuestionInputRequest,
+        responseMap.get(request.requestId),
+      ),
+    );
+    appendResolvedBatchTranscript(input.messages, batch, toolParts);
+  }
+
+  return input.messages;
+}
+
+function finishResolvedInput(input: {
+  readonly deferTurnInput: boolean;
+  readonly leftoverResponses: readonly InputResponse[];
+  readonly limitContinuation?: { readonly granted: boolean };
+  readonly messages: ModelMessage[];
+  readonly rejectedActions?: readonly RejectedActionBatch[];
+  readonly resolvedStepInput: ResolvedStepInput | undefined;
+  readonly session: HarnessSession;
+}): ResolvePendingInputResult {
   // AI SDK collects approval responses only from the tail tool message.
   // Defer channel context and any follow-up message so the approval resolves
   // in isolation; `consumeDeferredStepInput` replays them on the next step.
@@ -247,45 +513,52 @@ export function resolvePendingInput(input: {
     inputResponses?: StepInput["inputResponses"];
     message?: StepInput["message"];
   } = {};
-  if (leftoverResponses.length > 0) {
-    deferredInput.inputResponses = leftoverResponses;
+  if (input.leftoverResponses.length > 0) {
+    deferredInput.inputResponses = input.leftoverResponses;
   }
-  if (resolvesApprovalBatch || resumesApprovalBatch || limitBlocked) {
-    if ((resolvedStepInput?.context?.length ?? 0) > 0) {
-      deferredInput.context = resolvedStepInput?.context;
+  if (input.deferTurnInput) {
+    if ((input.resolvedStepInput?.context?.length ?? 0) > 0) {
+      deferredInput.context = input.resolvedStepInput?.context;
     }
-    if (resolvedStepInput?.message !== undefined) {
-      deferredInput.message = resolvedStepInput.message;
+    if (input.resolvedStepInput?.message !== undefined) {
+      deferredInput.message = input.resolvedStepInput.message;
     }
   }
 
-  if (
-    deferredInput.context !== undefined ||
-    deferredInput.message !== undefined ||
-    deferredInput.inputResponses !== undefined
-  ) {
-    session = queueDeferredStepInput(session, deferredInput);
+  if (Object.keys(deferredInput).length > 0) {
+    const session = queueDeferredStepInput(input.session, deferredInput);
 
     return {
-      consumedMessage: resolvedStepInput?.messageConsumed,
+      consumedMessage: input.resolvedStepInput?.messageConsumed,
       deferredContext: deferredInput.context === undefined ? undefined : true,
       deferredMessage: deferredInput.message === undefined ? undefined : true,
-      limitContinuation,
+      limitContinuation: input.limitContinuation,
       outcome: "resolved",
-      messages,
-      rejectedActions: rejectedActions.length > 0 ? rejectedActions : undefined,
+      messages: input.messages,
+      rejectedActions: input.rejectedActions,
       session,
     };
   }
 
   return {
-    consumedMessage: resolvedStepInput?.messageConsumed,
-    limitContinuation,
+    consumedMessage: input.resolvedStepInput?.messageConsumed,
+    limitContinuation: input.limitContinuation,
     outcome: "resolved",
-    messages,
-    rejectedActions: rejectedActions.length > 0 ? rejectedActions : undefined,
-    session,
+    messages: input.messages,
+    rejectedActions: input.rejectedActions,
+    session: input.session,
   };
+}
+
+function appendResolvedBatchTranscript(
+  messages: ModelMessage[],
+  batch: PendingInputBatch,
+  toolParts: readonly ToolResponsePart[],
+): void {
+  messages.push(...batch.responseMessages);
+  if (toolParts.length > 0) {
+    messages.push({ content: [...toolParts], role: "tool" });
+  }
 }
 
 function canonicalizeInputResponses(responses: readonly InputResponse[]): readonly InputResponse[] {
@@ -387,17 +660,6 @@ export function clearPendingSessionLimitPrompt(session: HarnessSession): Harness
   return removePendingInputBatches(session, dropped);
 }
 
-function hasUnansweredRequiredRequest(input: {
-  readonly pendingBatch: PendingInputBatch;
-  readonly responses: readonly InputResponse[];
-}): boolean {
-  const responseIds = new Set(input.responses.map((response) => response.requestId));
-  return input.pendingBatch.requests.some(
-    (request) =>
-      classifyInputRequest(request) === "required" && !responseIds.has(request.requestId),
-  );
-}
-
 type ResolvePendingInputResult = {
   readonly consumedMessage?: boolean;
   readonly deferredContext?: boolean;
@@ -448,7 +710,7 @@ function recordApprovedTools(input: {
   );
 
   const newKeys = input.pendingBatch.requests
-    .filter((r) => approvedIds.has(r.requestId))
+    .filter((r) => isApprovalRequest(r) && approvedIds.has(r.requestId))
     .map((r) => input.resolveApprovalKey?.(r) ?? r.action.toolName);
 
   if (newKeys.length === 0) {
@@ -553,7 +815,10 @@ function buildRejectedActionBatch(
   return results.length > 0 ? { event: batch.event, results } : undefined;
 }
 
-function buildToolResponseParts(
+type QuestionInputRequest = InputRequest & { readonly kind: "question" };
+type ToolApprovalInputRequest = InputRequest & { readonly kind: "tool-approval" };
+
+function buildApprovalBatchToolResponseParts(
   batch: PendingInputBatch,
   responses: readonly InputResponse[],
 ): ToolResponsePart[] {
@@ -561,73 +826,80 @@ function buildToolResponseParts(
 
   const parts: ToolResponsePart[] = [];
   for (const request of batch.requests) {
-    parts.push(...buildToolResponsePartsForRequest(request, responseMap.get(request.requestId)));
+    const response = responseMap.get(request.requestId);
+    switch (request.kind) {
+      case "tool-approval":
+        parts.push(
+          ...buildApprovalToolResponseParts(request as ToolApprovalInputRequest, response),
+        );
+        break;
+      case "question":
+        parts.push(buildQuestionToolResponsePart(request as QuestionInputRequest, response));
+        break;
+      case "session-limit":
+        throw new TypeError(SESSION_LIMIT_BATCH_INVARIANT_MESSAGE);
+      default: {
+        const unhandled: never = request.kind;
+        throw new TypeError(`Unhandled pending input request kind: ${String(unhandled)}`);
+      }
+    }
   }
   return parts;
 }
 
-function buildToolResponsePartsForRequest(
-  request: InputRequest,
+function buildApprovalToolResponseParts(
+  request: ToolApprovalInputRequest,
   response: InputResponse | undefined,
 ): ToolResponsePart[] {
-  // A session-limit continuation prompt is harness-authored: no matching
-  // tool call exists in model history, so resolving it must not append a
-  // tool message the provider would reject as unmatched. This is currently
-  // the only harness-authored request type; if another appears, replace this
-  // toolName predicate with a generic synthetic-request marker instead of
-  // stacking a second special case here.
-  if (isSessionLimitContinuationRequest(request)) {
-    return [];
-  }
-
-  if (isApprovalRequest(request)) {
-    const { approved, reason } = resolveApprovalOutcome(response);
-    const parts: ToolResponsePart[] = [
-      {
-        approvalId: request.requestId,
-        approved,
-        reason,
-        type: "tool-approval-response",
-      },
-    ];
-    /*
-     * On denial (explicit "cancel" or auto-deny when the user continues
-     * without responding), splice in the matching `execution-denied`
-     * tool-result. AI SDK's `streamText` synthesizes this for the
-     * current turn's `initialResponseMessages`, but that synthesis is
-     * gated on the input messages' last entry being a tool message —
-     * on subsequent turns (when a new user message is the tail of
-     * history) the synthesis is skipped, and the persisted
-     * `tool-approval-response` is stripped during provider prompt
-     * conversion. Without an own `tool-result` in history, the prior
-     * `tool_use` block replays unmatched and some providers reject
-     * the request with 400.
-     */
-    if (!approved) {
-      parts.push({
-        output: { type: "execution-denied", reason },
-        toolCallId: request.action.callId,
-        toolName: request.action.toolName,
-        type: "tool-result",
-      });
-    }
-    return parts;
-  }
-
-  return [
+  const { approved, reason } = resolveApprovalOutcome(response);
+  const parts: ToolResponsePart[] = [
     {
-      output: {
-        type: "json",
-        value:
-          response !== undefined
-            ? { optionId: response.optionId, text: response.text, status: "answered" }
-            : { status: "ignored" },
-      },
+      approvalId: request.requestId,
+      approved,
+      reason,
+      type: "tool-approval-response",
+    },
+  ];
+  /*
+   * On denial (explicit "cancel" or auto-deny when the user continues
+   * without responding), splice in the matching `execution-denied`
+   * tool-result. AI SDK's `streamText` synthesizes this for the
+   * current turn's `initialResponseMessages`, but that synthesis is
+   * gated on the input messages' last entry being a tool message —
+   * on subsequent turns (when a new user message is the tail of
+   * history) the synthesis is skipped, and the persisted
+   * `tool-approval-response` is stripped during provider prompt
+   * conversion. Without an own `tool-result` in history, the prior
+   * `tool_use` block replays unmatched and some providers reject
+   * the request with 400.
+   */
+  if (!approved) {
+    parts.push({
+      output: { type: "execution-denied", reason },
       toolCallId: request.action.callId,
       toolName: request.action.toolName,
       type: "tool-result",
+    });
+  }
+  return parts;
+}
+
+function buildQuestionToolResponsePart(
+  request: QuestionInputRequest,
+  response: InputResponse | undefined,
+): ToolResponsePart {
+  return {
+    output: {
+      type: "json",
+      value:
+        response !== undefined
+          ? { optionId: response.optionId, text: response.text, status: "answered" }
+          : { status: "ignored" },
     },
-  ];
+    toolCallId: request.action.callId,
+    toolName: request.action.toolName,
+    type: "tool-result",
+  };
 }
 
 // ---------------------------------------------------------------------------
