@@ -1,13 +1,7 @@
 /**
- * Starts or continues every pending runtime action for the parked parent
- * session.
- *
- * The batch is classified into a dispatch plan first (reject / resume /
- * start), then each entry dispatches and emits one
- * parent `subagent.called` control-plane event through a single tail.
- * Every start commits an agent handle (`starting`) before its side effect
- * and confirms it (`running`) once the child reports coordinates, so the
- * returned snapshot-bearing state owns every child it may have created.
+ * Dispatches every pending runtime action for a parked parent session.
+ * Starts commit ownership before their side effect, so the returned state
+ * owns every child it may have created.
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -39,7 +33,10 @@ import {
   prepareAgentStart,
   rejectAgentEffect,
 } from "#harness/handles/transitions.js";
-import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import {
+  getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
+} from "#harness/runtime-actions.js";
 import {
   createSubagentCalledEvent,
   encodeMessageStreamEvent,
@@ -77,6 +74,7 @@ import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -137,15 +135,20 @@ export async function dispatchRuntimeActionsStep(input: {
     return { results: [], sessionState: input.sessionState };
   }
 
+  const parentTurnId = batch.event.turnId || activeTurnId(input.sessionState.emissionState);
+  const batchEvent = { ...batch.event, turnId: parentTurnId };
+
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: effectiveAgent.turnAgent,
+  const session = setPendingRuntimeActionBatch({
+    ...batch,
+    event: batchEvent,
+    session: hydrateDurableSession({
+      compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
+      durable: durableSession,
+      turnAgent: effectiveAgent.turnAgent,
+    }),
   });
   const adapter = ctx.require(ChannelKey);
   const auth = ctx.get(AuthKey) ?? null;
@@ -199,13 +202,13 @@ export async function dispatchRuntimeActionsStep(input: {
             }),
             currentSession: nextSession,
             parentToken: input.parentContinuationToken ?? session.continuationToken,
-            parentTurnId: batch.event.turnId,
+            parentTurnId,
           });
           break;
         case "start":
           outcome = await startSubagent({
             auth,
-            batchEvent: batch.event,
+            batchEvent,
             bundle,
             callbackBaseUrl: input.callbackBaseUrl,
             capabilities,
@@ -240,10 +243,10 @@ export async function dispatchRuntimeActionsStep(input: {
             name: outcome.name,
             remote:
               outcome.address.kind === "agent/remote" ? { url: outcome.address.url } : undefined,
-            sequence: batch.event.sequence,
+            sequence: batchEvent.sequence,
             sessionId: session.sessionId,
             toolName: outcome.toolName,
-            turnId: batch.event.turnId,
+            turnId: parentTurnId,
             workflowId: workflowEntryReference.workflowId,
           }),
           adapterCtx,
@@ -262,7 +265,7 @@ export async function dispatchRuntimeActionsStep(input: {
   }
 
   const nextState =
-    nextSession === session
+    nextSession === session && batch.event.turnId === parentTurnId
       ? input.sessionState
       : createDurableSessionState({ session: nextSession });
 

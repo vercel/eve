@@ -5,6 +5,7 @@ import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatc
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import {
+  getPendingRuntimeActionBatch,
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
@@ -187,6 +188,65 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       ],
     });
     expect(writes).toHaveLength(1);
+  });
+
+  it("uses the active session turn when pending batch metadata has an empty turn id", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "local",
+    });
+    installContext(session, {
+      definition: { description: "Research", kind: "subagent" },
+      nodeId: "subagents/research",
+    });
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(getAgentHandleStore(resultState)).toMatchObject({
+      handles: [
+        {
+          operation: {
+            parentTurnId: "turn_3",
+          },
+        },
+      ],
+    });
+  });
+
+  it("persists the active turn when dispatch leaves agent handles unchanged", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "remote",
+    });
+    installContext(session, {
+      definition: REMOTE_REGISTRY_DEFINITION,
+      nodeId: "remote/research",
+    });
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getAgentHandleStore(resultState)).toBeUndefined();
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(mocks.createDurableSessionState).toHaveBeenCalledTimes(1);
   });
 
   it("rejects the prepared handle when the local start fails", async () => {
@@ -687,7 +747,14 @@ function createBaseSession(handle?: AgentHandle): HarnessSession {
     : { ...base, state: { [AGENT_HANDLES_STATE_KEY]: { handles: [handle] } } };
 }
 
-function createStartSession(input: { readonly kind: "local" | "remote" }): HarnessSession {
+function createStartSession(input: {
+  readonly event?: {
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  };
+  readonly kind: "local" | "remote";
+}): HarnessSession {
   return setPendingRuntimeActionBatch({
     actions: [
       input.kind === "local"
@@ -710,7 +777,7 @@ function createStartSession(input: { readonly kind: "local" | "remote" }): Harne
             remoteAgentName: "research",
           },
     ],
-    event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+    event: input.event ?? { sequence: 1, stepIndex: 2, turnId: "turn-1" },
     responseMessages: [],
     session: createBaseSession(),
   });
