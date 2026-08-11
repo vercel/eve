@@ -746,6 +746,7 @@ describe("turnWorkflow", () => {
       createSessionState({ hasProxyInputRequests: true }),
       runningChildren,
     );
+    const retiredProxyState = withRunningChildren(createSessionState(), runningChildren);
     const completedState = createSessionState();
     const requestId = "turn-token:inbox:delivery:0";
     installInbox([
@@ -789,6 +790,7 @@ describe("turnWorkflow", () => {
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "continue",
       remainder: undefined,
+      sessionState: retiredProxyState,
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -830,11 +832,13 @@ describe("turnWorkflow", () => {
         sessionState: proxyState,
       }),
     );
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].sessionState).toBe(retiredProxyState);
   });
 
   it("lets the parent cancel after a descendant consumes a session-limit Stop response", async () => {
     const pendingState = createSessionState();
     const proxyState = createSessionState({ hasProxyInputRequests: true });
+    const retiredProxyState = createSessionState();
     const requestId = "child-limit-request";
     installInbox([
       {
@@ -864,6 +868,7 @@ describe("turnWorkflow", () => {
     });
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "cancel-turn",
+      sessionState: retiredProxyState,
     });
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "park",
@@ -883,7 +888,7 @@ describe("turnWorkflow", () => {
 
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
       serializedContext: { state: "proxied" },
-      sessionState: proxyState,
+      sessionState: retiredProxyState,
     });
     expect(turnStep).toHaveBeenCalledOnce();
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
@@ -891,7 +896,7 @@ describe("turnWorkflow", () => {
         cancelled: true,
         kind: "park",
         serializedContext: { state: "proxied" },
-        sessionState: proxyState,
+        sessionState: retiredProxyState,
       },
       kind: "turn-result",
     });
@@ -1077,6 +1082,7 @@ describe("turnWorkflow", () => {
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "continue",
       remainder: undefined,
+      sessionState: pendingState,
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({

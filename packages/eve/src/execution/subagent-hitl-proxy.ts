@@ -69,6 +69,7 @@ export interface RoutedDeliverPayload {
   readonly forChildren: readonly {
     readonly childContinuationToken: string;
     readonly payload: { readonly inputResponses: readonly InputResponse[] };
+    readonly retireRequestIds: readonly string[];
   }[];
   readonly forSelf: DeliverPayload | undefined;
   readonly parentAction: { readonly kind: "cancel-turn" } | undefined;
@@ -82,7 +83,10 @@ export function routeDeliverPayload(input: {
   const entries = getProxyInputRequests(input.state);
   const inputResponses = input.payload.inputResponses ?? [];
 
-  const responsesByChild = new Map<string, InputResponse[]>();
+  const responsesByChild = new Map<
+    string,
+    { responses: InputResponse[]; routes: ProxyInputRequest[] }
+  >();
   const unroutedResponses: InputResponse[] = [];
   let parentAction: RoutedDeliverPayload["parentAction"];
 
@@ -101,17 +105,36 @@ export function routeDeliverPayload(input: {
     const existing = responsesByChild.get(route.childContinuationToken);
 
     if (existing === undefined) {
-      responsesByChild.set(route.childContinuationToken, [response]);
+      responsesByChild.set(route.childContinuationToken, {
+        responses: [response],
+        routes: [route],
+      });
     } else {
-      existing.push(response);
+      existing.responses.push(response);
+      existing.routes.push(route);
     }
   }
 
   const forChildren: RoutedDeliverPayload["forChildren"] = [...responsesByChild.entries()].map(
-    ([childContinuationToken, responses]) => ({
-      childContinuationToken,
-      payload: { inputResponses: responses },
-    }),
+    ([childContinuationToken, bucket]) => {
+      const responseIds = new Set(bucket.responses.map((response) => response.requestId));
+      const retireRequestIds = new Set(responseIds);
+
+      for (const route of bucket.routes) {
+        if (
+          route.batch !== undefined &&
+          batchResolves({ batch: route.batch, childContinuationToken, entries, responseIds })
+        ) {
+          for (const requestId of route.batch.requestIds) retireRequestIds.add(requestId);
+        }
+      }
+
+      return {
+        childContinuationToken,
+        payload: { inputResponses: bucket.responses },
+        retireRequestIds: [...retireRequestIds],
+      };
+    },
   );
 
   // Preserve every non-`inputResponses` field on the original payload
@@ -134,4 +157,33 @@ export function routeDeliverPayload(input: {
   const forSelf = Object.keys(remainder).length > 0 ? (remainder as DeliverPayload) : undefined;
 
   return { forChildren, forSelf, parentAction };
+}
+
+function batchResolves(input: {
+  readonly batch: NonNullable<ProxyInputRequest["batch"]>;
+  readonly childContinuationToken: string;
+  readonly entries: ReadonlyMap<string, ProxyInputRequest>;
+  readonly responseIds: ReadonlySet<string>;
+}): boolean {
+  if (input.batch.approvalRequestIds.length === 0) return true;
+
+  return input.batch.approvalRequestIds.every((requestId) => {
+    const route = input.entries.get(requestId);
+    if (route === undefined || !sameBatch(route, input)) return true;
+    return input.responseIds.has(requestId);
+  });
+}
+
+function sameBatch(
+  route: ProxyInputRequest,
+  input: {
+    readonly batch: NonNullable<ProxyInputRequest["batch"]>;
+    readonly childContinuationToken: string;
+  },
+): boolean {
+  return (
+    route.childContinuationToken === input.childContinuationToken &&
+    route.batch?.requestIds.length === input.batch.requestIds.length &&
+    route.batch.requestIds.every((requestId, index) => requestId === input.batch.requestIds[index])
+  );
 }

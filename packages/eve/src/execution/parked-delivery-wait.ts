@@ -10,7 +10,7 @@ type NextSessionAction =
   | { readonly kind: "compact" }
   | { readonly kind: "expired" }
   | { readonly kind: "reset" }
-  | AuthorizationCallbackInstruction
+  | Omit<AuthorizationCallbackInstruction, "sessionState">
   | {
       readonly delivery: DeliverHookPayload | null;
       readonly kind: "delivery";
@@ -22,21 +22,23 @@ export interface AuthorizationCallbackInstruction {
   /** True when the authorization hook closed; no further callbacks can arrive. */
   readonly closed: boolean;
   readonly payloads: readonly DeliverPayload[];
+  readonly sessionState: DurableSessionState;
 }
 
 /** What the parked driver should do with the next session activity. */
 export type NextTurnInstruction =
-  | { readonly kind: "clear" }
-  | { readonly kind: "compact" }
-  | { readonly kind: "expired" }
-  | { readonly kind: "reset" }
-  | { readonly kind: "closed" }
-  | { readonly kind: "cancel-turn" }
+  | { readonly kind: "clear"; readonly sessionState: DurableSessionState }
+  | { readonly kind: "compact"; readonly sessionState: DurableSessionState }
+  | { readonly kind: "expired"; readonly sessionState: DurableSessionState }
+  | { readonly kind: "reset"; readonly sessionState: DurableSessionState }
+  | { readonly kind: "closed"; readonly sessionState: DurableSessionState }
+  | { readonly kind: "cancel-turn"; readonly sessionState: DurableSessionState }
   | AuthorizationCallbackInstruction
   | {
       readonly kind: "turn";
       readonly deliver: DeliverHookPayload;
       readonly remainder: DeliverPayload;
+      readonly sessionState: DurableSessionState;
     };
 
 /**
@@ -81,6 +83,8 @@ async function awaitNextTurnDelivery(input: {
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
 }): Promise<NextTurnInstruction> {
+  let sessionState = input.sessionState;
+
   while (true) {
     const nextAction = await waitForNextSessionAction({
       bufferedDeliveries: input.bufferedDeliveries,
@@ -90,27 +94,28 @@ async function awaitNextTurnDelivery(input: {
     });
 
     if (nextAction.kind === "authorization") {
-      return nextAction;
+      return { ...nextAction, sessionState };
     }
 
     if (nextAction.kind !== "delivery") {
-      return { kind: nextAction.kind };
+      return { kind: nextAction.kind, sessionState };
     }
 
     const deliver = nextAction.delivery;
     if (deliver === null) {
-      return { kind: "closed" };
+      return { kind: "closed", sessionState };
     }
 
     const routed = await routeDeliverToChildren({
       auth: deliver.auth,
       parentWritable: input.driverWritable,
       payloads: deliver.payloads,
-      sessionState: input.sessionState,
+      sessionState,
     });
+    sessionState = routed.sessionState;
 
     if (routed.kind === "cancel-turn") {
-      return { kind: "cancel-turn" };
+      return { kind: "cancel-turn", sessionState };
     }
 
     if (routed.remainder === undefined) {
@@ -118,7 +123,7 @@ async function awaitNextTurnDelivery(input: {
       continue;
     }
 
-    return { deliver, kind: "turn", remainder: routed.remainder };
+    return { deliver, kind: "turn", remainder: routed.remainder, sessionState };
   }
 }
 

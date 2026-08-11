@@ -21,7 +21,7 @@ export async function routeDeliverToChildren(input: {
 }): Promise<RoutedDeliverResult> {
   const payload = coalesceDeliverPayloads(input.payloads);
   if (!input.sessionState.hasProxyInputRequests) {
-    return { kind: "continue", remainder: payload };
+    return { kind: "continue", remainder: payload, sessionState: input.sessionState };
   }
 
   return await routeProxiedDeliverStep({

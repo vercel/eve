@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import {
+  retireProxyInputRequests,
+  upsertProxyInputRequests,
+} from "#harness/proxy-input-requests.js";
+import type { ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 
@@ -17,6 +21,26 @@ function createSession(state?: Record<string, unknown>): HarnessSession {
     sessionId: "parent-session",
     state,
   };
+}
+
+function addBatchRoutes(
+  session: HarnessSession,
+  requests: readonly { readonly kind: ProxyInputRequest["kind"]; readonly requestId: string }[],
+): HarnessSession {
+  const batch = {
+    approvalRequestIds: requests.flatMap((request) =>
+      request.kind === "tool-approval" ? [request.requestId] : [],
+    ),
+    requestIds: requests.map((request) => request.requestId),
+  };
+  return upsertProxyInputRequests({
+    entries: requests.map((request) => [
+      request.requestId,
+      { batch, childContinuationToken: "child-a", kind: request.kind },
+    ]),
+    forChildContinuationToken: "child-a",
+    session,
+  });
 }
 
 describe("routeDeliverPayload", () => {
@@ -103,8 +127,81 @@ describe("routeDeliverPayload", () => {
       {
         childContinuationToken: "child-a",
         payload: { inputResponses: [{ optionId: "stop", requestId: "req-limit" }] },
+        retireRequestIds: ["req-limit"],
       },
     ]);
     expect(routed.parentAction).toEqual({ kind: "cancel-turn" });
+  });
+
+  it("retires an entire question batch after one answer", () => {
+    const session = addBatchRoutes(createSession(), [
+      { kind: "question", requestId: "question-1" },
+      { kind: "question", requestId: "question-2" },
+    ]);
+
+    const routed = routeDeliverPayload({
+      payload: { inputResponses: [{ requestId: "question-1", text: "answer" }] },
+      state: session.state,
+    });
+
+    expect(new Set(routed.forChildren[0]?.retireRequestIds)).toEqual(
+      new Set(["question-1", "question-2"]),
+    );
+  });
+
+  it("retires a mixed batch when all of its approvals are answered", () => {
+    const session = addBatchRoutes(createSession(), [
+      { kind: "question", requestId: "question-1" },
+      { kind: "tool-approval", requestId: "approval-1" },
+    ]);
+
+    const routed = routeDeliverPayload({
+      payload: { inputResponses: [{ optionId: "approve", requestId: "approval-1" }] },
+      state: session.state,
+    });
+
+    expect(new Set(routed.forChildren[0]?.retireRequestIds)).toEqual(
+      new Set(["question-1", "approval-1"]),
+    );
+  });
+
+  it("keeps unresolved approval routes across partial multi-approval responses", () => {
+    let session = addBatchRoutes(createSession(), [
+      { kind: "tool-approval", requestId: "approval-1" },
+      { kind: "tool-approval", requestId: "approval-2" },
+    ]);
+
+    const partial = routeDeliverPayload({
+      payload: { inputResponses: [{ optionId: "approve", requestId: "approval-1" }] },
+      state: session.state,
+    });
+    expect(partial.forChildren[0]?.retireRequestIds).toEqual(["approval-1"]);
+
+    session = retireProxyInputRequests(session, partial.forChildren[0]?.retireRequestIds ?? []);
+    const completed = routeDeliverPayload({
+      payload: { inputResponses: [{ optionId: "cancel", requestId: "approval-2" }] },
+      state: session.state,
+    });
+    expect(new Set(completed.forChildren[0]?.retireRequestIds)).toEqual(
+      new Set(["approval-1", "approval-2"]),
+    );
+  });
+
+  it("keeps request-only retirement for legacy routes without batch metadata", () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        ["question-1", { childContinuationToken: "child-a", kind: "question" }],
+        ["question-2", { childContinuationToken: "child-a", kind: "question" }],
+      ],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+
+    const routed = routeDeliverPayload({
+      payload: { inputResponses: [{ requestId: "question-1", text: "answer" }] },
+      state: session.state,
+    });
+
+    expect(routed.forChildren[0]?.retireRequestIds).toEqual(["question-1"]);
   });
 });

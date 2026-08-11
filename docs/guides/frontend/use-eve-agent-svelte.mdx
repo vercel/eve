@@ -77,26 +77,48 @@ await agent.send([
 
 ## Human-in-the-loop prompts
 
-A tool opts into approval with `approval` ([Tools](../../tools)). When one fires, the pending request rides along on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `agent.respond(inputResponses)`:
+A tool opts into approval with `approval` ([Tools](../../tools)). When one fires, the pending request rides along on a `dynamic-tool` part at `part.toolMetadata?.eve?.inputRequest`. Scan every message because an unrelated turn can add newer messages while the approval stays open, then answer through the same session with `agent.respond(inputResponses)`:
 
-```ts
-import type { EveDynamicToolPart, EveMessagePart } from "eve/svelte";
+```svelte
+<script lang="ts">
+  import { useEveAgent } from "eve/svelte";
 
-const isDynamicToolPart = (part: EveMessagePart): part is EveDynamicToolPart =>
-  part.type === "dynamic-tool";
+  const agent = useEveAgent();
+  const pendingRequests = $derived(
+    agent.data.messages.flatMap((message) =>
+      message.parts.flatMap((part) => {
+        if (part.type !== "dynamic-tool" || part.state !== "approval-requested") return [];
+        const request = part.toolMetadata?.eve?.inputRequest;
+        return request ? [request] : [];
+      }),
+    ),
+  );
+</script>
 
-const request = agent.data.messages
-  .at(-1)
-  ?.parts.filter(isDynamicToolPart)
-  .map((part) => part.toolMetadata?.eve?.inputRequest)
-  .find((value) => value !== undefined);
-
-if (request) {
-  await agent.respond([{ requestId: request.requestId, optionId: "approve" }]);
-}
+{#each pendingRequests as request (request.requestId)}
+  <fieldset>
+    <legend>
+      {request.kind === "tool-approval"
+        ? "Approval required"
+        : request.kind === "question"
+          ? "Question"
+          : "Session limit"}
+    </legend>
+    <p>{request.prompt}</p>
+    {#each request.options ?? [] as option (option.id)}
+      <button
+        type="button"
+        onclick={() =>
+          void agent.respond([{ requestId: request.requestId, optionId: option.id }])}
+      >
+        {option.label}
+      </button>
+    {/each}
+  </fieldset>
+{/each}
 ```
 
-The find-and-answer flow is identical across frameworks. The [React hook reference](./overview) covers the longer walkthrough.
+For a question with `allowFreeform`, bind a text input and send `{ requestId, text }`. The [React hook reference](./overview) covers the shared behavior.
 
 ## Stop, reset, and resume
 

@@ -20,7 +20,7 @@ import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -60,7 +60,9 @@ vi.mock("./durable-session-store.js", async (importOriginal) => {
   };
 });
 
-function installSessionStoreMocks(sessions: HarnessSession[]): void {
+function installSessionStoreMocks(
+  sessions: Awaited<ReturnType<typeof readDurableSession>>[],
+): void {
   // Each `readDurableSession` invocation pops the next prepared session
   // off the queue. Tests that exercise multiple harness steps stack
   // sessions in the order the step boundaries hit them.
@@ -168,7 +170,9 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
   };
 }
 
-function createSerializedContext(): Record<string, unknown> {
+function createSerializedContext(
+  mode: "conversation" | "task" = "conversation",
+): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, {
@@ -191,7 +195,7 @@ function createSerializedContext(): Record<string, unknown> {
   } as never);
   ctx.set(ChannelKey, threadContextAdapter);
   ctx.set(ContinuationTokenKey, "http:thread-context");
-  ctx.set(ModeKey, "conversation");
+  ctx.set(ModeKey, mode);
   ctx.set(SessionIdKey, "session-1");
   return serializeContext(ctx);
 }
@@ -215,7 +219,10 @@ describe("routeProxiedDeliverStep", () => {
       principalType: "user",
     };
     const session = upsertProxyInputRequests({
-      entries: [["request-1", { childContinuationToken: "child-token", kind: "tool-approval" }]],
+      entries: [
+        ["request-1", { childContinuationToken: "child-token", kind: "tool-approval" }],
+        ["request-2", { childContinuationToken: "child-token", kind: "tool-approval" }],
+      ],
       forChildContinuationToken: "child-token",
       session: createStubSession({
         continuationToken: "parent-token",
@@ -224,20 +231,24 @@ describe("routeProxiedDeliverStep", () => {
     });
     installSessionStoreMocks([session]);
 
-    await expect(
-      routeProxiedDeliverStep({
-        auth,
-        parentWritable: createTestWritable(),
-        payload: {
-          inputResponses: [{ optionId: "approve", requestId: "request-1" }],
-        },
-        sessionState: createStubSessionState({
-          continuationToken: "parent-token",
-          hasProxyInputRequests: true,
-          sessionId: "parent-session",
-        }),
+    const result = await routeProxiedDeliverStep({
+      auth,
+      parentWritable: createTestWritable(),
+      payload: {
+        inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+      },
+      sessionState: createStubSessionState({
+        continuationToken: "parent-token",
+        hasProxyInputRequests: true,
+        sessionId: "parent-session",
       }),
-    ).resolves.toEqual({ kind: "continue", remainder: undefined });
+    });
+
+    expect(result).toMatchObject({ kind: "continue", remainder: undefined });
+    expect(result.sessionState.hasProxyInputRequests).toBe(true);
+    expect([...getProxyInputRequests(result.sessionState.snapshot?.session.state)]).toEqual([
+      ["request-2", { childContinuationToken: "child-token", kind: "tool-approval" }],
+    ]);
 
     expect(resumeHookMock).toHaveBeenCalledWith("child-token", {
       auth,
@@ -249,6 +260,88 @@ describe("routeProxiedDeliverStep", () => {
       payloads: [{ inputResponses: [{ optionId: "approve", requestId: "request-1" }] }],
       requestId: undefined,
     });
+  });
+
+  it("does not retire before forwarding succeeds and ignores a stale retry after retirement", async () => {
+    const session = upsertProxyInputRequests({
+      entries: [["request-1", { childContinuationToken: "child-token", kind: "session-limit" }]],
+      forChildContinuationToken: "child-token",
+      session: createStubSession(),
+    });
+    installSessionStoreMocks([session]);
+    const initialState = createDurableSessionState({ session });
+    resumeHookMock.mockRejectedValueOnce(new Error("temporary forward failure"));
+
+    await expect(
+      routeProxiedDeliverStep({
+        parentWritable: createTestWritable(),
+        payload: { inputResponses: [{ optionId: "stop", requestId: "request-1" }] },
+        sessionState: initialState,
+      }),
+    ).rejects.toThrow("temporary forward failure");
+    expect(initialState.hasProxyInputRequests).toBe(true);
+
+    installSessionStoreMocks([session]);
+    const forwarded = await routeProxiedDeliverStep({
+      parentWritable: createTestWritable(),
+      payload: { inputResponses: [{ optionId: "stop", requestId: "request-1" }] },
+      sessionState: initialState,
+    });
+    expect(forwarded.kind).toBe("cancel-turn");
+    expect(forwarded.sessionState.hasProxyInputRequests).toBe(false);
+
+    resumeHookMock.mockClear();
+    const retiredSession = forwarded.sessionState.snapshot?.session;
+    if (retiredSession === undefined) throw new Error("Expected a routed session snapshot.");
+    installSessionStoreMocks([retiredSession]);
+    const stale = await routeProxiedDeliverStep({
+      parentWritable: createTestWritable(),
+      payload: { inputResponses: [{ optionId: "stop", requestId: "request-1" }] },
+      sessionState: forwarded.sessionState,
+    });
+
+    expect(stale).toEqual({
+      kind: "continue",
+      remainder: { inputResponses: [{ optionId: "stop", requestId: "request-1" }] },
+      sessionState: forwarded.sessionState,
+    });
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("replays multi-child forwarding in the same order when a later child fails", async () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        ["request-a", { childContinuationToken: "child-a", kind: "question" }],
+        ["request-b", { childContinuationToken: "child-b", kind: "question" }],
+      ],
+      forChildContinuationToken: "child-a",
+      session: createStubSession(),
+    });
+    installSessionStoreMocks([session]);
+    const initialState = createDurableSessionState({ session });
+    resumeHookMock
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("child-b down"));
+    const input = {
+      parentWritable: createTestWritable(),
+      payload: {
+        inputResponses: [
+          { requestId: "request-a", text: "a" },
+          { requestId: "request-b", text: "b" },
+        ],
+      },
+      sessionState: initialState,
+    };
+
+    await expect(routeProxiedDeliverStep(input)).rejects.toThrow("child-b down");
+    expect(resumeHookMock.mock.calls.map(([token]) => token)).toEqual(["child-a", "child-b"]);
+    expect(initialState.snapshot?.session.state).toEqual(session.state);
+
+    resumeHookMock.mockReset();
+    installSessionStoreMocks([session]);
+    await routeProxiedDeliverStep(input);
+
+    expect(resumeHookMock.mock.calls.map(([token]) => token)).toEqual(["child-a", "child-b"]);
   });
 });
 
@@ -1016,6 +1109,45 @@ describe("dispatchRuntimeActionsStep", () => {
 });
 
 describe("turnStep", () => {
+  it("rejects task completion while input requests remain pending", async () => {
+    const session = appendPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "call-pending-approval",
+            input: {},
+            kind: "tool-call",
+            toolName: "confirm",
+          },
+          kind: "tool-approval",
+          prompt: "Approve?",
+          requestId: "request-pending-approval",
+        },
+      ],
+      responseMessages: [],
+      session: createStubSession(),
+    });
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: { done: true, output: "must not complete" },
+        session: stepSession,
+      });
+    });
+
+    await expect(
+      turnStep({
+        input: {
+          kind: "deliver",
+          payloads: [{ message: "unrelated message" }],
+        },
+        parentWritable: createTestWritable(),
+        serializedContext: createSerializedContext("task"),
+        sessionState: createStubSessionState(),
+      }),
+    ).rejects.toThrow("Task mode cannot complete while input requests remain pending.");
+  });
+
   it("uses the selected dynamic subagent model for execution identity", async () => {
     const session = createStubSession();
     installSessionStoreMocks([session]);

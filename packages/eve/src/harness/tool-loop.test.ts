@@ -8039,6 +8039,140 @@ describe("createToolLoopHarness", () => {
     expect(hasPendingInputBatch(deniedResult.session.state)).toBe(false);
   });
 
+  it.each([
+    { delegated: false, label: "task" },
+    { delegated: true, label: "delegated task" },
+  ])(
+    "defers an unrelated message behind an open approval in $label mode",
+    async ({ delegated }) => {
+      const { emit, events } = createEventCollector();
+      const config = createTestConfig("task", emit, {
+        capabilities: { requestInput: true },
+        tools: new Map([
+          [
+            "bash",
+            {
+              description: "Run shell commands",
+              execute: vi.fn().mockResolvedValue("ok"),
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "bash",
+            },
+          ],
+        ]),
+      });
+      const run = () =>
+        createToolLoopHarness(config)(createPendingBashApprovalSession(), {
+          message: "Do something unrelated.",
+        });
+
+      let result: Awaited<ReturnType<typeof run>>;
+      if (delegated) {
+        const ctx = new ContextContainer();
+        setDelegatedParent(ctx);
+        result = await contextStorage.run(ctx, run);
+      } else {
+        result = await run();
+      }
+
+      expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+      expect(result.next).toBeNull();
+      expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
+      expect(hasDeferredStepInput(result.session)).toBe(true);
+      expect(events.some((event) => event.type === "session.completed")).toBe(false);
+    },
+  );
+
+  it.each([
+    { approved: true, reply: "approve" },
+    { approved: false, reply: "cancel" },
+  ])(
+    "resolves text $reply before replaying a deferred task message",
+    async ({ approved, reply }) => {
+      const generateCalls: Array<Array<{ content: unknown; role: string }>> = [];
+      const agentResults = [
+        {
+          finishReason: "stop",
+          response: { messages: [{ content: "Approval resolved.", role: "assistant" }] },
+          text: "Approval resolved.",
+          toolCalls: [],
+          toolResults: [],
+        },
+        {
+          finishReason: "stop",
+          response: { messages: [{ content: "Task complete.", role: "assistant" }] },
+          text: "Task complete.",
+          toolCalls: [],
+          toolResults: [],
+        },
+      ] satisfies Record<string, unknown>[];
+      let resultIndex = 0;
+      vi.mocked(ToolLoopAgent).mockImplementation(function (
+        this: MockAgentInstance,
+        settings: MockAgentSettings,
+      ) {
+        const result = agentResults[resultIndex++];
+        if (result === undefined) throw new Error("ToolLoopAgent mock exhausted its results.");
+        const { onStepFinish, prepareStep } = settings;
+        this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
+          if (prepareStep) {
+            await prepareStep({
+              context: undefined,
+              messages: input.messages,
+              model: {},
+              stepNumber: 0,
+              steps: [],
+            });
+          }
+          generateCalls.push(input.messages as Array<{ content: unknown; role: string }>);
+          if (onStepFinish) await onStepFinish(result);
+          return createMockGenerateResult(result);
+        });
+        return this;
+      } as MockAgentConstructor);
+
+      const config = createTestConfig("task", undefined, {
+        capabilities: { requestInput: true },
+        tools: new Map([
+          [
+            "bash",
+            {
+              description: "Run shell commands",
+              execute: vi.fn().mockResolvedValue("ok"),
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "bash",
+            },
+          ],
+        ]),
+      });
+      const harness = createToolLoopHarness(config);
+      const deferred = await harness(createPendingBashApprovalSession(), {
+        message: "Do something unrelated.",
+      });
+
+      const resolved = await harness(deferred.session, { message: reply });
+
+      expect(generateCalls).toHaveLength(1);
+      const approvalMessage = generateCalls[0]?.at(-1);
+      expect(approvalMessage?.role).toBe("tool");
+      expect(approvalMessage?.content).toEqual(
+        expect.arrayContaining([expect.objectContaining({ approvalId: "approval-1", approved })]),
+      );
+      expect(hasPendingInputBatch(resolved.session.state)).toBe(false);
+      expect(hasDeferredStepInput(resolved.session)).toBe(true);
+      expect(typeof resolved.next).toBe("function");
+      if (typeof resolved.next !== "function") throw new Error("Expected deferred replay step.");
+
+      const completed = await resolved.next(resolved.session);
+
+      expect(generateCalls).toHaveLength(2);
+      expect(generateCalls[1]?.at(-1)).toEqual({
+        content: "Do something unrelated.",
+        role: "user",
+      });
+      expect(completed.next).toEqual({ done: true, output: "Task complete." });
+    },
+  );
+
   it("continues deferred input when approval resolution raises another request", async () => {
     setupMockAgentSequence([
       {

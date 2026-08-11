@@ -1,13 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
+import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type {
   SessionCommandInbox,
   SessionInboxPayload,
   SessionInboxSource,
 } from "#execution/session-command-inbox.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+
+vi.mock("./route-child-delivery.js", () => ({
+  routeDeliverToChildren: vi.fn(),
+}));
 
 interface ScriptedRead {
   readonly result: IteratorResult<SessionInboxPayload>;
@@ -101,6 +106,10 @@ function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelive
 }
 
 describe("nextTurnDelivery", () => {
+  afterEach(() => {
+    vi.mocked(routeDeliverToChildren).mockReset();
+  });
+
   it("surfaces an authorization callback as its own instruction", async () => {
     const inbox = createMockInbox([authorizationRead()]);
 
@@ -173,5 +182,29 @@ describe("nextTurnDelivery", () => {
       nextTurnDelivery({ ...waitInput(inbox), awaitAuthorizationCallbacks: false }),
     ).rejects.toThrow("Mock inbox exhausted.");
     expect(inbox.windowTransitions).toEqual([]);
+  });
+
+  it("carries retired proxy state through fully routed parked deliveries", async () => {
+    const retiredState = { ...sessionState, hasProxyInputRequests: false };
+    const inbox = createMockInbox([messageRead("child response"), messageRead("parent turn")]);
+    vi.mocked(routeDeliverToChildren)
+      .mockResolvedValueOnce({
+        kind: "continue",
+        remainder: undefined,
+        sessionState: retiredState,
+      })
+      .mockResolvedValueOnce({
+        kind: "continue",
+        remainder: { message: "parent turn" },
+        sessionState: retiredState,
+      });
+
+    const next = await nextTurnDelivery({
+      ...waitInput(inbox),
+      awaitAuthorizationCallbacks: false,
+    });
+
+    expect(vi.mocked(routeDeliverToChildren).mock.calls[1]?.[0].sessionState).toBe(retiredState);
+    expect(next).toMatchObject({ kind: "turn", sessionState: retiredState });
   });
 });

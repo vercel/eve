@@ -8,6 +8,8 @@ const PENDING_INPUT_BATCHES_KEY = "eve.runtime.pendingInputBatches";
 /** Pre-collection singleton key; read once for sessions parked before the upgrade. */
 const LEGACY_PENDING_INPUT_BATCH_KEY = "eve.runtime.pendingInputBatch";
 const DEFERRED_STEP_INPUT_KEY = "eve.runtime.deferredStepInput";
+const DUPLICATE_REQUEST_ID_MESSAGE =
+  "Internal pending input invariant violated: requestId must be unique across all pending batches";
 
 /**
  * Stream-emit coordinates carried so a parked batch's resolution can attribute
@@ -72,13 +74,31 @@ export function getPendingInputBatches(
 ): readonly PendingInputBatch[] {
   const value = state?.[PENDING_INPUT_BATCHES_KEY];
   if (Array.isArray(value)) {
-    return value
+    const batches = value
       .map((entry) => coercePendingInputBatch(entry))
       .filter((batch): batch is PendingInputBatch => batch !== undefined);
+    assertUniqueRequestIds(batches);
+    return batches;
   }
 
   const legacy = coercePendingInputBatch(state?.[LEGACY_PENDING_INPUT_BATCH_KEY]);
-  return legacy === undefined ? [] : [legacy];
+  const batches = legacy === undefined ? [] : [legacy];
+  assertUniqueRequestIds(batches);
+  return batches;
+}
+
+function assertUniqueRequestIds(batches: readonly PendingInputBatch[]): void {
+  const requestIds = new Set<string>();
+  for (const batch of batches) {
+    for (const request of batch.requests) {
+      if (requestIds.has(request.requestId)) {
+        throw new TypeError(
+          `${DUPLICATE_REQUEST_ID_MESSAGE}: ${JSON.stringify(request.requestId)}.`,
+        );
+      }
+      requestIds.add(request.requestId);
+    }
+  }
 }
 
 /**
@@ -104,6 +124,7 @@ function setPendingInputBatches(
   session: HarnessSession,
   batches: readonly PendingInputBatch[],
 ): HarnessSession {
+  assertUniqueRequestIds(batches);
   const state = { ...session.state };
   delete state[LEGACY_PENDING_INPUT_BATCH_KEY];
   if (batches.length === 0) {
@@ -145,13 +166,15 @@ export function appendPendingInputBatch(input: {
 
 /**
  * Merges any queued follow-up input into the current step input and clears it
- * from session state.
+ * from session state. When `preferCurrentInput` is set, fresh input is returned
+ * alone and the queued input remains deferred.
  *
  * Used when the harness has to process a pending tool-approval response first
  * and defer the user's new message to the next internal model step.
  */
 export function consumeDeferredStepInput(input: {
   readonly input?: StepInput;
+  readonly preferCurrentInput?: boolean;
   readonly session: HarnessSession;
 }): {
   readonly input?: StepInput;
@@ -161,6 +184,12 @@ export function consumeDeferredStepInput(input: {
 
   if (deferredInput === undefined) {
     return input;
+  }
+
+  // A fresh task delivery may answer the request that caused the deferral.
+  // Resolve it alone, leaving the older turn input queued for the next step.
+  if (input.preferCurrentInput === true && input.input !== undefined) {
+    return { input: input.input, session: input.session };
   }
 
   const session = clearDeferredStepInput(input.session);

@@ -150,13 +150,13 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
 
 The follow-up reuses the same durable session: same history, same state. Message sends default to cancellation-backed `"steer"`; if a turn is active, eve buffers the follow-up, cancels that turn, and starts the message under a new turn ID. Channels and TypeScript `Session.send(...)` calls can select `turnPolicy: "queue"` when active work should finish first. Structured `inputResponses` never steer.
 
-If the session is waiting on a human-in-the-loop approval, a matching text reply such as `approve` or `cancel` answers the approval. Other follow-up text is held until the approval is answered, so an unrelated message does not implicitly deny the pending tool call.
+If one pending batch is waiting on a human-in-the-loop approval, a matching text reply such as `approve` or `cancel` answers it. Unrelated text starts an ordinary turn immediately without denying the tool call; the approval stays pending and answerable. A later structured `inputResponses` answer keyed by its `requestId` still resumes the original tool call, even after intervening turns.
 
-If the session is waiting on `ask_question`, a follow-up message clears that pending request before the model continues. An exact option match or permitted freeform response answers the question; any other message marks the question unanswered and starts the follow-up turn.
+With one question-only batch, an exact option match or permitted freeform response answers `ask_question`. Any other follow-up marks the question unanswered and starts the new turn. With several approval or question batches pending, eve does not guess which batch plain text addresses: the message starts an ordinary turn and the batches stay open. Use structured responses to target requests unambiguously.
 
-A response is stale when its request is no longer pending: the question or approval was already answered, cleared by a follow-up message, or cancelled. eve delivers a stale response to the model as a new user message, and the model decides whether the old selection still matters. A stale approval never authorizes the earlier tool call; the model must request the action and approval again if they are still needed.
+A structured response matches any currently pending request by ID, not only the newest batch. It becomes stale only after that request was answered, cleared, or cancelled. eve delivers a stale response to the model as a new user message, and the model decides whether the old selection still matters. A stale approval never authorizes the earlier tool call; the model must request the action and approval again if they are still needed.
 
-Responses match pending requests by request ID, so a response to an older request stays a plain user message even while a different question or approval is pending. Like any follow-up message, a stale response clears a pending question and is held while an approval is pending.
+One delivery can answer requests from several batches. eve resumes approval-bearing batches in durable order and carries later answers forward until each batch can resume.
 
 Multiple replacement messages retain their durable arrival order and may be folded into the same replacement turn when they arrive before cancellation settles. See [message delivery and steering](./execution-model-and-durability#message-delivery-and-steering) for the current runtime contract.
 

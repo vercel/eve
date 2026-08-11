@@ -127,6 +127,7 @@ import {
   getApprovedTools,
   getPendingInputRequestIds,
   hasDeferredStepInput,
+  hasPendingApprovalBatch,
   hasStepInput,
   resolvePendingInput,
   appendPendingInputBatch,
@@ -699,7 +700,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Resolve deferred input, runtime actions, then HITL input; each stage
     // may park when its resume payload has not arrived.
 
-    const stepInput = consumeDeferredStepInput({ input, session });
+    const stepInput = consumeDeferredStepInput({
+      input,
+      preferCurrentInput:
+        config.mode !== "conversation" && input !== undefined && hasPendingApprovalBatch(session),
+      session,
+    });
     session = stepInput.session;
 
     const resolvedRuntimeActions = await resolvePendingRuntimeActions({
@@ -731,13 +737,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         : effectiveStepInput;
 
     const pending = resolvePendingInput({
+      deferMessagesWhileApprovalsPending: config.mode !== "conversation",
       history: resolvedRuntimeActions.messages,
       resolveApprovalKey: resolveApprovalKeyFromTools(config.tools),
       session,
       stepInput: effectiveStepInput,
     });
     if (pending.outcome === "unresolved") {
-      if (emit && pending.deferredMessage === true && hasStepInput(input)) {
+      if (
+        emit &&
+        config.mode === "conversation" &&
+        pending.deferredMessage === true &&
+        hasStepInput(input)
+      ) {
         try {
           emissionState = await emitTurnPreamble(
             emit,

@@ -113,20 +113,41 @@ received attachment as a `file` part on the user message. The part includes `med
 
 ## Human-in-the-loop prompts
 
-Tools opt into approval with `approval`, and the model can also ask a question with `ask_question` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `respond()`:
+Tools opt into approval with `approval`, and the model can also ask a question with `ask_question` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part at `part.toolMetadata?.eve?.inputRequest`. Scan every message because an unrelated turn can add newer messages while an approval stays open, then answer through the same session with `respond()`:
 
 ```tsx
-const request = agent.data.messages
-  .at(-1)
-  ?.parts.find((part) => part.type === "dynamic-tool" && part.toolMetadata?.eve?.inputRequest)
-  ?.toolMetadata?.eve?.inputRequest;
+const pendingRequests = agent.data.messages
+  .flatMap((message) => message.parts)
+  .flatMap((part) => {
+    if (part.type !== "dynamic-tool" || part.state !== "approval-requested") return [];
+    const request = part.toolMetadata?.eve?.inputRequest;
+    return request ? [request] : [];
+  });
 
-if (request) {
-  await agent.respond([{ requestId: request.requestId, optionId: "approve" }]);
-}
+return pendingRequests.map((request) => (
+  <fieldset key={request.requestId}>
+    <legend>
+      {request.kind === "tool-approval"
+        ? "Approval required"
+        : request.kind === "question"
+          ? "Question"
+          : "Session limit"}
+    </legend>
+    <p>{request.prompt}</p>
+    {request.options?.map((option) => (
+      <button
+        key={option.id}
+        onClick={() => void agent.respond([{ requestId: request.requestId, optionId: option.id }])}
+        type="button"
+      >
+        {option.label}
+      </button>
+    ))}
+  </fieldset>
+));
 ```
 
-`request.prompt` and `request.options` give you what you need to render the approve and cancel UI. The default reducer marks the part as responded immediately, then updates it again once eve streams the resumed result.
+For a question with `allowFreeform`, render a text input and send `{ requestId, text }`. The default reducer marks each matching part as responded immediately. Approved tools update again when eve streams their result.
 
 ## Authorization prompts
 

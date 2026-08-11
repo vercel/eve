@@ -88,28 +88,51 @@ async function onFileChange(event: Event) {
 
 ## Human-in-the-loop prompts
 
-A tool opts into approval with `approval` ([Tools](../../tools)). When it triggers, the pending request shows up as a `dynamic-tool` part on the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `respond(inputResponses)`:
+A tool opts into approval with `approval` ([Tools](../../tools)). When it triggers, the pending request shows up on a `dynamic-tool` part at `part.toolMetadata?.eve?.inputRequest`. Scan every message because an unrelated turn can add newer messages while the approval stays open, then answer through the same session with `respond(inputResponses)`:
 
-```ts
-import type { EveDynamicToolPart, EveMessagePart } from "eve/vue";
+```vue
+<script setup lang="ts">
+import { computed } from "vue";
+import { useEveAgent } from "eve/vue";
 
 const { data, respond } = useEveAgent();
 
-const isDynamicToolPart = (part: EveMessagePart): part is EveDynamicToolPart =>
-  part.type === "dynamic-tool";
+const pendingRequests = computed(() =>
+  data.value.messages.flatMap((message) =>
+    message.parts.flatMap((part) => {
+      if (part.type !== "dynamic-tool" || part.state !== "approval-requested") return [];
+      const request = part.toolMetadata?.eve?.inputRequest;
+      return request ? [request] : [];
+    }),
+  ),
+);
+</script>
 
-const request = data.value.messages
-  .at(-1)
-  ?.parts.filter(isDynamicToolPart)
-  .map((part) => part.toolMetadata?.eve?.inputRequest)
-  .find((value) => value !== undefined);
-
-if (request) {
-  await respond([{ requestId: request.requestId, optionId: "approve" }]);
-}
+<template>
+  <fieldset v-for="request in pendingRequests" :key="request.requestId">
+    <legend>
+      {{
+        request.kind === "tool-approval"
+          ? "Approval required"
+          : request.kind === "question"
+            ? "Question"
+            : "Session limit"
+      }}
+    </legend>
+    <p>{{ request.prompt }}</p>
+    <button
+      v-for="option in request.options ?? []"
+      :key="option.id"
+      type="button"
+      @click="respond([{ requestId: request.requestId, optionId: option.id }])"
+    >
+      {{ option.label }}
+    </button>
+  </fieldset>
+</template>
 ```
 
-The find-and-answer flow is the same across every framework. The [React hook reference](./overview) covers the longer walkthrough.
+For a question with `allowFreeform`, bind a text input and send `{ requestId, text }`. The [React hook reference](./overview) covers the shared behavior.
 
 ## Stop, reset, and resume
 

@@ -8,6 +8,7 @@ import {
   type DurableSessionState,
   projectSessionState,
   readDurableSession,
+  replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { projectToDurableSession } from "#execution/session.js";
@@ -154,6 +155,32 @@ describe("durable-session-store cross-version contract", () => {
         version: DURABLE_SESSION_VERSION,
       },
     });
+  });
+
+  it("replaces the session without dropping unknown snapshot fields", () => {
+    const original = createDurableSessionState({
+      session: buildSession({ continuationToken: "http:old", sessionId: "wrun_replace" }),
+    });
+    const state = {
+      ...original,
+      snapshot: {
+        ...original.snapshot,
+        futureSnapshotField: { owner: "newer deployment" },
+      },
+    } as DurableSessionState;
+    const session = {
+      ...state.snapshot!.session,
+      continuationToken: "http:new",
+    };
+
+    const replaced = replaceDurableSessionSnapshot({ session, state });
+
+    expect(replaced.continuationToken).toBe("http:new");
+    expect(replaced.snapshot?.session).toBe(session);
+    expect(
+      (replaced.snapshot as DurableSessionSnapshot & { futureSnapshotField?: unknown })
+        .futureSnapshotField,
+    ).toEqual({ owner: "newer deployment" });
   });
 
   it("reads an embedded snapshot without opening the legacy stream", async () => {

@@ -58,9 +58,10 @@ vi.mock("./create-session-step.js", () => ({
 }));
 
 vi.mock("./route-child-delivery.js", () => ({
-  routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads }) => ({
+  routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads, sessionState }) => ({
     kind: "continue",
     remainder: payloads[0],
+    sessionState,
   })),
 }));
 
@@ -1104,6 +1105,7 @@ describe("workflowEntry", () => {
     vi.mocked(routeDeliverToChildren).mockResolvedValueOnce({
       kind: "continue",
       remainder: undefined,
+      sessionState,
     });
     installHookMocks({
       deliveryHooks: [
@@ -1129,6 +1131,40 @@ describe("workflowEntry", () => {
     ).resolves.toEqual({ output: "" });
 
     expect(notifyTurnCallerStep).toHaveBeenCalledTimes(1);
+  });
+
+  it("adopts retired proxy state before the next parked driver turn", async () => {
+    const sessionState = createBaseSessionState({ hasProxyInputRequests: true });
+    const retiredState = createBaseSessionState({ hasProxyInputRequests: false });
+    const completedState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(routeDeliverToChildren).mockResolvedValueOnce({
+      kind: "continue",
+      remainder: undefined,
+      sessionState: retiredState,
+    });
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [
+            { kind: "send", payload: { inputResponses: [] } },
+            { kind: "send", payload: { message: "next parent turn" } },
+          ],
+        },
+      ],
+      turnControls: [
+        turnResult({ action: "park", sessionState }),
+        turnResult({ action: "done", output: "ok", sessionState: completedState }),
+      ],
+    });
+
+    await workflowEntry({
+      input: { message: "hello" },
+      serializedContext: createSerializedContext(),
+    });
+
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].sessionState).toBe(retiredState);
   });
 
   it("runs concurrent caller deliveries as separate turns", async () => {

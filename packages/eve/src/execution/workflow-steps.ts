@@ -68,6 +68,7 @@ import {
   createDurableSessionState,
   type DurableSessionState,
   readDurableSession,
+  replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import {
   createTurnWorkflowInput,
@@ -76,6 +77,7 @@ import {
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+import { retireProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
@@ -89,6 +91,9 @@ import {
   turnWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
+
+const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
+  "Task mode cannot complete while input requests remain pending.";
 
 /**
  * Result of one durable harness step, consumed by the turn workflow.
@@ -463,6 +468,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     typeof stepResult.next === "object" &&
     "done" in stepResult.next
   ) {
+    if (mode === "task" && hasPendingInputBatch(stepResult.session.state)) {
+      writer.releaseLock();
+      throw new Error(TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE);
+    }
     await writer.close();
     const sessionTotals = getTurnUsageState(stepResult.session.state)?.session;
     return {
@@ -600,17 +609,20 @@ export function resolveEffectiveOutputSchema(input: {
 export type RoutedDeliverResult =
   | {
       readonly kind: "cancel-turn";
+      readonly sessionState: DurableSessionState;
     }
   | {
       readonly kind: "continue";
       /** `undefined` when the entire payload was routed to descendants. */
       readonly remainder: DeliverPayload | undefined;
+      readonly sessionState: DurableSessionState;
     };
 
 /**
  * Splits an inbound deliver payload into parent-local and
  * proxied-child buckets and forwards the child buckets via
- * `resumeHook`. Read-only: never appends a snapshot.
+ * `resumeHook`. Successfully forwarded request IDs are retired in the
+ * returned snapshot so later deliveries cannot route through stale entries.
  */
 export async function routeProxiedDeliverStep(input: {
   readonly auth?: SessionAuthContext | null;
@@ -620,7 +632,7 @@ export async function routeProxiedDeliverStep(input: {
 }): Promise<RoutedDeliverResult> {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
+  let durableSession = await readDurableSession(input.sessionState);
   const routed = routeDeliverPayload({
     payload: input.payload,
     state: durableSession.state,
@@ -633,9 +645,17 @@ export async function routeProxiedDeliverStep(input: {
       forChild.childContinuationToken,
       sendCommandToDelivery({ auth: input.auth, kind: "send", payload: forChild.payload }),
     );
+    durableSession = retireProxyInputRequests(durableSession, forChild.retireRequestIds);
   }
 
-  return routed.parentAction ?? { kind: "continue", remainder: routed.forSelf };
+  const sessionState =
+    routed.forChildren.length === 0
+      ? input.sessionState
+      : replaceDurableSessionSnapshot({ session: durableSession, state: input.sessionState });
+
+  return routed.parentAction === undefined
+    ? { kind: "continue", remainder: routed.forSelf, sessionState }
+    : { ...routed.parentAction, sessionState };
 }
 
 /** Starts a per-turn child workflow for the current driver session. */

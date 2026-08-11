@@ -4,8 +4,12 @@ import {
   clearProxyInputRequestsForChild,
   getProxyInputRequests,
   hasProxyInputRequests,
+  retireProxyInputRequests,
+  toProxyInputRequestEntries,
   upsertProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
+import type { SubagentInputRequestHookPayload } from "#channel/types.js";
+import type { InputRequest, InputRequestKind } from "#runtime/input/types.js";
 import type { HarnessSession } from "#harness/types.js";
 
 function createSession(state?: Record<string, unknown>): HarnessSession {
@@ -20,6 +24,15 @@ function createSession(state?: Record<string, unknown>): HarnessSession {
     history: [],
     sessionId: "parent-session",
     state,
+  };
+}
+
+function createRequest(requestId: string, kind: InputRequestKind): InputRequest {
+  return {
+    action: { callId: requestId, input: {}, kind: "tool-call", toolName: "test" },
+    kind,
+    prompt: "Respond",
+    requestId,
   };
 }
 
@@ -112,6 +125,48 @@ describe("upsertProxyInputRequests", () => {
   });
 });
 
+describe("toProxyInputRequestEntries", () => {
+  it("records shared batch and approval metadata on every route", () => {
+    const requests = [
+      createRequest("question-1", "question"),
+      createRequest("approval-1", "tool-approval"),
+    ];
+    const payload = {
+      callId: "call-1",
+      childContinuationToken: "child-a",
+      childSessionId: "child-session",
+      event: { requests, sequence: 3, stepIndex: 2, turnId: "turn-1" },
+      kind: "subagent-input-request",
+      subagentName: "delegate",
+    } satisfies SubagentInputRequestHookPayload;
+
+    expect(toProxyInputRequestEntries(payload)).toEqual([
+      [
+        "question-1",
+        {
+          batch: {
+            approvalRequestIds: ["approval-1"],
+            requestIds: ["question-1", "approval-1"],
+          },
+          childContinuationToken: "child-a",
+          kind: "question",
+        },
+      ],
+      [
+        "approval-1",
+        {
+          batch: {
+            approvalRequestIds: ["approval-1"],
+            requestIds: ["question-1", "approval-1"],
+          },
+          childContinuationToken: "child-a",
+          kind: "tool-approval",
+        },
+      ],
+    ]);
+  });
+});
+
 describe("clearProxyInputRequestsForChild", () => {
   it("removes only the target child's entries", () => {
     let session = upsertProxyInputRequests({
@@ -143,6 +198,30 @@ describe("clearProxyInputRequestsForChild", () => {
   });
 });
 
+describe("retireProxyInputRequests", () => {
+  it("removes only answered request IDs, including partial same-child batches", () => {
+    const session = upsertProxyInputRequests({
+      entries: [
+        ["req-1", { childContinuationToken: "child-a", kind: "question" }],
+        ["req-2", { childContinuationToken: "child-a", kind: "question" }],
+      ],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+
+    const next = retireProxyInputRequests(session, ["req-1"]);
+
+    expect([...getProxyInputRequests(next.state)]).toEqual([
+      ["req-2", { childContinuationToken: "child-a", kind: "question" }],
+    ]);
+  });
+
+  it("is idempotent for an already-retired request ID", () => {
+    const session = createSession();
+    expect(retireProxyInputRequests(session, ["req-1"])).toBe(session);
+  });
+});
+
 describe("getProxyInputRequests type safety", () => {
   it("returns an empty map when the session carries no proxy state", () => {
     const entries = getProxyInputRequests(createSession().state);
@@ -171,5 +250,23 @@ describe("getProxyInputRequests type safety", () => {
       "eve.runtime.proxyInputRequests": [{ requestId: "req-1" }],
     });
     expect(getProxyInputRequests(session.state).size).toBe(0);
+  });
+
+  it("keeps legacy routes and ignores malformed optional batch metadata", () => {
+    const session = createSession({
+      "eve.runtime.proxyInputRequests": {
+        legacy: { childContinuationToken: "child-a", kind: "question" },
+        malformed: {
+          batch: { approvalRequestIds: ["other"], requestIds: ["malformed"] },
+          childContinuationToken: "child-a",
+          kind: "tool-approval",
+        },
+      },
+    });
+
+    expect([...getProxyInputRequests(session.state)]).toEqual([
+      ["legacy", { childContinuationToken: "child-a", kind: "question" }],
+      ["malformed", { childContinuationToken: "child-a", kind: "tool-approval" }],
+    ]);
   });
 });

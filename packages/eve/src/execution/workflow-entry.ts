@@ -307,9 +307,14 @@ async function runDriverLoop(input: {
     readonly expectedAttemptIds: readonly string[];
     readonly sessionState: DurableSessionState;
   }): Promise<
-    | { readonly kind: "authorization-resume"; readonly payloads: DeliverPayload[] }
+    | {
+        readonly kind: "authorization-resume";
+        readonly payloads: DeliverPayload[];
+        readonly sessionState: DurableSessionState;
+      }
     | Exclude<NextTurnInstruction, { kind: "authorization" }>
   > => {
+    let sessionState = park.sessionState;
     const expectedAttemptIds = new Set(park.expectedAttemptIds);
     for (const attemptId of collectedAuthPayloads.keys()) {
       if (!expectedAttemptIds.has(attemptId)) collectedAuthPayloads.delete(attemptId);
@@ -324,7 +329,7 @@ async function runDriverLoop(input: {
           (attemptId) => collectedAuthPayloads.get(attemptId)!,
         );
         collectedAuthPayloads.clear();
-        return { kind: "authorization-resume", payloads };
+        return { kind: "authorization-resume", payloads, sessionState };
       }
 
       const next = await nextTurnDelivery({
@@ -334,8 +339,9 @@ async function runDriverLoop(input: {
         commandInbox,
         deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,
         driverWritable: input.driverWritable,
-        sessionState: park.sessionState,
+        sessionState,
       });
+      sessionState = next.sessionState;
       if (next.kind !== "authorization") return next;
 
       for (const payload of next.payloads) {
@@ -353,7 +359,7 @@ async function runDriverLoop(input: {
       if (next.closed) {
         const payloads = [...collectedAuthPayloads.values()];
         collectedAuthPayloads.clear();
-        return { kind: "authorization-resume", payloads };
+        return { kind: "authorization-resume", payloads, sessionState };
       }
     }
   };
@@ -484,6 +490,8 @@ async function runDriverLoop(input: {
         expectedAttemptIds: action.authorizationAttemptIds ?? [],
         sessionState: action.sessionState,
       });
+      action = { ...action, sessionState: next.sessionState };
+      input.crashCleanupState.lastSessionState = action.sessionState;
 
       if (next.kind === "authorization-resume") {
         action = await runTurn({
