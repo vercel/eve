@@ -40,7 +40,7 @@ import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
-import { resolveCoDeployedEveServicePrefix } from "#internal/vercel/vercel-service-config-operations.js";
+import { resolveEveServicePrefixByRoot } from "#internal/vercel/vercel-service-config-operations.js";
 import { parseVercelServicesConfig } from "#internal/vercel/vercel-services-config.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { isObject } from "#shared/guards.js";
@@ -100,7 +100,7 @@ async function writeOptionalApplicationBuildProfile(input: {
   }
 }
 
-async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
+async function resolveEveServicePrefixForVercelFunctionOutput(
   appRoot: string,
   agentRoot: string,
 ): Promise<string | undefined> {
@@ -114,7 +114,7 @@ async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
         JSON.parse(await readFile(configPath, "utf8")) as unknown,
         configPath,
       );
-      const servicePrefix = resolveCoDeployedEveServicePrefix({
+      const servicePrefix = resolveEveServicePrefixByRoot({
         appRoots,
         configRoot: await resolveVercelOutputConfigRoot(outputDirectory),
         config,
@@ -146,7 +146,7 @@ async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
           ? currentDir
           : await resolveVercelOutputConfigRoot(dirname(configPath));
 
-        const servicePrefix = resolveCoDeployedEveServicePrefix({
+        const servicePrefix = resolveEveServicePrefixByRoot({
           appRoots,
           configRoot,
           config,
@@ -288,17 +288,27 @@ async function buildApplicationInWorkspace(
 
   const servicePrefix = isVercelBuild
     ? await measureBuildPhase(profiler, "vercel.service-prefix.resolve", () =>
-        resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
+        resolveEveServicePrefixForVercelFunctionOutput(
           preparedHost.appRoot,
           preparedHost.compileResult.project.agentRoot,
         ),
       )
     : undefined;
+  if (
+    options.publicRoutePrefix !== undefined &&
+    servicePrefix !== undefined &&
+    options.publicRoutePrefix !== servicePrefix
+  ) {
+    throw new Error(
+      `EVE_PUBLIC_ROUTE_PREFIX ${JSON.stringify(options.publicRoutePrefix)} conflicts with the configured Vercel service prefix ${JSON.stringify(servicePrefix)}.`,
+    );
+  }
+  const publicRoutePrefix = options.publicRoutePrefix ?? servicePrefix;
   const nitro = await measureBuildPhase(profiler, "nitro.create", () =>
     createProductionApplicationNitro(preparedHost, {
       buildDir: workspace.nitro.buildDir,
       outputDir: workspace.publication.output.stagedDir,
-      publicRoutePrefix: options.publicRoutePrefix,
+      publicRoutePrefix,
     }),
   );
 
@@ -341,7 +351,7 @@ async function buildApplicationInWorkspace(
     if (vercelServiceOutput !== undefined) {
       await measureBuildPhase(profiler, "vercel.service-crons.normalize", () =>
         normalizeVercelServiceCrons({
-          publicRoutePrefix: options.publicRoutePrefix,
+          publicRoutePrefix,
           serviceOutputDirectory: workspace.publication.output.stagedDir,
         }),
       );

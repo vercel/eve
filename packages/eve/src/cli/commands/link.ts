@@ -1,7 +1,9 @@
+import { resolveEveProjectContext } from "#internal/project-context.js";
+import { isEveProject } from "#setup/scaffold/index.js";
 import { runLinkFlow, type LinkFlowDeps } from "#setup/flows/link.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 
-import { hasInteractiveTerminal } from "./preconditions.js";
+import { hasInteractiveTerminal, NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import {
   isNonInteractiveProjectCommand,
   runNonInteractiveLink,
@@ -16,12 +18,14 @@ export interface LinkCliLogger {
 export interface LinkCommandDependencies {
   createPrompter?: () => Prompter;
   hasInteractiveTerminal(): boolean;
+  isEveProject: typeof isEveProject;
   /** Test seam into the flow's detection and box effects. */
   flowDeps?: Partial<LinkFlowDeps>;
 }
 
 const defaultDependencies: LinkCommandDependencies = {
   hasInteractiveTerminal,
+  isEveProject,
 };
 
 /**
@@ -38,6 +42,19 @@ export async function runLinkCommand(
   dependencies: LinkCommandDependencies = defaultDependencies,
   options: VercelProjectCliOptions = {},
 ): Promise<void> {
+  const projectContext = await resolveEveProjectContext(appRoot);
+  if (projectContext.kind === "collection-member") {
+    logger.error(
+      `This agent belongs to the collection at ${projectContext.collection.root}. Run \`eve link\` from the collection root.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (!(await dependencies.isEveProject(appRoot)) && projectContext.kind === "standalone") {
+    logger.error(NOT_AN_AGENT_MESSAGE);
+    process.exitCode = 1;
+    return;
+  }
   if (isNonInteractiveProjectCommand(options)) {
     await runNonInteractiveLink({ logger, appRoot, options });
     return;

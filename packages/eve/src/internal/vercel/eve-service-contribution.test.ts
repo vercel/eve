@@ -1,44 +1,28 @@
 import { describe, expect, it } from "vitest";
 
 import { createEveServiceName } from "#internal/vercel/eve-service-contribution.js";
-import { resolveCoDeployedEveServicePrefix } from "#internal/vercel/vercel-service-config-operations.js";
+import { resolveEveServicePrefixByRoot } from "#internal/vercel/vercel-service-config-operations.js";
 import { isValidVercelServiceName } from "#internal/vercel/vercel-service-name.js";
 
-describe("resolveCoDeployedEveServicePrefix", () => {
-  it("resolves the matching eve service only when it is co-deployed with a host", () => {
+describe("resolveEveServicePrefixByRoot", () => {
+  it("resolves stable and legacy services by application root", () => {
     expect(
-      resolveCoDeployedEveServicePrefix({
+      resolveEveServicePrefixByRoot({
         appRoots: ["/project/agents/support"],
         config: {
           services: {
             eve: { framework: "eve", root: "agents/support", routePrefix: "/support" },
-            web: { framework: "nextjs", root: "." },
           },
         },
         configRoot: "/project",
       }),
     ).toBe("/support");
     expect(
-      resolveCoDeployedEveServicePrefix({
-        appRoots: ["/project/agents/support"],
-        config: {
-          services: {
-            eve: { framework: "eve", root: "agents/support", routePrefix: "/support" },
-          },
-        },
-        configRoot: "/project",
-      }),
-    ).toBeUndefined();
-  });
-
-  it("supports legacy service collections", () => {
-    expect(
-      resolveCoDeployedEveServicePrefix({
+      resolveEveServicePrefixByRoot({
         appRoots: ["/project/agent"],
         config: {
           experimentalServices: {
             eve: { entrypoint: "agent", framework: "eve", mount: { path: "/agent" } },
-            web: { framework: "nextjs" },
           },
         },
         configRoot: "/project",
@@ -48,7 +32,7 @@ describe("resolveCoDeployedEveServicePrefix", () => {
 
   it("ignores malformed legacy service collections", () => {
     expect(
-      resolveCoDeployedEveServicePrefix({
+      resolveEveServicePrefixByRoot({
         appRoots: ["/project/agent"],
         config: {
           experimentalServices: null,

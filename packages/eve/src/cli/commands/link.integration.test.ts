@@ -25,6 +25,17 @@ class TestLogger implements LinkCliLogger {
   }
 }
 
+async function createCollectionProject(): Promise<string> {
+  const projectRoot = await mkdtemp(join(tmpdir(), "eve-link-collection-"));
+  await mkdir(join(projectRoot, "agents/support/agent"), { recursive: true });
+  await writeFile(
+    join(projectRoot, "package.json"),
+    JSON.stringify({ eve: { collection: true }, private: true }),
+    "utf8",
+  );
+  return projectRoot;
+}
+
 async function createAgentProject(): Promise<string> {
   const projectRoot = await mkdtemp(join(tmpdir(), "eve-link-command-"));
   await mkdir(join(projectRoot, "agent"), { recursive: true });
@@ -107,6 +118,34 @@ afterEach(() => {
 });
 
 describe("runLinkCommand", () => {
+  test("refuses a directory without an eve agent", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "eve-link-empty-"));
+    const logger = new TestLogger();
+
+    await runLinkCommand(logger, projectRoot, {
+      isEveProject,
+      hasInteractiveTerminal: () => true,
+    });
+
+    expect(logger.errors).toEqual([
+      "No eve agent in this directory. Run `eve init <name>`, then run this command from inside the new project.",
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("refuses to link one member of a collection", async () => {
+    const projectRoot = await createCollectionProject();
+    const logger = new TestLogger();
+
+    await runLinkCommand(logger, join(projectRoot, "agents/support"), {
+      isEveProject,
+      hasInteractiveTerminal: () => true,
+    });
+
+    expect(logger.errors[0]).toContain("collection root");
+    expect(process.exitCode).toBe(1);
+  });
+
   test("refuses without an interactive terminal", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();

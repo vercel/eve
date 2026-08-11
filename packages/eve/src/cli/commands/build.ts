@@ -5,6 +5,7 @@ import { applicationCommand, type CliApplicationContext } from "#cli/application
 import { resolveInternalVercelServiceOutput } from "#cli/vercel-service-output.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
+import { resolveEveProjectContext } from "#internal/project-context.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
@@ -41,6 +42,25 @@ export function registerBuildCommand(input: {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 
       await loadDevelopmentEnvironmentFiles(input.applicationContext.root);
+
+      const projectContext = await resolveEveProjectContext(input.appRoot);
+      if (projectContext.kind === "collection") {
+        if (options.profile !== undefined || options.skipSandboxPrewarm === true) {
+          throw new Error(
+            "Collection builds do not support --profile or --skip-sandbox-prewarm. Run those options from an individual agent directory.",
+          );
+        }
+        const { buildAgentCollection } = await import("#internal/vercel/build-agent-collection.js");
+        const outputDir = await buildAgentCollection(projectContext.collection);
+        input.logger.log(
+          renderCliTaggedLine(theme, {
+            message: `built output at ${outputDir}`,
+            tag: "build",
+            tone: "success",
+          }),
+        );
+        return;
+      }
 
       const buildHost =
         input.buildHost ?? (await import("#internal/nitro/host.js")).buildApplication;

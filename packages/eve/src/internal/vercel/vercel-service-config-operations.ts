@@ -62,21 +62,23 @@ function resolveServiceRoot(configRoot: string, service: VercelServiceConfig): s
   return typeof root === "string" && root.trim().length > 0 ? resolve(configRoot, root) : undefined;
 }
 
-/** Resolve the mounted prefix for an eve service co-deployed with a host service. */
-export function resolveCoDeployedEveServicePrefix(input: {
+function resolveServiceCollection(
+  config: VercelServicesConfig,
+): readonly VercelServiceConfig[] | undefined {
+  return (
+    parseLegacyServiceCollection(config.experimentalServices) ??
+    parseLegacyServiceCollection(config.experimentalServicesV2) ??
+    createServiceConfigList(config.services)
+  );
+}
+
+/** Resolve the mounted prefix for the eve service matching an application root. */
+export function resolveEveServicePrefixByRoot(input: {
   readonly appRoots: readonly string[];
   readonly config: VercelServicesConfig;
   readonly configRoot: string;
 }): string | undefined {
-  const services =
-    parseLegacyServiceCollection(input.config.experimentalServices) ??
-    parseLegacyServiceCollection(input.config.experimentalServicesV2) ??
-    createServiceConfigList(input.config.services);
-  if (services === undefined || !services.some((service) => service.framework !== "eve")) {
-    return undefined;
-  }
-
-  for (const service of services) {
+  for (const service of resolveServiceCollection(input.config) ?? []) {
     const prefix = resolveServicePrefix(service);
     if (
       service.framework === "eve" &&

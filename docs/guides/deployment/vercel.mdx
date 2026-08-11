@@ -51,6 +51,28 @@ See [Sandbox](../../sandbox) for resource limits, network policy, and lifecycle 
 
 ## Deploy the agent
 
+A project containing only several independently addressed root agents can use eve's hostless collection layout:
+
+```json title="package.json"
+{
+  "eve": { "collection": true }
+}
+```
+
+```text
+my-project/
+├── package.json
+└── agents/
+    ├── support/
+    │   └── agent/
+    └── research/
+        └── agent/
+```
+
+The `eve.collection` declaration marks the project as a collection. eve then validates and discovers only direct `agents/<name>/agent/` children. Their directory names become their public identities, exposed at `/eve/agents/<name>/eve/v1/*`. Run `eve dev`, `eve info`, and `eve eval` from an individual child directory; run project-level build, link, and deploy commands from the collection root. A child `package.json` is optional, must belong to the root package-manager workspace, and may provide its own `build` script and dependencies.
+
+With no authored `vercel.json#services`, `eve build` derives the complete Vercel Services graph on every build. If `vercel.json` declares `services`, that authored graph is authoritative instead; use `vercel build` to build and validate the complete project. This supports heterogeneous projects with frontends, private APIs, bindings, and other non-eve services without generated configuration files.
+
 Deploy the linked project to production:
 
 ```bash
