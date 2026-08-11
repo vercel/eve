@@ -13,7 +13,7 @@ const commands = (results.o11y?.shellCommands ?? []).map((entry) => entry.comman
 const events = readJsonLines("__authoring_eval__/world-events.jsonl");
 
 test("installs the discovered iMessage registry item through the headless setup path", () => {
-  expect(commands).toMatch(/eve\s+add\s+channel\/mock-imessage[^\n]*--non-interactive/i);
+  expect(commands).toMatch(/eve\s+add\s+channel\/photon-imessage[^\n]*--non-interactive/i);
   expect(commands).toMatch(/--answer(?:=|\s+)["']?phoneNumber=/i);
 });
 

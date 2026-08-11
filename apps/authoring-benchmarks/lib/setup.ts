@@ -6,6 +6,7 @@ const TARBALL_PATH = "__authoring_eval__/eve.tgz";
 const REGISTRY_ROOT = "__authoring_eval__/registry";
 const SEED_ROOT = "__authoring_eval__/seed";
 const SCAFFOLD_ROOT = "/tmp/eve-authoring-subject";
+const SYNTHETIC_REGISTRY_URL = "http://127.0.0.1:4173";
 
 export interface SetupAuthoringEvalOptions {
   readonly agentsMd?: boolean;
@@ -61,20 +62,26 @@ export async function setupAuthoringEval(
     "vitest@4.1.10",
   ]);
 
-  if (options.syntheticImessage === true) await installSyntheticImessageWorld(sandbox);
+  if (options.syntheticImessage === true) {
+    await installSyntheticImessageWorld(sandbox);
+    await sandbox.writeFiles({
+      ".claude/settings.json": JSON.stringify({
+        env: { EVE_DEV_OFFICIAL_REGISTRY_URL: SYNTHETIC_REGISTRY_URL },
+      }),
+    });
+  }
   if (options.agentsMd !== true) await removeScaffoldedAgentGuidance(sandbox);
 }
 
 async function installSyntheticImessageWorld(sandbox: Sandbox): Promise<void> {
-  const registryBaseUrl = "http://127.0.0.1:4173";
   const channel = {
     $schema: "https://ui.shadcn.com/schema/registry-item.json",
-    name: "channel/mock-imessage",
-    title: "Mock iMessage",
+    name: "channel/photon-imessage",
+    title: "Photon iMessage",
     description: "Connect an eve agent to iMessage through a deterministic provider setup flow.",
     files: [
       {
-        path: "registry/channels/mock-imessage.ts",
+        path: "registry/channels/photon-imessage.ts",
         content: [
           'import { photonIMessageChannel } from "eve/channels/photon";',
           "",
@@ -91,7 +98,7 @@ async function installSyntheticImessageWorld(sandbox: Sandbox): Promise<void> {
     ],
     meta: {
       eve: {
-        docs: "/docs/channels/mock-imessage",
+        docs: "/docs/channels/photon-imessage",
         setup: {
           command: "mock-imessage-setup",
           package: "@eve-internal/mock-imessage-setup",
@@ -105,21 +112,21 @@ async function installSyntheticImessageWorld(sandbox: Sandbox): Promise<void> {
   const catalog = {
     $schema: "https://ui.shadcn.com/schema/registry.json",
     name: "eve-authoring-eval",
-    homepage: registryBaseUrl,
+    homepage: SYNTHETIC_REGISTRY_URL,
     items: [
       {
-        name: "channel/mock-imessage",
+        name: "channel/photon-imessage",
         type: "registry:item",
         description: channel.description,
-        registry: `${registryBaseUrl}/registry.json`,
-        addCommandArgument: `${registryBaseUrl}/channel/mock-imessage.json`,
+        registry: `${SYNTHETIC_REGISTRY_URL}/registry.json`,
+        addCommandArgument: `${SYNTHETIC_REGISTRY_URL}/channel/photon-imessage.json`,
       },
     ],
   };
 
   await sandbox.writeFiles({
     [`${REGISTRY_ROOT}/registry.json`]: JSON.stringify(catalog),
-    [`${REGISTRY_ROOT}/channel/mock-imessage.json`]: JSON.stringify(channel),
+    [`${REGISTRY_ROOT}/channel/photon-imessage.json`]: JSON.stringify(channel),
   });
   await run(sandbox, "npm", [
     "install",
