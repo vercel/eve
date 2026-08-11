@@ -22,7 +22,10 @@ project root with `eve set --model anthropic/claude-opus-4.8` or from the local
 dev TUI with `/model anthropic/claude-opus-4.8`.
 
 The root `agent.ts` can be omitted when no runtime config is needed. In that case, eve defaults
-to `zai/glm-5.2-fast`. When `agent.ts` is present, `model` is required.
+to `zai/glm-5.2-fast`. GLM 5.2 Fast does not support image input; choose a
+vision-capable model or [route image inputs to Gemini
+Flash](./guides/dynamic-capabilities#route-image-inputs-to-a-vision-model).
+When `agent.ts` is present, `model` is required.
 
 `model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
 
@@ -96,56 +99,6 @@ selection object. Returning `null` or `undefined` fails the turn.
 The `session.started` runtime identity does not include a model id for a
 dynamic agent. Each public `step.started` event reports the concrete `modelId`
 selected for that model call.
-
-#### Route image inputs to a vision model
-
-Use a `step.started` resolver when the model choice depends on the current
-message content. This example uses GLM 5.2 Fast for text-only steps and switches
-to Gemini 3.5 Flash when a user message contains an AI SDK `image` part or an
-image `file` part:
-
-```ts title="agent/agent.ts"
-import { defineAgent, defineDynamic } from "eve";
-
-export default defineAgent({
-  model: defineDynamic({
-    events: {
-      "step.started": (_event, ctx) => {
-        const hasImage = ctx.messages.some(
-          (message) =>
-            message.role === "user" &&
-            Array.isArray(message.content) &&
-            message.content.some(
-              (part) =>
-                part.type === "image" ||
-                (part.type === "file" &&
-                  (part.mediaType === "image" || part.mediaType.startsWith("image/"))),
-            ),
-        );
-
-        return hasImage ? "google/gemini-3.5-flash" : "zai/glm-5.2-fast";
-      },
-    },
-  }),
-});
-```
-
-`step.started` runs before every model call, so every step whose current
-history includes one of those user-message parts uses Gemini Flash. Before the
-resolver runs, eve writes byte-backed `file` parts to the session sandbox under
-`/workspace/attachments`; `ctx.messages` keeps a sandbox reference and the
-media type, so the check still matches staged image files. AI SDK `image` parts
-and unresolved remote file URLs are not staged. See [Inbound
-attachments](./sandbox#inbound-attachments) for the storage and hydration
-lifecycle.
-
-When image content reaches the selected model, a model with vision support can
-process it; a model without vision support rejects the model call with its
-provider error. eve does not drop unsupported images or choose a vision model
-automatically. Check image-input support in the [AI Gateway model
-catalog](https://vercel.com/ai-gateway/models), and see [Send images to the
-model with content parts](./tools#send-images-to-the-model-with-content-parts)
-for tool-produced images.
 
 ## Reasoning effort
 

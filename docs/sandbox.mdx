@@ -72,35 +72,11 @@ The option types (`SandboxSpawnOptions`, `SandboxReadBinaryFileOptions`, `Sandbo
 
 ## Inbound attachments
 
-Before the first model step for a message, eve writes byte-backed AI SDK `file`
-parts to the session sandbox under `/workspace/attachments`. This includes
-inline data, base64 and `data:` URL inputs, and remote URLs that the active
-channel resolves to bytes with `fetchFile`. Session history keeps a compact
-sandbox reference and the media type instead of another copy of the bytes.
-`step.started` dynamic resolvers receive that reference in `ctx.messages`, and
-the model can reach the same file through the sandbox filesystem tools.
-
-Remote HTTP URLs that the channel does not resolve pass through for the model
-provider to fetch. Legacy AI SDK `image` parts also pass through without
-sandbox staging.
-
-Before each provider call, eve reads staged images up to 3 MiB and PDFs up to
-20 MiB back from the sandbox and sends their bytes to the model. Other file
-types and larger images or PDFs become text parts that name the sandbox path
-and media type. A model with image-input support can inspect an image sent as
-bytes. A model without image-input support rejects that provider call; when eve
-sends only a text path for a larger image, the model does not receive the
-pixels directly.
-
-Staged file bytes persist with the session sandbox, not in durable session
-history. If the backend can no longer reattach that sandbox, eve cannot
-reconstruct the attachment bytes from the stored reference. A later model call
-receives a missing-file text result instead. Persist important attachments
-outside the sandbox when they must survive sandbox loss.
-
-See [Send attachments](./guides/client/messages#send-attachments) for the
-TypeScript client input shape and [Custom channel file
-uploads](./channels/custom#file-uploads) for authenticated remote files.
+Before the first model step, eve writes byte-backed AI SDK `file` parts under
+`/workspace/attachments` and stores a sandbox reference in session history.
+For provider calls, images up to 3 MiB and PDFs up to 20 MiB are restored as
+bytes; other files become text references to their sandbox paths. Unresolved
+remote URLs and legacy AI SDK `image` parts are not staged.
 
 ## Seeding `/workspace`
 
