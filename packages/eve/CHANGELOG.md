@@ -1,5 +1,17 @@
 # eve
 
+## 0.33.0
+
+### Minor Changes
+
+- ccaa596: Dynamic models and subagents now resolve without compiled fallbacks or placeholder configs. `defineDynamic` accepts only `events`; dynamic model handlers must return a concrete selection, while runtime model metadata is normalized and cached when the selection becomes active.
+- 2dd193b: Channel message sends now use `turnPolicy: "steer"` by default, so accepted messages replace active turns through cancellation-backed steering without a separate cancel request. Set `turnPolicy: "queue"` on a channel or individual send to preserve the previous wait-for-completion behavior.
+
+### Patch Changes
+
+- 672c054: Add `eve set` with `--model` and `--reasoning` options for changing an existing agent's model settings, and add the same model settings to `eve init` for scaffolding.
+- 1ee27be: Interactive setup now offers an explicit exit after `eve init` and runs Vercel login and project linking in place whenever Vercel-backed integration setup or deployment needs them.
+
 ## 0.32.0
 
 ### Minor Changes
