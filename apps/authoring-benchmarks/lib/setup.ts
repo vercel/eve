@@ -18,18 +18,19 @@ export async function setupAuthoringEval(
   sandbox: Sandbox,
   options: SetupAuthoringEvalOptions = {},
 ): Promise<void> {
+  const timings: SetupTiming[] = [];
   const tarball = process.env.EVE_AUTHORING_TARBALL;
   if (tarball === undefined) {
     throw new Error("EVE_AUTHORING_TARBALL is not set. Run through pnpm benchmark:authoring.");
   }
 
-  await measure("prepare fixture", () =>
+  await measure(timings, "prepare fixture", () =>
     run(sandbox, "bash", [
       "-lc",
       `mkdir -p ${SEED_ROOT} && cp -a seed/. ${SEED_ROOT}/ && rm -rf seed package.json package-lock.json`,
     ]),
   );
-  await measure("upload eve tarball", () =>
+  await measure(timings, "upload eve tarball", () =>
     sandbox.writeFiles({
       // agent-eval accepts Buffer at runtime, but its public type currently names only string.
       // @ts-expect-error binary sandbox uploads are supported
@@ -37,7 +38,7 @@ export async function setupAuthoringEval(
     }),
   );
   const tarballPath = `${sandbox.getWorkingDirectory()}/${TARBALL_PATH}`;
-  await measure("install bootstrap eve CLI", () =>
+  await measure(timings, "install bootstrap eve CLI", () =>
     run(sandbox, "npm", [
       "install",
       "--prefix",
@@ -48,7 +49,7 @@ export async function setupAuthoringEval(
     ]),
   );
   const cliPath = `${sandbox.getWorkingDirectory()}/${SEED_ROOT}/eve-cli/node_modules/eve/bin/eve.js`;
-  await measure("scaffold subject", () =>
+  await measure(timings, "scaffold subject", () =>
     run(sandbox, "bash", [
       "-lc",
       [
@@ -61,7 +62,7 @@ export async function setupAuthoringEval(
       ].join(" && "),
     ]),
   );
-  await measure("install eval dependencies", async () => {
+  await measure(timings, "install eval dependencies", async () => {
     await run(sandbox, "npm", ["pkg", "set", `dependencies.eve=file:${TARBALL_PATH}`]);
     await run(sandbox, "npm", [
       "install",
@@ -73,7 +74,7 @@ export async function setupAuthoringEval(
   });
 
   if (options.syntheticImessage === true) {
-    await measure("install synthetic iMessage world", async () => {
+    await measure(timings, "install synthetic iMessage world", async () => {
       await installSyntheticImessageWorld(sandbox);
       await sandbox.writeFiles({
         ".claude/settings.json": JSON.stringify({
@@ -83,7 +84,10 @@ export async function setupAuthoringEval(
     });
   }
   if (options.agentsMd !== true)
-    await measure("remove agent guidance", () => removeScaffoldedAgentGuidance(sandbox));
+    await measure(timings, "remove agent guidance", () => removeScaffoldedAgentGuidance(sandbox));
+  await sandbox.writeFiles({
+    "__authoring_eval__/setup-timings.json": JSON.stringify(timings),
+  });
 }
 
 async function installSyntheticImessageWorld(sandbox: Sandbox): Promise<void> {
@@ -157,14 +161,23 @@ async function removeScaffoldedAgentGuidance(sandbox: Sandbox): Promise<void> {
   await run(sandbox, "rm", ["-f", "AGENTS.md", "CLAUDE.md"]);
 }
 
-async function measure<T>(label: string, operation: () => Promise<T>): Promise<T> {
+interface SetupTiming {
+  label: string;
+  durationMs: number;
+}
+
+async function measure<T>(
+  timings: SetupTiming[],
+  label: string,
+  operation: () => Promise<T>,
+): Promise<T> {
   const startedAt = performance.now();
   try {
     return await operation();
   } finally {
-    console.log(
-      `[authoring-benchmark] setup ${label}: ${(performance.now() - startedAt).toFixed(0)}ms`,
-    );
+    const durationMs = Math.round(performance.now() - startedAt);
+    timings.push({ label, durationMs });
+    console.log(`[authoring-benchmark] setup ${label}: ${durationMs}ms`);
   }
 }
 
