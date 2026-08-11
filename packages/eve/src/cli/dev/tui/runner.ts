@@ -1922,7 +1922,7 @@ export class EveTUIRunner {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
 
-    loadDevelopmentEnvironmentFiles(appRoot);
+    await loadDevelopmentEnvironmentFiles(appRoot);
     await this.#runtimeArtifacts?.refreshAfterSourceChange({});
     const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
     void this.#refreshSetupAttention(refreshedInfo);

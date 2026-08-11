@@ -2,6 +2,12 @@ import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
 import { appendEnv } from "../../append-env.js";
+import {
+  hasVercelHostFramework,
+  resolveVercelHostFrameworkPreset,
+} from "#internal/vercel-host-framework.js";
+
+export { hasVercelHostFramework, resolveVercelHostFrameworkPreset };
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor, type NodeEngineOverride } from "../../node-engine.js";
@@ -174,47 +180,6 @@ async function hasPackageDependency(
  */
 export async function isNextJsProject(projectRoot: string): Promise<boolean> {
   return hasPackageDependency(join(projectRoot, "package.json"), NEXT_PACKAGE_NAME);
-}
-
-/**
- * Host-framework dependency → the Vercel Framework Preset slug it must deploy
- * under (so the framework owns the top-level build and eve runs as a sibling).
- * Single source of truth for which dependencies mark a host framework;
- * {@link hasVercelHostFramework} derives from it.
- */
-const VERCEL_HOST_FRAMEWORK_PRESETS: Readonly<Record<string, string>> = {
-  "@sveltejs/kit": "sveltekit",
-  [NEXT_PACKAGE_NAME]: "nextjs",
-  nuxt: "nuxtjs",
-  nuxt3: "nuxtjs",
-  "nuxt-edge": "nuxtjs",
-  "nuxt-nightly": "nuxtjs",
-};
-
-/**
- * The Vercel Framework Preset slug for the host framework a project declares, or
- * `undefined` when it declares none (a missing `package.json` reads as none).
- */
-export async function resolveVercelHostFrameworkPreset(
-  projectRoot: string,
-): Promise<string | undefined> {
-  const parsed = await readPackageJsonObject(join(projectRoot, "package.json"));
-  if (parsed === undefined) return undefined;
-
-  for (const [dependencyName, preset] of Object.entries(VERCEL_HOST_FRAMEWORK_PRESETS)) {
-    if (packageJsonHasDependency(parsed, dependencyName)) return preset;
-  }
-  return undefined;
-}
-
-/**
- * Whether the root app declares a Vercel framework that should own the
- * top-level deployment while eve runs as a sibling service. These match Eve's
- * current framework integrations: Next.js, Nuxt, and SvelteKit. Derived from
- * {@link resolveVercelHostFrameworkPreset} so the two share one dependency list.
- */
-export async function hasVercelHostFramework(projectRoot: string): Promise<boolean> {
-  return (await resolveVercelHostFrameworkPreset(projectRoot)) !== undefined;
 }
 
 async function ensurePackageDependency(

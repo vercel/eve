@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 
+import { resolveEveProjectContext } from "#internal/project-context.js";
 import { isObject } from "#shared/guards.js";
 import { readProviderSelectionSync } from "#setup/provider-settings.js";
 
@@ -22,6 +23,7 @@ function isMissingEnvironmentFileError(error: unknown): error is NodeJS.ErrnoExc
 }
 
 interface DevelopmentEnvironmentLoader {
+  readonly environmentRoots: readonly string[];
   reload(): void;
   stageReload(): DevelopmentEnvironmentReload;
 }
@@ -38,9 +40,9 @@ const developmentEnvironmentLoaders = new Map<string, DevelopmentEnvironmentLoad
  * application root, ordered from highest to lowest precedence.
  */
 export function getDevelopmentEnvironmentFilePaths(appRoot: string): string[] {
-  const resolvedAppRoot = resolve(appRoot);
-
-  return DEVELOPMENT_ENV_FILE_NAMES.map((fileName) => join(resolvedAppRoot, fileName));
+  return [...getDevelopmentEnvironmentLoader(appRoot).environmentRoots]
+    .reverse()
+    .flatMap((root) => DEVELOPMENT_ENV_FILE_NAMES.map((fileName) => join(root, fileName)));
 }
 
 /**
@@ -51,8 +53,10 @@ export function getDevelopmentEnvironmentFilePaths(appRoot: string): string[] {
  * precedence. Variables supplied by env files are refreshed on subsequent
  * reloads so dev-mode file watching can pick up changed values.
  */
-export function loadDevelopmentEnvironmentFiles(appRoot: string): void {
-  getDevelopmentEnvironmentLoader(appRoot).reload();
+export async function loadDevelopmentEnvironmentFiles(appRoot: string): Promise<void> {
+  const resolvedAppRoot = resolve(appRoot);
+  const context = await resolveEveProjectContext(resolvedAppRoot);
+  getDevelopmentEnvironmentLoader(resolvedAppRoot, context.environmentRoots).reload();
 }
 
 export function stageDevelopmentEnvironmentFiles(appRoot: string): DevelopmentEnvironmentReload {
@@ -63,7 +67,9 @@ export function readDevelopmentEnvironmentHostValues(
   appRoot: string,
 ): Readonly<Record<string, string | null>> {
   const values: Record<string, string | null> = {};
-  const fileValues = readDevelopmentEnvironmentValues(resolve(appRoot));
+  const fileValues = readDevelopmentEnvironmentValues(
+    getDevelopmentEnvironmentLoader(appRoot).environmentRoots,
+  );
   const hostKeys = new Set(fileValues.keys());
   // Project selection can suppress a shell-only key. Keep that transition in
   // the host fingerprint so the worker that inherited the key is replaced.
@@ -76,27 +82,39 @@ export function readDevelopmentEnvironmentHostValues(
   return values;
 }
 
-function getDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnvironmentLoader {
+function getDevelopmentEnvironmentLoader(
+  appRoot: string,
+  environmentRoots?: readonly string[],
+): DevelopmentEnvironmentLoader {
   const resolvedAppRoot = resolve(appRoot);
   const existingLoader = developmentEnvironmentLoaders.get(resolvedAppRoot);
+  if (existingLoader !== undefined && environmentRoots === undefined) return existingLoader;
 
-  if (existingLoader !== undefined) {
+  const resolvedEnvironmentRoots = environmentRoots ?? [resolvedAppRoot];
+  if (
+    existingLoader !== undefined &&
+    existingLoader.environmentRoots.length === resolvedEnvironmentRoots.length &&
+    existingLoader.environmentRoots.every((root, index) => root === resolvedEnvironmentRoots[index])
+  ) {
     return existingLoader;
   }
 
-  const loader = createDevelopmentEnvironmentLoader(resolvedAppRoot);
+  const loader = createDevelopmentEnvironmentLoader(resolvedAppRoot, resolvedEnvironmentRoots);
   developmentEnvironmentLoaders.set(resolvedAppRoot, loader);
   return loader;
 }
 
-function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnvironmentLoader {
+function createDevelopmentEnvironmentLoader(
+  appRoot: string,
+  environmentRoots: readonly string[],
+): DevelopmentEnvironmentLoader {
   const protectedValues = new Map(Object.entries(process.env));
   const protectedKeys = new Set(protectedValues.keys());
   const managedValues = new Map<string, string>();
 
   const stageReload = (): DevelopmentEnvironmentReload => {
     const previousManagedValues = new Map(managedValues);
-    const nextValues = readDevelopmentEnvironmentValues(appRoot);
+    const nextValues = readDevelopmentEnvironmentValues(environmentRoots);
     const preferProjectOidc = applyProviderSelection(appRoot, nextValues);
     const affectedKeys = new Set([...managedValues.keys(), ...nextValues.keys()]);
     if (preferProjectOidc) {
@@ -143,6 +161,7 @@ function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnviron
   };
 
   return {
+    environmentRoots,
     reload() {
       stageReload().commit();
     },
@@ -183,23 +202,21 @@ function applyDevelopmentEnvironmentValues(input: {
   }
 }
 
-function readDevelopmentEnvironmentValues(appRoot: string): Map<string, string> {
+function readDevelopmentEnvironmentValues(
+  environmentRoots: readonly string[],
+): Map<string, string> {
   const values = new Map<string, string>();
 
-  for (const fileName of [...DEVELOPMENT_ENV_FILE_NAMES].reverse()) {
-    try {
-      const parsedValues = parseEnv(readFileSync(join(appRoot, fileName), "utf8"));
+  for (const environmentRoot of environmentRoots) {
+    for (const fileName of [...DEVELOPMENT_ENV_FILE_NAMES].reverse()) {
+      try {
+        const parsedValues = parseEnv(readFileSync(join(environmentRoot, fileName), "utf8"));
 
-      for (const [key, value] of Object.entries(parsedValues)) {
-        if (value === undefined) {
-          continue;
+        for (const [key, value] of Object.entries(parsedValues)) {
+          if (value !== undefined) values.set(key, value);
         }
-
-        values.set(key, value);
-      }
-    } catch (error) {
-      if (!isMissingEnvironmentFileError(error)) {
-        throw error;
+      } catch (error) {
+        if (!isMissingEnvironmentFileError(error)) throw error;
       }
     }
   }

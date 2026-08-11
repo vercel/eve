@@ -385,7 +385,7 @@ async function startNitroDevelopmentServer(
   process.env[EVE_DEV_ENV_FLAG] ??= "1";
 
   const project = await resolveDiscoveryProject(rootDir);
-  loadDevelopmentEnvironmentFiles(project.appRoot);
+  await loadDevelopmentEnvironmentFiles(project.appRoot);
 
   const environmentPort = readEnvironmentPort();
   const requestedPort = options.port ?? environmentPort;
