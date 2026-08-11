@@ -82,7 +82,7 @@ async function hydrateCompiledModuleMapFromManifest(
     ...[...manifest.subagents]
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
       .map((subagent) => ({
-        additionalModuleRef: subagent.configResolver === undefined ? undefined : subagent,
+        additionalModuleRef: subagent.configResolver,
         agentRoot: subagent.agent.agentRoot,
         externalDependencies:
           subagent.configResolver === undefined

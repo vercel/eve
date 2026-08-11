@@ -2,20 +2,17 @@ import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
 import { defineAgent, defineDynamic, type AgentDefinition, type DynamicResolveContext } from "eve";
 
 const model = e2eModel();
-const selectedModel =
-  process.env.EVE_E2E_MODEL === "mock" ? "eve-mock/dynamic-model" : (model as string);
 const { experimental } = e2eAgentConfig();
 
 /**
- * Dynamic-model e2e fixture. Resolves at `turn.started` so one session can
- * exercise repeated selection, missing-selection failure, and resolver
- * failure.
+ * Dynamic-model e2e fixture. Resolves at `step.started` so live model objects
+ * exercise the same selection, omission, and failure paths as gateway ids.
  */
 const agent: AgentDefinition = defineAgent({
   experimental,
   model: defineDynamic({
     events: {
-      "turn.started": (_event, ctx) => {
+      "step.started": (_event, ctx) => {
         const text = lastUserText(ctx.messages);
 
         if (text.includes("[model: boom]")) {
@@ -24,20 +21,20 @@ const agent: AgentDefinition = defineAgent({
 
         if (text.includes("[model: mini]")) {
           return {
-            model: selectedModel,
+            model,
             modelContextWindowTokens: 128_000,
           };
         }
 
         if (text.includes("[model: catalog]")) {
-          return selectedModel;
+          return model;
         }
 
         if (text.includes("[model: missing]")) {
           return null as never;
         }
 
-        return { model: selectedModel, modelContextWindowTokens: 1_000_000 };
+        return { model, modelContextWindowTokens: 1_000_000 };
       },
     },
   }),
