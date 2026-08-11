@@ -131,6 +131,11 @@
       "import": "./dist/src/public/agents/auth.js",
       "default": "./dist/src/public/agents/auth.js"
     },
+    "./agents/vercel": {
+      "types": "./dist/src/public/agents/vercel.d.ts",
+      "import": "./dist/src/public/agents/vercel.js",
+      "default": "./dist/src/public/agents/vercel.js"
+    },
     "./hooks": {
       "types": "./dist/src/public/hooks/index.d.ts",
       "import": "./dist/src/public/hooks/index.js",
