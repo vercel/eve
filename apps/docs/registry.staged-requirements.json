@@ -1,0 +1,10 @@
+{
+  "items": [
+    "channel/slack",
+    "channel/discord",
+    "channel/github",
+    "channel/linear-agent",
+    "channel/web",
+    "channel/photon-imessage"
+  ]
+}
