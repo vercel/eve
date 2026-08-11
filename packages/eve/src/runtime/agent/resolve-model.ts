@@ -1,6 +1,9 @@
 import type { LanguageModel } from "ai";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
-import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import {
+  normalizeAgentDefinition,
+  normalizeAgentReasoningDefinition,
+} from "#internal/authored-definition/core.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import type {
   RuntimeDynamicModelReference,
@@ -144,6 +147,9 @@ export function normalizeDynamicRuntimeModelResult(input: {
       : parseProviderOptionsRecord(selection.modelOptions.providerOptions);
   // Never inherited from the fallback: a different model's window is not a safe guess.
   const contextWindowTokens = selection.modelContextWindowTokens;
+  // Carried per-selection; the model-call site falls back to the agent-level
+  // `reasoning` when this is undefined.
+  const reasoning = selection.reasoning;
 
   if (typeof selection.model === "string") {
     const id = formatLanguageModelGatewayId(selection.model);
@@ -152,6 +158,7 @@ export function normalizeDynamicRuntimeModelResult(input: {
         id,
         contextWindowTokens,
         providerOptions,
+        reasoning,
       },
     };
   }
@@ -164,11 +171,17 @@ export function normalizeDynamicRuntimeModelResult(input: {
       id: formatLanguageModelGatewayId(selection.model),
       contextWindowTokens,
       providerOptions,
+      reasoning,
     },
   };
 }
 
-const DYNAMIC_MODEL_SELECTION_KEYS = new Set(["model", "modelContextWindowTokens", "modelOptions"]);
+const DYNAMIC_MODEL_SELECTION_KEYS = new Set([
+  "model",
+  "modelContextWindowTokens",
+  "modelOptions",
+  "reasoning",
+]);
 
 function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefinition): void {
   const unknownKeys = Object.keys(selection).filter(
@@ -176,7 +189,7 @@ function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefin
   );
   if (unknownKeys.length > 0) {
     throw new Error(
-      `Dynamic model resolver returned a selection with unknown key(s): ${unknownKeys.join(", ")}. Expected { model, modelContextWindowTokens?, modelOptions? }.`,
+      `Dynamic model resolver returned a selection with unknown key(s): ${unknownKeys.join(", ")}. Expected { model, modelContextWindowTokens?, modelOptions?, reasoning? }.`,
     );
   }
 
@@ -187,6 +200,13 @@ function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefin
   ) {
     throw new Error(
       "Dynamic model resolver returned an invalid modelContextWindowTokens value. Expected a positive integer.",
+    );
+  }
+
+  if (selection.reasoning !== undefined) {
+    normalizeAgentReasoningDefinition(
+      selection.reasoning,
+      "Dynamic model resolver returned an invalid reasoning value. Expected one of: provider-default, none, minimal, low, medium, high, xhigh.",
     );
   }
 }
@@ -213,7 +233,7 @@ function isModelSelectionDefinition(value: unknown): value is PublicAgentModelSe
 function validateRuntimeLanguageModel(model: unknown): asserts model is LanguageModel {
   if (!isRuntimeLanguageModel(model)) {
     throw new Error(
-      "Dynamic model resolver returned an invalid model. Return an AI Gateway model id string, an AI SDK language model, or { model, modelContextWindowTokens?, modelOptions? }.",
+      "Dynamic model resolver returned an invalid model. Return an AI Gateway model id string, an AI SDK language model, or { model, modelContextWindowTokens?, modelOptions?, reasoning? }.",
     );
   }
 }

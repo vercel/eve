@@ -80,10 +80,14 @@ selection object, or `null` to leave the scope unset.
   credentials fails at request time.
 - **Serialization.** Session/turn selections must be model id strings; return
   live `LanguageModel` objects only from `step.started`.
-- **Selection object.** `{ model, modelContextWindowTokens?, modelOptions? }`.
+- **Selection object.** `{ model, modelContextWindowTokens?, modelOptions?, reasoning? }`.
   Set `modelContextWindowTokens` when the selected model's window differs
   from the fallback's — it is never inherited. Omitted `modelOptions` reuses
-  the agent-level `modelOptions`.
+  the agent-level `modelOptions`. Set `reasoning` (same values as the
+  agent-level [reasoning effort](#reasoning-effort)) to override the
+  agent-level `reasoning` for the selected model; omitted, it reuses the
+  agent-level `reasoning`. Useful when a downshifted classifier should run at
+  a lower effort than the agent default.
 
 Runtime identity reports a dynamic agent's model as `dynamic:<fallback id>`.
 

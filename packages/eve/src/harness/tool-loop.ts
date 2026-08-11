@@ -1072,7 +1072,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         },
         onStepFinish: hooks.onStepFinish,
         prepareStep: hooks.prepareStep,
-        reasoning: session.agent.reasoning,
+        // A dynamic per-selection `reasoning` overrides the agent default; it
+        // rides on the model reference so it survives the durable/serializable
+        // boundary the same way `modelContextWindowTokens`/`providerOptions` do.
+        reasoning: session.agent.modelReference.reasoning ?? session.agent.reasoning,
         runtimeContext: telemetryRuntimeContext,
         stopWhen: isStepCount(1),
         telemetry: enrichTelemetry(
