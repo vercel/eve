@@ -34,7 +34,7 @@ export function registerRegistryCommands(input: {
 
   program
     .command("add <item>")
-    .description("Install a registry item or change the agent model with model/<model-id>.")
+    .description("Install a registry item; relative paths use the official eve registry.")
     .option("-o, --overwrite", "Overwrite existing files.")
     .option("--skip-install", "Run the item's setup flow without installing it.")
     .option("--skip-setup", "Skip the item's setup flow.")
@@ -62,11 +62,6 @@ export function registerRegistryCommands(input: {
       ) => {
         if (options.answer !== undefined && !options.nonInteractive) {
           throw new InvalidArgumentError("--answer requires --non-interactive.");
-        }
-        if (item.startsWith("model/")) {
-          const { runAddModelCommand } = await import("./model.js");
-          await runAddModelCommand(logger, appRoot, item.slice("model/".length));
-          return;
         }
         const { runAddCommand } = await import("./registry.js");
         await runAddCommand(logger, appRoot, item, { ...options, answers: options.answer });

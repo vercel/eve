@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Add `eve add model/<model-id>` for changing an existing agent's model and `eve init --model <model-id>` for scaffolding with a selected model.
+Add `eve model <model-id>` for changing an existing agent's model and `eve init --model <model-id>` for scaffolding with a selected model.

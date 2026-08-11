@@ -8,34 +8,34 @@ import {
 
 import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 
-export interface AddModelCommandLogger {
+export interface ModelCommandLogger {
   error(message: string): void;
   log(message: string): void;
 }
 
-export interface AddModelCommandDependencies {
+export interface ModelCommandDependencies {
   changeAgentModel: (input: { appRoot: string; slug: string }) => Promise<ApplyModelOutcome>;
   isEveProject: typeof isEveProject;
   modelChangeRefusal: (appRoot: string) => Promise<string | null>;
 }
 
-const defaultDependencies: AddModelCommandDependencies = {
+const defaultDependencies: ModelCommandDependencies = {
   changeAgentModel,
   isEveProject,
   modelChangeRefusal: modelChangeRefusalForUneditableModel,
 };
 
-function fail(logger: AddModelCommandLogger, message: string): void {
+function fail(logger: ModelCommandLogger, message: string): void {
   logger.error(message);
   process.exitCode = 1;
 }
 
-/** Changes the root agent model for the built-in `eve add model/<model-id>` target. */
-export async function runAddModelCommand(
-  logger: AddModelCommandLogger,
+/** Changes the root agent model for `eve model <model>`. */
+export async function runModelCommand(
+  logger: ModelCommandLogger,
   appRoot: string,
   slug: string,
-  dependencies: AddModelCommandDependencies = defaultDependencies,
+  dependencies: ModelCommandDependencies = defaultDependencies,
 ): Promise<void> {
   if (!(await dependencies.isEveProject(appRoot))) {
     fail(logger, NOT_AN_AGENT_MESSAGE);

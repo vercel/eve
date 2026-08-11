@@ -239,6 +239,14 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       },
     );
 
+  program
+    .command("model <model>")
+    .description("Change the root agent model (provider/model-id).")
+    .action(async (model: string) => {
+      const { runModelCommand } = await import("#cli/commands/model.js");
+      await runModelCommand(logger, appRoot, model);
+    });
+
   registerProjectCommands({ program, logger, appRoot });
 
   registerBuildCommand({

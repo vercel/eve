@@ -26,7 +26,8 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve channels list`           | List user-authored channels                                                                                                                           |
 | `eve extension init [target]` | Create a new extension package                                                                                                                        |
 | `eve extension build`         | Build the current package as an extension                                                                                                             |
-| `eve add <item>`              | Install a registry item, or change the root agent model with `model/<model-id>`                                                                       |
+| `eve model <model>`           | Change the root agent's AI Gateway model                                                                                                              |
+| `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                                     |
 | `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                                          |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
@@ -87,15 +88,14 @@ Builds the complete agent-shaped extension tree into its configured dist root, e
 Change the root agent's AI Gateway model without opening the dev TUI:
 
 ```bash
-eve add model/openai/gpt-5.5
+eve model openai/gpt-5.5
 ```
 
-The `model/` prefix selects eve's built-in model action; the remainder is the
-`provider/model-id` written to `agent/agent.ts`. The command applies the same
+The command writes the `provider/model-id` to `agent/agent.ts` with the same
 validation and source edit as `/model openai/gpt-5.5` in the local dev TUI. It
-does not install a registry item or configure model credentials. Models defined
-with `defineDynamic`, an environment expression, or a provider-authored SDK
-model must be changed in `agent.ts`.
+does not configure model credentials. Models defined with `defineDynamic`, an
+environment expression, or a provider-authored SDK model must be changed in
+`agent.ts`.
 
 ## Registry items
 

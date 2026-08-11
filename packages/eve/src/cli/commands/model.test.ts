@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { runAddModelCommand, type AddModelCommandDependencies } from "./model.js";
+import { runModelCommand, type ModelCommandDependencies } from "./model.js";
 
 function logger() {
   const errors: string[] = [];
@@ -13,11 +13,9 @@ function logger() {
   };
 }
 
-function dependencies(
-  overrides: Partial<AddModelCommandDependencies> = {},
-): AddModelCommandDependencies {
+function dependencies(overrides: Partial<ModelCommandDependencies> = {}): ModelCommandDependencies {
   return {
-    changeAgentModel: vi.fn<AddModelCommandDependencies["changeAgentModel"]>(async ({ slug }) => ({
+    changeAgentModel: vi.fn<ModelCommandDependencies["changeAgentModel"]>(async ({ slug }) => ({
       kind: "changed",
       to: slug,
     })),
@@ -31,12 +29,12 @@ afterEach(() => {
   process.exitCode = undefined;
 });
 
-describe("runAddModelCommand", () => {
+describe("runModelCommand", () => {
   it("changes the model through the shared /model source-change path", async () => {
     const output = logger();
     const deps = dependencies();
 
-    await runAddModelCommand(output, "/project", "openai/gpt-5.5", deps);
+    await runModelCommand(output, "/project", "openai/gpt-5.5", deps);
 
     expect(deps.modelChangeRefusal).toHaveBeenCalledWith("/project");
     expect(deps.changeAgentModel).toHaveBeenCalledWith({
@@ -53,13 +51,13 @@ describe("runAddModelCommand", () => {
   it("reports model validation rejections as command failures", async () => {
     const output = logger();
     const deps = dependencies({
-      changeAgentModel: vi.fn<AddModelCommandDependencies["changeAgentModel"]>(async () => ({
+      changeAgentModel: vi.fn<ModelCommandDependencies["changeAgentModel"]>(async () => ({
         kind: "rejected",
         message: "Unknown model.",
       })),
     });
 
-    await runAddModelCommand(output, "/project", "unknown/model", deps);
+    await runModelCommand(output, "/project", "unknown/model", deps);
 
     expect(output.logs).toEqual([]);
     expect(output.errors).toEqual(["Unknown model."]);
@@ -68,13 +66,13 @@ describe("runAddModelCommand", () => {
 
   it("does not attempt an edit when the authored model is not rewritable", async () => {
     const output = logger();
-    const changeAgentModel = vi.fn<AddModelCommandDependencies["changeAgentModel"]>();
+    const changeAgentModel = vi.fn<ModelCommandDependencies["changeAgentModel"]>();
     const deps = dependencies({
       changeAgentModel,
       modelChangeRefusal: vi.fn(async () => "Edit `model` in agent.ts."),
     });
 
-    await runAddModelCommand(output, "/project", "openai/gpt-5.5", deps);
+    await runModelCommand(output, "/project", "openai/gpt-5.5", deps);
 
     expect(changeAgentModel).not.toHaveBeenCalled();
     expect(output.errors).toEqual(["Edit `model` in agent.ts."]);
@@ -84,12 +82,12 @@ describe("runAddModelCommand", () => {
   it("formats source-change errors like /model", async () => {
     const output = logger();
     const deps = dependencies({
-      changeAgentModel: vi.fn<AddModelCommandDependencies["changeAgentModel"]>(async () => {
+      changeAgentModel: vi.fn<ModelCommandDependencies["changeAgentModel"]>(async () => {
         throw new Error("agent.ts could not be read");
       }),
     });
 
-    await runAddModelCommand(output, "/project", "openai/gpt-5.5", deps);
+    await runModelCommand(output, "/project", "openai/gpt-5.5", deps);
 
     expect(output.errors).toEqual(["Couldn't change the model: agent.ts could not be read"]);
     expect(process.exitCode).toBe(1);

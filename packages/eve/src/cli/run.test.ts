@@ -7,6 +7,12 @@ import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
+const { runModelCommand } = vi.hoisted(() => ({
+  runModelCommand: vi.fn(async () => {}),
+}));
+
+vi.mock("#cli/commands/model.js", () => ({ runModelCommand }));
+
 async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
   const stdoutDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
@@ -50,10 +56,20 @@ describe("CLI command registration", () => {
 
     const help = output.join("\n");
     expect(help).toContain("init [options] [target]");
+    expect(help).toContain("model <model>");
     expect(help).toContain("link");
     expect(help).toContain("deploy");
     expect(help).toContain("registry");
     expect(help).not.toContain("setup [options] <item>");
+  });
+
+  it("forwards the selected model to the model command", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runModelCommand.mockClear();
+
+    await runCli(["model", "openai/gpt-5.5"], logger);
+
+    expect(runModelCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), "openai/gpt-5.5");
   });
 
   it("lists registry installation and setup options", async () => {
