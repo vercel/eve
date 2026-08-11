@@ -1,4 +1,4 @@
-import { defineEval } from "eve/evals";
+import { satisfies } from "eve/evals/expect";
 
 import {
   requireBackgroundTaskId,
@@ -7,14 +7,19 @@ import {
   waitForCompletedTask,
   waitForTaskInput,
 } from "./shared.js";
-import { satisfies } from "eve/evals/expect";
+import { defineTaskEval } from "./task-transition.js";
 
 /**
- * Replaying Q1 after the child has raised Q2 must neither deliver Q1 again nor
- * clear Q2 from the task snapshot.
+ * Once Q1's proxy route is retired, replaying its answer becomes new parent
+ * input and cannot reach the child or clear Q2 from the task snapshot.
  */
-export default defineEval({
-  description: "A stale task answer cannot unblock or erase the child's newer approval request.",
+export default defineTaskEval({
+  description:
+    "An answer for a retired proxy route becomes parent input without unblocking or erasing the child's newer request.",
+  transition: {
+    primary: "task.input.route.observed-stale-unrouted",
+    dimensions: { transport: "local" },
+  },
   async test(t) {
     const started = await t.send("TASK-INPUT-BATCH-ORDERING");
     started.expectOk();
@@ -37,6 +42,8 @@ export default defineEval({
       },
     ]);
     stale.expectOk();
+    stale.event("step.started", { count: 1 });
+    stale.noFailedActions();
 
     const afterStale = await sendAndFollowQueuedTurn(
       t,

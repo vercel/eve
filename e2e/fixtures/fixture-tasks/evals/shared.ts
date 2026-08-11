@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type { EveEvalContext, EveEvalSession, EveEvalTurn, InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -9,6 +7,7 @@ export type TaskEvalSessionDriver = Pick<
 >;
 
 export interface PendingTaskInput {
+  readonly observedTurns: readonly EveEvalTurn[];
   readonly request: InputRequest;
   readonly session: TaskEvalSessionDriver;
 }
@@ -17,6 +16,10 @@ export interface FollowedQueuedTurn {
   readonly observedTurns: readonly EveEvalTurn[];
   readonly session: TaskEvalSessionDriver;
   readonly turn: EveEvalTurn;
+}
+
+interface FollowQueuedTurnOptions {
+  readonly allowFailedActions?: boolean;
 }
 
 export function requireSessionStreamIndex(
@@ -28,16 +31,6 @@ export function requireSessionStreamIndex(
   return state.streamIndex;
 }
 
-/** Reproduces the runtime task id for a fixed call in an observed parent turn. */
-export function deriveTurnTaskId(turn: EveEvalTurn, callId: string): string {
-  const started = turn.events.find((event) => event.type === "turn.started");
-  if (started === undefined) throw new Error("Cannot derive task id without turn.started.");
-  const operationId = createHash("sha256")
-    .update(`${turn.sessionId}\0${started.data.turnId}\0${callId}`)
-    .digest("hex");
-  return `task_${operationId.slice(0, 24)}`;
-}
-
 /** Waits across server-initiated parent turns for one task-owned input request. */
 export async function waitForTaskInput(
   t: EveEvalContext,
@@ -45,18 +38,40 @@ export async function waitForTaskInput(
   toolName: string,
 ): Promise<PendingTaskInput> {
   let session = initialSession;
+  const observedTurns: EveEvalTurn[] = [];
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const pending = session.pendingInputRequests.find(
+    const matching = session.pendingInputRequests.filter(
       (request) => request.action.toolName === toolName,
     );
-    if (pending !== undefined) return { request: pending, session };
+    if (matching.length > 1) {
+      throw new Error(`Task surfaced ${matching.length} pending requests for tool "${toolName}".`);
+    }
+    if (matching[0] !== undefined) {
+      if (session.pendingInputRequests.length !== 1) {
+        throw new Error(
+          `Task surfaced unexpected pending input alongside tool "${toolName}": ${session.pendingInputRequests
+            .map((request) => request.action.toolName)
+            .join(", ")}.`,
+        );
+      }
+      return { observedTurns, request: matching[0], session };
+    }
+    if (session.pendingInputRequests.length > 0) {
+      throw new Error(
+        `Expected task input for tool "${toolName}"; received ${session.pendingInputRequests
+          .map((request) => request.action.toolName)
+          .join(", ")}.`,
+      );
+    }
 
     const sessionId = session.sessionId;
     if (sessionId === undefined) throw new Error("Task input wait has no parent session id.");
     const live = t.target.watchTurn(sessionId, {
       startIndex: requireSessionStreamIndex(session, "Task input wait"),
     });
-    await live.result();
+    const turn = await live.result();
+    turn.noFailedActions().label(`task input wait ${attempt + 1} has no failed actions`);
+    observedTurns.push(turn);
     session = live.session;
   }
   throw new Error(`Task did not surface input for tool "${toolName}" after five turns.`);
@@ -96,11 +111,15 @@ export async function sendAndFollowQueuedTurn(
   t: EveEvalContext,
   message: string,
   initialSession: TaskEvalSessionDriver = t,
+  options: FollowQueuedTurnOptions = {},
 ): Promise<FollowedQueuedTurn> {
   let session = initialSession;
   let turn = await session.send(message);
   const observedTurns = [turn];
   for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (options.allowFailedActions !== true) {
+      turn.noFailedActions().label(`queued turn ${attempt + 1} has no failed actions`);
+    }
     const received = turn.events.some(
       (event) =>
         event.type === "message.received" && messageText(event.data.message).includes(message),
@@ -137,8 +156,20 @@ export async function waitForTaskStatus(
   taskId: string,
   status: string,
 ): Promise<EveEvalTurn> {
+  let currentSession = session;
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const turn = await session.send(`${verificationMessage} ${taskId}`);
+    const followed = await sendAndFollowQueuedTurn(
+      t,
+      `${verificationMessage} ${taskId}`,
+      currentSession,
+    );
+    for (const [turnIndex, observed] of followed.observedTurns.entries()) {
+      observed
+        .noFailedActions()
+        .label(`task status attempt ${attempt + 1}, turn ${turnIndex + 1} has no failed actions`);
+    }
+    const turn = followed.turn;
+    currentSession = followed.session;
     const peeked = turn.toolCalls.find((call) => call.name === "task_peek");
     if (taskStatus(peeked?.output, taskId) === status) {
       await t.require(

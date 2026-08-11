@@ -1,14 +1,19 @@
-import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
 import { requireBackgroundTaskId, requireTaskView, waitForTaskStatus } from "./shared.js";
+import { defineTaskEval } from "./task-transition.js";
 
 const CALL_ID = "task-a2-failing-busy-worker";
 
 /** A child execution failure remains observable through its durable task view. */
-export default defineEval({
+export default defineTaskEval({
   description:
     "A background child that fails terminally leaves a failed task with a stable error projection.",
+  transition: {
+    primary: "task.lifecycle.fail.accepted-nonterminal",
+    setup: ["task.dispatch.start.accepted-acknowledged"],
+    dimensions: { transport: "local" },
+  },
   async test(t) {
     const started = await t.send("TASK-A2-CHILD-FAILURE");
     started.expectOk();

@@ -1,14 +1,17 @@
-import { defineEval } from "eve/evals";
-
 import { requireBackgroundTaskId, waitForCompletedTask, waitForTaskInput } from "./shared.js";
+import { defineTaskEval } from "./task-transition.js";
 
 /**
  * Task-owned child HITL must surface on the parent session, and answering it
  * must route to the child without running the parent model.
  */
-export default defineEval({
+export default defineTaskEval({
   description:
     "A background child's approval surfaces on the parent and routes back without a parent model step.",
+  transition: {
+    primary: "task.input.answer.accepted-complete",
+    dimensions: { transport: "local" },
+  },
   async test(t) {
     const started = await t.send("TASK-HITL-ROUTING");
     started.expectOk();
@@ -27,9 +30,9 @@ export default defineEval({
     ]);
     answered.expectOk();
     answered.notEvent("step.started");
+    answered.noFailedActions();
 
-    // A second child request proves the first answer reached the child even
-    // though the parent model did not run.
+    // The next child request proves direct delivery of the first answer.
     const second = await waitForTaskInput(t, first.session, "second_gate");
     const answeredSecond = await second.session.respond([
       {
@@ -38,8 +41,8 @@ export default defineEval({
       },
     ]);
     answeredSecond.expectOk();
-    answeredSecond.notEvent("step.started");
 
+    // Remaining gates only let the fixture reach a terminal cleanup state.
     const third = await waitForTaskInput(t, second.session, "third_gate");
     const finished = await third.session.respond([
       {

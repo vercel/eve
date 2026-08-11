@@ -7,7 +7,8 @@
     "build": "eve build",
     "dev": "eve dev",
     "start": "eve start",
-    "typecheck": "eve build && tsc",
+    "typecheck": "pnpm validate:transitions && eve build && tsc",
+    "validate:transitions": "node scripts/validate-transitions.mjs",
     "test:e2e": "eve eval --strict"
   },
   "dependencies": {

@@ -1,4 +1,3 @@
-import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
 import {
@@ -7,13 +6,18 @@ import {
   waitForCompletedTask,
   waitForTaskInput,
 } from "./shared.js";
+import { defineTaskEval } from "./task-transition.js";
 
 const REMOTE_PRINCIPAL_MARKER = "C8-REMOTE-PRINCIPAL:user:remote-http-child";
 
 /** A remote task's HITL answer must use its persisted HTTP child route. */
-export default defineEval({
+export default defineTaskEval({
   description:
     "A loopback remote child surfaces HITL and resumes over its remote response route with the remote transport principal intact.",
+  transition: {
+    primary: "task.input.answer.accepted-complete",
+    dimensions: { transport: "remote" },
+  },
   async test(t) {
     const started = await t.send("TASK-C8-REMOTE-HITL");
     started.expectOk();
@@ -36,6 +40,17 @@ export default defineEval({
       },
     ]);
     answered.expectOk();
+    answered.eventsSatisfy(
+      "a following parent model step belongs only to a task-ready notification",
+      (events) =>
+        !events.some((event) => event.type === "step.started") ||
+        events.some(
+          (event) =>
+            event.type === "message.received" &&
+            messageText(event.data.message).includes(`Background task ${taskId}`),
+        ),
+    );
+    answered.noFailedActions();
 
     const terminal = await waitForCompletedTask(t, gate.session, "TASK-C8-REMOTE-VERIFY", taskId);
     terminal.expectOk();
@@ -81,4 +96,19 @@ function hasRemotePrincipalOutput(task: Record<string, unknown>): boolean {
     typeof Reflect.get(output, "data") === "string" &&
     Reflect.get(output, "data").includes(REMOTE_PRINCIPAL_MARKER)
   );
+}
+
+function messageText(message: unknown): string {
+  if (typeof message === "string") return message;
+  if (!Array.isArray(message)) return "";
+  return message
+    .flatMap((part) =>
+      part !== null &&
+      typeof part === "object" &&
+      Reflect.get(part, "type") === "text" &&
+      typeof Reflect.get(part, "text") === "string"
+        ? [Reflect.get(part, "text") as string]
+        : [],
+    )
+    .join("\n");
 }

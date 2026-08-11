@@ -1,6 +1,7 @@
-import { defineEval, type EveEvalTurn, type InputRequest } from "eve/evals";
+import { type EveEvalTurn, type InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
+import { defineTaskEval } from "./task-transition.js";
 import {
   requireSessionStreamIndex,
   sendAndFollowQueuedTurn,
@@ -9,10 +10,14 @@ import {
 
 const FANOUT_SIZE = 10;
 
-/** Many background tasks complete independently and publish lifecycle updates to their parent. */
-export default defineEval({
-  description:
-    "A ten-task fanout returns distinct receipts and sends every completion update to the parent session.",
+/** The parent remains interactive while its background children await input. */
+export default defineTaskEval({
+  description: "A parent accepts a new tool-free turn while ten background children remain live.",
+  transition: {
+    primary: "task.parent-interaction.send.accepted-live-children",
+    setup: ["task.dispatch.start.accepted-acknowledged", "task.input.require.accepted-valid-batch"],
+    dimensions: { transport: "local", parentPhase: "active" },
+  },
   async test(t) {
     const started = await t.send("TASK-FANOUT-PARENT-UPDATES");
     started.expectOk();
@@ -45,36 +50,11 @@ export default defineEval({
       })),
     );
     released.expectOk();
-
-    const updated = new Set([
-      ...completedTaskUpdates(started, taskIds),
-      ...blocked.observedTurns.flatMap((turn) => completedTaskUpdates(turn, taskIds)),
-      ...interactive.observedTurns.flatMap((turn) => completedTaskUpdates(turn, taskIds)),
-      ...completedTaskUpdates(released, taskIds),
-    ]);
-    let startIndex = requireSessionStreamIndex(interactive.session, "Task fanout update wait");
-    for (let attempt = 0; attempt < FANOUT_SIZE && updated.size < FANOUT_SIZE; attempt += 1) {
-      const sessionId = t.sessionId;
-      if (sessionId === undefined) throw new Error("Task fanout has no parent session id.");
-      const live = t.target.watchTurn(sessionId, { startIndex });
-      const turn = await live.result();
-      for (const taskId of completedTaskUpdates(turn, taskIds)) updated.add(taskId);
-      startIndex = requireSessionStreamIndex(live.session, "Task fanout update wait");
-    }
-
-    await t.require(
-      [...updated],
-      satisfies(
-        (ids: readonly string[]) => ids.length === FANOUT_SIZE,
-        "every fanout task sends a completed update to the parent session",
-      ),
-    );
     t.noFailedActions();
   },
 });
 
 interface BlockedFanout {
-  readonly observedTurns: readonly EveEvalTurn[];
   readonly requests: readonly InputRequest[];
   readonly session: TaskEvalSessionDriver;
 }
@@ -85,7 +65,6 @@ async function waitForReleaseRequests(
   initialTurn: EveEvalTurn,
 ): Promise<BlockedFanout> {
   const requests = new Map<string, InputRequest>();
-  const observedTurns = [initialTurn];
   let session = initialSession;
   collectReleaseRequests(initialTurn, requests);
   for (let attempt = 0; attempt < FANOUT_SIZE && requests.size < FANOUT_SIZE; attempt += 1) {
@@ -95,14 +74,13 @@ async function waitForReleaseRequests(
       startIndex: requireSessionStreamIndex(session, "Task fanout release wait"),
     });
     const turn = await live.result();
-    observedTurns.push(turn);
     collectReleaseRequests(turn, requests);
     session = live.session;
   }
   if (requests.size !== FANOUT_SIZE) {
     throw new Error(`Expected ${FANOUT_SIZE} release requests; received ${requests.size}.`);
   }
-  return { observedTurns, requests: [...requests.values()], session };
+  return { requests: [...requests.values()], session };
 }
 
 function collectReleaseRequests(turn: EveEvalTurn, requests: Map<string, InputRequest>): void {
@@ -117,30 +95,4 @@ function backgroundTaskIds(turn: EveEvalTurn): readonly string[] {
       ? [event.data.backgroundTask.taskId]
       : [],
   );
-}
-
-function completedTaskUpdates(turn: EveEvalTurn, taskIds: readonly string[]): readonly string[] {
-  const messages = turn.events.flatMap((event) =>
-    event.type === "message.received" ? [messageText(event.data.message)] : [],
-  );
-  return taskIds.filter((taskId) =>
-    messages.some(
-      (message) => message.includes(`Background task ${taskId} `) && message.includes("completed"),
-    ),
-  );
-}
-
-function messageText(message: unknown): string {
-  if (typeof message === "string") return message;
-  if (!Array.isArray(message)) return "";
-  return message
-    .flatMap((part) =>
-      part !== null &&
-      typeof part === "object" &&
-      Reflect.get(part, "type") === "text" &&
-      typeof Reflect.get(part, "text") === "string"
-        ? [Reflect.get(part, "text") as string]
-        : [],
-    )
-    .join("\n");
 }

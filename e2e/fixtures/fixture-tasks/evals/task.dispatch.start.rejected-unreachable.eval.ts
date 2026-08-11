@@ -1,14 +1,15 @@
-import { defineEval } from "eve/evals";
-import { satisfies } from "eve/evals/expect";
-
-import { deriveTurnTaskId, sendAndFollowQueuedTurn } from "./shared.js";
+import { defineTaskEval } from "./task-transition.js";
 
 const CALL_ID = "task-a3-unstartable-worker";
 
 /** A failed remote start never admits its prepared task or child session. */
-export default defineEval({
+export default defineTaskEval({
   description:
     "An unreachable remote URL fails dispatch without exposing a receipt, task id, or child session.",
+  transition: {
+    primary: "task.dispatch.start.rejected-unreachable",
+    dimensions: { transport: "remote", parentPhase: "active" },
+  },
   async test(t) {
     const started = await t.send("TASK-A3-DISPATCH-START-FAILURE");
     started.expectOk();
@@ -21,7 +22,7 @@ export default defineEval({
       status: "failed",
     });
     started.eventsSatisfy(
-      "failed start exposes no receipt, task id, or child session",
+      "failed start exposes no task id, receipt, child session, or index admission",
       (events) => {
         const failed = events.flatMap((event) =>
           event.type === "action.result" &&
@@ -47,21 +48,6 @@ export default defineEval({
         );
       },
     );
-
-    const taskId = deriveTurnTaskId(started, CALL_ID);
-    const unknown = await sendAndFollowQueuedTurn(t, `TASK-A3-UNKNOWN-VERIFY ${taskId}`);
-    unknown.turn.expectOk();
-    unknown.turn.messageIncludes("TASK-A3-UNKNOWN");
-    await t.require(
-      unknown.turn.requireToolCall("task_peek", {
-        input: { taskIds: [taskId] },
-        status: "failed",
-      }).output,
-      satisfies(
-        (output) => isUnknownTaskOutput(output, taskId),
-        "the deterministically derived failed-start task id is unknown",
-      ),
-    );
   },
 });
 
@@ -72,10 +58,4 @@ function isStartFailureWithoutTaskId(output: unknown): boolean {
     Reflect.get(output, "code") === "REMOTE_AGENT_START_FAILED" &&
     !Object.hasOwn(output, "taskId")
   );
-}
-
-function isUnknownTaskOutput(output: unknown, taskId: string): boolean {
-  if (output === null || typeof output !== "object" || Object.hasOwn(output, "tasks")) return false;
-  const message = Reflect.get(output, "message");
-  return typeof message === "string" && message.includes(taskId);
 }

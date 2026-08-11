@@ -1,6 +1,7 @@
-import { defineEval, type EveEvalContext, type EveEvalTurn, type InputRequest } from "eve/evals";
+import { type EveEvalContext, type EveEvalTurn, type InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
+import { defineTaskEval } from "./task-transition.js";
 import { requireSessionStreamIndex, type TaskEvalSessionDriver } from "./shared.js";
 
 const FAN_IN_SIZE = 2;
@@ -12,16 +13,21 @@ const FAN_IN_CALLS = [
 
 type FanInMarker = (typeof FAN_IN_CALLS)[number]["marker"];
 
-/**
- * The join contract: the framework delivers one
- * wake per ready transition and the model decides sufficiency. On every
- * wake the scripted model peeks both tasks; with one task released it must
- * answer WAITING, and only after the second completes may it answer
- * COMPLETE from a peek showing both tasks completed.
- */
-export default defineEval({
+/** A join remains waiting when its exact task set contains one nonterminal task. */
+export default defineTaskEval({
   description:
-    "Two background tasks joined across completion wakes: peek on every wake, final answer only when all are completed.",
+    "A join observes one completed and one input-required task, answers WAITING, and does not answer COMPLETE.",
+  transition: {
+    primary: "task.join.evaluate.observed-partial",
+    setup: [
+      "task.dispatch.start.accepted-acknowledged",
+      "task.input.require.accepted-valid-batch",
+      "task.input.answer.accepted-complete",
+      "task.lifecycle.complete.accepted-nonterminal",
+      "task.parent.wake.emitted-ready",
+    ],
+    dimensions: { transport: "local", parentPhase: "active" },
+  },
   async test(t) {
     const started = await t.send("TASK-FAN-IN");
     started.expectOk();
@@ -30,31 +36,17 @@ export default defineEval({
 
     const tasksByMarker = backgroundTasksByMarker(started);
     const taskIds = [...tasksByMarker.values()];
-    await t.require(
-      taskIds,
-      satisfies(
-        (ids: readonly string[]) => ids.length === FAN_IN_SIZE && new Set(ids).size === FAN_IN_SIZE,
-        `${FAN_IN_SIZE} distinct background task receipts`,
-      ),
-    );
+    await requireDistinctTasks(t, taskIds);
+    const blocked = await waitForReleaseRequests(t, t, started);
 
-    const blocked = await waitForReleaseRequests(t, t, started, FAN_IN_SIZE);
-
-    // Release one task only: its completion wake must produce a peek that
-    // still sees the other task blocked, so the model holds the answer.
-    // The wake may coalesce into the respond turn or arrive on its own.
     const marker1 = "TASK-FAN-IN-1";
     const marker2 = "TASK-FAN-IN-2";
     const marker1TaskId = requireMappedValue(tasksByMarker, marker1, "background task");
     const marker2TaskId = requireMappedValue(tasksByMarker, marker2, "background task");
-    const marker1Request = requireMappedValue(blocked.requestsByMarker, marker1, "release request");
     const marker2Request = requireMappedValue(blocked.requestsByMarker, marker2, "release request");
 
     const firstReleased = await blocked.session.respond([
-      {
-        optionId: "approve",
-        requestId: marker2Request.requestId,
-      },
+      { optionId: "approve", requestId: marker2Request.requestId },
     ]);
     firstReleased.expectOk();
 
@@ -73,48 +65,36 @@ export default defineEval({
         { marker: marker1, status: "input_required", taskId: marker1TaskId },
         { marker: marker2, status: "completed", taskId: marker2TaskId },
       ],
-      "marker 2 completes its task while marker 1 remains blocked",
+      "the join reads one completed and one input-required exact task",
     );
     for (const turn of waiting.observedTurns) {
       await t.require(
         turn.message ?? "",
         satisfies(
           (message) => !String(message).includes("TASK-FAN-IN-COMPLETE"),
-          "no final answer before every task completed",
+          "no COMPLETE answer while one joined task is nonterminal",
         ),
       );
     }
-
-    // Release the second task: the next peek sees both completed and the
-    // model may finally answer.
-    const secondReleased = await waiting.session.respond([
-      {
-        optionId: "approve",
-        requestId: marker1Request.requestId,
-      },
-    ]);
-    secondReleased.expectOk();
-
-    const complete = await waitForTurnMessage(
-      t,
-      waiting.session,
-      "TASK-FAN-IN-COMPLETE",
-      secondReleased,
-    );
-    const completePeek = complete.turn.toolCalls.find((call) => call.name === "task_peek");
-    await requireExactPeek(
-      t,
-      completePeek,
-      taskIds,
-      [
-        { marker: marker1, status: "completed", taskId: marker1TaskId },
-        { marker: marker2, status: "completed", taskId: marker2TaskId },
-      ],
-      "final join observes both exact tasks completed with their own markers",
-    );
     t.noFailedActions();
   },
 });
+
+interface ExpectedTask {
+  readonly marker: FanInMarker;
+  readonly status: "completed" | "input_required";
+  readonly taskId: string;
+}
+
+async function requireDistinctTasks(t: EveEvalContext, taskIds: readonly string[]): Promise<void> {
+  await t.require(
+    taskIds,
+    satisfies(
+      (ids: readonly string[]) => ids.length === FAN_IN_SIZE && new Set(ids).size === FAN_IN_SIZE,
+      `${FAN_IN_SIZE} distinct background task receipts`,
+    ),
+  );
+}
 
 async function requireExactPeek(
   t: EveEvalContext,
@@ -129,11 +109,11 @@ async function requireExactPeek(
       const inputIds = Reflect.get(subject.input ?? {}, "taskIds");
       const tasks = Reflect.get(subject.output ?? {}, "tasks");
       if (!Array.isArray(inputIds) || !Array.isArray(tasks)) return false;
-      const expected = [...taskIds].sort();
+      const expectedIds = [...taskIds].sort();
       const outputIds = tasks.map((task) => Reflect.get(task, "taskId")).sort();
       return (
-        JSON.stringify([...inputIds].sort()) === JSON.stringify(expected) &&
-        JSON.stringify(outputIds) === JSON.stringify(expected) &&
+        JSON.stringify([...inputIds].sort()) === JSON.stringify(expectedIds) &&
+        JSON.stringify(outputIds) === JSON.stringify(expectedIds) &&
         expectedTasks.every((expectedTask) => {
           const task = tasks.find(
             (candidate) => Reflect.get(candidate ?? {}, "taskId") === expectedTask.taskId,
@@ -143,12 +123,6 @@ async function requireExactPeek(
       );
     }, description),
   );
-}
-
-interface ExpectedTask {
-  readonly marker: FanInMarker;
-  readonly status: "completed" | "input_required";
-  readonly taskId: string;
 }
 
 function taskMatchesExpected(task: unknown, expected: ExpectedTask): boolean {
@@ -178,14 +152,13 @@ async function waitForReleaseRequests(
   t: EveEvalContext,
   initialSession: TaskEvalSessionDriver,
   initialTurn: EveEvalTurn,
-  expected: number,
 ): Promise<BlockedFanIn> {
   const requestsByMarker = new Map<FanInMarker, InputRequest>();
   let session = initialSession;
   collectReleaseRequests(initialTurn.inputRequests, requestsByMarker);
   for (
     let attempt = 0;
-    attempt < MAX_WAKE_TURNS && requestsByMarker.size < expected;
+    attempt < MAX_WAKE_TURNS && requestsByMarker.size < FAN_IN_SIZE;
     attempt += 1
   ) {
     const sessionId = session.sessionId;
@@ -197,9 +170,9 @@ async function waitForReleaseRequests(
     collectReleaseRequests(turn.inputRequests, requestsByMarker);
     session = live.session;
   }
-  if (requestsByMarker.size !== expected) {
+  if (requestsByMarker.size !== FAN_IN_SIZE) {
     throw new Error(
-      `Expected ${expected} marked release requests; received ${requestsByMarker.size}.`,
+      `Expected ${FAN_IN_SIZE} marked release requests; received ${requestsByMarker.size}.`,
     );
   }
   return { requestsByMarker, session };
@@ -222,15 +195,9 @@ function isFanInMarker(value: unknown): value is FanInMarker {
 
 interface ObservedTurnMessage {
   readonly observedTurns: readonly EveEvalTurn[];
-  readonly session: TaskEvalSessionDriver;
   readonly turn: EveEvalTurn;
 }
 
-/**
- * Finds the first turn whose reply carries `token`, starting with an
- * already-consumed turn (a wake can coalesce into a respond turn) before
- * watching for later server-initiated turns.
- */
 async function waitForTurnMessage(
   t: EveEvalContext,
   initialSession: TaskEvalSessionDriver,
@@ -239,9 +206,7 @@ async function waitForTurnMessage(
 ): Promise<ObservedTurnMessage> {
   const observedTurns: EveEvalTurn[] = [initialTurn];
   let session = initialSession;
-  if ((initialTurn.message ?? "").includes(token)) {
-    return { observedTurns, session, turn: initialTurn };
-  }
+  if ((initialTurn.message ?? "").includes(token)) return { observedTurns, turn: initialTurn };
   for (let attempt = 0; attempt < MAX_WAKE_TURNS; attempt += 1) {
     const sessionId = session.sessionId;
     if (sessionId === undefined) throw new Error("Fan-in has no parent session id.");
@@ -251,7 +216,7 @@ async function waitForTurnMessage(
     const turn = await live.result();
     observedTurns.push(turn);
     session = live.session;
-    if ((turn.message ?? "").includes(token)) return { observedTurns, session, turn };
+    if ((turn.message ?? "").includes(token)) return { observedTurns, turn };
   }
   throw new Error(`No turn carried "${token}" after ${MAX_WAKE_TURNS} turns.`);
 }
@@ -261,9 +226,8 @@ function backgroundTasksByMarker(turn: EveEvalTurn): ReadonlyMap<FanInMarker, st
   for (const event of turn.events) {
     if (event.type !== "subagent.completed" || event.data.backgroundTask === undefined) continue;
     const fanInCall = FAN_IN_CALLS.find(({ callId }) => callId === event.data.callId);
-    if (fanInCall !== undefined) {
+    if (fanInCall !== undefined)
       tasksByMarker.set(fanInCall.marker, event.data.backgroundTask.taskId);
-    }
   }
   return tasksByMarker;
 }

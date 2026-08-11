@@ -1,4 +1,4 @@
-import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
+import type { EveEvalContext, EveEvalTurn } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
 import {
@@ -9,6 +9,7 @@ import {
   type TaskEvalSessionDriver,
   waitForCompletedTask,
 } from "./shared.js";
+import { defineTaskEval } from "./task-transition.js";
 
 const AUTHORIZATION_CODE = "c7-deterministic-code";
 const AUTHORIZATION_NAME = "c7-task-authorization";
@@ -19,9 +20,13 @@ type AuthorizationEvent = Extract<
 >;
 
 /** A task-owned interactive authorization keeps its distinct lifecycle and task blocker. */
-export default defineEval({
+export default defineTaskEval({
   description:
     "A background child surfaces interactive authorization, resumes through its webhook, and completes without masquerading as ordinary input.",
+  transition: {
+    primary: "task.authorization.callback.accepted-current-attempt",
+    dimensions: { transport: "local" },
+  },
   async test(t) {
     const started = await t.send("TASK-C7-AUTHORIZATION");
     started.expectOk();
