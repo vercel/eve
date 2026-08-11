@@ -4,8 +4,8 @@ First settle the target: a new project, or the agent added to an existing
 directory? For a new project, propose a name and ask the user to confirm it; for
 an existing one, ask for the directory.
 
-For a new project, run (append `--model provider/model-id` when the user chose a
-model, and `--channel-web-nextjs` only if the user wants Web Chat):
+For a new project, run (`--channel-web-nextjs` is only for users who want Web
+Chat):
 
     npx eve@latest init <name>
 
@@ -18,5 +18,7 @@ If the user wants a reusable extension package instead of an agent, run
 
 For an existing app, run `npx eve@latest init .` from its directory. This adds the
 agent and missing dependencies while leaving the existing Git repository and app
-scripts alone. If init cannot be used, install by hand with
+scripts alone. Append `--model provider/model-id` or `--reasoning effort` to
+either init command when the user chose those settings. If init cannot be used,
+install by hand with
 `npm install eve@latest ai zod`; manual installation does not add package scripts.

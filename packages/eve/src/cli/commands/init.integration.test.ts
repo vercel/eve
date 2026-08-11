@@ -191,21 +191,44 @@ describe("runInitCommand", () => {
     expect(output.messages[3]).toContain("$ eve dev");
   });
 
-  it("creates a new agent with the model selected by --model", async () => {
+  it("creates a new agent with model settings selected by init options", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-model-"));
     const output = logger();
     const deps = dependencies();
 
-    await runInitCommand(output, parentDirectory, "my-agent", { model: "openai/gpt-5.5" }, deps);
+    await runInitCommand(
+      output,
+      parentDirectory,
+      "my-agent",
+      { model: "openai/gpt-5.5", reasoning: "high" },
+      deps,
+    );
 
     const projectPath = join(parentDirectory, "my-agent");
-    expect(await readFile(join(projectPath, "agent/agent.ts"), "utf8")).toContain(
-      'model: "openai/gpt-5.5"',
-    );
+    const agentSource = await readFile(join(projectPath, "agent/agent.ts"), "utf8");
+    expect(agentSource).toContain('model: "openai/gpt-5.5"');
+    expect(agentSource).toContain('reasoning: "high"');
     expect(deps.validateModelSlug).toHaveBeenCalledWith(
       expect.stringContaining(".eve-init-"),
       "openai/gpt-5.5",
     );
+  });
+
+  it("omits authored reasoning when init uses the provider default", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-reasoning-default-"));
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(
+      output,
+      parentDirectory,
+      "my-agent",
+      { reasoning: "provider-default" },
+      deps,
+    );
+
+    const agentSource = await readFile(join(parentDirectory, "my-agent", "agent/agent.ts"), "utf8");
+    expect(agentSource).not.toContain("reasoning:");
   });
 
   it("rejects an invalid --model before creating the project", async () => {
@@ -814,17 +837,23 @@ describe("runInitCommand", () => {
     expect(output.messages.join("\n")).not.toContain("Overrode package.json engines.node");
   });
 
-  it("adds an agent to an existing project with the model selected by --model", async () => {
+  it("adds an agent to an existing project with model settings selected by init options", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-model-"));
     const projectRoot = await createHostProject(parentDirectory);
     const output = logger();
     const deps = dependencies();
 
-    await runInitCommand(output, parentDirectory, "host-app", { model: "openai/gpt-5.5" }, deps);
-
-    expect(await readFile(join(projectRoot, "agent/agent.ts"), "utf8")).toContain(
-      'model: "openai/gpt-5.5"',
+    await runInitCommand(
+      output,
+      parentDirectory,
+      "host-app",
+      { model: "openai/gpt-5.5", reasoning: "high" },
+      deps,
     );
+
+    const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
+    expect(agentSource).toContain('model: "openai/gpt-5.5"');
+    expect(agentSource).toContain('reasoning: "high"');
     expect(deps.validateModelSlug).toHaveBeenCalledWith(projectRoot, "openai/gpt-5.5");
   });
 

@@ -10,6 +10,7 @@ import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { formatNodeEngineOverrideWarning, type NodeEngineOverride } from "#setup/node-engine.js";
 import {
   detectInvokingPackageManager,
@@ -53,6 +54,8 @@ export interface InitCommandOptions {
   channelWebNextjs?: boolean;
   /** Model id written to the root agent config. Set by `--model`. */
   model?: string;
+  /** Reasoning effort written to the root agent config. Set by `--reasoning`. */
+  reasoning?: AgentReasoningDefinition;
 }
 
 export interface InitCommandDependencies {
@@ -176,6 +179,7 @@ async function addToExistingProject(
   const result = await dependencies.addAgentToProject({
     projectRoot: targetPath,
     model: options.model ?? DEFAULT_AGENT_MODEL_ID,
+    reasoning: options.reasoning,
     packageManager: manager.kind,
     evePackage,
   });
@@ -228,6 +232,7 @@ async function scaffoldProject(
     const scaffoldOptions = {
       projectName: stagedProjectName,
       model: options.model ?? DEFAULT_AGENT_MODEL_ID,
+      reasoning: options.reasoning,
       evePackage,
       targetDirectory: stagingDirectory,
       workspaceProbeDirectory: projectPath,

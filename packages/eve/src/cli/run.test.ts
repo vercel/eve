@@ -7,10 +7,12 @@ import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
-const { runSetCommand } = vi.hoisted(() => ({
+const { runInitCommand, runSetCommand } = vi.hoisted(() => ({
+  runInitCommand: vi.fn(async () => {}),
   runSetCommand: vi.fn(async () => {}),
 }));
 
+vi.mock("#cli/commands/init.js", () => ({ runInitCommand }));
 vi.mock("#cli/commands/set.js", () => ({ runSetCommand }));
 
 async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
@@ -86,6 +88,15 @@ describe("CLI command registration", () => {
     const help = output.join("\n");
     expect(help).toContain("--model <model>");
     expect(help).toContain("--reasoning <effort>");
+  });
+
+  it("rejects unsupported reasoning before running the set command", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runSetCommand.mockClear();
+
+    await expect(runCli(["set", "--reasoning", "extreme"], logger)).rejects.toThrow();
+
+    expect(runSetCommand).not.toHaveBeenCalled();
   });
 
   it("lists registry installation and setup options", async () => {
@@ -183,6 +194,32 @@ describe("eve init compatibility flags", () => {
     const help = output.join("\n");
     expect(help).toContain("-y, --yes");
     expect(help).toContain("--model <model>");
+    expect(help).toContain("--reasoning <effort>");
+  });
+
+  it("forwards model settings to the init command", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+
+    await runCli(
+      ["init", "my-agent", "--model", "openai/gpt-5.6-sol", "--reasoning", "high"],
+      logger,
+    );
+
+    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), "my-agent", {
+      channelWebNextjs: undefined,
+      model: "openai/gpt-5.6-sol",
+      reasoning: "high",
+    });
+  });
+
+  it("rejects unsupported reasoning before running the init command", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+
+    await expect(runCli(["init", "my-agent", "--reasoning", "extreme"], logger)).rejects.toThrow();
+
+    expect(runInitCommand).not.toHaveBeenCalled();
   });
 
   it("still rejects unknown init options", async () => {

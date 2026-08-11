@@ -16,5 +16,6 @@ the coding harness's prompt tools when available, and do not guess.
    under `agent/connections/`. When a system needs every end-user to sign in, wire
    its auth through **Vercel Connect** (`connect()` from `@vercel/connect/eve`),
    which handles consent, encrypted token storage, and refresh.
-4. Does the user want a specific AI Gateway model? If so, pass its
-   `provider/model-id` to `eve init --model`; otherwise, use eve's default.
+4. Does the user want a specific AI Gateway model or reasoning effort? If so,
+   pass its `provider/model-id` to `eve init --model` and its reasoning effort to
+   `--reasoning`; otherwise, use eve's defaults.

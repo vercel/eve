@@ -131,17 +131,6 @@ describe("runSetCommand", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it("rejects unsupported reasoning values before editing source", async () => {
-    const output = logger();
-    const deps = dependencies();
-
-    await runSetCommand(output, "/project", { reasoning: "extreme" }, deps);
-
-    expect(deps.changeAgentModelSettings).not.toHaveBeenCalled();
-    expect(output.errors.join("\n")).toContain('received "extreme"');
-    expect(process.exitCode).toBe(1);
-  });
-
   it("reports source-change rejections as command failures", async () => {
     const output = logger();
     const deps = dependencies({

@@ -123,12 +123,13 @@ npx eve@latest init my-agent
 ```
 
 `eve init` writes a new agent with eve's default model. Pass `--model
-openai/gpt-5.5` to choose another AI Gateway model or `--channel-web-nextjs` to
-add the Web Chat application. It installs dependencies, initializes Git, and
-starts the development server. When it finds a supported coding-agent REPL, the
-handoff menu can open that REPL instead or exit. Targeting an existing project
-directory (`eve init .`) adds the agent files and missing dependencies instead.
-It does not create a Vercel project or deploy the agent.
+openai/gpt-5.5` to choose another AI Gateway model, `--reasoning high` to set a
+reasoning effort, or `--channel-web-nextjs` to add the Web Chat application. It
+installs dependencies, initializes Git, and starts the development server. When
+it finds a supported coding-agent REPL, the handoff menu can open that REPL
+instead or exit. Targeting an existing project directory (`eve init .`) adds the
+agent files and missing dependencies instead. It does not create a Vercel
+project or deploy the agent.
 
 CLI commands:
 
