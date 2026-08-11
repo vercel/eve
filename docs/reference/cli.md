@@ -305,7 +305,7 @@ Links the current directory to a Vercel project. After selecting a team, you can
 eve deploy
 ```
 
-Deploys the agent to Vercel production (`vercel deploy --prod`), installing dependencies first and pulling environment variables after. An already-linked project deploys with or without a TTY (non-interactive runs pass the non-interactive `vercel` flags). An unlinked directory walks the `eve link` pickers when a terminal is present, and exits with guidance otherwise.
+Deploys the agent to Vercel production (`vercel deploy --prod`), installing dependencies first and pulling environment variables after. An already-linked project deploys with or without a TTY (non-interactive runs pass the non-interactive `vercel` flags). When a terminal is present, an unlinked deployment signs in to Vercel if needed and then walks the `eve link` pickers; otherwise, it exits with guidance.
 
 ## `eve eval`
 
