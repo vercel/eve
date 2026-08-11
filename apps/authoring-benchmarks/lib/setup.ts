@@ -39,12 +39,9 @@ export async function setupAuthoringEval(
   );
   const tarballPath = `${sandbox.getWorkingDirectory()}/${TARBALL_PATH}`;
   await measure(timings, "extract bootstrap eve CLI", () =>
-    run(sandbox, "tar", [
-      "-xzf",
-      TARBALL_PATH,
-      "-C",
-      `${SEED_ROOT}/eve-cli`,
-      "--strip-components=1",
+    run(sandbox, "bash", [
+      "-lc",
+      `mkdir -p ${SEED_ROOT}/eve-cli && tar -xzf ${TARBALL_PATH} -C ${SEED_ROOT}/eve-cli --strip-components=1`,
     ]),
   );
   const cliPath = `${sandbox.getWorkingDirectory()}/${SEED_ROOT}/eve-cli/bin/eve.js`;
