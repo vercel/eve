@@ -131,10 +131,17 @@ export default defineAgent({
 ```
 
 `step.started` runs before every model call, so every step whose current
-history includes one of those user-message parts uses Gemini Flash. eve sends
-the image parts to the selected model. A model with vision support can process
-them; a model without vision support rejects the model call with its provider
-error. eve does not drop unsupported images or choose a vision model
+history includes one of those user-message parts uses Gemini Flash. Before the
+resolver runs, eve writes byte-backed `file` parts to the session sandbox under
+`/workspace/attachments`; `ctx.messages` keeps a sandbox reference and the
+media type, so the check still matches staged image files. AI SDK `image` parts
+and unresolved remote file URLs are not staged. See [Inbound
+attachments](./sandbox#inbound-attachments) for the storage and hydration
+lifecycle.
+
+When image content reaches the selected model, a model with vision support can
+process it; a model without vision support rejects the model call with its
+provider error. eve does not drop unsupported images or choose a vision model
 automatically. Check image-input support in the [AI Gateway model
 catalog](https://vercel.com/ai-gateway/models), and see [Send images to the
 model with content parts](./tools#send-images-to-the-model-with-content-parts)
