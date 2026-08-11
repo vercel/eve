@@ -92,8 +92,24 @@ describe("vercelAuthBlockerReason", () => {
 
 describe("getVercelAuthStatus", () => {
   it("reports authenticated when whoami succeeds", async () => {
+    mockedReadProjectLink.mockResolvedValueOnce(undefined);
     mockedCaptureVercel.mockResolvedValueOnce(captured("acme\n"));
     await expect(getVercelAuthStatus("/tmp/eve-agent")).resolves.toBe("authenticated");
+    expect(mockedCaptureVercel).toHaveBeenCalledWith(
+      ["whoami"],
+      expect.objectContaining({ cwd: "/tmp/eve-agent" }),
+    );
+  });
+
+  it("scopes whoami to an existing linked team project", async () => {
+    mockedReadProjectLink.mockResolvedValueOnce({ orgId: "team_demo", projectId: "prj_demo" });
+    mockedCaptureVercel.mockResolvedValueOnce(captured("demo\n"));
+
+    await expect(getVercelAuthStatus("/tmp/eve-agent")).resolves.toBe("authenticated");
+    expect(mockedCaptureVercel).toHaveBeenCalledWith(
+      ["whoami", "--scope", "team_demo"],
+      expect.objectContaining({ cwd: "/tmp/eve-agent" }),
+    );
   });
 
   it("reports logged-out when whoami ran but exited non-zero", async () => {
