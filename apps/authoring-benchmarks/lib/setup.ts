@@ -53,6 +53,13 @@ export async function setupAuthoringEval(
     ].join(" && "),
   ]);
   await run(sandbox, "npm", ["pkg", "set", `dependencies.eve=file:${TARBALL_PATH}`]);
+  await run(sandbox, "npm", [
+    "install",
+    "--save-dev",
+    "--package-lock=false",
+    "--registry=https://registry.npmjs.org",
+    "vitest@4.1.10",
+  ]);
 
   if (options.syntheticImessage === true) await installSyntheticImessageWorld(sandbox);
   if (options.agentsMd !== true) await removeScaffoldedAgentGuidance(sandbox);
