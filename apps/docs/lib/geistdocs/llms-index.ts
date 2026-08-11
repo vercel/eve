@@ -21,35 +21,34 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Agents](${EVE_ORIGIN}/docs/agent-config.md): Configure the model, reasoning effort, compaction, and runtime behavior.
 - [Instructions](${EVE_ORIGIN}/docs/instructions.md): Write the agent's always-on system prompt.
 - [Tools](${EVE_ORIGIN}/docs/tools.md): Define typed actions and gate sensitive calls on human approval.
+- [Connections](${EVE_ORIGIN}/docs/connections.md): Connect external MCP and OpenAPI servers without exposing credentials to the model.
+- [Channels](${EVE_ORIGIN}/docs/channels/overview.md): Expose the agent through HTTP, Slack, Discord, and other messaging surfaces.
+- [Base eve Channel](${EVE_ORIGIN}/docs/channels/eve.md): Understand the HTTP API exposed by each running eve app.
 - [Skills](${EVE_ORIGIN}/docs/skills.md): Add procedures that the model loads on demand.
-- [Durable State](${EVE_ORIGIN}/docs/guides/state.md): Persist per-session memory across step boundaries.
 - [Sandbox](${EVE_ORIGIN}/docs/sandbox.md): Configure the isolated shell, filesystem, lifecycle, and network policy.
 - [Subagents](${EVE_ORIGIN}/docs/subagents.md): Delegate work to copies of the root agent or declared specialists.
-- [Schedules](${EVE_ORIGIN}/docs/schedules.md): Run prompts or handlers on a cron cadence.
 - [Evals](${EVE_ORIGIN}/docs/evals/overview.md): Define repeatable scored checks and run them with \`eve eval\`.
+- [Durable State](${EVE_ORIGIN}/docs/guides/state.md): Persist per-session memory across step boundaries.
+- [Schedules](${EVE_ORIGIN}/docs/schedules.md): Run prompts or handlers on a cron cadence.
+- [Hooks](${EVE_ORIGIN}/docs/guides/hooks.md): Subscribe to runtime stream events.
+- [Dynamic Capabilities](${EVE_ORIGIN}/docs/guides/dynamic-capabilities.md): Resolve models, tools, skills, subagents, and instructions at runtime.
+- [Workflow Tool](${EVE_ORIGIN}/docs/guides/dynamic-workflows.md): Let the model orchestrate subagents through the experimental Workflow tool.
 
 ## Integrations
 
 - [Add Integrations](${EVE_ORIGIN}/docs/install-integrations.md): Discover and add official or third-party integrations.
-- [Connections](${EVE_ORIGIN}/docs/connections.md): Connect external MCP and OpenAPI servers without exposing credentials to the model.
-- [Channels](${EVE_ORIGIN}/docs/channels/overview.md): Expose the agent through HTTP, Slack, Discord, and other messaging surfaces.
-- [Base eve Channel](${EVE_ORIGIN}/docs/channels/eve.md): Understand the HTTP API exposed by each running eve app.
 - [Extensions](${EVE_ORIGIN}/docs/extensions.md): Package and mount reusable eve capabilities.
 - [Remote Agents](${EVE_ORIGIN}/docs/guides/remote-agents.md): Call another eve deployment as a subagent.
 - [Agent Client Protocol (ACP)](${EVE_ORIGIN}/docs/protocols/acp.md): Use local or deployed eve agents from ACP clients.
 - [Universal Commerce Protocol (UCP)](${EVE_ORIGIN}/docs/protocols/ucp.md): Serve a UCP profile from a custom eve channel.
-
 - [Frontend Frameworks](${EVE_ORIGIN}/docs/guides/frontend/overview.md): Build browser chat interfaces with \`useEveAgent\`.
 - [Next.js](${EVE_ORIGIN}/docs/guides/frontend/nextjs.md): Mount eve routes and use the React client in Next.js.
 - [Nuxt](${EVE_ORIGIN}/docs/guides/frontend/nuxt.md): Mount eve routes and use the Vue client in Nuxt.
 - [SvelteKit](${EVE_ORIGIN}/docs/guides/frontend/sveltekit.md): Mount eve routes and use the Svelte client in SvelteKit.
 - [TypeScript SDK](${EVE_ORIGIN}/docs/guides/client/overview.md): Call an eve app from scripts, services, tests, or custom UIs.
 
-## Advanced
+## Operate
 
-- [Hooks](${EVE_ORIGIN}/docs/guides/hooks.md): Subscribe to runtime stream events.
-- [Dynamic Capabilities](${EVE_ORIGIN}/docs/guides/dynamic-capabilities.md): Resolve models, tools, skills, subagents, and instructions at runtime.
-- [Workflow Tool](${EVE_ORIGIN}/docs/guides/dynamic-workflows.md): Let the model orchestrate subagents through the experimental Workflow tool.
 - [Deployment Overview](${EVE_ORIGIN}/docs/guides/deployment/overview.md): Choose between Vercel and self-hosted infrastructure.
 - [Deploy to Vercel](${EVE_ORIGIN}/docs/guides/deployment/vercel.md): Build and deploy with Vercel Workflow and Vercel Sandbox.
 - [Self-Hosting](${EVE_ORIGIN}/docs/guides/deployment/self-hosting.md): Run eve as a Node service or container.

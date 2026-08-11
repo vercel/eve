@@ -10,7 +10,7 @@ describe("createLlmsIndex", () => {
     expect(output).toContain("## Introduction");
     expect(output).toContain("## Build");
     expect(output).toContain("## Integrations");
-    expect(output).toContain("## Advanced");
+    expect(output).toContain("## Operate");
     expect(output).not.toContain("## Application Integration");
     expect(output).toContain("## Core Concepts");
     expect(output).toContain("## Optional");
