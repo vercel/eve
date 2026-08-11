@@ -319,6 +319,8 @@ describe("ensureChannel", () => {
     expect(authSource).toContain('requireEnvironmentVariable("BETTER_AUTH_SECRET")');
     expect(authSource).toContain("process.env.VERCEL_PROJECT_PRODUCTION_URL");
     expect(authSource).toContain('clientId: requireEnvironmentVariable("VERCEL_APP_CLIENT_ID")');
+    expect(authSource).toContain('throw new Error("No trusted deployment hosts are configured")');
+    expect(authSource).not.toContain("*.vercel.app");
 
     const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
     expect(channelSource).toContain("auth.api.getSession");

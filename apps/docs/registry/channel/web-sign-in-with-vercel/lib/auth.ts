@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth";
 
 const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
-const DEVELOPMENT_ALLOWED_HOSTS = ["localhost:*", "127.0.0.1:*", "*.vercel.app"];
+const DEVELOPMENT_ALLOWED_HOSTS = ["localhost:*", "127.0.0.1:*"];
 
 function getAllowedHosts(): string[] {
   if (process.env.NODE_ENV === "development") {
@@ -12,7 +12,10 @@ function getAllowedHosts(): string[] {
     process.env.VERCEL_BRANCH_URL,
     process.env.VERCEL_PROJECT_PRODUCTION_URL,
   ].filter((host): host is string => Boolean(host));
-  return deploymentHosts.length > 0 ? Array.from(new Set(deploymentHosts)) : ["*.vercel.app"];
+  if (deploymentHosts.length === 0) {
+    throw new Error("No trusted deployment hosts are configured");
+  }
+  return Array.from(new Set(deploymentHosts));
 }
 
 function requireEnvironmentVariable(name: string): string {
