@@ -158,7 +158,7 @@ export async function dispatchRuntimeActionsStep(input: {
   // context, so this is the last place the parent's window is visible.
   const parentTraceContext = readSessionTraceContext(input.serializedContext, session.sessionId);
   const persistentSessions =
-    bundle.resolvedAgent.config.experimental?.subagentPersistentSessions === true;
+    bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
   // A corrupt handle store throws; surface that before anything dispatches.
   // A mid-loop throw after a sibling started would durably replay the whole
   // batch and re-dispatch that sibling.

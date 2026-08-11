@@ -23,7 +23,11 @@ function infoWithRouting(
   endpoint?: AgentInfo["agent"]["model"]["endpoint"],
 ): AgentInfo {
   const model: AgentInfo["agent"]["model"] =
-    endpoint === undefined ? { id: "m", routing } : { endpoint, id: "m", routing };
+    routing.kind === "dynamic"
+      ? { routing }
+      : endpoint === undefined
+        ? { id: "m", routing }
+        : { endpoint, id: "m", routing };
 
   return {
     agent: {

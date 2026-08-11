@@ -1,12 +1,12 @@
-import type { AgentBuildDefinition, PublicAgentDefinition } from "#shared/agent-definition.js";
+import type {
+  AgentBuildDefinition,
+  PublicAgentDefinition,
+  PublicAgentStaticModelDefinition,
+} from "#shared/agent-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { RemoteAgentDefinition } from "#public/definitions/remote-agent.js";
 import { defineDynamic as defineDynamicBase } from "#public/definitions/tool.js";
-import type {
-  DynamicEvents,
-  DynamicEventsWithFallback,
-  DynamicSentinel,
-} from "#shared/dynamic-tool-definition.js";
+import type { DynamicEvents, DynamicSentinel } from "#shared/dynamic-tool-definition.js";
 
 declare const DEFINED_AGENT: unique symbol;
 
@@ -49,9 +49,10 @@ export type DefinedAgent<TAgent extends AgentDefinition = AgentDefinition> = TAg
  * Agent configuration returned by a dynamic subagent resolver. The description
  * tells the parent agent when to delegate.
  */
-export type DynamicLocalSubagentDefinition = AgentDefinition & {
-  readonly description: string;
-};
+export type DynamicLocalSubagentDefinition = Extract<
+  AgentDefinition,
+  { readonly model: PublicAgentStaticModelDefinition }
+> & { readonly description: string };
 
 /** Definition a dynamic subagent resolver may select at runtime. */
 export type DynamicSubagentDefinition = DynamicLocalSubagentDefinition | RemoteAgentDefinition;
@@ -72,12 +73,6 @@ type DynamicSubagentDescriptionConstraint<TEvents extends DynamicEvents> =
     : { readonly "Dynamic subagent definitions require a description": never };
 
 interface DefineDynamicAgent {
-  <const TEvents extends DynamicEventsWithFallback, TFallback = unknown>(
-    definition: {
-      readonly fallback: TFallback;
-      readonly events: TEvents;
-    } & DynamicSubagentDescriptionConstraint<TEvents>,
-  ): DynamicSentinel<Exclude<DynamicEventResult<TEvents>, undefined>, TFallback>;
   <const TEvents extends DynamicEvents>(
     definition: {
       readonly build?: AgentBuildDefinition;
@@ -94,11 +89,8 @@ interface DefineDynamicAgent {
 export const defineDynamic: DefineDynamicAgent = ((definition: {
   readonly build?: AgentBuildDefinition;
   readonly events: DynamicEvents;
-  readonly fallback?: unknown;
 }) => {
-  const sentinel = Object.hasOwn(definition, "fallback")
-    ? defineDynamicBase({ events: definition.events, fallback: definition.fallback })
-    : defineDynamicBase({ events: definition.events });
+  const sentinel = defineDynamicBase({ events: definition.events });
   return definition.build === undefined ? sentinel : { ...sentinel, build: definition.build };
 }) as DefineDynamicAgent;
 

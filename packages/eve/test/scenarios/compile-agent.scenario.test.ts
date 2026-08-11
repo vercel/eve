@@ -1045,7 +1045,9 @@ describe("compileAgent", () => {
     expect(result.manifest.subagents[0]).toMatchObject({
       sourceId: "subagents/researcher",
     });
-    expect(result.manifest.subagents[0]?.agent.config.name).toBe("researcher");
+    const researcher = result.manifest.subagents[0];
+    if (researcher?.configResolver !== undefined) throw new Error("expected a static subagent");
+    expect(researcher?.agent.config.name).toBe("researcher");
   });
 
   it("compiles remote subagents into the owning node manifest", async () => {

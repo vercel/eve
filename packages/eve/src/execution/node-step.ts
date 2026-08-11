@@ -135,10 +135,6 @@ export function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIde
     agentId: node.turnAgent.id,
     agentName: node.agent.config?.name,
     eveVersion: packageInfo.version,
-    modelId:
-      node.turnAgent.dynamicModel === undefined
-        ? node.turnAgent.model.id
-        : `dynamic:${node.turnAgent.model.id}`,
   };
 
   const gitSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
@@ -174,7 +170,6 @@ function createRuntimeDynamicModelEventDispatcher(
       ctx: input.ctx,
       dynamicModel,
       event: input.event,
-      fallback: input.fallback,
       messages: input.messages,
       scope,
     });

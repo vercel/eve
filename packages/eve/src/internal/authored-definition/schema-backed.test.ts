@@ -262,15 +262,17 @@ describe("normalizeToolDefinition", () => {
   });
 
   it("rejects a defineDynamic tool export carrying a fallback", () => {
-    const dynamicTools = defineDynamic({
+    const dynamicTools = {
+      ...defineDynamic({
+        events: {
+          "session.started": async () => ({}),
+        },
+      }),
       fallback: "not-supported-here",
-      events: {
-        "session.started": async () => ({}),
-      },
-    });
+    } as never;
 
     expect(() => normalizeToolDefinition(dynamicTools, FAILURE_MESSAGE)).toThrow(
-      '"fallback" is only supported on a dynamic agent model',
+      "Unknown key(s): fallback",
     );
   });
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createCompiledAgentResources,
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
   ROOT_COMPILED_AGENT_NODE_ID,
@@ -145,23 +146,11 @@ describe("resolveRuntimeAgentGraph", () => {
       ],
       subagents: [
         {
-          agent: createCompiledAgentNodeManifest({
+          agent: createCompiledAgentResources({
             agentRoot: "/app/agent/subagents/researcher",
             appRoot: "/app",
-            config: {
-              model: {
-                id: TEST_DEFAULT_MODEL_ID,
-                routing: { kind: "gateway", target: "openai" },
-              },
-              name: "researcher",
-              source: {
-                logicalPath: "agent.ts",
-                sourceId: "agent-config",
-                sourceKind: "module",
-              },
-            },
           }),
-          dynamic: { eventNames: ["session.started"] },
+          configResolver: { eventNames: ["session.started"] },
           entryPath: "/app/agent/subagents/researcher/agent.ts",
           logicalPath: "subagents/researcher",
           name: "researcher",
@@ -180,7 +169,7 @@ describe("resolveRuntimeAgentGraph", () => {
           [ROOT_COMPILED_AGENT_NODE_ID]: { modules: {} },
           "subagents/researcher": {
             modules: {
-              "agent-config": { default: dynamic },
+              "subagents/researcher": { default: dynamic },
             },
           },
         },
@@ -445,7 +434,7 @@ describe("resolveRuntimeAgentGraph", () => {
     const researcherNode = graph.nodesByNodeId.get("subagents/researcher");
     const reviewerNode = graph.nodesByNodeId.get("subagents/researcher::subagents/reviewer");
 
-    expect(researcherNode?.agent.config.name).toBe("researcher");
+    expect(researcherNode?.agent.config?.name).toBe("researcher");
     expect(researcherNode?.agent.instructions).toEqual({
       name: "researcher-instructions",
       logicalPath: "instructions.md",

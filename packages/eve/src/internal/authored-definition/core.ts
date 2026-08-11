@@ -68,6 +68,15 @@ export function normalizeAgentDefinition(
     model: normalizeAgentModelDefinition(record.model, message),
   };
 
+  if (
+    isDynamicSentinel(definition.model) &&
+    (record.modelContextWindowTokens !== undefined || record.modelOptions !== undefined)
+  ) {
+    throw new Error(
+      `${message} Dynamic model definitions do not support sibling "modelContextWindowTokens" or "modelOptions" fields. Return those overrides from the resolver selection instead.`,
+    );
+  }
+
   if (record.description !== undefined) {
     definition.description = expectString(record.description, message);
   }
@@ -134,18 +143,12 @@ function normalizeAgentModelDefinition(
   value: unknown,
   message: string,
 ): NormalizedAgentDefinition["model"] {
-  // Bare-sentinel check so a fallback-less defineDynamic hits the
-  // actionable error below instead of the generic invalid-model path.
   if (!isDynamicSentinel(value)) {
     return value as NormalizedAgentDefinition["model"];
   }
 
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["events", "fallback", "kind"], message);
-
-  if (record.fallback === undefined) {
-    throw new Error(`${message} Dynamic model definitions must include a "fallback" model.`);
-  }
+  expectOnlyKnownKeys(record, ["events", "kind"], message);
 
   const rawEvents = expectObjectRecord(record.events, message);
   const events: MutableDynamicEvents = {};
@@ -157,7 +160,6 @@ function normalizeAgentModelDefinition(
 
   return {
     events,
-    fallback: record.fallback as PublicAgentStaticModelDefinition,
     kind: record.kind,
   } as NormalizedAgentDefinition["model"];
 }

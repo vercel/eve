@@ -9,7 +9,6 @@ import {
   TurnDynamicModelReferenceKey,
   type LiveDynamicModelSelection,
 } from "#context/keys.js";
-import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
   RuntimeDynamicModelReference,
@@ -17,15 +16,12 @@ import type {
 } from "#runtime/agent/bootstrap.js";
 import {
   loadDynamicRuntimeModelDefinition,
-  normalizeDynamicRuntimeModelResult,
+  resolveRuntimeModelSelection,
   shouldMockAuthoredRuntimeModels,
   type ResolvedRuntimeModelSelection,
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
-import { toErrorMessage } from "#shared/errors.js";
 import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
-
-const log = createLogger("dynamic-models");
 
 const ALLOWED_DYNAMIC_MODEL_EVENTS = new Set<DynamicToolEventName>([
   "session.started",
@@ -77,7 +73,6 @@ export async function dispatchDynamicModelEvent(input: {
   readonly ctx: AlsContext;
   readonly dynamicModel: RuntimeDynamicModelReference | undefined;
   readonly event: UnstampedMessageStreamEvent;
-  readonly fallback: RuntimeModelReference;
   readonly messages: readonly ModelMessage[];
   readonly scope: RuntimeModelResolutionScope;
 }): Promise<void> {
@@ -85,46 +80,31 @@ export async function dispatchDynamicModelEvent(input: {
   if (!isDynamicModelEventName(input.event.type)) return;
   if (!input.dynamicModel.eventNames.includes(input.event.type)) return;
 
-  try {
-    const definition = await loadDynamicRuntimeModelDefinition({
-      dynamicModel: input.dynamicModel,
-      scope: input.scope,
-    });
-    const handler = definition.events[input.event.type];
+  const definition = await loadDynamicRuntimeModelDefinition({
+    dynamicModel: input.dynamicModel,
+    scope: input.scope,
+  });
+  const handler = definition.events[input.event.type];
 
-    if (handler === undefined) {
-      setSelectionForEvent(input.ctx, input.event.type, null);
-      return;
-    }
-
-    const rawResult = await handler(input.event, buildResolveContext(input.ctx, input.messages));
-    const selection =
-      rawResult === null || rawResult === undefined
-        ? null
-        : normalizeDynamicRuntimeModelResult({
-            fallback: input.fallback,
-            result: rawResult,
-          });
-
-    if (
-      selection !== null &&
-      input.event.type !== "step.started" &&
-      selection.model !== undefined
-    ) {
-      log.error(
-        `Dynamic model resolver (${input.event.type}) returned a provider object, but session- and turn-scoped model selections must be serializable. Return a model id string for this scope, or use "step.started".`,
-      );
-      setSelectionForEvent(input.ctx, input.event.type, null);
-      return;
-    }
-
-    setSelectionForEvent(input.ctx, input.event.type, selection);
-  } catch (error) {
-    log.error(`Dynamic model resolver (${input.event.type}) threw - skipping.`, {
-      error: toErrorMessage(error),
-    });
-    setSelectionForEvent(input.ctx, input.event.type, null);
+  if (handler === undefined) {
+    throw new Error(
+      `Dynamic model resolver is missing its compiled "${input.event.type}" handler.`,
+    );
   }
+
+  const rawResult = await handler(input.event, buildResolveContext(input.ctx, input.messages));
+  const selection = await resolveRuntimeModelSelection({
+    selection: rawResult as never,
+    state: input.ctx,
+  });
+
+  if (input.event.type !== "step.started" && selection.model !== undefined) {
+    throw new Error(
+      `Dynamic model resolver (${input.event.type}) returned a provider object, but session- and turn-scoped model selections must be serializable. Return a model id string for this scope, or use "step.started".`,
+    );
+  }
+
+  setSelectionForEvent(input.ctx, input.event.type, selection);
 }
 
 function setSelectionForEvent(

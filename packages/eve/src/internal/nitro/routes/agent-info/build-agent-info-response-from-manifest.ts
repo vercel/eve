@@ -86,18 +86,26 @@ export function buildAgentInfoResponseFromManifest(
       appRoot: manifest.appRoot,
       configSource: manifest.config.source ? toSource(manifest.config.source) : undefined,
       description: manifest.config.description,
-      model: {
-        contextWindowTokens: manifest.config.model.contextWindowTokens,
-        id: manifest.config.model.id,
-        providerOptions: manifest.config.model.providerOptions,
-        reasoning: manifest.config.reasoning,
-        source: manifest.config.model.source ? toSource(manifest.config.model.source) : undefined,
-        routing: manifest.config.model.routing,
-        endpoint: resolveModelEndpointStatus(
-          manifest.config.model.routing,
-          input.gatewayCredentials,
-        ),
-      },
+      model:
+        manifest.config.dynamicModel === undefined
+          ? {
+              contextWindowTokens: manifest.config.model.contextWindowTokens,
+              id: manifest.config.model.id,
+              providerOptions: manifest.config.model.providerOptions,
+              reasoning: manifest.config.reasoning,
+              source: manifest.config.model.source
+                ? toSource(manifest.config.model.source)
+                : undefined,
+              routing: manifest.config.model.routing,
+              endpoint: resolveModelEndpointStatus(
+                manifest.config.model.routing,
+                input.gatewayCredentials,
+              ),
+            }
+          : {
+              reasoning: manifest.config.reasoning,
+              routing: { kind: "dynamic" },
+            },
       name: manifest.config.name,
       outputSchema: manifest.config.outputSchema,
     },

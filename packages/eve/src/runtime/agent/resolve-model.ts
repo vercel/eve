@@ -1,6 +1,9 @@
 import type { LanguageModel } from "ai";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { ContextAccessor } from "#context/key.js";
+import { RuntimeModelMetadataCacheKey, type CachedModelMetadata } from "#context/keys.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import { normalizeCatalogModelId } from "#internal/model-catalog.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import type {
   RuntimeDynamicModelReference,
@@ -21,6 +24,11 @@ import {
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import {
+  runtimeModelCatalog,
+  type RuntimeModelCatalog,
+  type RuntimeModelMetadata,
+} from "#runtime/agent/model-catalog.js";
 
 export { shouldMockAuthoredRuntimeModels };
 
@@ -93,7 +101,9 @@ async function loadSourceBackedRuntimeModelReference(
   }
 
   if (isDynamicModelDefinition(model)) {
-    return model.fallback;
+    throw new Error(
+      `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to provide a static runtime model.`,
+    );
   }
 
   return model;
@@ -132,40 +142,116 @@ export async function loadDynamicRuntimeModelDefinition(input: {
   return authoredModel;
 }
 
-export function normalizeDynamicRuntimeModelResult(input: {
-  readonly fallback: RuntimeModelReference;
-  readonly result: NonNullable<PublicAgentDynamicModelResult>;
-}): ResolvedRuntimeModelSelection {
-  const selection = normalizeDynamicModelSelection(input.result);
+export async function resolveRuntimeModelSelection(input: {
+  readonly catalog?: RuntimeModelCatalog;
+  readonly selection: PublicAgentDynamicModelResult;
+  readonly state: ContextAccessor;
+}): Promise<ResolvedRuntimeModelSelection> {
+  if (input.selection === null || input.selection === undefined) {
+    throw new Error(
+      "Dynamic model resolver returned no model. Every matching dynamic model handler must return a concrete model selection.",
+    );
+  }
+
+  const selection = normalizeDynamicModelSelection(input.selection);
   validateDynamicModelSelection(selection);
   const providerOptions =
     selection.modelOptions?.providerOptions === undefined
-      ? input.fallback.providerOptions
+      ? undefined
       : parseProviderOptionsRecord(selection.modelOptions.providerOptions);
-  // Never inherited from the fallback: a different model's window is not a safe guess.
-  const contextWindowTokens = selection.modelContextWindowTokens;
 
-  if (typeof selection.model === "string") {
-    const id = formatLanguageModelGatewayId(selection.model);
+  const selectedModel = selection.model;
+  if (typeof selectedModel === "string") {
+    const id = formatLanguageModelGatewayId(selectedModel);
+    const metadata = await resolveSelectionMetadata({
+      cacheKey: `gateway:${normalizeCatalogModelId(id)}`,
+      catalog: input.catalog ?? runtimeModelCatalog,
+      contextWindowTokens: selection.modelContextWindowTokens,
+      load: (catalog) => catalog.getByGatewayId(id),
+      modelLabel: id,
+      state: input.state,
+    });
     return {
       reference: {
-        id,
-        contextWindowTokens,
+        id: metadata.resolvedModelId,
+        contextWindowTokens: metadata.contextWindowTokens,
+        maxOutputTokens: metadata.maxOutputTokens,
         providerOptions,
       },
     };
   }
 
-  validateRuntimeLanguageModel(selection.model);
+  validateRuntimeLanguageModel(selectedModel);
+
+  const formattedId = formatLanguageModelGatewayId(selectedModel);
+  const topLevelProvider = selectedModel.provider.split(".")[0]!;
+  const metadata = await resolveSelectionMetadata({
+    cacheKey:
+      topLevelProvider === "gateway"
+        ? `gateway:${normalizeCatalogModelId(selectedModel.modelId)}`
+        : `provider:${topLevelProvider}:${normalizeCatalogModelId(selectedModel.modelId)}`,
+    catalog: input.catalog ?? runtimeModelCatalog,
+    contextWindowTokens: selection.modelContextWindowTokens,
+    load: (catalog) =>
+      topLevelProvider === "gateway"
+        ? catalog.getByGatewayId(selectedModel.modelId)
+        : catalog.getByProviderModelId(selectedModel.provider, selectedModel.modelId),
+    modelLabel: formattedId,
+    state: input.state,
+  });
 
   return {
-    model: selection.model,
+    model: selectedModel,
     reference: {
-      id: formatLanguageModelGatewayId(selection.model),
-      contextWindowTokens,
+      id: metadata.resolvedModelId,
+      contextWindowTokens: metadata.contextWindowTokens,
+      maxOutputTokens: metadata.maxOutputTokens,
       providerOptions,
     },
   };
+}
+
+const RUNTIME_MODEL_METADATA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function resolveSelectionMetadata(input: {
+  readonly cacheKey: string;
+  readonly catalog: RuntimeModelCatalog;
+  readonly contextWindowTokens?: number;
+  readonly load: (catalog: RuntimeModelCatalog) => Promise<RuntimeModelMetadata | null>;
+  readonly modelLabel: string;
+  readonly state: ContextAccessor;
+}): Promise<RuntimeModelMetadata> {
+  if (input.contextWindowTokens !== undefined) {
+    return {
+      contextWindowTokens: input.contextWindowTokens,
+      resolvedModelId: input.modelLabel,
+    };
+  }
+
+  const now = Date.now();
+  const cached = input.state.get(RuntimeModelMetadataCacheKey)?.[input.cacheKey];
+  if (cached !== undefined && cached.expiresAt > now) {
+    return cached;
+  }
+
+  const resolved = await input.load(input.catalog);
+  if (resolved === null) {
+    throw new Error(
+      `Cannot select model "${input.modelLabel}" because AI Gateway did not provide context window metadata. Return modelContextWindowTokens with this selection for an unlisted or custom model.`,
+    );
+  }
+
+  const entry: CachedModelMetadata = {
+    ...resolved,
+    expiresAt: now + RUNTIME_MODEL_METADATA_CACHE_TTL_MS,
+  };
+  input.state.set(RuntimeModelMetadataCacheKey, (current) => ({
+    ...Object.fromEntries(
+      Object.entries(current ?? {}).filter(([, value]) => value.expiresAt > now),
+    ),
+    [input.cacheKey]: entry,
+  }));
+  return entry;
 }
 
 const DYNAMIC_MODEL_SELECTION_KEYS = new Set(["model", "modelContextWindowTokens", "modelOptions"]);
@@ -188,6 +274,10 @@ function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefin
     throw new Error(
       "Dynamic model resolver returned an invalid modelContextWindowTokens value. Expected a positive integer.",
     );
+  }
+
+  if (typeof selection.model === "string" && selection.model.trim() === "") {
+    throw new Error("Dynamic model resolver returned an empty model id.");
   }
 }
 

@@ -53,7 +53,7 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
           warnings: compiledState.metadata.discovery.summary.warnings,
         }
       : null,
-    model: compiledState?.manifest.config.model.id ?? null,
+    model: compiledState?.manifest.config.model?.id ?? null,
     instructions: compiledState?.manifest.instructions?.logicalPath ?? null,
     skills: (compiledState?.manifest.skills ?? []).map((skill) => skill.name),
     tools: (compiledState?.manifest.tools ?? []).map((tool) => tool.name),

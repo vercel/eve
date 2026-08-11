@@ -54,18 +54,21 @@ export async function compileAgentConfig(
       ? `Expected the default agent config to match the public eve shape.`
       : `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
   );
-  const authoredModel = isDynamicModelDefinition(definition.model)
-    ? definition.model.fallback
-    : definition.model;
-  const model = await normalizeAuthoredModelReference({
-    modelCatalog: context.modelCatalog,
-    purpose: "the primary compaction trigger model",
-    contextWindowTokens: definition.modelContextWindowTokens,
-    providerOptions: definition.modelOptions?.providerOptions,
-    source: configModule,
-    sourcePath: configModulePath,
-    value: authoredModel,
-  });
+  const dynamicModelDefinition = isDynamicModelDefinition(definition.model)
+    ? definition.model
+    : undefined;
+  const model =
+    dynamicModelDefinition === undefined
+      ? await normalizeAuthoredModelReference({
+          modelCatalog: context.modelCatalog,
+          purpose: "the primary compaction trigger model",
+          contextWindowTokens: definition.modelContextWindowTokens,
+          providerOptions: definition.modelOptions?.providerOptions,
+          source: configModule,
+          sourcePath: configModulePath,
+          value: definition.model as PublicAgentStaticModelDefinition,
+        })
+      : undefined;
   const compaction: {
     model?: CompiledRuntimeModelReference;
     thresholdPercent?: number;
@@ -78,9 +81,7 @@ export async function compileAgentConfig(
       thresholdPercent?: number;
     };
     description?: string;
-    dynamicModel?: CompiledAgentDefinition["dynamicModel"];
     experimental?: CompiledAgentDefinition["experimental"];
-    model: CompiledRuntimeModelReference;
     name: string;
     outputSchema?: JsonObject;
     reasoning?: CompiledAgentDefinition["reasoning"];
@@ -88,7 +89,6 @@ export async function compileAgentConfig(
     limits?: CompiledAgentDefinition["limits"];
   } = {
     compaction,
-    model,
     name: manifest.agentId,
   };
 
@@ -96,12 +96,13 @@ export async function compileAgentConfig(
     compiledConfig.description = definition.description;
   }
 
-  if (isDynamicModelDefinition(definition.model)) {
+  let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;
+  if (dynamicModelDefinition !== undefined) {
     if (configModule === undefined) {
       throw new Error("Expected dynamic model definitions to be authored in agent.ts.");
     }
-    compiledConfig.dynamicModel = {
-      eventNames: Object.keys(definition.model.events) as DynamicToolEventName[],
+    dynamicModel = {
+      eventNames: Object.keys(dynamicModelDefinition.events) as DynamicToolEventName[],
       exportName: configModule.exportName,
       sourceKind: "module",
       logicalPath: configModule.logicalPath,
@@ -164,7 +165,15 @@ export async function compileAgentConfig(
     compaction.thresholdPercent = definition.compaction.thresholdPercent;
   }
 
-  return compiledConfig;
+  if (dynamicModel !== undefined) {
+    return { ...compiledConfig, dynamicModel };
+  }
+
+  if (model === undefined) {
+    throw new Error("Expected a static agent model to compile to a concrete model reference.");
+  }
+
+  return { ...compiledConfig, model };
 }
 
 function normalizeExperimentalDefinition(
@@ -265,6 +274,7 @@ async function normalizeAuthoredModelReference(input: {
         ...sourceBackedModel,
         id: providerResult.slug,
         contextWindowTokens: providerResult.limits.contextWindowTokens,
+        maxOutputTokens: providerResult.limits.maxOutputTokens,
       };
     }
   }
@@ -333,6 +343,7 @@ async function withCompiledRuntimeModelLimits(
   return {
     ...model,
     contextWindowTokens: limits.contextWindowTokens,
+    maxOutputTokens: limits.maxOutputTokens,
   };
 }
 

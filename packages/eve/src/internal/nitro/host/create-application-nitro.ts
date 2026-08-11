@@ -100,13 +100,14 @@ function collectHostedTraceDependencies(
   preparedHost: PreparedApplicationHost,
   configuredOptionalEnginePackages: readonly string[],
 ): string[] {
-  const agentNodes = [
-    preparedHost.compileResult.manifest,
-    ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
+  const configuredExternalDependencies = [
+    ...(preparedHost.compileResult.manifest.config.build?.externalDependencies ?? []),
+    ...preparedHost.compileResult.manifest.subagents.flatMap((subagent) =>
+      subagent.configResolver === undefined
+        ? (subagent.agent.config.build?.externalDependencies ?? [])
+        : (subagent.configResolver.build?.externalDependencies ?? []),
+    ),
   ];
-  const configuredExternalDependencies = agentNodes.flatMap(
-    (node) => node.config.build?.externalDependencies ?? [],
-  );
   // Nitro already classifies known native and non-bundleable packages through
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.

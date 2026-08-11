@@ -30,7 +30,7 @@ export type RuntimeDynamicModelReference = Readonly<
 /**
  * Minimal runtime-owned agent shape prepared for one harness turn.
  */
-export interface RuntimeTurnAgent {
+interface RuntimeTurnAgentBase {
   readonly availableSkills?: readonly AvailableSkillDescription[];
   readonly id: string;
   readonly instructions: readonly string[];
@@ -40,14 +40,31 @@ export interface RuntimeTurnAgent {
    * When omitted, the harness uses the active turn model for compaction.
    */
   readonly compactionModel?: RuntimeModelReference;
-  readonly dynamicModel?: RuntimeDynamicModelReference;
-  readonly model: RuntimeModelReference;
   readonly nodeId?: string;
-  readonly outputSchema?: ResolvedAgent["config"]["outputSchema"];
-  readonly reasoning?: ResolvedAgent["config"]["reasoning"];
+  readonly outputSchema?: import("#runtime/types.js").ResolvedAgentDefinition["outputSchema"];
+  readonly reasoning?: import("#runtime/types.js").ResolvedAgentDefinition["reasoning"];
   readonly tools: readonly PreparedRuntimeTool[];
   readonly workspaceSpec: WorkspaceRuntimeSpec;
 }
+
+export type RuntimeTurnAgent = RuntimeTurnAgentBase &
+  (
+    | {
+        readonly configResolver?: never;
+        readonly dynamicModel?: never;
+        readonly model: RuntimeModelReference;
+      }
+    | {
+        readonly dynamicModel: RuntimeDynamicModelReference;
+        readonly configResolver?: never;
+        readonly model?: never;
+      }
+    | {
+        readonly configResolver: true;
+        readonly dynamicModel?: never;
+        readonly model?: never;
+      }
+  );
 
 /**
  * Static system prompt for the bootstrap runtime path.
@@ -61,10 +78,16 @@ export const BOOTSTRAP_RUNTIME_SYSTEM_PROMPT =
  */
 export function createResolvedRuntimeTurnAgent(input: {
   readonly agent: ResolvedAgent;
+  readonly id?: string;
   readonly nodeId?: string;
   readonly tools: readonly PreparedRuntimeTool[];
 }): RuntimeTurnAgent {
   const agent = input.agent;
+  const config = agent.config;
+  const id = input.id ?? config?.name;
+  if (id === undefined) {
+    throw new Error("Expected a path-derived agent id while resolving agent resources.");
+  }
   const subagentDeclaredTool = input.tools.some(
     (tool) => tool.kind === "subagent" || tool.kind === "remote",
   );
@@ -78,27 +101,30 @@ export function createResolvedRuntimeTurnAgent(input: {
     hasAuthoredAgentTool: input.tools.some((tool) => tool.name === AGENT_TOOL_NAME),
     nodeId: input.nodeId,
   });
-  return {
+  const base: RuntimeTurnAgentBase = {
     availableSkills: agent.skills.map((skill) => ({
       description: skill.description,
       name: skill.name,
     })),
-    id: agent.config.name,
+    id,
     instructions: composeRuntimeBasePrompt({
       connections: agent.connections,
       instructions: agent.instructions,
-      persistentSubagentSessions: agent.config.experimental?.subagentPersistentSessions === true,
+      persistentSubagentSessions: config?.experimental?.subagentPersistentSessions === true,
       subagentsAvailable: subagentDeclaredTool || subagentImplicitRootTool,
       toolsAvailable: input.tools.length > 0 || subagentImplicitRootTool,
       workspaceSpec: agent.workspaceSpec,
     }),
-    compactionModel: agent.config.compaction?.model,
-    dynamicModel: agent.config.dynamicModel,
-    model: agent.config.model,
+    compactionModel: config?.compaction?.model,
     nodeId: input.nodeId,
-    outputSchema: agent.config.outputSchema,
-    reasoning: agent.config.reasoning,
+    outputSchema: config?.outputSchema,
+    reasoning: config?.reasoning,
     tools: [...input.tools],
     workspaceSpec: agent.workspaceSpec,
   };
+
+  if (config === undefined) return { ...base, configResolver: true };
+  return config.dynamicModel === undefined
+    ? { ...base, model: config.model }
+    : { ...base, dynamicModel: config.dynamicModel };
 }

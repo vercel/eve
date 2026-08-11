@@ -3,36 +3,24 @@ import { join } from "node:path";
 
 import { z } from "#compiled/zod/index.js";
 import { AI_GATEWAY_MODELS_CATALOG_URL, vercelGatewayFetch } from "#internal/gateway.js";
+import {
+  catalogModelSchema,
+  findCatalogModelByProviderModelId,
+  findCatalogModelBySlug,
+  modelCatalogLimitsFromProvider,
+  modelCatalogResponseSchema,
+  normalizeCatalogModelId,
+  type CatalogModel,
+} from "#internal/model-catalog.js";
 const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_KIND = "eve-model-catalog-cache";
 const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_VERSION = 2;
 const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const THINKING_SUFFIX = "-thinking";
-
-export const catalogModelProviderSchema = z
-  .object({
-    provider: z.string().min(1),
-    providerModelId: z.string().min(1),
-    contextWindowTokens: z.number().int().nonnegative().optional(),
-    maxOutputTokens: z.number().int().nonnegative().optional(),
-  })
-  .passthrough();
-
-export const catalogModelSchema = z
-  .object({
-    slug: z.string().min(1),
-    providers: z.array(catalogModelProviderSchema).min(1),
-  })
-  .passthrough();
-
-export const modelCatalogResponseSchema = z
-  .object({
-    models: z.array(catalogModelSchema),
-    providerAliases: z.record(z.string(), z.string()),
-  })
-  .passthrough();
-
-export type CatalogModelProvider = z.infer<typeof catalogModelProviderSchema>;
-export type CatalogModel = z.infer<typeof catalogModelSchema>;
+export {
+  catalogModelProviderSchema,
+  catalogModelSchema,
+  modelCatalogResponseSchema,
+} from "#internal/model-catalog.js";
+export type { CatalogModelProvider, CatalogModel } from "#internal/model-catalog.js";
 
 /**
  * Stable runtime model limits that eve can embed in compiled artifacts without
@@ -160,14 +148,14 @@ export function createCompiledRuntimeModelCatalogLoader(
 
   return {
     async getModelLimits(modelId) {
-      const normalizedId = normalizeModelId(modelId);
+      const normalizedId = normalizeCatalogModelId(modelId);
       const resolved = await resolveModelsFromCacheOrFetch();
 
       if (resolved !== null) {
-        const model = findBySlug(resolved.models, normalizedId);
+        const model = findCatalogModelBySlug(resolved.models, normalizedId);
         if (model) {
           for (const p of model.providers) {
-            const limits = limitsFromProvider(p);
+            const limits = modelCatalogLimitsFromProvider(p);
             if (limits !== null) {
               return limits;
             }
@@ -184,21 +172,16 @@ export function createCompiledRuntimeModelCatalogLoader(
         return null;
       }
 
-      const baseProvider = provider.split(".")[0]!;
-      const resolvedProvider = resolved.providerAliases[baseProvider] ?? baseProvider;
-      const normalizedModelId = normalizeModelId(providerModelId);
-
-      for (const model of resolved.models) {
-        for (const p of model.providers) {
-          if (
-            p.provider === resolvedProvider &&
-            normalizeModelId(p.providerModelId) === normalizedModelId
-          ) {
-            const limits = limitsFromProvider(p);
-            if (limits !== null) {
-              return { slug: model.slug, limits };
-            }
-          }
+      const match = findCatalogModelByProviderModelId({
+        models: resolved.models,
+        provider,
+        providerAliases: resolved.providerAliases,
+        providerModelId,
+      });
+      if (match !== null) {
+        const limits = modelCatalogLimitsFromProvider(match.provider);
+        if (limits !== null) {
+          return { slug: match.model.slug, limits };
         }
       }
 
@@ -265,29 +248,10 @@ async function readModelCatalogCache(
   }
 }
 
-function findBySlug(models: readonly CatalogModel[], slug: string): CatalogModel | undefined {
-  return models.find((m) => m.slug === slug);
-}
-
-function limitsFromProvider(provider: CatalogModelProvider): CompiledRuntimeModelLimits | null {
-  if (provider.contextWindowTokens === undefined || provider.contextWindowTokens <= 0) {
-    return null;
-  }
-  return {
-    contextWindowTokens: provider.contextWindowTokens,
-    ...(provider.maxOutputTokens !== undefined &&
-      provider.maxOutputTokens > 0 && { maxOutputTokens: provider.maxOutputTokens }),
-  };
-}
-
 function isCacheFresh(cache: CompiledRuntimeModelCatalogCache): boolean {
   const fetchedAt = Date.parse(cache.fetchedAt);
   if (!Number.isFinite(fetchedAt)) {
     return false;
   }
   return Date.now() - fetchedAt <= COMPILED_RUNTIME_MODEL_CATALOG_CACHE_TTL_MS;
-}
-
-function normalizeModelId(modelId: string): string {
-  return modelId.endsWith(THINKING_SUFFIX) ? modelId.slice(0, -THINKING_SUFFIX.length) : modelId;
 }

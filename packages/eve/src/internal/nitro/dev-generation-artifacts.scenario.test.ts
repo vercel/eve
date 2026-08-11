@@ -118,7 +118,7 @@ describe("development generation artifacts", () => {
       ),
     });
     const subagent = compileResult.manifest.subagents[0];
-    const sourceId = subagent?.agent.config.source?.sourceId;
+    const sourceId = subagent?.sourceId;
     expect(sourceId).toBeDefined();
     const moduleNamespace = moduleMap.nodes[subagent!.nodeId]?.modules[sourceId!] as {
       default: { events: Record<string, Function> };

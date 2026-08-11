@@ -78,10 +78,12 @@ function stubDiagnostics() {
   };
 }
 
+type StaticAgentInfoModel = Extract<AgentInfoResult["agent"]["model"], { readonly id: string }>;
+
 function agentInfoWithModel(
   modelId: string,
-  endpoint?: AgentInfoResult["agent"]["model"]["endpoint"],
-  extras?: Partial<AgentInfoResult["agent"]["model"]>,
+  endpoint?: StaticAgentInfoModel["endpoint"],
+  extras?: Partial<StaticAgentInfoModel>,
 ): AgentInfoResult {
   return {
     agent: {
@@ -90,6 +92,7 @@ function agentInfoWithModel(
       model: {
         id: modelId,
         endpoint,
+        routing: { kind: "gateway" as const, target: modelId.split("/")[0] ?? "openai" },
         ...extras,
       },
       name: "Weather Agent",

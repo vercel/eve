@@ -37,7 +37,7 @@ export const VERCEL_EVE_AGENT_SUMMARY_KIND = "vercel-eve-agent-summary" as const
  * making semantic changes consumers must opt into. Adding optional fields
  * does not require a version bump.
  */
-export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 3;
+export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 4;
 
 /**
  * Output path (relative to the agent's `appRoot`) where eve writes the
@@ -62,11 +62,16 @@ export type VercelEveChannelType = "slack" | "http" | "webhook" | "unknown";
 /**
  * Top-level agent identity used to label the dashboard card.
  */
-export interface VercelEveAgentEntry {
+interface VercelEveAgentEntryBase {
   readonly name: string;
   readonly description?: string;
-  readonly modelId: string;
 }
+
+export type VercelEveAgentEntry = VercelEveAgentEntryBase &
+  (
+    | { readonly modelId: string; readonly modelRouting?: never }
+    | { readonly modelId?: never; readonly modelRouting: { readonly kind: "dynamic" } }
+  );
 
 /**
  * Authored agent instructions resolved at build time from the agent's

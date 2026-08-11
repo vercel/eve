@@ -43,11 +43,18 @@ export function buildVercelAgentSummary(input: {
     kind: VERCEL_EVE_AGENT_SUMMARY_KIND,
     schemaVersion: VERCEL_EVE_AGENT_SUMMARY_VERSION,
     generatorVersion: input.generatorVersion ?? resolveInstalledPackageInfo().version,
-    agent: {
-      name: manifest.config.name,
-      description: manifest.config.description,
-      modelId: manifest.config.model.id,
-    },
+    agent:
+      manifest.config.dynamicModel === undefined
+        ? {
+            name: manifest.config.name,
+            description: manifest.config.description,
+            modelId: manifest.config.model.id,
+          }
+        : {
+            name: manifest.config.name,
+            description: manifest.config.description,
+            modelRouting: { kind: "dynamic" },
+          },
     instructions: manifest.instructions ? toInstructionsEntry(manifest.instructions) : null,
     schedules: manifest.schedules.map(toScheduleEntry),
     tools: manifest.tools.map(toToolEntry),

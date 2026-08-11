@@ -49,21 +49,23 @@ Model use is subject to the terms, data-processing commitments, retention behavi
 
 ### Choose the model dynamically
 
-`model` also accepts `defineDynamic({ fallback, events })`. `fallback` is the
-compiled static model: it anchors build-time metadata (routing, credentials,
-context window) and serves whenever no dynamic selection is set.
+`model` also accepts `defineDynamic({ events })`. Each matching handler must
+return the concrete model for its scope; a dynamic model has no compiled
+default.
 
 ```ts title="agent/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
 
 export default defineAgent({
   model: defineDynamic({
-    fallback: "anthropic/claude-sonnet-5",
     events: {
-      "session.started": (_event, ctx) =>
-        ctx.session.auth.initiator?.attributes.plan === "enterprise"
-          ? "anthropic/claude-opus-4.8"
-          : null,
+      "session.started": (_event, ctx) => {
+        if (ctx.session.auth.initiator?.attributes.plan === "enterprise") {
+          return "anthropic/claude-opus-4.8";
+        }
+
+        return "anthropic/claude-sonnet-5";
+      },
     },
   }),
 });
@@ -72,24 +74,28 @@ export default defineAgent({
 Handlers receive the shared [dynamic resolver
 context](./guides/dynamic-capabilities) (`ctx.session`, `ctx.channel`,
 `ctx.messages`) and return a gateway model id, an AI SDK `LanguageModel`, a
-selection object, or `null` to leave the scope unset.
+selection object. Returning `null` or `undefined` fails the turn.
 
 - **Scopes.** `session.started` (once per session), `turn.started` (once per
   turn), `step.started` (every model step). Precedence: step > turn >
-  session > `fallback`. Prefer `session.started`: prompt caches are per
-  model, so every switch re-ingests the conversation at uncached prices.
-- **Failures degrade, never fail the turn.** A resolver that throws or
-  returns an invalid selection logs an error and leaves its scope unset.
-  Build-time validation covers only `fallback`; a selected model without
-  credentials fails at request time.
+  session. Prefer `session.started`: prompt caches are per model, so every
+  switch re-ingests the conversation at uncached prices. If no active
+  selection exists before model-dependent work begins, the turn fails.
+- **Failures stop the turn.** A resolver that throws, returns no model, or
+  returns an invalid selection fails before the provider call. A selected
+  model without valid credentials fails at request time.
 - **Serialization.** Session/turn selections must be model id strings; return
   live `LanguageModel` objects only from `step.started`.
 - **Selection object.** `{ model, modelContextWindowTokens?, modelOptions? }`.
-  Set `modelContextWindowTokens` when the selected model's window differs
-  from the fallback's — it is never inherited. Omitted `modelOptions` reuses
-  the agent-level `modelOptions`.
+  When `modelContextWindowTokens` is omitted, eve resolves it from the AI
+  Gateway catalog and caches successful metadata in durable session state for
+  24 hours. Set it explicitly for an unlisted or custom model. Dynamic agents
+  cannot set sibling `modelContextWindowTokens` or `modelOptions` fields;
+  return per-model values from the handler.
 
-Runtime identity reports a dynamic agent's model as `dynamic:<fallback id>`.
+The `session.started` runtime identity does not include a model id for a
+dynamic agent. Each public `step.started` event reports the concrete `modelId`
+selected for that model call.
 
 ## Reasoning effort
 

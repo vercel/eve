@@ -1,19 +1,19 @@
 import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
-import { defineAgent, defineDynamic, type DynamicResolveContext } from "eve";
+import { defineAgent, defineDynamic, type AgentDefinition, type DynamicResolveContext } from "eve";
 
 const model = e2eModel();
+const selectedModel =
+  process.env.EVE_E2E_MODEL === "mock" ? "eve-mock/dynamic-model" : (model as string);
+const { experimental } = e2eAgentConfig();
 
 /**
- * Dynamic-model e2e fixture. Resolves at `turn.started` (not the usual
- * `session.started`) so one session can exercise selection, null fallback,
- * and resolver-failure degradation.
+ * Dynamic-model e2e fixture. Resolves at `turn.started` so one session can
+ * exercise repeated selection, missing-selection failure, and resolver
+ * failure.
  */
-export default defineAgent({
-  // Harness config wires the workflow world; the dynamic definition below
-  // overrides the harness model.
-  ...e2eAgentConfig(),
+const agent: AgentDefinition = defineAgent({
+  experimental,
   model: defineDynamic({
-    fallback: model,
     events: {
       "turn.started": (_event, ctx) => {
         const text = lastUserText(ctx.messages);
@@ -24,16 +24,26 @@ export default defineAgent({
 
         if (text.includes("[model: mini]")) {
           return {
-            model,
+            model: selectedModel,
             modelContextWindowTokens: 128_000,
           };
         }
 
-        return null;
+        if (text.includes("[model: catalog]")) {
+          return selectedModel;
+        }
+
+        if (text.includes("[model: missing]")) {
+          return null as never;
+        }
+
+        return { model: selectedModel, modelContextWindowTokens: 1_000_000 };
       },
     },
   }),
 });
+
+export default agent;
 
 function lastUserText(messages: DynamicResolveContext["messages"]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {

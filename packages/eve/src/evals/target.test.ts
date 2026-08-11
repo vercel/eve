@@ -123,7 +123,7 @@ function infoPayload(input: { readonly name: string }) {
     agent: {
       agentRoot: "/tmp/app/agent",
       appRoot: "/tmp/app",
-      model: { id: "mock" },
+      model: { id: "mock", routing: { kind: "gateway", target: "mock" } },
       name: input.name,
     },
     capabilities: { devRoutes: true },

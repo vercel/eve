@@ -102,7 +102,7 @@ export async function settleCancelledTurnStep(input: {
         };
         const emit =
           createInstrumentationHandleEvent({
-            agentName: bundle.resolvedAgent.config.name,
+            agentName: bundle.turnAgent.id,
             handleEvent: baseEmit,
             hooks: instrumentation?.hooks,
             sessionId: session.sessionId,

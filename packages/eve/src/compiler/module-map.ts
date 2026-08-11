@@ -3,6 +3,7 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type {
   CompiledAgentManifest,
   CompiledAgentNodeManifest,
+  CompiledAgentResources,
   CompiledExtensionMount,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
@@ -84,6 +85,7 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
           agentRoot: subagent.agent.agentRoot,
           importSpecifierStyle,
           manifest: subagent.agent,
+          additionalModuleRef: subagent.configResolver === undefined ? undefined : subagent,
           moduleMapDirectory,
           nextBindingName() {
             return `module_${nextBindingIndex++}`;
@@ -112,15 +114,19 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
 }
 
 function collectModuleNodeScope(input: {
+  readonly additionalModuleRef?: ModuleSourceRef;
   readonly agentRoot: string;
   readonly importSpecifierStyle: "absolute" | "relative";
-  readonly manifest: CompiledAgentNodeManifest;
+  readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   readonly moduleMapDirectory: string;
   readonly nextBindingName: () => string;
   readonly nodeId: string;
 }): CollectedModuleNodeScope {
   return {
-    modules: collectModuleRefsForManifest(input.manifest)
+    modules: [
+      ...collectModuleRefsForManifest(input.manifest),
+      ...(input.additionalModuleRef === undefined ? [] : [input.additionalModuleRef]),
+    ]
       .sort((left, right) => left.sourceId.localeCompare(right.sourceId))
       .map((moduleSourceRef) => ({
         bindingName: input.nextBindingName(),
@@ -142,15 +148,15 @@ function collectModuleNodeScope(input: {
  * from the manifest when the pre-built artifact is unavailable).
  */
 export function collectModuleRefsForManifest(
-  manifest: CompiledAgentNodeManifest,
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
 ): ModuleSourceRef[] {
   const moduleSourceRefs = new Map<string, ModuleSourceRef>();
 
-  if (manifest.config.source !== undefined) {
+  if ("config" in manifest && manifest.config.source !== undefined) {
     moduleSourceRefs.set(manifest.config.source.sourceId, manifest.config.source);
   }
 
-  if (manifest.config.model.source !== undefined) {
+  if ("config" in manifest && manifest.config.model?.source !== undefined) {
     moduleSourceRefs.set(manifest.config.model.source.sourceId, manifest.config.model.source);
   }
 

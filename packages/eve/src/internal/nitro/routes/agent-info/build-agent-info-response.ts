@@ -162,22 +162,35 @@ export interface AgentInfoDiagnostics {
   readonly discoveryWarnings: number;
 }
 
+interface AgentInfoModelBase {
+  readonly contextWindowTokens?: number;
+  readonly providerOptions?: unknown;
+  /** The agent's authored reasoning effort, forwarded to the model call. */
+  readonly reasoning?: AgentReasoningDefinition;
+  readonly source?: AgentInfoSource;
+}
+
+export type AgentInfoModel = AgentInfoModelBase &
+  (
+    | {
+        readonly id: string;
+        readonly routing: ModelRouting;
+        readonly endpoint?: ModelEndpointStatus;
+      }
+    | {
+        readonly id?: never;
+        readonly routing: { readonly kind: "dynamic" };
+        readonly endpoint?: never;
+      }
+  );
+
 export interface AgentInfoResponse {
   readonly agent: {
     readonly agentRoot: string;
     readonly appRoot: string;
     readonly configSource?: AgentInfoSource;
     readonly description?: string;
-    readonly model: {
-      readonly contextWindowTokens?: number;
-      readonly id: string;
-      readonly providerOptions?: unknown;
-      /** The agent's authored reasoning effort, forwarded to the model call. */
-      readonly reasoning?: AgentReasoningDefinition;
-      readonly source?: AgentInfoSource;
-      readonly routing?: ModelRouting;
-      readonly endpoint?: ModelEndpointStatus;
-    };
+    readonly model: AgentInfoModel;
     readonly name: string;
     readonly outputSchema?: unknown;
   };
@@ -220,23 +233,34 @@ export function buildAgentInfoResponse(
   },
 ): AgentInfoResponse {
   const agent = data.agent;
+  const config = agent.config;
+  if (config === undefined) {
+    throw new Error("Cannot inspect unresolved dynamic subagent resources as a root agent.");
+  }
   const tools = buildToolInfo(agent, getRootDelegationToolNames(data.manifest));
 
   return {
     agent: {
       agentRoot: agent.metadata.agentRoot,
       appRoot: agent.metadata.appRoot,
-      configSource: agent.config.source ? toSource(agent.config.source) : undefined,
-      description: agent.config.description,
-      model: {
-        contextWindowTokens: agent.config.model.contextWindowTokens,
-        id: agent.config.model.id,
-        providerOptions: agent.config.model.providerOptions,
-        reasoning: agent.config.reasoning,
-        source: agent.config.model.source ? toSource(agent.config.model.source) : undefined,
-      },
-      name: agent.config.name,
-      outputSchema: agent.config.outputSchema,
+      configSource: config.source ? toSource(config.source) : undefined,
+      description: config.description,
+      model:
+        config.dynamicModel === undefined
+          ? {
+              contextWindowTokens: config.model.contextWindowTokens,
+              id: config.model.id,
+              providerOptions: config.model.providerOptions,
+              reasoning: config.reasoning,
+              source: config.model.source ? toSource(config.model.source) : undefined,
+              routing: { kind: "gateway", target: config.model.id.split("/")[0]! },
+            }
+          : {
+              reasoning: config.reasoning,
+              routing: { kind: "dynamic" },
+            },
+      name: config.name,
+      outputSchema: config.outputSchema,
     },
     capabilities: {
       devRoutes: input.mode === "development",

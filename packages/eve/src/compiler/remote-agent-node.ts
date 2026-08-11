@@ -6,6 +6,9 @@ import type { Node } from "#shared/node.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 
 export interface CompiledDynamicSubagentDefinition {
+  readonly build?: {
+    readonly externalDependencies?: readonly string[];
+  };
   readonly eventNames: readonly string[];
 }
 

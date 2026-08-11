@@ -45,6 +45,7 @@ const INFO: AgentInfoResult = {
     appRoot: "/tmp/weather-agent",
     model: {
       id: "anthropic/claude-opus-4.7",
+      routing: { kind: "gateway", target: "anthropic" },
     },
     name: "Weather Agent",
   },

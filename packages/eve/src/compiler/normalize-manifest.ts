@@ -3,6 +3,7 @@ import { mountRefNamespace, packageStateNamespace } from "#discover/extensions.j
 import {
   type CompiledAgentManifest,
   type CompiledAgentNodeManifest,
+  type CompiledAgentResources,
   type CompiledDynamicInstructionsDefinition,
   type CompiledExtensionMount,
   type CompiledDynamicSkillDefinition,
@@ -13,6 +14,7 @@ import {
   type CompiledWorkflowToolDefinition,
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
+  createCompiledAgentResources,
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
@@ -43,6 +45,7 @@ export async function compileAgentManifest(
   const subagentGraph = await compileSubagentGraph({
     appRoot: manifest.appRoot,
     compileAgentNodeManifest,
+    compileAgentResources,
     context,
     externalDependencies: compiledNode.config.build?.externalDependencies ?? [],
     parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
@@ -91,6 +94,16 @@ async function compileAgentNodeManifest(
             externalDependencies,
           },
         };
+  const resources = await compileAgentResources(manifest, context, { externalDependencies });
+  return createCompiledAgentNodeManifest({ ...resources, config });
+}
+
+async function compileAgentResources(
+  manifest: AgentSourceManifest,
+  context: ManifestCompileContext,
+  options: { readonly externalDependencies?: readonly string[] } = {},
+): Promise<CompiledAgentResources> {
+  const externalDependencies = [...(options.externalDependencies ?? [])];
   const compiledToolEntries = await Promise.all(
     manifest.tools.map((toolSource) =>
       compileToolEntry(manifest.agentRoot, toolSource, { externalDependencies }),
@@ -234,12 +247,11 @@ async function compileAgentNodeManifest(
             sourceKind: "module",
           };
 
-  return createCompiledAgentNodeManifest({
+  return createCompiledAgentResources({
     agentRoot: manifest.agentRoot,
     appRoot: manifest.appRoot,
     channels: compiledChannels,
     extensionMounts: compileExtensionMounts(manifest),
-    config,
     connections,
     diagnosticsSummary: manifest.diagnosticsSummary,
     disabledFrameworkTools,

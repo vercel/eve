@@ -32,7 +32,14 @@ describe("createInstrumentationHandleEvent", () => {
 
     await handleEvent(createSessionStartedEvent());
     await handleEvent(createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }));
-    await handleEvent(createStepStartedEvent({ sequence: 0, stepIndex: 0, turnId: "turn-1" }));
+    await handleEvent(
+      createStepStartedEvent({
+        modelId: "openai/gpt-5.5",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+    );
     await handleEvent(
       createStepCompletedEvent({
         finishReason: "stop",

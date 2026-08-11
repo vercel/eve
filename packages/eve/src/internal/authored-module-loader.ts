@@ -259,11 +259,14 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   readonly moduleMapPath: string;
 }): Promise<string> {
   const packageRoot = resolveAuthoredPackageRoot(input.manifest.agentRoot);
-  const externalDependencies = normalizeExternalDependencies(
-    [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
-      (node) => node.config.build?.externalDependencies ?? [],
+  const externalDependencies = normalizeExternalDependencies([
+    ...(input.manifest.config.build?.externalDependencies ?? []),
+    ...input.manifest.subagents.flatMap((subagent) =>
+      subagent.configResolver === undefined
+        ? (subagent.agent.config.build?.externalDependencies ?? [])
+        : (subagent.configResolver.build?.externalDependencies ?? []),
     ),
-  );
+  ]);
   const moduleMapSource = createCompiledModuleMapSource({
     manifest: input.manifest,
     moduleMapPath: input.moduleMapPath,

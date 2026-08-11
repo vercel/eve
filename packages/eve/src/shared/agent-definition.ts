@@ -46,6 +46,7 @@ export type ModelRouting =
 export type InternalAgentModelDefinition = {
   id: string;
   contextWindowTokens?: number;
+  maxOutputTokens?: number;
   source?: ModuleSourceRef;
   providerOptions?: Record<string, JsonObject>;
 };
@@ -61,37 +62,31 @@ export type AgentModelResolveContext = DynamicResolveContext;
 
 export interface PublicAgentModelSelectionDefinition {
   readonly model: PublicAgentStaticModelDefinition;
-  /** Context window of the selected model, in tokens; never inherited from the fallback. */
+  /** Context window of the selected model, in tokens. */
   readonly modelContextWindowTokens?: number;
-  /** Provider options for the selected model; defaults to the agent-level `modelOptions`. */
+  /** Provider options for the selected model. */
   readonly modelOptions?: AgentModelOptionsDefinition;
 }
 
 export type PublicAgentDynamicModelResult =
   | PublicAgentStaticModelDefinition
-  | PublicAgentModelSelectionDefinition
-  | null;
+  | PublicAgentModelSelectionDefinition;
 
 export type AgentModelResolver = (
   event: unknown,
   ctx: AgentModelResolveContext,
 ) => PublicAgentDynamicModelResult | Promise<PublicAgentDynamicModelResult>;
 
-export type PublicAgentDynamicModelDefinition = DynamicSentinel<
-  PublicAgentDynamicModelResult,
-  PublicAgentStaticModelDefinition
->;
+export type PublicAgentDynamicModelDefinition = DynamicSentinel<PublicAgentDynamicModelResult>;
 
 export interface PublicAgentDynamicModelDefinitionInput {
-  /** Compiled static model: build-time metadata and the active model when no scope is set. */
-  readonly fallback: PublicAgentStaticModelDefinition;
   readonly events: DynamicSentinel<PublicAgentDynamicModelResult>["events"];
 }
 
 export function isDynamicModelDefinition(
   value: unknown,
 ): value is PublicAgentDynamicModelDefinition {
-  return isDynamicSentinel(value) && "fallback" in value;
+  return isDynamicSentinel(value);
 }
 
 /**
@@ -273,7 +268,7 @@ export type InternalAgentDefinition = {
  * package name or app-root basename). Authored definitions do not carry
  * a `name` field.
  */
-export type PublicAgentDefinition = {
+type PublicAgentDefinitionBase = {
   /**
    * Human-readable description of the agent's purpose. Required for
    * subagents (authored under `subagents/<id>/agent.ts`): surfaced to
@@ -287,22 +282,6 @@ export type PublicAgentDefinition = {
    * {@link AgentExperimentalDefinition}.
    */
   readonly experimental?: AgentExperimentalDefinition;
-  /**
-   * Language model used for agent turns. Accepts an AI Gateway model ID, any AI
-   * SDK-compatible language model, or `defineDynamic({ fallback, events })` for
-   * scoped dynamic model selection.
-   */
-  readonly model: PublicAgentModelDefinition;
-  /**
-   * Optional override for the primary model's context window size, in tokens.
-   *
-   * Escape hatch for cases where eve cannot resolve the model's metadata via
-   * the AI Gateway model catalog (e.g. a custom or unlisted model id). When
-   * set, eve uses this value verbatim and skips the AI Gateway lookup. Prefer
-   * leaving this unset so eve can stay in sync with provider metadata.
-   */
-  readonly modelContextWindowTokens?: number;
-  readonly modelOptions?: AgentModelOptionsDefinition;
   /**
    * Provider-agnostic reasoning effort for the agent's turn model calls.
    * Support for individual levels depends on the selected model and provider.
@@ -320,3 +299,24 @@ export type PublicAgentDefinition = {
    */
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
 };
+
+/**
+ * Shared public definition for an agent. Static models may carry definition-level
+ * metadata; dynamic models must return metadata with each concrete selection.
+ */
+export type PublicAgentDefinition = PublicAgentDefinitionBase &
+  (
+    | {
+        /** Language model used for agent turns. */
+        readonly model: PublicAgentStaticModelDefinition;
+        /** Optional context-window override for the static model. */
+        readonly modelContextWindowTokens?: number;
+        readonly modelOptions?: AgentModelOptionsDefinition;
+      }
+    | {
+        /** Resolver that must select a concrete model before model-dependent work. */
+        readonly model: PublicAgentDynamicModelDefinition;
+        readonly modelContextWindowTokens?: never;
+        readonly modelOptions?: never;
+      }
+  );

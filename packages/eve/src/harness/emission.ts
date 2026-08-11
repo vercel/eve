@@ -109,10 +109,12 @@ export async function emitTurnPreamble(
 export async function emitStepStarted(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
+  modelId: string,
   messages?: readonly import("ai").ModelMessage[],
 ): Promise<void> {
   await emitFn(
     createStepStartedEvent({
+      modelId,
       sequence: state.sequence,
       stepIndex: state.stepIndex,
       turnId: state.turnId,

@@ -117,8 +117,6 @@ export interface RuntimeIdentity {
     readonly gitBranch?: string;
     readonly gitSha?: string;
   };
-  /** Configured model id; dynamic-model agents report `dynamic:<fallback id>`. */
-  readonly modelId: string;
 }
 
 /**
@@ -399,6 +397,7 @@ export interface ResultCompletedStreamEvent {
  */
 export interface StepStartedStreamEvent {
   data: {
+    readonly modelId: string;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -1249,12 +1248,14 @@ export function createResultCompletedEvent(input: {
  * Creates the `step.started` event for one model call.
  */
 export function createStepStartedEvent(input: {
+  readonly modelId: string;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
 }): StepStartedStreamEvent {
   return {
     data: {
+      modelId: input.modelId,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,

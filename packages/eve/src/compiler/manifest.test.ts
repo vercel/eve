@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   compiledAgentManifestSchema,
+  createCompiledAgentResources,
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
 } from "#compiler/manifest.js";
@@ -41,12 +42,20 @@ describe("compiledAgentManifestSchema", () => {
       }).success;
 
     expect(parses({ description: "Research requests." })).toBe(true);
-    expect(parses({ dynamic: { eventNames: ["session.started"] } })).toBe(true);
+    expect(
+      parses({
+        agent: createCompiledAgentResources({
+          agentRoot: "/app/agent/subagents/research",
+          appRoot: "/app",
+        }),
+        configResolver: { eventNames: ["session.started"] },
+      }),
+    ).toBe(true);
     expect(parses({})).toBe(false);
     expect(
       parses({
         description: "Research requests.",
-        dynamic: { eventNames: ["session.started"] },
+        configResolver: { eventNames: ["session.started"] },
       }),
     ).toBe(false);
   });
@@ -170,7 +179,6 @@ describe("compiledAgentManifestSchema", () => {
           sourceId: "agent-config",
           sourceKind: "module",
         },
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
         name: "app",
       },
     });
@@ -183,6 +191,32 @@ describe("compiledAgentManifestSchema", () => {
       sourceId: "agent-config",
       sourceKind: "module",
     });
+    expect(parsed.config.model).toBeUndefined();
+  });
+
+  it("rejects compiled configs with both static and dynamic models", () => {
+    expect(() =>
+      compiledAgentManifestSchema.parse({
+        ...createCompiledAgentManifest({
+          agentRoot: "/app/agent",
+          appRoot: "/app",
+          config: {
+            model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+            name: "app",
+          },
+        }),
+        config: {
+          dynamicModel: {
+            eventNames: ["session.started"],
+            logicalPath: "agent.ts",
+            sourceId: "agent-config",
+            sourceKind: "module",
+          },
+          model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+          name: "app",
+        },
+      }),
+    ).toThrow();
   });
 
   it("preserves uncapped (false) session token limits", () => {

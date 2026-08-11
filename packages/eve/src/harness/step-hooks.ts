@@ -33,7 +33,12 @@ import {
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
-import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import {
+  type HarnessEmitFn,
+  type HarnessSession,
+  requireSessionModelReference,
+  type ToolLoopHarnessConfig,
+} from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
@@ -158,7 +163,12 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     let processed = messages;
 
     if (emit && input.emitStepStarted !== false) {
-      await emitStepStarted(emit, input.emissionState, messages);
+      await emitStepStarted(
+        emit,
+        input.emissionState,
+        requireSessionModelReference(session).id,
+        messages,
+      );
     }
 
     if (input.cachePath.kind === "anthropic-direct" && input.marker) {
@@ -171,7 +181,7 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
 
     if (input.cachePath.kind === "gateway-auto") {
       stepResult.providerOptions = mergeGatewayAutoCaching(
-        session.agent.modelReference.providerOptions,
+        requireSessionModelReference(session).providerOptions,
       ) as NonNullable<typeof stepResult.providerOptions>;
     }
 

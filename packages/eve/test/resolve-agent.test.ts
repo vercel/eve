@@ -167,7 +167,7 @@ describe("resolveAgent", () => {
     });
     const [resolvedChannel] = resolved.channels;
 
-    expect(resolved.config.name).toBe("weather-agent");
+    expect(resolved.config?.name).toBe("weather-agent");
     expect(resolved.config).toEqual({
       compaction: {},
       model: {
@@ -376,7 +376,7 @@ describe("resolveAgent", () => {
       },
     });
 
-    expect(resolved.config.name).toBe("weather-agent");
+    expect(resolved.config?.name).toBe("weather-agent");
     expect(resolved.config).toEqual({
       compaction: {},
       model: {
@@ -454,7 +454,7 @@ describe("resolveAgent", () => {
       },
     });
 
-    expect(resolved.config.model).toEqual({
+    expect(resolved.config?.model).toEqual({
       id: "test-provider/weather-pro",
       source: {
         sourceKind: "module",
@@ -493,7 +493,7 @@ describe("resolveAgent", () => {
       },
     });
 
-    expect(resolved.config.model).toEqual({
+    expect(resolved.config?.model).toEqual({
       id: "anthropic/claude-opus-4.5-thinking",
       providerOptions: {
         anthropic: {

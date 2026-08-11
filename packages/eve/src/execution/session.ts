@@ -1,6 +1,11 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
-import type { HarnessSession, SessionLimits, SessionToolDefinition } from "#harness/types.js";
+import type {
+  HarnessSession,
+  SessionAgent,
+  SessionLimits,
+  SessionToolDefinition,
+} from "#harness/types.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
 const DEFAULT_COMPACTION_RECENT_WINDOW_SIZE = 10;
@@ -38,6 +43,7 @@ export function createCompactionConfig(
   const config = {
     recentWindowSize: DEFAULT_COMPACTION_RECENT_WINDOW_SIZE,
     threshold,
+    thresholdPercent,
   };
 
   if (input.lastKnownInputTokens !== undefined) {
@@ -78,17 +84,9 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   const session: {
     -readonly [K in keyof HarnessSession]: HarnessSession[K];
   } = {
-    agent: {
-      compactionModelReference: turnAgent.compactionModel,
-      dynamicModelDefaultReference:
-        turnAgent.dynamicModel === undefined ? undefined : turnAgent.model,
-      modelReference: turnAgent.model,
-      reasoning: turnAgent.reasoning,
-      system: createSessionSystemPrompt({ turnAgent }),
-      tools,
-    },
+    agent: createSessionAgent(turnAgent, createSessionSystemPrompt({ turnAgent }), tools),
     compaction: createCompactionConfig({
-      contextWindowTokens: turnAgent.model.contextWindowTokens,
+      contextWindowTokens: turnAgent.model?.contextWindowTokens,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: input.continuationToken,
@@ -113,6 +111,27 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   return session;
 }
 
+function createSessionAgent(
+  turnAgent: RuntimeTurnAgent,
+  system: string,
+  tools: readonly SessionToolDefinition[],
+): SessionAgent {
+  const base = {
+    compactionModelReference: turnAgent.compactionModel,
+    reasoning: turnAgent.reasoning,
+    system,
+    tools,
+  };
+
+  if (turnAgent.model !== undefined) {
+    return { ...base, modelReference: turnAgent.model };
+  }
+  if (turnAgent.dynamicModel !== undefined) {
+    return { ...base, dynamicModel: true };
+  }
+  throw new Error("Cannot create a session before dynamic subagent config is selected.");
+}
+
 /**
  * Refreshes a session with the latest `turnAgent` — replaces the system
  * prompt, model/tool metadata, and compaction thresholds while preserving
@@ -127,17 +146,13 @@ export function refreshSessionFromTurnAgent(input: {
 }): HarnessSession {
   return {
     ...input.session,
-    agent: {
-      compactionModelReference: input.turnAgent.compactionModel,
-      dynamicModelDefaultReference:
-        input.turnAgent.dynamicModel === undefined ? undefined : input.turnAgent.model,
-      modelReference: input.turnAgent.model,
-      reasoning: input.turnAgent.reasoning,
-      system: createSessionSystemPrompt({ turnAgent: input.turnAgent }),
-      tools: createSessionToolDefinitions(input.turnAgent),
-    },
+    agent: createSessionAgent(
+      input.turnAgent,
+      createSessionSystemPrompt({ turnAgent: input.turnAgent }),
+      createSessionToolDefinitions(input.turnAgent),
+    ),
     compaction: createCompactionConfig({
-      contextWindowTokens: input.turnAgent.model.contextWindowTokens,
+      contextWindowTokens: input.turnAgent.model?.contextWindowTokens,
       lastKnownInputTokens: input.session.compaction.lastKnownInputTokens,
       lastKnownPromptMessageCount: input.session.compaction.lastKnownPromptMessageCount,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
@@ -245,17 +260,9 @@ export function hydrateDurableSession(input: {
   const session: {
     -readonly [K in keyof HarnessSession]: HarnessSession[K];
   } = {
-    agent: {
-      compactionModelReference: turnAgent.compactionModel,
-      dynamicModelDefaultReference:
-        turnAgent.dynamicModel === undefined ? undefined : turnAgent.model,
-      modelReference: turnAgent.model,
-      reasoning: turnAgent.reasoning,
-      system: durable.agent.system,
-      tools,
-    },
+    agent: createSessionAgent(turnAgent, durable.agent.system, tools),
     compaction: createCompactionConfig({
-      contextWindowTokens: turnAgent.model.contextWindowTokens,
+      contextWindowTokens: turnAgent.model?.contextWindowTokens,
       lastKnownInputTokens: durable.compaction?.lastKnownInputTokens,
       lastKnownPromptMessageCount: durable.compaction?.lastKnownPromptMessageCount,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,

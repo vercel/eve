@@ -177,7 +177,9 @@ function createEmptyToolRegistry(): RuntimeToolRegistry {
   };
 }
 
-function createTestTurnAgent(overrides?: Partial<RuntimeTurnAgent>): RuntimeTurnAgent {
+type StaticRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly model: unknown }>;
+
+function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): RuntimeTurnAgent {
   return {
     id: "test-agent",
     instructions: ["You are a test agent."],

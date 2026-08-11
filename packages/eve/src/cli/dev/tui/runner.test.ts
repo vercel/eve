@@ -90,6 +90,7 @@ const AGENT_INFO: AgentInfoResult = {
     appRoot: "/tmp/weather-agent",
     model: {
       id: "gpt-5",
+      routing: { kind: "gateway", target: "openai" },
     },
     name: "Weather Agent",
   },
@@ -379,6 +380,7 @@ describe("EveTUIRunner agent header", () => {
         ...AGENT_INFO.agent,
         model: {
           id: "anthropic/claude-sonnet-5",
+          routing: { kind: "gateway", target: "anthropic" },
         },
       },
     };
@@ -430,6 +432,7 @@ describe("EveTUIRunner agent header", () => {
         ...AGENT_INFO.agent,
         model: {
           id: "anthropic/claude-sonnet-5",
+          routing: { kind: "gateway", target: "anthropic" },
         },
       },
     };
@@ -2638,9 +2641,9 @@ describe("EveTUIRunner boot setup detection", () => {
     agent: {
       ...AGENT_INFO.agent,
       model: {
-        ...AGENT_INFO.agent.model,
-        routing: { kind: "gateway", target: "openai" },
-        endpoint: { kind: "gateway", connected: false },
+        id: "gpt-5",
+        routing: { kind: "gateway" as const, target: "openai" },
+        endpoint: { kind: "gateway" as const, connected: false as const },
       },
     },
   };

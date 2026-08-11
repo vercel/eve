@@ -11,7 +11,9 @@ import {
   refreshSessionFromTurnAgent,
 } from "#execution/session.js";
 
-function createTestTurnAgent(overrides?: Partial<RuntimeTurnAgent>): RuntimeTurnAgent {
+type StaticRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly model: unknown }>;
+
+function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): RuntimeTurnAgent {
   return {
     id: "test-agent",
     instructions: ["You are a helpful assistant.", "Be concise."],
@@ -46,6 +48,7 @@ describe("createCompactionConfig", () => {
     ).toEqual({
       recentWindowSize: 10,
       threshold: 180_000,
+      thresholdPercent: 0.9,
     });
   });
 
@@ -58,6 +61,7 @@ describe("createCompactionConfig", () => {
     ).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.5,
     });
   });
 
@@ -65,6 +69,7 @@ describe("createCompactionConfig", () => {
     expect(createCompactionConfig()).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.9,
     });
   });
 });
@@ -158,6 +163,7 @@ describe("createSession", () => {
     expect(session.compaction).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.9,
     });
   });
 
@@ -174,6 +180,7 @@ describe("createSession", () => {
     expect(session.compaction).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.5,
     });
   });
 
@@ -466,6 +473,7 @@ describe("refreshSessionFromTurnAgent", () => {
       lastKnownPromptMessageCount: 7,
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.5,
     });
   });
 

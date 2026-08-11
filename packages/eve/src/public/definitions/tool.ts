@@ -18,7 +18,6 @@ import {
   DYNAMIC_SENTINEL_KIND,
   TOOL_BRAND,
   type DynamicEvents,
-  type DynamicEventsWithFallback,
   type DynamicSentinel,
 } from "#shared/dynamic-tool-definition.js";
 
@@ -304,22 +303,13 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function defineDynamic<const TEvents extends DynamicEvents>(definition: {
   readonly events: TEvents;
 }): DynamicSentinel<DynamicEventMapResult<TEvents>>;
-export function defineDynamic<
-  const TEvents extends DynamicEventsWithFallback,
-  TFallback = unknown,
->(definition: {
-  readonly fallback: TFallback;
-  readonly events: TEvents;
-}): DynamicSentinel<Exclude<DynamicEventMapResult<TEvents>, undefined>, TFallback>;
-export function defineDynamic<TResult = unknown, TFallback = unknown>(definition: {
-  readonly fallback?: TFallback;
+export function defineDynamic<TResult = unknown>(definition: {
   readonly events: DynamicEvents<TResult>;
-}): DynamicSentinel<TResult, TFallback> {
+}): DynamicSentinel<TResult> {
   const sentinel = {
     kind: DYNAMIC_SENTINEL_KIND,
     events: definition.events,
-    ...(Object.hasOwn(definition, "fallback") ? { fallback: definition.fallback } : {}),
-  } as DynamicSentinel<TResult, TFallback>;
+  } as DynamicSentinel<TResult>;
   stampDefinitionKey(sentinel, `dynamic:${Object.keys(definition.events).join(",")}`);
   return sentinel;
 }

@@ -13,7 +13,6 @@ import { collectModuleRefsForManifest } from "#compiler/module-map.js";
 import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
 import { experimental_workflow } from "#public/definitions/tool.js";
 import { webSearch } from "#public/tools/web-search.js";
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 const mocks = vi.hoisted(() => ({
   compileAgentConfig: vi.fn(),
@@ -213,13 +212,12 @@ describe("compileAgentManifest", () => {
 
     const compiled = await compileAgentManifest(manifest);
 
-    expect(compiled.subagents[0]?.dynamic).toEqual({
+    expect(compiled.subagents[0]?.configResolver).toMatchObject({
       eventNames: ["session.started", "turn.started"],
     });
+    expect("config" in compiled.subagents[0]!.agent).toBe(false);
     expect(compiled.subagents[0]?.description).toBeUndefined();
-    expect(mocks.compileAgentConfig.mock.calls[1]?.[2]).toMatchObject({
-      definition: { model: DEFAULT_AGENT_MODEL_ID },
-    });
+    expect(mocks.compileAgentConfig).toHaveBeenCalledTimes(1);
   });
 
   it("applies dynamic subagent build configuration before resolving events", async () => {
@@ -241,15 +239,12 @@ describe("compileAgentManifest", () => {
 
     const compiled = await compileAgentManifest(manifest);
 
-    expect(compiled.subagents[0]?.dynamic).toEqual({
+    expect(compiled.subagents[0]?.configResolver).toMatchObject({
+      build: { externalDependencies: ["just-bash"] },
       eventNames: ["session.started"],
     });
-    expect(mocks.compileAgentConfig.mock.calls[1]?.[2]).toMatchObject({
-      definition: {
-        build: { externalDependencies: ["just-bash"] },
-        model: DEFAULT_AGENT_MODEL_ID,
-      },
-    });
+    expect("config" in compiled.subagents[0]!.agent).toBe(false);
+    expect(mocks.compileAgentConfig).toHaveBeenCalledTimes(1);
   });
 
   it("rejects invalid dynamic subagent build configuration", async () => {
@@ -267,20 +262,20 @@ describe("compileAgentManifest", () => {
 
   it("rejects fallback on a dynamic subagent", async () => {
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
-    mocks.loadModuleBackedDefinition.mockResolvedValue(
-      defineDynamic({
-        fallback: defineAgent({
-          description: "Research the request.",
-          model: "openai/gpt-5.5",
-        }),
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      ...defineDynamic({
         events: {
           "session.started": () => null,
         },
       }),
-    );
+      fallback: defineAgent({
+        description: "Research the request.",
+        model: "openai/gpt-5.5",
+      }),
+    });
 
     await expect(compileAgentManifest(createManifestWithSubagent())).rejects.toThrow(
-      'Dynamic subagent definitions do not support "fallback"',
+      'Unknown key "fallback"',
     );
   });
 

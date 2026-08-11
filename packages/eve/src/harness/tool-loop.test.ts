@@ -912,10 +912,9 @@ describe("createToolLoopHarness", () => {
     const resolveModel = vi.fn().mockResolvedValue("fallback-model" as LanguageModel);
     const dispatchDynamicModelEvent: NonNullable<
       ToolLoopHarnessConfig["dispatchDynamicModelEvent"]
-    > = vi.fn(async ({ ctx, event, fallback, messages }) => {
+    > = vi.fn(async ({ ctx, event, messages }) => {
       expect(event.type).toBe("step.started");
       expect(messages.at(-1)).toEqual({ content: "Hi", role: "user" });
-      expect(fallback).toEqual({ contextWindowTokens: 100_000, id: "fallback-model" });
 
       ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
         model: "selected-model" as LanguageModel,
@@ -934,8 +933,7 @@ describe("createToolLoopHarness", () => {
     const ctx = new ContextContainer();
     const session = createTestSession({
       agent: {
-        dynamicModelDefaultReference: { contextWindowTokens: 100_000, id: "fallback-model" },
-        modelReference: { contextWindowTokens: 100_000, id: "fallback-model" },
+        dynamicModel: true,
         system: "You are a test assistant.",
         tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
       },
@@ -986,8 +984,7 @@ describe("createToolLoopHarness", () => {
     });
     const session = createTestSession({
       agent: {
-        dynamicModelDefaultReference: { contextWindowTokens: 100_000, id: "fallback-model" },
-        modelReference: { contextWindowTokens: 100_000, id: "fallback-model" },
+        dynamicModel: true,
         system: "You are a test assistant.",
         tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
       },
@@ -1007,7 +1004,7 @@ describe("createToolLoopHarness", () => {
     expect(result.session.compaction.threshold).toBe(180_000);
   });
 
-  it("keeps the compaction threshold stable across steps with the same dynamic selection", async () => {
+  it("keeps the compaction threshold stable and fails when no dynamic selection remains", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -1027,8 +1024,7 @@ describe("createToolLoopHarness", () => {
     });
     const session = createTestSession({
       agent: {
-        dynamicModelDefaultReference: { contextWindowTokens: 100_000, id: "fallback-model" },
-        modelReference: { contextWindowTokens: 100_000, id: "fallback-model" },
+        dynamicModel: true,
         system: "You are a test assistant.",
         tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
       },
@@ -1045,12 +1041,9 @@ describe("createToolLoopHarness", () => {
     expect(second.session.compaction.threshold).toBe(180_000);
 
     ctx.set(SessionDynamicModelReferenceKey, null);
-    const third = await contextStorage.run(ctx, () => runStep(second.session, { message: "Back" }));
-    expect(third.session.agent.modelReference).toEqual({
-      contextWindowTokens: 100_000,
-      id: "fallback-model",
-    });
-    expect(third.session.compaction.threshold).toBe(90_000);
+    await expect(
+      contextStorage.run(ctx, () => runStep(second.session, { message: "Back" })),
+    ).rejects.toThrow(/Dynamic model selection is required/);
   });
 
   it("keeps declared subagent tools visible in deeply nested sessions", async () => {
@@ -8003,9 +7996,9 @@ describe("createToolLoopHarness", () => {
       "session.started",
       "turn.started",
       "message.received",
+      "step.started",
       "compaction.requested",
       "compaction.completed",
-      "step.started",
       "message.completed",
       "step.completed",
       "turn.completed",
@@ -9163,7 +9156,6 @@ describe("createToolLoopHarness", () => {
             agentId: "weather-agent",
             agentName: "Weather Agent",
             eveVersion: "0.0.0",
-            modelId: "anthropic/claude-sonnet-4-5",
           },
           tools: new Map(),
         };
@@ -9198,7 +9190,6 @@ describe("createToolLoopHarness", () => {
           runtimeIdentity: {
             agentId: "weather-agent",
             eveVersion: "0.0.0",
-            modelId: "anthropic/claude-sonnet-4-5",
           },
           tools: new Map(),
         };
@@ -9234,7 +9225,6 @@ describe("createToolLoopHarness", () => {
             agentId: "my-agent",
             agentName: "My Agent",
             eveVersion: "0.0.0",
-            modelId: "anthropic/claude-sonnet-4-5",
           },
           tools: new Map(),
         };
@@ -9272,7 +9262,6 @@ describe("createToolLoopHarness", () => {
           agentId: "my-agent",
           agentName: "My Agent",
           eveVersion: "0.0.0",
-          modelId: "anthropic/claude-sonnet-4-5",
         },
         tools: new Map(),
       };
@@ -9360,7 +9349,6 @@ describe("createToolLoopHarness", () => {
             agentId: "weather-agent",
             agentName: "Weather Agent",
             eveVersion: "0.0.0",
-            modelId: "anthropic/claude-sonnet-4-5",
           },
           tools: new Map(),
         };
@@ -9724,7 +9712,7 @@ describe("createToolLoopHarness", () => {
         Object.fromEntries(Object.keys(agentCall?.runtimeContext ?? {}).map((key) => [key, true])),
       );
       expect(order.indexOf("turn.started")).toBeLessThan(order.indexOf('events["step.started"]'));
-      expect(order.indexOf('events["step.started"]')).toBeLessThan(order.indexOf("step.started"));
+      expect(order.indexOf("step.started")).toBeLessThan(order.indexOf('events["step.started"]'));
       expect(getCompatibilityEventTypes(events)).toContain("step.started");
     });
 

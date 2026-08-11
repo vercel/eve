@@ -14,7 +14,14 @@ export async function computeDevelopmentHostFingerprint(
     agentName: manifest.config.name,
     bundler: {
       externalDependencies: [
-        ...new Set(agentNodes.flatMap((node) => node.config.build?.externalDependencies ?? [])),
+        ...new Set([
+          ...(manifest.config.build?.externalDependencies ?? []),
+          ...manifest.subagents.flatMap((subagent) =>
+            subagent.configResolver === undefined
+              ? (subagent.agent.config.build?.externalDependencies ?? [])
+              : (subagent.configResolver.build?.externalDependencies ?? []),
+          ),
+        ]),
       ].sort((left, right) => left.localeCompare(right)),
       extensionScopes: agentNodes
         .flatMap((node) => node.extensionMounts)

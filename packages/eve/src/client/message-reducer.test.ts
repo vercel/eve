@@ -634,6 +634,7 @@ describe("defaultMessageReducer", () => {
     });
     data = reduceServerEvents(reducer, data, [
       createStepStartedEvent({
+        modelId: "openai/gpt-5.5",
         sequence: 1,
         stepIndex: 0,
         turnId: "turn_1",

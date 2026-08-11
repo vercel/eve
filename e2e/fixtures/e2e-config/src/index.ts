@@ -1,4 +1,4 @@
-import type { AgentDefinition } from "eve";
+import type { AgentDefinition, AgentStaticModelDefinition } from "eve";
 import { mockModel, type MockModelResponder } from "eve/evals";
 
 /**
@@ -17,18 +17,23 @@ const DEFAULT_MODEL = "openai/gpt-5.6-sol";
 const MOCK_MODEL_CONTEXT_WINDOW_TOKENS = 1_000_000;
 
 /** Harness-owned agent configuration shared by e2e fixture root agents. */
-export type E2EAgentConfig = Pick<
+type StaticAgentDefinition = Extract<
   AgentDefinition,
+  { readonly model: AgentStaticModelDefinition }
+>;
+
+export type E2EAgentConfig = Pick<
+  StaticAgentDefinition,
   "experimental" | "model" | "modelContextWindowTokens"
 >;
 
 /** Harness-owned configuration for fixture subagents: model identity only. */
-export type E2ESubagentConfig = Pick<AgentDefinition, "model" | "modelContextWindowTokens">;
+export type E2ESubagentConfig = Pick<StaticAgentDefinition, "model" | "modelContextWindowTokens">;
 
 /**
  * A static model handle: a gateway model id string or a deterministic mock
  * instance. Assignable anywhere fixtures author a non-dynamic model
- * (agent `model`, compaction `model`, dynamic fallbacks, subagents).
+ * (agent `model`, compaction `model`, dynamic selections, subagents).
  */
 export type E2EModel = string | ReturnType<typeof mockModel>;
 

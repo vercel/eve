@@ -35,25 +35,35 @@ export interface CompactionConfig {
   readonly lastKnownPromptMessageCount?: number;
   readonly recentWindowSize: number;
   readonly threshold: number;
+  readonly thresholdPercent?: number;
 }
 
 /**
  * Serializable agent configuration stored on the session.
  */
-export interface SessionAgent {
+interface SessionAgentBase {
   /**
    * Optional model used only for compaction summaries.
    *
    * When omitted, the harness uses the active turn model for compaction.
    */
   readonly compactionModelReference?: RuntimeModelReference;
-  /** `defineDynamic.fallback` for dynamic-model agents; serves whenever no scoped selection is set. */
-  readonly dynamicModelDefaultReference?: RuntimeModelReference;
-  readonly modelReference: RuntimeModelReference;
   readonly reasoning?: AgentReasoningDefinition;
   readonly system: string;
   readonly tools: readonly SessionToolDefinition[];
 }
+
+export type SessionAgent = SessionAgentBase &
+  (
+    | {
+        readonly dynamicModel?: never;
+        readonly modelReference: RuntimeModelReference;
+      }
+    | {
+        readonly dynamicModel: true;
+        readonly modelReference?: RuntimeModelReference;
+      }
+  );
 
 /**
  * Serializable session state passed between harness and runtime.
@@ -91,6 +101,14 @@ export interface HarnessSession {
    * When omitted, the dispatch step applies the framework default.
    */
   readonly workflowMaxSubagents?: number;
+}
+
+export function requireSessionModelReference(session: HarnessSession): RuntimeModelReference {
+  const reference = session.agent.modelReference;
+  if (reference === undefined) {
+    throw new Error("Expected a concrete model selection for the active model call.");
+  }
+  return reference;
 }
 
 /**
@@ -295,7 +313,6 @@ export interface ToolLoopHarnessConfig {
   readonly dispatchDynamicModelEvent?: (input: {
     readonly ctx: AlsContext;
     readonly event: UnstampedMessageStreamEvent;
-    readonly fallback: RuntimeModelReference;
     readonly messages: readonly ModelMessage[];
   }) => Promise<void>;
   readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;

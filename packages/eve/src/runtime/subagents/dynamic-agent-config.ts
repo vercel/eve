@@ -1,12 +1,14 @@
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
-import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
+import type { ContextAccessor } from "#context/key.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
+import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 import {
   isDynamicModelDefinition,
   type AgentLimitsDefinition,
   type AgentReasoningDefinition,
-  type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
-import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import type { JsonObject } from "#shared/json.js";
 import { serializeOutputSchema } from "#shared/tool-schema.js";
 
 export interface DynamicSubagentAgentConfig {
@@ -21,16 +23,14 @@ export interface DynamicSubagentAgentConfig {
   readonly reasoning?: AgentReasoningDefinition;
 }
 
-export interface DynamicSubagentModelReference {
-  readonly contextWindowTokens?: number;
-  readonly id: string;
-  readonly providerOptions?: Record<string, JsonObject>;
-}
+export type DynamicSubagentModelReference = RuntimeModelReference;
 
-export function normalizeDynamicSubagentAgentConfig(input: {
+export async function normalizeDynamicSubagentAgentConfig(input: {
+  readonly catalog?: RuntimeModelCatalog;
   readonly name: string;
+  readonly state: ContextAccessor;
   readonly value: unknown;
-}): DynamicSubagentAgentConfig {
+}): Promise<DynamicSubagentAgentConfig> {
   const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineRemoteAgent(...), or null.`;
   const definition = normalizeAgentDefinition(input.value, message);
 
@@ -56,11 +56,15 @@ export function normalizeDynamicSubagentAgentConfig(input: {
     reasoning?: AgentReasoningDefinition;
   } = {
     description: definition.description,
-    model: normalizeModelReference({
-      contextWindowTokens: definition.modelContextWindowTokens,
-      model: definition.model,
+    model: await normalizeDurableModelSelection({
+      catalog: input.catalog,
       name: input.name,
-      providerOptions: definition.modelOptions?.providerOptions,
+      selection: {
+        model: definition.model,
+        modelContextWindowTokens: definition.modelContextWindowTokens,
+        modelOptions: definition.modelOptions,
+      },
+      state: input.state,
     }),
   };
 
@@ -70,11 +74,15 @@ export function normalizeDynamicSubagentAgentConfig(input: {
       thresholdPercent?: number;
     } = {};
     if (definition.compaction.model !== undefined) {
-      compaction.model = normalizeModelReference({
-        contextWindowTokens: definition.compaction.modelContextWindowTokens,
-        model: definition.compaction.model,
+      compaction.model = await normalizeDurableModelSelection({
+        catalog: input.catalog,
         name: input.name,
-        providerOptions: definition.modelOptions?.providerOptions,
+        selection: {
+          model: definition.compaction.model,
+          modelContextWindowTokens: definition.compaction.modelContextWindowTokens,
+          modelOptions: definition.modelOptions,
+        },
+        state: input.state,
       });
     }
     if (definition.compaction.thresholdPercent !== undefined) {
@@ -95,33 +103,21 @@ export function normalizeDynamicSubagentAgentConfig(input: {
   return config;
 }
 
-function normalizeModelReference(input: {
-  readonly contextWindowTokens?: number;
-  readonly model: PublicAgentStaticModelDefinition;
+async function normalizeDurableModelSelection(input: {
+  readonly catalog?: RuntimeModelCatalog;
   readonly name: string;
-  readonly providerOptions?: Record<string, JsonObject>;
-}): DynamicSubagentModelReference {
-  if (typeof input.model !== "string") {
+  readonly selection: Parameters<typeof resolveRuntimeModelSelection>[0]["selection"];
+  readonly state: ContextAccessor;
+}): Promise<DynamicSubagentModelReference> {
+  const resolved = await resolveRuntimeModelSelection({
+    catalog: input.catalog,
+    selection: input.selection,
+    state: input.state,
+  });
+  if (resolved.model !== undefined) {
     throw new Error(
       `Dynamic subagent "${input.name}" must return model IDs as strings so its agent config can cross durable workflow boundaries.`,
     );
   }
-
-  const reference: {
-    contextWindowTokens?: number;
-    id: string;
-    providerOptions?: Record<string, JsonObject>;
-  } = { id: formatLanguageModelGatewayId(input.model) };
-  if (input.contextWindowTokens !== undefined) {
-    reference.contextWindowTokens = input.contextWindowTokens;
-  }
-  if (input.providerOptions !== undefined) {
-    reference.providerOptions = Object.fromEntries(
-      Object.entries(input.providerOptions).map(([provider, options]) => [
-        provider,
-        parseJsonObject(options),
-      ]),
-    );
-  }
-  return reference;
+  return resolved.reference;
 }

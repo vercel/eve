@@ -23,20 +23,29 @@ export function resolveEffectiveAgentRuntimeFromConfig(
   config: DynamicSubagentAgentConfig | undefined,
 ): EffectiveAgentRuntime {
   if (config === undefined) {
+    if (bundle.turnAgent.configResolver === true) {
+      throw new Error("Dynamic subagent execution requires a selected concrete agent config.");
+    }
     return {
-      limits: bundle.resolvedAgent.config.limits,
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+      limits: bundle.resolvedAgent.config?.limits,
+      thresholdPercent: bundle.resolvedAgent.config?.compaction?.thresholdPercent,
       turnAgent: bundle.turnAgent,
     };
   }
 
+  const {
+    compactionModel: _compiledCompactionModel,
+    configResolver: _configResolver,
+    dynamicModel: _dynamicModel,
+    model: _compiledModel,
+    ...turnAgent
+  } = bundle.turnAgent;
   return {
     limits: config.limits,
     thresholdPercent: config.compaction?.thresholdPercent,
     turnAgent: {
-      ...bundle.turnAgent,
+      ...turnAgent,
       compactionModel: config.compaction?.model,
-      dynamicModel: undefined,
       model: config.model,
       outputSchema: config.outputSchema,
       reasoning: config.reasoning,

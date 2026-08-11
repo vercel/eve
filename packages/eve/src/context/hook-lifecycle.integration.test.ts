@@ -24,7 +24,13 @@ function createMockBundle(): CompiledBundle {
     resolvedAgent: { config: { name: "test-agent" }, skills: [] } as never,
     subagentRegistry: undefined as never,
     toolRegistry: undefined as never,
-    turnAgent: undefined as never,
+    turnAgent: {
+      id: "test-agent",
+      instructions: [],
+      model: { id: "openai/gpt-5.5" },
+      tools: [],
+      workspaceSpec: { rootEntries: [] },
+    },
   };
 }
 

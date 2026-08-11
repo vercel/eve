@@ -7,26 +7,26 @@ description: "Resolve models, subagents, tools, skills, and instructions at runt
 
 ## Dynamic models
 
-The `model` field in `agent.ts` accepts `defineDynamic({ fallback, events })`.
-Resolvers run at `session.started`, `turn.started`, or `step.started`
-(precedence: step > turn > session > `fallback`); `null` leaves a scope unset
-and failures degrade to the next scope. Prefer `session.started` — prompt
-caches are per model, so switching mid-session re-ingests the conversation at
-uncached prices. See
+The `model` field in `agent.ts` accepts `defineDynamic({ events })`. Resolvers
+run at `session.started`, `turn.started`, or `step.started` (precedence: step >
+turn > session). Every matching handler must return a concrete model. A
+missing, invalid, or throwing selection fails the turn before model-dependent
+work begins. Prefer `session.started` — prompt caches are per model, so
+switching mid-session re-ingests the conversation at uncached prices. See
 [agent configuration](../agent-config#choose-the-model-dynamically) for the
 full contract.
 
-The agent always needs exactly one model, so the compiled fallback anchors
-build-time metadata. Tools, skills, instructions, and subagents default by
-authoring a static entry (or returning `null`), so `fallback` on their
-`defineDynamic` export is a build error.
+Dynamic models do not compile a default model or model metadata. When a
+resolver first selects a model, eve normalizes the selection and resolves any
+omitted context-window metadata from the AI Gateway catalog. Dynamic tools,
+skills, instructions, and subagents may return `null` to omit a capability.
 
 ## Dynamic subagents
 
 Wrap a declared subagent's own `agent.ts` in `defineDynamic` when its
 availability depends on the caller, tenant, environment, or a feature flag.
-Return the child definition to configure and expose it. Return `null` or
-`undefined` to omit it from the parent's model-visible tools.
+Return the child definition to configure and expose it. Return `null` to omit
+it from the parent's model-visible tools.
 
 ```ts title="agent/subagents/finance/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
@@ -44,15 +44,19 @@ export default defineDynamic({
 });
 ```
 
-eve always compiles the subagent's filesystem manifest, including its
-instructions, tools, skills, connections, sandbox, and nested subagents. When
-the resolver selects it, eve injects the returned agent configuration into that
-compiled manifest. Each resolution can return a different model or other
-runtime agent settings. Runtime-selected models must use string model IDs;
-build and Workflow-world configuration cannot be selected at runtime.
+eve always compiles the subagent's filesystem resources, including its
+instructions, tools, skills, connections, sandbox, and nested subagents. It
+does not compile an agent config or placeholder model for a dynamic subagent.
+When the resolver selects the subagent, eve combines the returned config with
+those resources before starting the child session. Each resolution can return
+a different model or other runtime agent settings. A returned local config
+must use a static model; it cannot contain another `defineDynamic` model.
+Runtime-selected models must use string model IDs. Put build configuration on
+the outer `defineDynamic` definition; build and Workflow-world configuration
+cannot be selected in a handler result.
 
 A single-file remote subagent uses the same lifecycle. Return
-`defineRemoteAgent(...)` to expose the selected deployment, or nil to omit it:
+`defineRemoteAgent(...)` to expose the selected deployment, or `null` to omit it:
 
 ```ts title="agent/subagents/finance.ts"
 import { defineDynamic, defineRemoteAgent } from "eve";
@@ -77,7 +81,7 @@ outbound request without entering durable workflow state.
 
 Dynamic subagents support `session.started` and `turn.started`. A turn selection
 shadows the session selection for that turn, including when the turn handler
-returns nil. If a resolver throws or returns an invalid definition, eve logs the
+returns `null`. If a resolver throws or returns an invalid definition, eve logs the
 failure and omits the subagent.
 
 The resolved set applies to local and remote direct delegation and the

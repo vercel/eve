@@ -43,7 +43,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 39;
+export const COMPILED_AGENT_MANIFEST_VERSION = 40;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -103,8 +103,7 @@ export type CompiledRuntimeModelReference = InternalAgentModelDefinition & {
 };
 
 /**
- * Dynamic model resolver source preserved in the compiled manifest; the
- * compiled `config.model` remains the fallback model.
+ * Dynamic model resolver source preserved in the compiled manifest.
  */
 export type CompiledDynamicModelDefinition = ModuleSourceRef & {
   readonly eventNames: readonly string[];
@@ -126,11 +125,21 @@ type CompiledAgentCompactionDefinition = Omit<InternalAgentCompactionDefinition,
 /**
  * Normalized additive agent configuration preserved in the compiled manifest.
  */
-export type CompiledAgentDefinition = Omit<InternalAgentDefinition, "model" | "compaction"> & {
-  model: CompiledRuntimeModelReference;
+type CompiledAgentDefinitionBase = Omit<InternalAgentDefinition, "model" | "compaction"> & {
   compaction?: CompiledAgentCompactionDefinition;
-  dynamicModel?: CompiledDynamicModelDefinition;
 };
+
+export type CompiledAgentDefinition = CompiledAgentDefinitionBase &
+  (
+    | {
+        readonly model: CompiledRuntimeModelReference;
+        readonly dynamicModel?: never;
+      }
+    | {
+        readonly model?: never;
+        readonly dynamicModel: CompiledDynamicModelDefinition;
+      }
+  );
 
 /**
  * Normalized authored instructions prompt preserved in the compiled
@@ -249,21 +258,24 @@ export interface CompiledHookDefinition extends ModuleSourceRef {
  */
 export type CompiledAgentNodeManifest = z.infer<typeof compiledAgentNodeManifestSchema>;
 
+export type CompiledAgentResources = z.infer<typeof compiledAgentResourcesSchema>;
+
 export type CompiledSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
-      agent: CompiledAgentNodeManifest;
       entryPath: string;
       name: string;
       rootPath: string;
     } & (
       | {
+          agent: CompiledAgentNodeManifest;
+          configResolver?: never;
           description: string;
-          dynamic?: never;
         }
       | {
+          agent: CompiledAgentResources;
+          configResolver: CompiledDynamicSubagentDefinition;
           description?: never;
-          dynamic: CompiledDynamicSubagentDefinition;
         }
     )
 >;
@@ -376,6 +388,7 @@ const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReferen
   .object({
     contextWindowTokens: z.number().int().positive().optional(),
     id: z.string(),
+    maxOutputTokens: z.number().int().positive().optional(),
     source: moduleSourceRefSchema.optional(),
     providerOptions: z.record(z.string(), jsonObjectSchema).optional(),
     routing: modelRoutingSchema,
@@ -420,29 +433,40 @@ const compiledWorkflowToolDefinitionSchema: z.ZodType<CompiledWorkflowToolDefini
   })
   .strict();
 
-const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
-  .object({
-    build: compiledAgentBuildDefinitionSchema.optional(),
-    compaction: compiledAgentCompactionDefinitionSchema.optional(),
-    description: z.string().optional(),
-    dynamicModel: compiledDynamicModelDefinitionSchema.optional(),
-    experimental: z
-      .object({
-        subagentPersistentSessions: z.boolean().optional(),
-        workflow: compiledAgentWorkflowDefinitionSchema.optional(),
-      })
-      .strict()
-      .optional(),
-    model: compiledRuntimeModelReferenceSchema,
-    name: z.string(),
-    outputSchema: jsonObjectSchema.optional(),
-    reasoning: z
-      .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
-      .optional(),
-    source: moduleSourceRefSchema.optional(),
-    limits: compiledAgentLimitsDefinitionSchema.optional(),
-  })
-  .strict();
+const compiledAgentConfigBaseFields = {
+  build: compiledAgentBuildDefinitionSchema.optional(),
+  compaction: compiledAgentCompactionDefinitionSchema.optional(),
+  description: z.string().optional(),
+  experimental: z
+    .object({
+      subagentPersistentSessions: z.boolean().optional(),
+      workflow: compiledAgentWorkflowDefinitionSchema.optional(),
+    })
+    .strict()
+    .optional(),
+  name: z.string(),
+  outputSchema: jsonObjectSchema.optional(),
+  reasoning: z
+    .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
+    .optional(),
+  source: moduleSourceRefSchema.optional(),
+  limits: compiledAgentLimitsDefinitionSchema.optional(),
+};
+
+const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z.union([
+  z
+    .object({
+      ...compiledAgentConfigBaseFields,
+      model: compiledRuntimeModelReferenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...compiledAgentConfigBaseFields,
+      dynamicModel: compiledDynamicModelDefinitionSchema,
+    })
+    .strict(),
+]);
 
 const compiledInstructionsSchema: z.ZodType<CompiledInstructionsDefinition> = z
   .object({
@@ -654,35 +678,40 @@ const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
 /**
  * Zod schema for one non-recursive compiled authored agent payload.
  */
+const compiledAgentResourceFields = {
+  agentRoot: z.string(),
+  appRoot: z.string(),
+  channels: z.array(compiledChannelEntrySchema),
+  connections: z.array(compiledConnectionDefinitionSchema),
+  diagnosticsSummary: discoverDiagnosticsSummarySchema,
+  disabledFrameworkTools: z.array(z.string()).readonly(),
+  workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
+  webSearchProvider: z.enum(["exa", "parallel"]).optional(),
+  dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
+  dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
+  dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
+  extensionMounts: z.array(compiledExtensionMountSchema).default([]),
+  hooks: z.array(compiledHookDefinitionSchema),
+  sandbox: compiledSandboxDefinitionSchema.nullable(),
+  sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
+  schedules: z.array(compiledScheduleDefinitionSchema),
+  remoteAgents: z.array(compiledRemoteAgentNodeSchema),
+  skills: z.array(compiledSkillSourceSchema).readonly(),
+  instructions: compiledInstructionsSchema.optional(),
+  tools: z.array(compiledToolDefinitionSchema),
+  workspaceResourceRoot: compiledWorkspaceResourceRootSchema,
+};
+
+const compiledAgentResourcesSchema = z.object(compiledAgentResourceFields).strict();
+
 const compiledAgentNodeManifestSchema = z
   .object({
-    agentRoot: z.string(),
-    appRoot: z.string(),
-    channels: z.array(compiledChannelEntrySchema),
+    ...compiledAgentResourceFields,
     config: compiledAgentConfigSchema,
-    connections: z.array(compiledConnectionDefinitionSchema),
-    diagnosticsSummary: discoverDiagnosticsSummarySchema,
-    disabledFrameworkTools: z.array(z.string()).readonly(),
-    workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
-    webSearchProvider: z.enum(["exa", "parallel"]).optional(),
-    dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
-    dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
-    dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
-    extensionMounts: z.array(compiledExtensionMountSchema).default([]),
-    hooks: z.array(compiledHookDefinitionSchema),
-    sandbox: compiledSandboxDefinitionSchema.nullable(),
-    sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
-    schedules: z.array(compiledScheduleDefinitionSchema),
-    remoteAgents: z.array(compiledRemoteAgentNodeSchema),
-    skills: z.array(compiledSkillSourceSchema).readonly(),
-    instructions: compiledInstructionsSchema.optional(),
-    tools: z.array(compiledToolDefinitionSchema),
-    workspaceResourceRoot: compiledWorkspaceResourceRootSchema,
   })
   .strict();
 
 const compiledSubagentNodeBaseFields = {
-  agent: compiledAgentNodeManifestSchema,
   entryPath: z.string(),
   logicalPath: z.string(),
   name: z.string(),
@@ -694,15 +723,23 @@ const compiledSubagentNodeBaseFields = {
 };
 const compiledDynamicSubagentDefinitionSchema = z
   .object({
+    build: compiledAgentBuildDefinitionSchema.optional(),
     eventNames: z.array(z.string()).readonly(),
   })
   .strict();
 const compiledSubagentNodeSchema: z.ZodType<CompiledSubagentNode> = z.union([
-  z.object({ ...compiledSubagentNodeBaseFields, description: z.string() }).strict(),
   z
     .object({
       ...compiledSubagentNodeBaseFields,
-      dynamic: compiledDynamicSubagentDefinitionSchema,
+      agent: compiledAgentNodeManifestSchema,
+      description: z.string(),
+    })
+    .strict(),
+  z
+    .object({
+      ...compiledSubagentNodeBaseFields,
+      agent: compiledAgentResourcesSchema,
+      configResolver: compiledDynamicSubagentDefinitionSchema,
     })
     .strict(),
 ]);
@@ -773,14 +810,10 @@ export const compiledAgentManifestSchema = z
   })
   .strict();
 
-/**
- * Creates a compiled authored agent payload with stable defaults.
- */
-export function createCompiledAgentNodeManifest(input: {
+export interface CreateCompiledAgentResourcesInput {
   readonly agentRoot: string;
   readonly appRoot: string;
   readonly channels?: readonly CompiledChannelEntry[];
-  readonly config: CompiledAgentDefinition;
   readonly connections?: readonly CompiledConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly disabledFrameworkTools?: readonly string[];
@@ -799,67 +832,17 @@ export function createCompiledAgentNodeManifest(input: {
   readonly instructions?: CompiledInstructionsDefinition;
   readonly tools?: readonly CompiledToolDefinition[];
   readonly workspaceResourceRoot?: CompiledWorkspaceResourceRoot;
-}): CompiledAgentNodeManifest {
-  const node: CompiledAgentNodeManifest = {
+}
+
+/** Creates compiled filesystem-owned resources with stable defaults. */
+export function createCompiledAgentResources(
+  input: CreateCompiledAgentResourcesInput,
+): CompiledAgentResources {
+  const resources: CompiledAgentResources = {
     agentRoot: input.agentRoot,
     appRoot: input.appRoot,
     channels: [...(input.channels ?? [])],
     connections: [...(input.connections ?? [])],
-    config: {
-      build:
-        input.config.build === undefined
-          ? undefined
-          : {
-              externalDependencies:
-                input.config.build.externalDependencies === undefined
-                  ? undefined
-                  : [...input.config.build.externalDependencies],
-            },
-      compaction: {
-        model:
-          input.config.compaction?.model === undefined
-            ? undefined
-            : cloneCompiledRuntimeModelReference(input.config.compaction.model),
-        thresholdPercent: input.config.compaction?.thresholdPercent,
-      },
-      description: input.config.description,
-      dynamicModel:
-        input.config.dynamicModel === undefined
-          ? undefined
-          : {
-              ...input.config.dynamicModel,
-            },
-      experimental:
-        input.config.experimental === undefined
-          ? undefined
-          : {
-              subagentPersistentSessions: input.config.experimental.subagentPersistentSessions,
-              workflow:
-                input.config.experimental.workflow === undefined
-                  ? undefined
-                  : {
-                      world: input.config.experimental.workflow.world,
-                    },
-            },
-      model: cloneCompiledRuntimeModelReference(input.config.model),
-      name: input.config.name,
-      outputSchema: input.config.outputSchema,
-      reasoning: input.config.reasoning,
-      limits:
-        input.config.limits === undefined
-          ? undefined
-          : {
-              maxInputTokensPerSession: input.config.limits.maxInputTokensPerSession,
-              maxOutputTokensPerSession: input.config.limits.maxOutputTokensPerSession,
-              sessionTimeoutMs: input.config.limits.sessionTimeoutMs,
-            },
-      source:
-        input.config.source === undefined
-          ? undefined
-          : {
-              ...input.config.source,
-            },
-    },
     diagnosticsSummary: input.diagnosticsSummary ?? {
       errors: 0,
       warnings: 0,
@@ -891,10 +874,83 @@ export function createCompiledAgentNodeManifest(input: {
   };
 
   if (input.instructions !== undefined) {
-    node.instructions = input.instructions;
+    resources.instructions = input.instructions;
   }
 
-  return node;
+  return resources;
+}
+
+/** Creates a compiled authored agent payload with stable defaults. */
+export function createCompiledAgentNodeManifest(
+  input: CreateCompiledAgentResourcesInput & { readonly config: CompiledAgentDefinition },
+): CompiledAgentNodeManifest {
+  return {
+    ...createCompiledAgentResources(input),
+    config: cloneCompiledAgentDefinition(input.config),
+  };
+}
+
+function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): CompiledAgentDefinition {
+  const base = {
+    build:
+      config.build === undefined
+        ? undefined
+        : {
+            externalDependencies:
+              config.build.externalDependencies === undefined
+                ? undefined
+                : [...config.build.externalDependencies],
+          },
+    compaction: {
+      model:
+        config.compaction?.model === undefined
+          ? undefined
+          : cloneCompiledRuntimeModelReference(config.compaction.model),
+      thresholdPercent: config.compaction?.thresholdPercent,
+    },
+    description: config.description,
+    experimental:
+      config.experimental === undefined
+        ? undefined
+        : {
+            subagentPersistentSessions: config.experimental.subagentPersistentSessions,
+            workflow:
+              config.experimental.workflow === undefined
+                ? undefined
+                : {
+                    world: config.experimental.workflow.world,
+                  },
+          },
+    name: config.name,
+    outputSchema: config.outputSchema,
+    reasoning: config.reasoning,
+    limits:
+      config.limits === undefined
+        ? undefined
+        : {
+            maxInputTokensPerSession: config.limits.maxInputTokensPerSession,
+            maxOutputTokensPerSession: config.limits.maxOutputTokensPerSession,
+            sessionTimeoutMs: config.limits.sessionTimeoutMs,
+          },
+    source:
+      config.source === undefined
+        ? undefined
+        : {
+            ...config.source,
+          },
+  };
+
+  if (config.dynamicModel !== undefined) {
+    return {
+      ...base,
+      dynamicModel: { ...config.dynamicModel },
+    };
+  }
+
+  return {
+    ...base,
+    model: cloneCompiledRuntimeModelReference(config.model),
+  };
 }
 
 /**
@@ -978,6 +1034,9 @@ function cloneCompiledRuntimeModelReference(
   };
   if (model.contextWindowTokens !== undefined) {
     clone.contextWindowTokens = model.contextWindowTokens;
+  }
+  if (model.maxOutputTokens !== undefined) {
+    clone.maxOutputTokens = model.maxOutputTokens;
   }
   if (model.providerOptions !== undefined) {
     clone.providerOptions = { ...model.providerOptions };

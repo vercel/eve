@@ -109,6 +109,18 @@ export const TurnDynamicModelReferenceKey = new ContextKey<RuntimeModelReference
   "eve.turnDynamicModelReference",
 );
 
+export interface CachedModelMetadata {
+  readonly contextWindowTokens: number;
+  readonly expiresAt: number;
+  readonly maxOutputTokens?: number;
+  readonly resolvedModelId: string;
+}
+
+/** Successful runtime catalog selections cached in durable workflow state. */
+export const RuntimeModelMetadataCacheKey = new ContextKey<
+  Readonly<Record<string, CachedModelMetadata>>
+>("eve.runtimeModelMetadataCache");
+
 export interface LiveDynamicModelSelection {
   /** Live provider instance; absent for string selections, which resolve through the reference. */
   readonly model?: LanguageModel;
