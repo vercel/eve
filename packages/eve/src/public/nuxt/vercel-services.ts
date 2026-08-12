@@ -4,7 +4,7 @@ import { dirname, join, relative } from "node:path";
 import {
   EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV,
   EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV,
-} from "#internal/application/paths.js";
+} from "#internal/application/build-output-environment.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 import { findClosestLinkedVercelDirectory } from "#shared/vercel-output-directory.js";

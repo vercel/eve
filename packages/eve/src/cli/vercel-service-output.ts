@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import {
   EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV,
   EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV,
-} from "#internal/application/paths.js";
+} from "#internal/application/build-output-environment.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 
 type VercelServiceOutput = NonNullable<ApplicationBuildOptions["vercelServiceOutput"]>;
