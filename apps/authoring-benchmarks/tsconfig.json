@@ -3,5 +3,5 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["experiments/**/*.ts", "lib/**/*.ts"]
+  "include": ["experiments/**/*.ts", "evals/**/case.ts", "lib/**/*.ts"]
 }

@@ -1,17 +1,15 @@
-import type { AuthoringScenario } from "../harness-agent.js";
+import type { AuthoringSetup } from "../authoring-case.js";
 
-const PHONE_NUMBER = "+15551234567";
 const REGISTRY_PORT = 4173;
 const REGISTRY_URL = `http://127.0.0.1:${REGISTRY_PORT}`;
 
-export const imessageScenario: AuthoringScenario = {
+export const imessageSetup: AuthoringSetup = {
   id: "imessage-v1",
   ports: [REGISTRY_PORT],
   environment: { EVE_DEV_OFFICIAL_REGISTRY_URL: REGISTRY_URL },
-  maxTurns: 2,
   async onBootstrap({ run, sourceRoot, write }) {
     await run(
-      `npm install --save --package-lock=false ${sourceRoot}/apps/authoring-benchmarks/evals/author-000-imessage/seed/mock-imessage-setup`,
+      `npm install --save --package-lock=false ${sourceRoot}/apps/authoring-benchmarks/lib/setups/mock-imessage-setup`,
     );
     await run("mkdir -p __authoring_eval__/registry/channel");
 
@@ -69,14 +67,5 @@ export const imessageScenario: AuthoringScenario = {
       ".claude/settings.json",
       JSON.stringify({ env: { EVE_DEV_OFFICIAL_REGISTRY_URL: REGISTRY_URL } }),
     );
-  },
-  userSimulator({ turn, text }) {
-    if (turn !== 1) return undefined;
-    if (!/phone number|imessage number|number should/i.test(text)) {
-      throw new Error(
-        `Expected the agent to ask for the user's phone number on its first turn. Received: ${JSON.stringify(text)}`,
-      );
-    }
-    return PHONE_NUMBER;
   },
 };

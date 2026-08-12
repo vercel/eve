@@ -2,9 +2,8 @@ import type { ExperimentConfig } from "@vercel/agent-eval";
 import { registerAgent } from "@vercel/agent-eval";
 
 import { createAuthoringAgent } from "../lib/harness-agent.js";
-import { authoringScenario } from "../lib/scenarios/index.js";
 
-registerAgent(createAuthoringAgent(authoringScenario));
+registerAgent(createAuthoringAgent());
 
 const config: ExperimentConfig = {
   agent: "eve-harness-pi",
