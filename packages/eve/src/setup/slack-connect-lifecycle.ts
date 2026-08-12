@@ -1,4 +1,3 @@
-import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#setup/scaffold/index.js";
 import {
   CONNECT_MUTATION_TIMEOUT_MS,
@@ -72,9 +71,6 @@ export async function listSlackConnectors(
     return { state: "failed", message: "Vercel returned invalid JSON for the connector list." };
   }
 }
-
-/** Reads the linked Vercel project and team ids from local link metadata. */
-export const readProjectLink = readVercelProjectLink;
 
 export type SlackConnectorLookup =
   | {
