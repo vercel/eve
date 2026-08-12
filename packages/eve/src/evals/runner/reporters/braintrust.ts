@@ -175,7 +175,10 @@ class BraintrustReporter implements EvalReporter {
     this.#experiment.log({
       id: result.id,
       input: evaluation?.description ?? "",
-      output: result.result.output,
+      // Braintrust rejects a null/undefined output ("output must be specified"),
+      // which would otherwise abort the whole run. An eval that produced no
+      // agent turn has a null output, so fall back to an empty string.
+      output: result.result.output ?? "",
       error: result.error ?? undefined,
       scores,
       metadata,
