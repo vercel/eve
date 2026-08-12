@@ -1,4 +1,6 @@
-import { vercelOidc } from "#public/agents/auth.js";
+import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import type { OutboundAuthFn } from "#public/agents/auth.js";
+import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/types.js";
 import {
   defineRemoteAgent,
   type RemoteAgentDefinition,
@@ -32,6 +34,18 @@ export function defineVercelBranchAgent(input: VercelBranchAgentInput): RemoteAg
 
   return defineRemoteAgent({
     ...remote,
-    auth: vercelOidc(),
+    auth: vercelDeploymentOidc(),
   });
+}
+
+function vercelDeploymentOidc(): OutboundAuthFn {
+  return async () => {
+    const token = await getVercelOidcToken();
+    return {
+      headers: {
+        authorization: `Bearer ${token}`,
+        [VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER]: token,
+      },
+    };
+  };
 }
