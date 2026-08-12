@@ -1,5 +1,5 @@
 {
-  "name": "eve-canary-artifacts",
+  "name": "eve-package-artifacts",
   "version": "0.0.0",
   "private": true,
   "type": "module",

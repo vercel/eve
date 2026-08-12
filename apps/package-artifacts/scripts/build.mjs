@@ -5,14 +5,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { BlobNotFoundError, BlobPreconditionFailedError, head, put } from "@vercel/blob";
+import { head, put } from "@vercel/blob";
 
 import {
   SHA_PATTERN,
-  canaryArtifactPath,
-  canaryDependencyUrl,
-  canaryVersion,
-} from "../lib/canary.mjs";
+  packageArtifactPath,
+  packageDependencyUrl,
+  packageVersion,
+} from "../lib/package.mjs";
 
 const execFile = promisify(execFileCallback);
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -21,30 +21,30 @@ const packageRoot = join(repoRoot, "packages/eve");
 const packageJsonPath = join(packageRoot, "package.json");
 const artifactDirectory = join(appRoot, ".artifacts");
 const sourceSha = process.env.VERCEL_GIT_COMMIT_SHA;
-const blobStoreId = process.env.BLOB_STORE_ID;
+const branch = process.env.VERCEL_GIT_COMMIT_REF;
 
 if (!SHA_PATTERN.test(sourceSha ?? "")) {
   throw new Error("VERCEL_GIT_COMMIT_SHA must be a 40-character Git commit SHA.");
 }
-if (!/^store_[0-9A-Za-z]+$/.test(blobStoreId ?? "")) {
-  throw new Error("BLOB_STORE_ID must identify the connected public Blob store.");
+if (typeof branch !== "string" || branch.length === 0) {
+  throw new Error("VERCEL_GIT_COMMIT_REF must identify the source branch.");
 }
 
 const originalPackageJson = await readFile(packageJsonPath, "utf8");
 const stableVersion = JSON.parse(originalPackageJson).version;
-const version = canaryVersion(stableVersion, sourceSha);
-const dependencyUrl = canaryDependencyUrl(blobStoreId, sourceSha, version);
-const artifactPath = canaryArtifactPath(sourceSha, version);
+const version = packageVersion(stableVersion, sourceSha);
+const dependencyUrl = packageDependencyUrl(sourceSha);
+const artifactPath = packageArtifactPath(sourceSha, version);
 
 try {
   await rm(artifactDirectory, { force: true, recursive: true });
-  await execFile(process.execPath, [join(repoRoot, "scripts/prepare-canary-package.mjs")], {
+  await execFile(process.execPath, [join(repoRoot, "scripts/prepare-main-package.mjs")], {
     cwd: repoRoot,
-    env: { ...process.env, EVE_CANARY_SHA: sourceSha },
+    env: { ...process.env, EVE_MAIN_SHA: sourceSha },
   });
   await execFile("pnpm", ["--dir", packageRoot, "pack", "--pack-destination", artifactDirectory], {
     cwd: repoRoot,
-    env: { ...process.env, EVE_CANARY_DEPENDENCY_URL: dependencyUrl },
+    env: { ...process.env, EVE_MAIN_DEPENDENCY_URL: dependencyUrl },
   });
 
   const tarball = await readFile(join(artifactDirectory, `eve-${version}.tgz`));
@@ -64,46 +64,21 @@ try {
   }
 
   const manifest = { sourceSha, version, tarball: artifact.url, sha256 };
-  await put(`canary/${sourceSha}/manifest.json`, JSON.stringify(manifest), {
+  await put(`branches/${encodeURIComponent(branch)}.json`, JSON.stringify(manifest), {
     access: "public",
     addRandomSuffix: false,
-    allowOverwrite: false,
-    cacheControlMaxAge: 31_536_000,
+    allowOverwrite: true,
+    cacheControlMaxAge: 60,
     contentType: "application/json",
-  }).catch((error) => {
-    if (!(error instanceof Error) || !error.message.includes("already exists")) throw error;
   });
-  await advanceLatest(manifest);
 
   await mkdir(join(appRoot, "public"), { recursive: true });
   await writeFile(
     join(appRoot, "public/index.html"),
-    `<!doctype html><title>eve canary</title><pre>${JSON.stringify(manifest, null, 2)}</pre>\n`,
+    `<!doctype html><title>eve packages</title><pre>${JSON.stringify(manifest, null, 2)}</pre>\n`,
   );
   process.stdout.write(`${JSON.stringify(manifest)}\n`);
 } finally {
   await writeFile(packageJsonPath, originalPackageJson);
   await rm(artifactDirectory, { force: true, recursive: true });
-}
-
-async function advanceLatest(manifest) {
-  let etag;
-  try {
-    etag = (await head("canary/latest.json")).etag;
-  } catch (error) {
-    if (!(error instanceof BlobNotFoundError)) throw error;
-  }
-
-  try {
-    await put("canary/latest.json", JSON.stringify(manifest), {
-      access: "public",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      cacheControlMaxAge: 60,
-      contentType: "application/json",
-      ...(etag === undefined ? {} : { ifMatch: etag }),
-    });
-  } catch (error) {
-    if (!(error instanceof BlobPreconditionFailedError)) throw error;
-  }
 }

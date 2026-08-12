@@ -106,11 +106,11 @@ describe("post-build scripts", () => {
     await expect(access(join(packageRoot, "README.md"), constants.F_OK)).rejects.toThrow();
   });
 
-  it("prepares a canary package with separate runtime and scaffold dependency versions", async () => {
+  it("prepares a main package with separate runtime and scaffold dependency versions", async () => {
     const packageRoot = await createPostBuildFixture();
     const repoRoot = join(packageRoot, "..", "..");
     const sha = "a".repeat(40);
-    await copyRootScript(repoRoot, "prepare-canary-package.mjs");
+    await copyRootScript(repoRoot, "prepare-main-package.mjs");
     await writeFile(
       join(packageRoot, "dist", "src", "internal", "application", "package.js"),
       'export const version = "__EVE_PACKAGE_VERSION__";\n',
@@ -122,23 +122,23 @@ describe("post-build scripts", () => {
       "utf8",
     );
 
-    await runFile(process.execPath, [join(repoRoot, "scripts", "prepare-canary-package.mjs")], {
+    await runFile(process.execPath, [join(repoRoot, "scripts", "prepare-main-package.mjs")], {
       cwd: repoRoot,
-      env: { ...process.env, EVE_CANARY_SHA: sha },
+      env: { ...process.env, EVE_MAIN_SHA: sha },
     });
 
     const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-    expect(packageJson).toMatchObject({ version: `1.2.4-canary.${sha}` });
+    expect(packageJson).toMatchObject({ version: `1.2.4-main.${sha}` });
 
-    const dependencyUrl = `https://canary.eve.dev/canary/${sha}/eve.tgz`;
+    const dependencyUrl = `https://pkg.eve.dev/${sha}/eve.tgz`;
     await runFile(process.execPath, [join(packageRoot, "scripts", "stamp-version-tokens.mjs")], {
       cwd: packageRoot,
-      env: { ...process.env, EVE_CANARY_DEPENDENCY_URL: dependencyUrl },
+      env: { ...process.env, EVE_MAIN_DEPENDENCY_URL: dependencyUrl },
     });
 
     await expect(
       readFile(join(packageRoot, "dist", "src", "internal", "application", "package.js"), "utf8"),
-    ).resolves.toBe(`export const version = "1.2.4-canary.${sha}";\n`);
+    ).resolves.toBe(`export const version = "1.2.4-main.${sha}";\n`);
     await expect(
       readFile(join(packageRoot, "dist", "src", "chunks", "scaffold-abc123.js"), "utf8"),
     ).resolves.toBe(`export const dependency = "${dependencyUrl}";\n`);

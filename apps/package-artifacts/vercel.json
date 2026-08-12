@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm --filter eve-package-artifacts build",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "outputDirectory": "public",
+  "rewrites": [
+    { "source": "/:ref*/eve.tgz", "destination": "/api/package?ref=:ref" },
+    {
+      "source": "/:ref*/latest.json",
+      "destination": "/api/package?ref=:ref&manifest=1"
+    }
+  ]
+}

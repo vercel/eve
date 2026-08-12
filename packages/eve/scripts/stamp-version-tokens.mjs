@@ -39,7 +39,7 @@ if (typeof nodeEngine !== "string") {
   throw new Error("eve package.json is missing a string engines.node");
 }
 
-const evePackageDependencyVersion = process.env.EVE_CANARY_DEPENDENCY_URL ?? packageJson.version;
+const evePackageDependencyVersion = process.env.EVE_MAIN_DEPENDENCY_URL ?? packageJson.version;
 
 const replacements = {
   __EVE_PACKAGE_VERSION__: packageJson.version,

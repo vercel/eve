@@ -1,10 +1,10 @@
 import { readFile, writeFile } from "node:fs/promises";
 
 const packageJsonPath = new URL("../packages/eve/package.json", import.meta.url);
-const sha = process.env.EVE_CANARY_SHA;
+const sha = process.env.EVE_MAIN_SHA;
 
 if (!/^[0-9a-f]{40}$/i.test(sha ?? "")) {
-  throw new Error("EVE_CANARY_SHA must be a 40-character Git commit SHA.");
+  throw new Error("EVE_MAIN_SHA must be a 40-character Git commit SHA.");
 }
 
 const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
@@ -16,6 +16,6 @@ if (match === null) {
 }
 
 const [, major, minor, patch] = match;
-packageJson.version = `${major}.${minor}.${Number(patch) + 1}-canary.${sha}`;
+packageJson.version = `${major}.${minor}.${Number(patch) + 1}-main.${sha}`;
 
 await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
