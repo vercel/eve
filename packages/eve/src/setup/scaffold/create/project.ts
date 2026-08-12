@@ -36,7 +36,7 @@ export interface EvePackageContract {
 }
 
 export const DEFAULT_EVE_PACKAGE_CONTRACT: EvePackageContract = {
-  version: "__EVE_PACKAGE_VERSION__",
+  version: "__EVE_PACKAGE_DEPENDENCY_VERSION__",
   nodeEngine: "__NODE_ENGINE__",
 };
 
