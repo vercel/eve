@@ -1,5 +1,11 @@
 # eve
 
+## 0.33.3
+
+### Patch Changes
+
+- 22975d3: Keep GitHub comment text separate from channel metadata so option replies can resume pending input requests.
+
 ## 0.33.2
 
 ### Patch Changes
