@@ -2,7 +2,11 @@ import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
 import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
-import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
+import {
+  isStreamDisconnectError,
+  isStreamIdleTimeoutError,
+  readNdjsonStream,
+} from "#client/ndjson.js";
 import type {
   ClientRedirectPolicy,
   ResolvedStreamReconnectPolicy as StreamReconnectPolicyOptions,
@@ -82,6 +86,8 @@ interface FollowStreamInput {
   readonly sessionId: string;
   readonly signal?: AbortSignal;
   readonly startIndex: number;
+  /** @internal Overrides the byte-idle deadline for focused transport tests. */
+  readonly streamIdleTimeoutMs?: number;
   /** Follow the live stream after the durable tail (default). `false` bounds the read at the tail. */
   readonly follow?: boolean;
 }
@@ -154,8 +160,14 @@ export async function* followStreamIterable(
     }
 
     let deliveredEvent = false;
+    let timedOutIdle = false;
     try {
-      for await (const event of readNdjsonStream(connection.body)) {
+      for await (const event of readNdjsonStream(connection.body, {
+        idleTimeoutMs:
+          input.startIndex < 0 || idleRetryPolicy.maxAttempts === 0
+            ? undefined
+            : (input.streamIdleTimeoutMs ?? 30_000),
+      })) {
         startIndex += 1;
         deliveredEvent = true;
         reconnectDelayMs = idleRetryPolicy.baseDelayMs;
@@ -167,7 +179,9 @@ export async function* followStreamIterable(
         }
       }
     } catch (error) {
-      if (!isStreamDisconnectError(error)) {
+      if (isStreamIdleTimeoutError(error)) {
+        timedOutIdle = true;
+      } else if (!isStreamDisconnectError(error)) {
         throw error;
       }
     }
@@ -176,7 +190,11 @@ export async function* followStreamIterable(
       return;
     }
 
-    if (
+    // Silence can be a healthy long-running step, so only clean or failed
+    // transport endings consume the empty-stream retry budget.
+    if (timedOutIdle) {
+      reconnectDelayMs = idleRetryPolicy.baseDelayMs;
+    } else if (
       !deliveredEvent &&
       !initialConnection &&
       (idleReconnects += 1) >= idleRetryPolicy.maxAttempts

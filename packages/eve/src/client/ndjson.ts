@@ -24,6 +24,21 @@ export function isStreamDisconnectError(error: unknown): boolean {
   );
 }
 
+class StreamIdleTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Message stream produced no bytes for ${timeoutMs}ms.`);
+    this.name = "StreamIdleTimeoutError";
+  }
+}
+
+export function isStreamIdleTimeoutError(error: unknown): boolean {
+  return error instanceof StreamIdleTimeoutError;
+}
+
+interface ReadNdjsonStreamOptions {
+  readonly idleTimeoutMs?: number;
+}
+
 /**
  * Reads newline-delimited JSON events from a `ReadableStream<Uint8Array>`.
  *
@@ -35,6 +50,7 @@ export function isStreamDisconnectError(error: unknown): boolean {
  */
 export async function* readNdjsonStream(
   body: ReadableStream<Uint8Array>,
+  options: ReadNdjsonStreamOptions = {},
 ): AsyncGenerator<MessageStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -43,7 +59,7 @@ export async function* readNdjsonStream(
 
   try {
     while (true) {
-      const result = await reader.read();
+      const result = await readWithIdleTimeout(reader, options.idleTimeoutMs);
 
       if (result.done) {
         reachedEof = true;
@@ -82,5 +98,29 @@ export async function* readNdjsonStream(
       await reader.cancel().catch(() => {});
     }
     reader.releaseLock();
+  }
+}
+
+async function readWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleTimeoutMs: number | undefined,
+): ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]> {
+  if (idleTimeoutMs === undefined) {
+    return await reader.read();
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new StreamIdleTimeoutError(idleTimeoutMs)),
+          idleTimeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
