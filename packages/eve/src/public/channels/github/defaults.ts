@@ -16,6 +16,7 @@ import type {
 } from "#public/channels/github/githubChannel.js";
 import { splitGitHubCommentBody } from "#public/channels/github/limits.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { InputRequest } from "#runtime/input/types.js";
 
 const log = createLogger("github.defaults");
 
@@ -97,6 +98,11 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
       await postCommentChunks(channel, event.message);
     },
 
+    async "input.requested"(event, channel, _ctx) {
+      if (event.requests.length === 0) return;
+      await postCommentChunks(channel, event.requests.map(renderInputRequest).join("\n\n"));
+    },
+
     async "session.failed"(event, channel) {
       const hint = formatErrorHint(event);
       const errorId = extractErrorId(event.details);
@@ -121,6 +127,23 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
       await postFailure(channel, message);
     },
   };
+}
+
+function renderInputRequest(request: InputRequest): string {
+  const lines = [request.prompt];
+  if (request.options !== undefined && request.options.length > 0) {
+    lines.push(
+      "",
+      ...request.options.map((option, index) => {
+        const description = option.description ? ` - ${option.description}` : "";
+        return `${index + 1}. ${option.label}${description}`;
+      }),
+    );
+  }
+  if (request.allowFreeform === true) {
+    lines.push("", "You can also reply with a custom answer.");
+  }
+  return lines.join("\n");
 }
 
 async function checkoutRepositoryForTurn(
