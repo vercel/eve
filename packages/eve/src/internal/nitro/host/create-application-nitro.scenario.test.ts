@@ -628,7 +628,7 @@ describe("application Nitro creation", () => {
     );
   });
 
-  it("includes the sandbox shutdown plugin only for production builds", async () => {
+  it("includes coordinated shutdown plugins only for production builds", async () => {
     const productionNitroStub = createNitroStub();
     const devNitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(productionNitroStub.nitro);
@@ -645,10 +645,16 @@ describe("application Nitro creation", () => {
     const devPlugins = createNitroMock.mock.calls[1]?.[0].plugins as string[];
 
     expect(productionPlugins).toEqual(
-      expect.arrayContaining([expect.stringContaining("sandbox-shutdown-plugin.ts")]),
+      expect.arrayContaining([
+        expect.stringContaining("sandbox-shutdown-plugin.ts"),
+        expect.stringContaining("server-shutdown-plugin.ts"),
+      ]),
     );
     expect(devPlugins).not.toEqual(
-      expect.arrayContaining([expect.stringContaining("sandbox-shutdown-plugin.ts")]),
+      expect.arrayContaining([
+        expect.stringContaining("sandbox-shutdown-plugin.ts"),
+        expect.stringContaining("server-shutdown-plugin.ts"),
+      ]),
     );
   });
 

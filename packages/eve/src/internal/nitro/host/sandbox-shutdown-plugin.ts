@@ -1,8 +1,5 @@
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
-import { isEveDevEnvironment } from "#internal/application/optional-package-install.js";
-
-const SHUTDOWN_SIGNALS = ["SIGINT", "SIGTERM"] as const;
-type ShutdownSignal = (typeof SHUTDOWN_SIGNALS)[number];
+import { shouldInstallServerShutdown } from "#internal/nitro/host/server-shutdown-plugin.js";
 
 /**
  * Bounds sandbox shutdown so a wedged provider cannot keep the server
@@ -13,38 +10,10 @@ const SANDBOX_SHUTDOWN_TIMEOUT_MS = 15_000;
 
 let installed = false;
 
-interface SandboxShutdownProcess {
-  readonly env: Record<string, string | undefined>;
-  exit(code?: number): void;
-  once(event: ShutdownSignal, listener: () => void): unknown;
-}
-
 interface NitroAppLike {
   readonly hooks?: {
     hook(name: "close", handler: () => Promise<void>): unknown;
   };
-}
-
-/**
- * Reports whether this server process owns sandbox shutdown.
- *
- * - `eve dev` workers are excluded: the dev CLI parent already stops
- *   dev-tagged sandboxes when the dev server closes.
- * - Vercel serverless instances are excluded: instance recycling is not
- *   a server stop, and persistent session sandboxes must keep serving
- *   later invocations.
- */
-export function shouldInstallSandboxShutdown(env: Record<string, string | undefined>): boolean {
-  if (isEveDevEnvironment()) {
-    return false;
-  }
-  if (env.EVE_DEVELOPMENT_SANDBOX_RUN_ID !== undefined) {
-    return false;
-  }
-  if (env.VERCEL !== undefined) {
-    return false;
-  }
-  return true;
 }
 
 /**
@@ -68,36 +37,21 @@ export async function runSandboxShutdown(log: (message: string) => void): Promis
   }
 }
 
-function exitCodeForSignal(signal: ShutdownSignal): number {
-  return signal === "SIGINT" ? 130 : 143;
-}
-
 /**
- * Wires sandbox shutdown into the server lifecycle: the nitro `close`
- * hook plus SIGINT/SIGTERM, since the node-server preset installs no
- * signal handling of its own. Exposed for tests; the plugin default
- * export applies it to the real `process`.
+ * Wires tracked sandbox cleanup into Nitro's coordinated close lifecycle.
  */
-export function installSandboxShutdownHandlers(input: {
+export function installSandboxShutdownHook(input: {
+  readonly env: Record<string, string | undefined>;
   readonly log: (message: string) => void;
   readonly nitroApp?: NitroAppLike;
-  readonly process: SandboxShutdownProcess;
 }): void {
-  if (!shouldInstallSandboxShutdown(input.process.env)) {
+  if (!shouldInstallServerShutdown(input.env)) {
     return;
   }
 
   input.nitroApp?.hooks?.hook("close", async () => {
     await runSandboxShutdown(input.log);
   });
-
-  for (const signal of SHUTDOWN_SIGNALS) {
-    input.process.once(signal, () => {
-      void runSandboxShutdown(input.log).finally(() => {
-        input.process.exit(exitCodeForSignal(signal));
-      });
-    });
-  }
 }
 
 export default function sandboxShutdownPlugin(nitroApp?: NitroAppLike): void {
@@ -105,9 +59,9 @@ export default function sandboxShutdownPlugin(nitroApp?: NitroAppLike): void {
     return;
   }
   installed = true;
-  installSandboxShutdownHandlers({
+  installSandboxShutdownHook({
+    env: process.env,
     log: (message) => console.error(message),
     nitroApp,
-    process,
   });
 }

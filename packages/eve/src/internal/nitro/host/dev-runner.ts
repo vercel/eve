@@ -4,6 +4,11 @@ import { Worker } from "node:worker_threads";
 import { BaseEnvRunner } from "#compiled/env-runner/index.js";
 import { resolvePackageCompiledFilePath } from "#internal/application/package.js";
 
+// The outer dev-server process grants its child 550ms to close over IPC before
+// escalating to process signals. Keep worker cleanup inside that window while
+// still giving Nitro hooks enough time to release worker-owned resources.
+const DEVELOPMENT_WORKER_SHUTDOWN_GRACE_MS = 300;
+
 export interface DevelopmentRunner {
   readonly closed: boolean;
   close(cause?: unknown): Promise<void>;
@@ -98,8 +103,15 @@ class NodeDevelopmentRunner extends BaseEnvRunner implements DevelopmentRunner {
     }
 
     this.#worker = undefined;
+    await requestWorkerShutdown(worker);
     worker.removeAllListeners();
-    await worker.terminate();
+    const ignoreTerminationError = () => undefined;
+    worker.on("error", ignoreTerminationError);
+    try {
+      await worker.terminate();
+    } finally {
+      worker.off("error", ignoreTerminationError);
+    }
   }
 
   protected override _handleMessage(message: unknown): void {
@@ -138,6 +150,56 @@ class NodeDevelopmentRunner extends BaseEnvRunner implements DevelopmentRunner {
 
 export const createNodeDevelopmentRunner: DevelopmentRunnerFactory = (input) =>
   new NodeDevelopmentRunner(input);
+
+async function requestWorkerShutdown(worker: Worker): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let timeout: NodeJS.Timeout | undefined;
+
+    const settle = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timeout !== undefined) {
+        clearTimeout(timeout);
+      }
+      worker.off("error", settle);
+      worker.off("exit", settle);
+      worker.off("message", onMessage);
+      resolve();
+    };
+    const onMessage = (message: unknown) => {
+      if (isWorkerExitMessage(message)) {
+        settle();
+      }
+    };
+
+    worker.once("error", settle);
+    worker.once("exit", settle);
+    worker.on("message", onMessage);
+    timeout = setTimeout(settle, DEVELOPMENT_WORKER_SHUTDOWN_GRACE_MS);
+    timeout.unref();
+
+    if (worker.threadId === -1) {
+      settle();
+      return;
+    }
+
+    try {
+      worker.postMessage({ event: "shutdown" });
+    } catch {
+      settle();
+    }
+  });
+}
+
+function isWorkerExitMessage(value: unknown): value is { readonly event: "exit" } {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  return (value as Record<string, unknown>).event === "exit";
+}
 
 function isWorkerInitializationError(
   value: unknown,

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { access, mkdir, realpath, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -72,6 +72,107 @@ async function createMinimalAppRoot(prefix: string): Promise<string> {
   await writeFile(join(appRoot, "agent", "instructions.md"), "You are a precise assistant.\n");
 
   return appRoot;
+}
+
+async function createWorkflowShutdownProbeAppRoot(): Promise<{
+  readonly appRoot: string;
+  readonly eventsPath: string;
+  readonly lockPath: string;
+}> {
+  const appRoot = await createScratchDirectory("eve-cli-workflow-shutdown-");
+  const eventsPath = join(appRoot, "workflow-world-events.log");
+  const lockPath = join(appRoot, "workflow-world.lock");
+  const workflowWorldPath = join(appRoot, "workflow-shutdown-world.mjs");
+
+  await mkdir(join(appRoot, "agent"), {
+    recursive: true,
+  });
+  await writeFile(
+    join(appRoot, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "eve-cli-workflow-shutdown-test",
+        private: true,
+        type: "module",
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(
+    join(appRoot, "agent", "agent.mjs"),
+    [
+      "export default {",
+      '  model: "openai/gpt-5.4",',
+      "  experimental: {",
+      `    workflow: { world: ${JSON.stringify(workflowWorldPath)} },`,
+      "  },",
+      "};",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(join(appRoot, "agent", "instructions.md"), "You are a precise assistant.\n");
+  await mkdir(join(appRoot, "agent", "channels"), {
+    recursive: true,
+  });
+  await writeFile(
+    join(appRoot, "agent", "channels", "shutdown.mjs"),
+    [
+      "export default {",
+      '  __kind: "eve:channel",',
+      '  adapter: { kind: "channel" },',
+      "  routes: [",
+      "    {",
+      '      method: "GET",',
+      '      path: "/shutdown/slow-stream",',
+      "      handler() {",
+      "        const body = new ReadableStream({",
+      "          start(controller) {",
+      '            controller.enqueue(new TextEncoder().encode("start\\n"));',
+      "            setTimeout(() => {",
+      '              controller.enqueue(new TextEncoder().encode("finish\\n"));',
+      "              controller.close();",
+      "            }, 500);",
+      "          },",
+      "        });",
+      "        return new Response(body);",
+      "      },",
+      "    },",
+      "  ],",
+      "};",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    workflowWorldPath,
+    [
+      'import { appendFile, rm, writeFile } from "node:fs/promises";',
+      "",
+      `const eventsPath = ${JSON.stringify(eventsPath)};`,
+      `const lockPath = ${JSON.stringify(lockPath)};`,
+      "",
+      "export function createWorld() {",
+      "  return {",
+      "    specVersion: 5,",
+      "    events: {},",
+      "    createQueueHandler() {",
+      "      return async () => Response.json({ ok: true });",
+      "    },",
+      "    async start() {",
+      '      await writeFile(lockPath, String(process.pid), { flag: "wx" });',
+      '      await appendFile(eventsPath, "start\\n");',
+      "    },",
+      "    async close() {",
+      '      await appendFile(eventsPath, "close\\n");',
+      "      await rm(lockPath);",
+      "    },",
+      "  };",
+      "}",
+      "",
+    ].join("\n"),
+  );
+
+  return { appRoot, eventsPath, lockPath };
 }
 
 async function startPackagedEveStart(appRoot: string): Promise<RunningEveStart> {
@@ -423,6 +524,56 @@ describe("runCli", () => {
     } finally {
       await server.stop();
     }
+  }, 120_000);
+
+  it("closes a configured Workflow world before an immediate restart", async () => {
+    const { buildApplication } = await import("../../src/internal/nitro/host.js");
+    const { appRoot, eventsPath, lockPath } = await createWorkflowShutdownProbeAppRoot();
+
+    await buildApplication(appRoot, {
+      skipVercelSandboxPrewarm: false,
+    });
+
+    const firstServer = await startPackagedEveStart(appRoot);
+    try {
+      await expect(fetch(new URL(EVE_HEALTH_ROUTE_PATH, firstServer.url))).resolves.toMatchObject({
+        status: 200,
+      });
+
+      const response = await fetch(new URL("/shutdown/slow-stream", firstServer.url));
+      expect(response.status).toBe(200);
+      expect(response.body).not.toBeNull();
+      if (response.body === null) {
+        throw new Error("Expected the shutdown probe route to return a streaming body.");
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const firstChunk = await reader.read();
+      expect(decoder.decode(firstChunk.value)).toBe("start\n");
+
+      const stopping = firstServer.stop();
+      const secondChunk = await reader.read();
+      expect(decoder.decode(secondChunk.value)).toBe("finish\n");
+      await expect(reader.read()).resolves.toMatchObject({ done: true });
+      await stopping;
+    } finally {
+      await firstServer.stop();
+    }
+
+    await expect(access(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(eventsPath, "utf8")).resolves.toBe("start\nclose\n");
+
+    const secondServer = await startPackagedEveStart(appRoot);
+    try {
+      await expect(fetch(new URL(EVE_HEALTH_ROUTE_PATH, secondServer.url))).resolves.toMatchObject({
+        status: 200,
+      });
+    } finally {
+      await secondServer.stop();
+    }
+
+    await expect(access(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(eventsPath, "utf8")).resolves.toBe("start\nclose\nstart\nclose\n");
   }, 120_000);
 
   it("surfaces discovery diagnostics in build failures", async () => {
