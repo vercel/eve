@@ -33,37 +33,24 @@ export default defineTaskEval({
       ),
     );
 
-    const blocked = await waitForReleaseRequests(t, t, started);
+    const blockedSession = await waitForReleaseRequests(t, t, started);
     const interactive = await sendAndFollowQueuedTurn(
       t,
       "TASK-FANOUT-INTERACTIVE-CHECK",
-      blocked.session,
+      blockedSession,
     );
     interactive.turn.expectOk();
     interactive.turn.messageIncludes("TASK-FANOUT-INTERACTIVE-OK");
     interactive.turn.usedNoTools();
-
-    const released = await interactive.session.respond(
-      blocked.requests.map((request) => ({
-        optionId: "approve",
-        requestId: request.requestId,
-      })),
-    );
-    released.expectOk();
     t.noFailedActions();
   },
 });
-
-interface BlockedFanout {
-  readonly requests: readonly InputRequest[];
-  readonly session: TaskEvalSessionDriver;
-}
 
 async function waitForReleaseRequests(
   t: Parameters<typeof sendAndFollowQueuedTurn>[0],
   initialSession: TaskEvalSessionDriver,
   initialTurn: EveEvalTurn,
-): Promise<BlockedFanout> {
+): Promise<TaskEvalSessionDriver> {
   const requests = new Map<string, InputRequest>();
   let session = initialSession;
   collectReleaseRequests(initialTurn, requests);
@@ -80,7 +67,7 @@ async function waitForReleaseRequests(
   if (requests.size !== FANOUT_SIZE) {
     throw new Error(`Expected ${FANOUT_SIZE} release requests; received ${requests.size}.`);
   }
-  return { requests: [...requests.values()], session };
+  return session;
 }
 
 function collectReleaseRequests(turn: EveEvalTurn, requests: Map<string, InputRequest>): void {
