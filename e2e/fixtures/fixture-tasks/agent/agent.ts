@@ -10,7 +10,7 @@ import {
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
 
 function respond(request: MockModelRequest): MockModelResponse | string {
-  const message = request.userMessages.findLast((entry) => !entry.startsWith("[Agents]")) ?? "";
+  const message = [...request.userMessages].reverse().find(isScenarioMessage) ?? "";
   if (message.includes("TASK-FANOUT-INTERACTIVE-CHECK")) return "TASK-FANOUT-INTERACTIVE-OK";
   if (message.includes("TASK-CANCEL-NOW")) return cancelWorkerTask(request);
   if (message.includes("CHILD-TASK-EXCLUSIVITY-RACE")) return raceBusyWorker(request);
@@ -136,7 +136,7 @@ function fanInTasks(request: MockModelRequest): MockModelResponse | string {
  * per ready transition and the model decides whether the state suffices.
  */
 function fanInNotification(request: MockModelRequest): MockModelResponse | string {
-  const callId = `task-fan-in-check-${request.userMessageCount}`;
+  const callId = `task-fan-in-check-${scenarioUserMessageCount(request)}`;
   const checked = resultById(request, callId);
   const taskIds = FAN_IN_CALL_IDS.map((id) => findTaskId(resultById(request, id)?.output)).filter(
     (taskId): taskId is string => taskId !== undefined,
@@ -182,7 +182,7 @@ function setupCancelWorker(request: MockModelRequest): MockModelResponse | strin
 }
 
 function cancelWorkerTask(request: MockModelRequest): MockModelResponse | string {
-  const callId = `task-cancel-call-${request.userMessageCount}`;
+  const callId = `task-cancel-call-${scenarioUserMessageCount(request)}`;
   if (resultById(request, callId) === undefined) {
     const taskId = findTaskId(resultById(request, "task-cancel-worker")?.output);
     if (taskId === undefined) throw new Error("Cancel scenario has no initial task id.");
@@ -261,13 +261,21 @@ function peekTask(
   completedText: string,
   message: string,
 ): MockModelResponse | string {
-  const callId = `${callIdPrefix}-${request.userMessageCount}`;
+  const callId = `${callIdPrefix}-${scenarioUserMessageCount(request)}`;
   if (resultById(request, callId) === undefined) {
     const taskId = TASK_ID_PATTERN.exec(message)?.[0];
     if (taskId === undefined) throw new Error(`Verification message has no task id: ${message}`);
     return { toolCalls: [{ id: callId, input: { taskIds: [taskId] }, name: "task_peek" }] };
   }
   return completedText;
+}
+
+function isScenarioMessage(message: string): boolean {
+  return !message.startsWith("[Agents]");
+}
+
+function scenarioUserMessageCount(request: MockModelRequest): number {
+  return request.userMessages.filter(isScenarioMessage).length;
 }
 
 function setupBusyWorker(request: MockModelRequest): MockModelResponse | string {
