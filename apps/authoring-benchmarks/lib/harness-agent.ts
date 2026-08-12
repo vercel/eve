@@ -24,13 +24,13 @@ const INSTRUCTIONS =
 
 export function createAuthoringAgent(): Agent {
   return {
-    name: "eve-harness-pi",
-    displayName: "eve HarnessAgent (Pi)",
+    name: "eve-authoring-harness",
+    displayName: "eve authoring harness",
     getApiKeyEnvVar: () => "AI_GATEWAY_API_KEY",
     getDefaultModel: () => "claude-sonnet-4-6",
     definition: {
-      name: "eve-harness-pi",
-      displayName: "eve HarnessAgent (Pi)",
+      name: "eve-authoring-harness",
+      displayName: "eve authoring harness",
       defaultModel: "claude-sonnet-4-6",
       o11yAgentName: "claude-code",
       runnerPath: "",
@@ -72,7 +72,10 @@ export function createAuthoringAgent(): Agent {
         sandbox,
         sandboxConfig: {
           workDir: WORKSPACE,
-          bootstrapHash: bootstrapHash(authoringCase),
+          bootstrapHash: bootstrapHash(
+            authoringCase,
+            options.agentOptions?.agentsMd === true ? "agents-md" : "baseline",
+          ),
           onBootstrap: async ({ session: bootstrap, workDir }) => {
             const networkSandbox = bootstrap as HarnessV1NetworkSandboxSession;
             await bootstrapSubject(networkSandbox, workDir, authoringCase.startingPoint.workspace);
@@ -242,12 +245,12 @@ function shellCommands(toolCalls: ReadonlyArray<{ input: unknown }>): string[] {
   });
 }
 
-function bootstrapHash(authoringCase: AuthoringCase): string {
+function bootstrapHash(authoringCase: AuthoringCase, treatment: string): string {
   const setupIds = [authoringCase.startingPoint.setup, authoringCase.setup]
     .filter((setup): setup is AuthoringSetup => setup !== undefined)
     .map((setup) => setup.id)
     .join("-");
-  return `eve-authoring-${SUBJECT_REPOSITORY}-${SUBJECT_REVISION}-${authoringCase.startingPoint.id}-${setupIds}`;
+  return `eve-authoring-${SUBJECT_REPOSITORY}-${SUBJECT_REVISION}-${authoringCase.startingPoint.id}-${setupIds}-${treatment}`;
 }
 
 async function loadAuthoringCase(fixturePath: string): Promise<AuthoringCase> {

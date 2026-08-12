@@ -6,7 +6,7 @@ import { createAuthoringAgent } from "../lib/harness-agent.js";
 registerAgent(createAuthoringAgent());
 
 const config: ExperimentConfig = {
-  agent: "eve-harness-pi",
+  agent: "eve-authoring-harness",
   model: "claude-sonnet-4-6",
   evals: process.env.EVE_BENCHMARK_EVAL ?? "*",
   scripts: ["typecheck", "build"],
