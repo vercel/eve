@@ -1,7 +1,12 @@
 export const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
-export function canaryDependencyUrl(deploymentHost) {
-  return `https://${deploymentHost}/canary/eve.tgz`;
+export function canaryArtifactPath(sourceSha, version) {
+  return `canary/${sourceSha}/eve-${version}.tgz`;
+}
+
+export function canaryDependencyUrl(storeId, sourceSha, version) {
+  const host = storeId.replace(/^store_/, "").toLowerCase();
+  return `https://${host}.public.blob.vercel-storage.com/${canaryArtifactPath(sourceSha, version)}`;
 }
 
 export function canaryVersion(stableVersion, sourceSha) {
