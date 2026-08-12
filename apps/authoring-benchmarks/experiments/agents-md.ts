@@ -1,18 +1,21 @@
 import type { ExperimentConfig } from "@vercel/agent-eval";
+import { registerAgent } from "@vercel/agent-eval";
 
-import { setupAuthoringEval } from "../lib/setup.js";
+import { harnessAgent, imessageUserSimulator } from "../lib/harness-agent.js";
+
+registerAgent(harnessAgent);
 
 const config: ExperimentConfig = {
-  agent: "vercel-ai-gateway/claude-code",
+  agent: "eve-harness-pi",
   model: "claude-sonnet-4-6",
   evals: "author-000-imessage",
   scripts: ["typecheck", "build"],
   runs: 1,
   earlyExit: true,
   timeout: 900,
-  sandbox: "auto",
+  sandbox: "vercel",
   copyFiles: "changed",
-  setup: (sandbox) => setupAuthoringEval(sandbox, { agentsMd: true, syntheticImessage: true }),
+  agentOptions: { agentsMd: true, maxTurns: 2, userSimulator: imessageUserSimulator },
 };
 
 export default config;

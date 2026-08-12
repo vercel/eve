@@ -32,9 +32,16 @@ creation → phone registration decision tree and records events under
 `__authoring_eval__/world-events.jsonl`. This tests an agent's setup decisions without
 coupling the authoring suite to Photon or live external services.
 
-Until agent-eval supports controlled follow-up turns, the phone number is included in the
-initial prompt. The hidden grader still verifies that the agent passes that value through the
-structured non-interactive setup protocol.
+The iMessage case runs through a registered HarnessAgent-backed Claude Code adapter so the user simulator can
+inspect each completed assistant turn and reply in the same native session. The initial prompt
+omits the phone number; the simulator requires the agent to ask for it before responding. The
+hidden grader verifies both the interaction transcript and the structured non-interactive setup
+protocol.
+
+The adapter also uses HarnessAgent's `bootstrapHash` and `onBootstrap` hooks to build one reusable
+Vercel Sandbox snapshot per subject repository and revision. Each benchmark attempt starts from an
+independent sandbox restored from that prepared project, then applies treatment-specific changes
+in `onSession`.
 
 ## Subject package
 

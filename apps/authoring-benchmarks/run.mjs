@@ -3,7 +3,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
@@ -59,7 +59,12 @@ console.log(`> eve package: ${tarball} (${(statSync(tarball).size / 1024 / 1024)
 const result = spawnSync(executable, experiments, {
   cwd: appRoot,
   stdio: "inherit",
-  env: { ...process.env, EVE_AUTHORING_TARBALL: tarball },
+  env: {
+    ...process.env,
+    EVE_AUTHORING_TARBALL: tarball,
+    EVE_BENCHMARK_REPOSITORY: local ? pathToFileURL(repositoryRoot).href : repository,
+    EVE_BENCHMARK_REVISION: subject.revision,
+  },
 });
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);
