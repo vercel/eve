@@ -1,0 +1,90 @@
+---
+title: "Compare Agent Frameworks"
+description: "An evidence-based comparison of eve, Mastra, Flue 2.0, Cloudflare Agents SDK, LangGraph, Hermes Agent, and the wider agent framework landscape."
+---
+
+<ComparisonHero />
+
+The agent ecosystem has no shortage of SDKs that can call a model, execute a tool, or persist a chat. Those are table stakes. The difficult question is what happens when the agent becomes a real product: it works for days, runs code, serves several surfaces, delegates to specialists, asks people for approval, and acts with the credentials of whoever is speaking now.
+
+This comparison evaluates the **documented production contract**, not whether a determined team could build the missing layer. Any general-purpose runtime can be extended indefinitely. “Built in” means the framework owns the lifecycle and gives it one coherent authoring, durability, identity, and observability story.
+
+## The architectural difference
+
+eve treats an agent as a directory. The model gets a durable harness and decides how to use the capabilities inside it. You do not have to turn the model's job into a graph before it can begin.
+
+<AuthoringShape />
+
+That distinction becomes more important as models improve. A graph captures the routing intelligence you had to supply today. A well-designed harness exposes the stable capabilities, policies, and environment that a stronger model can use better tomorrow. With eve, adding a connection, skill, channel, schedule, or specialist makes the agent richer without making its central definition larger.
+
+Mastra now offers [experimental file-based agents](https://mastra.ai/docs/getting-started/file-based-agents), and Flue 2.0 discovers exported agent functions. Those are useful moves in the same direction. The difference is completeness: eve's recursive directory is the framework's primary authoring model, including nested subagents, dynamic capability files, sandbox seed state, connections, channels, schedules, and sibling evals. There is no second registry that becomes the real architecture.
+
+## Capability comparison
+
+The matrix uses four deliberately narrow labels:
+
+- **First-class**: the framework owns the end-to-end lifecycle.
+- **Supported**: there is a documented primitive or close integration, but another surface or adapter completes the story.
+- **Assemble**: application code combines lower-level pieces.
+- **Outside core**: possible in the host ecosystem, but not a documented framework responsibility.
+
+<ComparisonMatrix />
+
+The point is not that eve is the only project with durability, sandboxes, channels, or subagents. It is the only framework in this set where all of those concerns share the same filesystem authoring model and durable session contract—including identity changes between turns.
+
+## Multiplayer is an authorization problem
+
+Several frameworks now use “multiplayer” to mean that multiple clients can subscribe to one stream, send messages into one thread, or steer a running loop. That is valuable, but a shared transcript alone does not answer the production questions: **Who is speaking now? Which tenant are they in? Whose OAuth grant should this tool use? Which instructions and skills may this person load?**
+
+<MultiplayerTimeline />
+
+eve carries both [`auth.current`](./guides/session-context) and `auth.initiator` in the durable session. A follow-up from a different person updates the current principal while preserving who began the session. Dynamic tools, skills, instructions, connection headers, approval policies, and user-scoped credentials can all resolve from that current identity.
+
+Mastra deserves credit for pushing shared-agent interaction forward. Its [Channels architecture](https://mastra.ai/blog/building-multi-user-multi-channel-agents) maps many participants into one platform thread, attributes messages, queues concurrent input, and can isolate a workspace per thread. Its documented resource memory remains bound to whoever started the thread, while other participants arrive as attributed messages. eve goes one layer deeper: the active participant is a runtime security principal, not only conversation metadata.
+
+## Durability without a second programming model
+
+Durability is often available somewhere in a competitor's stack. The catch is where its boundary sits.
+
+- LangGraph checkpoints graph supersteps once a checkpointer is configured.
+- Cloudflare combines Agent instances with Fibers or Workflows.
+- Mastra has durable workflows and a separate beta Durable Agents surface for long-running autonomous loops.
+- Flue 2.0 records accepted submissions and can recover durable tools and delegated tasks, while code around agent sends remains outside that checkpoint boundary.
+
+eve makes the ordinary agent turn the durable unit. Every model step checkpoints automatically. Approval, OAuth, sleep, a long-running child, or a channel reply parks the workflow without holding compute. Tools and subagents keep a synchronous authoring shape even when execution crosses processes or deploys. You can still author deterministic orchestration when the task truly calls for it, but reliability does not require converting the agent into a workflow first.
+
+## A complete harness, not a bag of primitives
+
+The most important eve advantage is cumulative. A production feature is more useful when it composes with every other one:
+
+- The sandbox is isolated from the trusted app runtime, persists per session, supports network policy, and can broker credentials without exposing them to model-controlled code.
+- A nested or remote subagent gets its own durable session; approval and OAuth challenges still surface through the root channel.
+- The same authenticated principal that selects dynamic tools and skills also selects user-scoped MCP or OpenAPI credentials.
+- The same session streams to web clients, messaging channels, the TUI, evals, and OpenTelemetry instrumentation.
+- Schedules, channels, tools, connections, sandboxes, and subagents remain recognizable as files even when the agent grows to hundreds of capabilities.
+
+Other projects can reproduce individual boxes. eve owns the seams between them.
+
+## Where each option is strongest
+
+A useful comparison should make the alternatives legible too. These are different products with different centers of gravity.
+
+<FrameworkFit />
+
+### What about OpenAI Agents SDK, Pydantic AI, and CrewAI?
+
+They are credible choices, but they answer different slices of the problem:
+
+- [OpenAI Agents SDK](https://openai.github.io/openai-agents-js/) is intentionally a small set of TypeScript and Python primitives for agent loops, tools, handoffs, guardrails, sessions, tracing, HITL, MCP, and sandbox agents. It does not try to be the deployment, channel, scheduling, or filesystem application framework around them.
+- [Pydantic AI](https://pydantic.dev/docs/ai/overview/) is an excellent Python-first choice when typed dependencies and outputs, model portability, evals, and opt-in durable execution integrations matter more than a complete product-agent runtime.
+- [CrewAI](https://docs.crewai.com/) centers role-based crews and event-driven flows, with a growing enterprise deployment platform. It is strongest when explicit multi-agent teams and automations are the desired abstraction.
+
+The same principle applies to lower-level model SDKs: being able to assemble a feature is not the same as having a framework own its lifecycle.
+
+## Methodology and sources
+
+This page was last verified on **July 31, 2026** against public, official documentation. The primary comparison covers eve, [Mastra](https://mastra.ai/docs/), [Flue 2.0](https://flueframework.com/docs/), [Cloudflare Agents SDK](https://developers.cloudflare.com/agents/), [LangGraph](https://docs.langchain.com/oss/javascript/langgraph/overview), and [Hermes Agent](https://hermes-agent.nousresearch.com/docs/). Flue refers to the `2.0.0` surface published on that date, not older v1 beta material.
+
+The scope is the open or publicly documented framework surface. Hosted products are credited where they materially complete that framework's production story, and the matrix says so. It does not compare price, benchmarks, GitHub stars, private roadmap claims, or features visible only in a demo. “Not documented” is not a claim of impossibility; it means adopters own that contract until the project publishes one.
+
+Frameworks change quickly. Every matrix assessment links to the relevant source so you can verify a requirement that is critical to your application.

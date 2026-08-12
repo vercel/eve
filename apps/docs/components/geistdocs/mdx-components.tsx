@@ -4,6 +4,13 @@ import { Step, Steps } from "fumadocs-ui/components/steps";
 import type { MDXComponents } from "mdx/types";
 import Link from "next/link";
 import { AgentRuntimeDiagram } from "./agent-runtime-diagram";
+import {
+  AuthoringShape,
+  ComparisonHero,
+  ComparisonMatrix,
+  FrameworkFit,
+  MultiplayerTimeline,
+} from "./framework-comparison";
 
 const localComponents: MDXComponents = {
   a: ({ href, ...props }) =>
@@ -16,8 +23,13 @@ const localComponents: MDXComponents = {
   Files,
   Folder,
   AgentRuntimeDiagram,
+  AuthoringShape,
+  ComparisonHero,
+  ComparisonMatrix,
   Step,
   Steps,
+  FrameworkFit,
+  MultiplayerTimeline,
 };
 
 export const getMDXComponents = (components?: MDXComponents): MDXComponents =>
