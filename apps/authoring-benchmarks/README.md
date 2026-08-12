@@ -13,7 +13,7 @@ files, commands, validation, and any synthetic world events.
 
 Each directory under `evals/` contains:
 
-- `case.ts`, which selects a reusable starting point, adds optional setup, and defines the user interaction.
+- `CASE.ts`, which selects a reusable starting point, adds optional setup, and defines the user interaction.
 - `EVAL.ts`, which contains hidden deterministic assertions.
 - Case-specific support files, when needed, which are installed during setup and kept out of sight from the coding agent.
 - `PROMPT.md`, a compatibility stub used only by agent-eval to discover the fixture. Its contents are never sent to the coding agent.
@@ -90,12 +90,12 @@ credential is required.
 
 ## Adding a case
 
-Copy an existing fixture, give it the next `author-NNN-*` name, then edit `case.ts` and the
+Copy an existing fixture, give it the next `author-NNN-*` name, then edit `CASE.ts` and the
 hidden grader. Select `simpleProject` or `emptyProject`, compose reusable setup when needed, and
 put the complete user interaction in `interact`. There is no scenario registry to update.
 
 Keep setup that is useful across cases under `lib/setups/`. Keep one-off setup next to the case
-or inline in `case.ts`. A one-turn filesystem task can be as small as:
+or inline in `CASE.ts`. A one-turn filesystem task can be as small as:
 
 ```ts
 export default defineAuthoringCase({

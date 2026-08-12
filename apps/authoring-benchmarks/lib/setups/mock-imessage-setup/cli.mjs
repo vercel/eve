@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
+import { authoringStatePath, recordAuthoringEvent } from "./authoring-world.mjs";
+
 const PROTOCOL_VERSION = 2;
-const EVENT_LOG = "__authoring_eval__/world-events.jsonl";
-const STATE_FILE = "__authoring_eval__/mock-imessage-state.json";
+const STATE_FILE = authoringStatePath("mock-imessage-state");
 const EXPECTED_PHONE = process.env.EVE_AUTHORING_PHONE_NUMBER ?? "+15551234567";
 
 const { values } = parseArgs({
@@ -90,7 +91,7 @@ if (!values["non-interactive"]) {
 }
 
 function record(type, data) {
-  appendFileSync(EVENT_LOG, `${JSON.stringify({ at: new Date().toISOString(), type, data })}\n`);
+  recordAuthoringEvent(type, data);
 }
 
 function persist() {

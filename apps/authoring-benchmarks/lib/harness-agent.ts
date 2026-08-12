@@ -131,7 +131,10 @@ export function createAuthoringAgent(): Agent {
           }),
         );
         await context.write("__agent_eval__/harness-transcript.json", JSON.stringify(transcript));
-        await context.write("EVAL.test.ts", readFileSync(`${fixturePath}/EVAL.ts`, "utf8"));
+        await Promise.all([
+          context.write("EVAL.test.ts", readFileSync(`${fixturePath}/EVAL.ts`, "utf8")),
+          context.write("grader.ts", readFileSync(new URL("./grader.ts", import.meta.url), "utf8")),
+        ]);
 
         const test = await resultOf(activeSandbox, "vitest run EVAL.test.ts", workspace);
         const scriptsResults = Object.fromEntries(
@@ -246,11 +249,11 @@ function bootstrapHash(authoringCase: AuthoringCase): string {
 }
 
 async function loadAuthoringCase(fixturePath: string): Promise<AuthoringCase> {
-  const module = (await import(pathToFileURL(`${fixturePath}/case.ts`).href)) as {
+  const module = (await import(pathToFileURL(`${fixturePath}/CASE.ts`).href)) as {
     default?: AuthoringCase;
   };
   if (module.default === undefined) {
-    throw new Error(`${fixturePath}/case.ts must export an authoring case as default.`);
+    throw new Error(`${fixturePath}/CASE.ts must export an authoring case as default.`);
   }
   return module.default;
 }
