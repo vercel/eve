@@ -21,16 +21,16 @@ interface ExtensionCapabilityContract {
 
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
-  tool: { current: 11, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dropped: {} },
+  tool: { current: 12, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dropped: {} },
   dynamicTool: {
-    current: 13,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+    current: 14,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
     dropped: {},
   },
-  connection: { current: 4, supported: [1, 2, 3, 4], dropped: {} },
+  connection: { current: 5, supported: [1, 2, 3, 4, 5], dropped: {} },
   hook: {
-    current: 10,
-    supported: [10],
+    current: 11,
+    supported: [10, 11],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -48,7 +48,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   instructions: { current: 1, supported: [1], dropped: {} },
   dynamicInstructions: { current: 8, supported: [1, 2, 3, 4, 5, 6, 7, 8], dropped: {} },
   config: { current: 1, supported: [1], dropped: {} },
-  state: { current: 3, supported: [1, 2, 3], dropped: {} },
+  state: { current: 4, supported: [1, 2, 3, 4], dropped: {} },
 } as const satisfies Record<string, ExtensionCapabilityContract>;
 
 /** One independently versioned extension-facing contract. */

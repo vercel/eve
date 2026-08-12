@@ -97,56 +97,65 @@ export async function checkoutGitHubRepository(
   // Broker the installation token at the sandbox firewall: git fetches a clean
   // (token-free) URL and the platform injects `Authorization` on egress to
   // GitHub, so the token never enters the sandbox process. The `"*"` rule keeps
-  // the agent's other egress open.
+  // the agent's other egress open. Scoped to this fetch window — the prior
+  // policy is captured up front and restored in the `finally` below, so the
+  // broker (and its wide-open `"*"`) doesn't linger over later egress and a
+  // failed fetch can't strand the sandbox in the widened state.
+  const priorNetworkPolicy = sandbox.getNetworkPolicy();
   await sandbox.setNetworkPolicy(buildBrokerNetworkPolicy(token));
 
-  await runCheckoutCommand({
-    command: `mkdir -p ${shellQuote(checkoutPath)}`,
-    label: "create checkout directory",
-    sandbox,
-  });
-  await runCheckoutCommand({
-    command: `cd ${shellQuote(checkoutPath)} && git init`,
-    label: "initialize git repository",
-    sandbox,
-  });
-  await runCheckoutCommand({
-    command: `cd ${shellQuote(checkoutPath)} && git remote remove origin >/dev/null 2>&1 || true`,
-    label: "reset git remote",
-    sandbox,
-  });
-  await runCheckoutCommand({
-    command: `cd ${shellQuote(checkoutPath)} && git remote add origin ${shellQuote(remote)}`,
-    label: "configure git remote",
-    sandbox,
-  });
-  await runCheckoutCommand({
-    command: `cd ${shellQuote(checkoutPath)} && GIT_TERMINAL_PROMPT=0 git fetch${fetchDepth} origin ${shellQuote(
-      checkoutRef,
-    )}`,
-    label: "fetch GitHub ref",
-    sandbox,
-  });
-  await runCheckoutCommand({
-    command: `cd ${shellQuote(checkoutPath)} && git checkout --detach ${shellQuote(fetchedRef)}`,
-    label: "checkout GitHub ref",
-    sandbox,
-  });
-  if (input.includeBase === true && descriptor.baseSha !== null) {
+  let head: { readonly stderr: string; readonly stdout: string };
+  try {
     await runCheckoutCommand({
-      command: `cd ${shellQuote(checkoutPath)} && GIT_TERMINAL_PROMPT=0 git fetch${fetchDepth} origin ${shellQuote(
-        descriptor.baseSha,
-      )}`,
-      label: "fetch GitHub base ref",
+      command: `mkdir -p ${shellQuote(checkoutPath)}`,
+      label: "create checkout directory",
       sandbox,
     });
-  }
+    await runCheckoutCommand({
+      command: `cd ${shellQuote(checkoutPath)} && git init`,
+      label: "initialize git repository",
+      sandbox,
+    });
+    await runCheckoutCommand({
+      command: `cd ${shellQuote(checkoutPath)} && git remote remove origin >/dev/null 2>&1 || true`,
+      label: "reset git remote",
+      sandbox,
+    });
+    await runCheckoutCommand({
+      command: `cd ${shellQuote(checkoutPath)} && git remote add origin ${shellQuote(remote)}`,
+      label: "configure git remote",
+      sandbox,
+    });
+    await runCheckoutCommand({
+      command: `cd ${shellQuote(checkoutPath)} && GIT_TERMINAL_PROMPT=0 git fetch${fetchDepth} origin ${shellQuote(
+        checkoutRef,
+      )}`,
+      label: "fetch GitHub ref",
+      sandbox,
+    });
+    await runCheckoutCommand({
+      command: `cd ${shellQuote(checkoutPath)} && git checkout --detach ${shellQuote(fetchedRef)}`,
+      label: "checkout GitHub ref",
+      sandbox,
+    });
+    if (input.includeBase === true && descriptor.baseSha !== null) {
+      await runCheckoutCommand({
+        command: `cd ${shellQuote(checkoutPath)} && GIT_TERMINAL_PROMPT=0 git fetch${fetchDepth} origin ${shellQuote(
+          descriptor.baseSha,
+        )}`,
+        label: "fetch GitHub base ref",
+        sandbox,
+      });
+    }
 
-  const head = await runCheckoutCommand({
-    command: `cd ${shellQuote(checkoutPath)} && git rev-parse HEAD`,
-    label: "resolve checked out commit",
-    sandbox,
-  });
+    head = await runCheckoutCommand({
+      command: `cd ${shellQuote(checkoutPath)} && git rev-parse HEAD`,
+      label: "resolve checked out commit",
+      sandbox,
+    });
+  } finally {
+    await sandbox.setNetworkPolicy(priorNetworkPolicy);
+  }
   const sha = head.stdout.trim() || descriptor.headSha || checkoutRef;
   return {
     baseRef: descriptor.baseRef,

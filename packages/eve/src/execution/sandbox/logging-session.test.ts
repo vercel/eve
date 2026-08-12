@@ -90,6 +90,7 @@ describe("createLoggingSandboxSession", () => {
 function createTestSession(runResult = { exitCode: 0, stderr: "", stdout: "" }): SandboxSession {
   return {
     id: "test-session",
+    getNetworkPolicy: () => "allow-all",
     resolvePath: (path) => (path.startsWith("/") ? path : `/workspace/${path}`),
     run: vi.fn(async () => runResult),
     spawn: vi.fn(async () => ({

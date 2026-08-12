@@ -24,3 +24,20 @@ import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
  * no binaries to govern).
  */
 export type SandboxNetworkPolicy = Vercel.NetworkPolicy;
+
+/**
+ * Mutable box tracking the network policy currently in effect on a live
+ * sandbox. Seeded with the policy the sandbox was created under and passed
+ * into {@link buildSandboxSession}, whose `setNetworkPolicy` wrapper updates
+ * `current` after every policy change it accepts, so the resulting
+ * session's `getNetworkPolicy()` stays accurate.
+ *
+ * Backends whose `useSessionFn` applies a policy straight to the provider
+ * SDK (bypassing that wrapper) must write `current` themselves — and must
+ * share the same ref instance across every session built for that handle,
+ * or `getNetworkPolicy()` on one session won't see updates made through
+ * another.
+ */
+export interface SandboxNetworkPolicyRef {
+  current: SandboxNetworkPolicy;
+}

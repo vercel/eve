@@ -87,7 +87,8 @@ describe("GitHub checkout", () => {
       false,
     );
     expect(sandbox.commandLog.some((command) => command.includes("ghs_checkout"))).toBe(false);
-    // Token brokered at the firewall via a github.com header transform.
+    // Token brokered at the firewall via a github.com header transform, then
+    // the sandbox's prior policy is restored once the fetch window closes.
     const authorization = `Basic ${Buffer.from("x-access-token:ghs_checkout").toString("base64")}`;
     expect(sandbox.networkPolicyUpdates).toEqual([
       {
@@ -97,7 +98,67 @@ describe("GitHub checkout", () => {
           "*": [],
         },
       },
+      "allow-all",
     ]);
+  });
+
+  it("restores the sandbox's prior (non-default) network policy after checkout", async () => {
+    const headSha = "a".repeat(40);
+    const priorPolicy = { allow: { "npmjs.org": [] } };
+    const sandbox = mockSandbox({
+      networkPolicy: priorPolicy,
+      run(options) {
+        if (options.command.includes("git rev-parse HEAD 2>/dev/null")) {
+          return { exitCode: 128, stderr: "", stdout: "" };
+        }
+        if (options.command.includes("git rev-parse HEAD")) {
+          return { exitCode: 0, stderr: "", stdout: `${headSha}\n` };
+        }
+        return { exitCode: 0, stderr: "", stdout: "" };
+      },
+    });
+
+    await checkoutGitHubRepository(sandbox.session, {
+      credentials,
+      headSha,
+      installationId: 55,
+      owner: "vercel",
+      repo: "eve",
+    });
+
+    expect(sandbox.networkPolicyUpdates.at(-1)).toEqual(priorPolicy);
+    expect(sandbox.session.getNetworkPolicy()).toEqual(priorPolicy);
+  });
+
+  it("restores the prior network policy even when the checkout fails", async () => {
+    const headSha = "e".repeat(40);
+    const priorPolicy = "deny-all";
+    const sandbox = mockSandbox({
+      networkPolicy: priorPolicy,
+      run(options) {
+        if (options.command.includes("git fetch")) {
+          return {
+            exitCode: 128,
+            stderr: "fatal: could not read from remote repository",
+            stdout: "",
+          };
+        }
+        return { exitCode: 0, stderr: "", stdout: "" };
+      },
+    });
+
+    await expect(
+      checkoutGitHubRepository(sandbox.session, {
+        credentials,
+        headSha,
+        installationId: 55,
+        owner: "vercel",
+        repo: "eve",
+      }),
+    ).rejects.toThrow("Verify the GitHub App installation has access to this repository");
+
+    expect(sandbox.networkPolicyUpdates.at(-1)).toBe(priorPolicy);
+    expect(sandbox.session.getNetworkPolicy()).toBe(priorPolicy);
   });
 
   it("skips fetch when the workspace is already at the target commit", async () => {

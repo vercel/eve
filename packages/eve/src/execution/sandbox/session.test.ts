@@ -74,6 +74,49 @@ describe("buildSandboxSession", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // getNetworkPolicy
+  // ---------------------------------------------------------------------------
+
+  it("defaults getNetworkPolicy to allow-all when no ref is supplied", () => {
+    const session = buildSandboxSession(createTestPrimitives());
+
+    expect(session.getNetworkPolicy()).toBe("allow-all");
+  });
+
+  it("seeds getNetworkPolicy from the supplied ref", () => {
+    const session = buildSandboxSession(createTestPrimitives(), undefined, {
+      current: "deny-all",
+    });
+
+    expect(session.getNetworkPolicy()).toBe("deny-all");
+  });
+
+  it("updates the ref (and getNetworkPolicy) after an accepted setNetworkPolicy", async () => {
+    const ref = { current: "allow-all" as const };
+    const session = buildSandboxSession(createTestPrimitives(), async () => {}, ref);
+    const policy = { allow: { "github.com": [] } };
+
+    await session.setNetworkPolicy(policy);
+
+    expect(session.getNetworkPolicy()).toEqual(policy);
+    expect(ref.current).toEqual(policy);
+  });
+
+  it("does not update the ref when the applier rejects", async () => {
+    const ref = { current: "allow-all" as const };
+    const apply = vi.fn(async () => {
+      throw new Error("firewall rejected the policy");
+    });
+    const session = buildSandboxSession(createTestPrimitives(), apply, ref);
+
+    await expect(session.setNetworkPolicy("deny-all")).rejects.toThrow(
+      "firewall rejected the policy",
+    );
+    expect(session.getNetworkPolicy()).toBe("allow-all");
+    expect(ref.current).toBe("allow-all");
+  });
+
+  // ---------------------------------------------------------------------------
   // resolvePath
   // ---------------------------------------------------------------------------
 

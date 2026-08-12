@@ -301,6 +301,9 @@ function createRecordingDispatch(events: ReturnType<typeof createPrewarmEvents>)
           async readTextFile() {
             return null;
           },
+          getNetworkPolicy() {
+            return "allow-all" as const;
+          },
           async setNetworkPolicy() {},
           async removePath() {},
           resolvePath(path: string) {
@@ -346,6 +349,9 @@ function createFailingBootstrapDispatch() {
           },
           async readTextFile() {
             return null;
+          },
+          getNetworkPolicy() {
+            return "allow-all" as const;
           },
           async setNetworkPolicy() {},
           async removePath() {},

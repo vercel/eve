@@ -3,7 +3,10 @@ import {
   ensureVercelSandboxBaseRuntime,
 } from "#execution/sandbox/bindings/vercel-base-runtime.js";
 import type { SandboxBootstrapContext } from "#public/definitions/sandbox.js";
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import type {
+  SandboxNetworkPolicy,
+  SandboxNetworkPolicyRef,
+} from "#shared/sandbox-network-policy.js";
 import type {
   InternalSandboxSession,
   SandboxProcess,
@@ -134,7 +137,7 @@ export function createVercelSandbox(
         await applyInitialVercelNetworkPolicy(session.sandbox, createOptions.networkPolicy);
       }
 
-      return createHandle(session.sandbox, createInput.sessionKey);
+      return createHandle(session.sandbox, createInput.sessionKey, createOptions.networkPolicy);
     },
     async prewarm(
       prewarmInput: SandboxBackendPrewarmInput<VercelSandboxBootstrapUseOptions>,
@@ -316,9 +319,11 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
   await ensureVercelSandboxBaseRuntime(sandbox);
   await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
 
+  const networkPolicyRef = createVercelNetworkPolicyRef(input.createOptions.networkPolicy);
   const templateSession = buildSandboxSession(
     createVercelInternalSandboxSession(sandbox, input.templateKey),
     createVercelNetworkPolicySetter(sandbox),
+    networkPolicyRef,
   );
 
   await writeVercelSandboxSeedFiles({
@@ -331,9 +336,7 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
     input.log?.("running sandbox bootstrap");
     await input.bootstrap({
       use: async (options?: VercelSandboxBootstrapUseOptions) => {
-        if (options !== undefined) {
-          await sandbox.update(options);
-        }
+        await applyVercelSandboxUpdate(sandbox, options, networkPolicyRef);
         return createLoggingSandboxSession({
           log: input.log,
           session: templateSession,
@@ -438,19 +441,21 @@ function withBaseSetupNetworkPolicy(
 function createHandle(
   sandbox: VercelSandbox,
   sessionKey: string,
+  networkPolicy: SandboxNetworkPolicy | undefined,
 ): SandboxBackendHandle<VercelSandboxSessionUseOptions> {
+  const networkPolicyRef = createVercelNetworkPolicyRef(networkPolicy);
   return {
     session: buildSandboxSession(
       createVercelInternalSandboxSession(sandbox, sessionKey),
       createVercelNetworkPolicySetter(sandbox),
+      networkPolicyRef,
     ),
     useSessionFn: async (options?: VercelSandboxSessionUseOptions) => {
-      if (options !== undefined) {
-        await sandbox.update(options);
-      }
+      await applyVercelSandboxUpdate(sandbox, options, networkPolicyRef);
       return buildSandboxSession(
         createVercelInternalSandboxSession(sandbox, sessionKey),
         createVercelNetworkPolicySetter(sandbox),
+        networkPolicyRef,
       );
     },
     async captureState() {
@@ -486,6 +491,23 @@ function createVercelNetworkPolicySetter(
   return async (policy) => {
     await sandbox.update({ networkPolicy: policy });
   };
+}
+
+function createVercelNetworkPolicyRef(
+  networkPolicy: SandboxNetworkPolicy | undefined,
+): SandboxNetworkPolicyRef {
+  return { current: networkPolicy ?? "allow-all" };
+}
+
+// Bypasses the session's setNetworkPolicy wrapper, so the ref is written here too.
+async function applyVercelSandboxUpdate(
+  sandbox: VercelSandbox,
+  options: { readonly networkPolicy?: SandboxNetworkPolicy } | undefined,
+  networkPolicyRef: SandboxNetworkPolicyRef,
+): Promise<void> {
+  if (options === undefined) return;
+  await sandbox.update(options);
+  if (options.networkPolicy !== undefined) networkPolicyRef.current = options.networkPolicy;
 }
 
 function createVercelInternalSandboxSession(

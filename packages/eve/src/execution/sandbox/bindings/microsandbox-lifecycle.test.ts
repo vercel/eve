@@ -10,6 +10,7 @@ import {
   MICROSANDBOX_DEFAULT_IMAGE,
   resolveMicrosandboxOptions,
 } from "#execution/sandbox/bindings/microsandbox-options.js";
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
 const runtimeMocks = vi.hoisted(() => ({
   connectMicrosandbox: vi.fn(),
@@ -208,6 +209,38 @@ describe("createMicrosandboxHandle", () => {
     expect(runtimeMocks.createPreparedMicrosandbox).toHaveBeenCalledTimes(2);
   });
 
+  it("shares one network policy ref between the handle's session and useSessionFn", async () => {
+    const vm = createFakeMicrosandboxVm("session-key");
+    runtimeMocks.createPreparedMicrosandbox.mockResolvedValue(vm);
+    const options = resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE });
+
+    const handle = await createMicrosandboxHandle({
+      backendName: "microsandbox",
+      createInput: {
+        runtimeContext: { appRoot: "/tmp/eve-app" },
+        sessionKey: "session-key",
+        templateKey: "template-key",
+      },
+      options,
+      optionsHash: "options-hash",
+    });
+
+    expect(handle.session.getNetworkPolicy()).toBe("allow-all");
+
+    // useSessionFn applies networkPolicy straight to the VM (bypassing
+    // session.setNetworkPolicy); getNetworkPolicy() on the *original*
+    // session handle must still see the update.
+    const usedSession = await handle.useSessionFn({ networkPolicy: "deny-all" });
+
+    expect(vm.setNetworkPolicy).toHaveBeenCalledWith("deny-all");
+    expect(handle.session.getNetworkPolicy()).toBe("deny-all");
+    expect(usedSession.getNetworkPolicy()).toBe("deny-all");
+
+    await usedSession.setNetworkPolicy("allow-all");
+
+    expect(handle.session.getNetworkPolicy()).toBe("allow-all");
+  });
+
   it("reports a missing template snapshot race as not provisioned", async () => {
     runtimeMocks.createPreparedMicrosandbox.mockRejectedValueOnce(
       new Error("snapshot template-snapshot not found"),
@@ -309,11 +342,18 @@ describe("prewarmMicrosandboxTemplate", () => {
   });
 });
 
-function createFakeMicrosandboxVm(sessionKey: string) {
+function createFakeMicrosandboxVm(
+  sessionKey: string,
+  initialNetworkPolicy: SandboxNetworkPolicy = "allow-all",
+) {
   const files = new Map<string, Buffer>();
+  let networkPolicy: SandboxNetworkPolicy = initialNetworkPolicy;
 
   return {
     id: sessionKey,
+    get networkPolicy(): SandboxNetworkPolicy {
+      return networkPolicy;
+    },
     async captureState(optionsHash: string) {
       return {
         optionsHash,
@@ -331,7 +371,9 @@ function createFakeMicrosandboxVm(sessionKey: string) {
       files.delete(path);
     },
     async removePersisted() {},
-    async setNetworkPolicy() {},
+    setNetworkPolicy: vi.fn(async (policy: SandboxNetworkPolicy) => {
+      networkPolicy = policy;
+    }),
     async spawn() {
       throw new Error("spawn is not used by this test.");
     },

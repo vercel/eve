@@ -100,6 +100,15 @@ export class MicrosandboxVm {
     return this.#input.sessionKey;
   }
 
+  /**
+   * The network policy currently applied to this VM: either the policy it
+   * was created (or resumed) under, or the most recent one accepted by
+   * {@link setNetworkPolicy}.
+   */
+  get networkPolicy(): SandboxNetworkPolicy | undefined {
+    return this.#networkPolicy;
+  }
+
   async captureState(optionsHash: string): Promise<MicrosandboxSessionMetadata> {
     this.#optionsHash = optionsHash;
     if (isEveDevEnvironment()) {

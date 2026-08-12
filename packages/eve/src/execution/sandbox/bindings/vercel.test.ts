@@ -1280,6 +1280,50 @@ describe("createVercelSandbox", () => {
     });
   });
 
+  it("shares one network policy ref between the handle's session and useSessionFn", async () => {
+    const templateSandbox = createMockSandbox({ name: "template" });
+    const sessionSandbox = createMockSandbox({ name: "session" });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi
+          .fn()
+          .mockResolvedValueOnce(templateSandbox)
+          .mockResolvedValueOnce(sessionSandbox),
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+
+    const handle = await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: "template-key",
+    });
+
+    expect(handle.session.getNetworkPolicy()).toBe("allow-all");
+
+    // useSessionFn applies networkPolicy straight to the provider SDK
+    // (bypassing session.setNetworkPolicy); getNetworkPolicy() on the
+    // *original* session handle must still see the update.
+    const usedSession = await handle.useSessionFn({ networkPolicy: "deny-all" });
+
+    expect(handle.session.getNetworkPolicy()).toBe("deny-all");
+    expect(usedSession.getNetworkPolicy()).toBe("deny-all");
+
+    await usedSession.setNetworkPolicy("allow-all");
+
+    expect(handle.session.getNetworkPolicy()).toBe("allow-all");
+  });
+
   it("brokers credentials through the session's setNetworkPolicy to sandbox.update", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });

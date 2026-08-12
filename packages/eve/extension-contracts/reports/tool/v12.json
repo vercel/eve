@@ -1,0 +1,22 @@
+{
+  "kind": "eve-extension-capability-contract",
+  "capability": "tool",
+  "epoch": 12,
+  "sha256": "f64bf869a7fd406be4ac8d501d20e81713e237389ca25aad8b7a039052f448e9",
+  "exports": [
+    "defineBashTool",
+    "defineGlobTool",
+    "defineGrepTool",
+    "defineReadFileTool",
+    "defineTool",
+    "defineWriteFileTool",
+    "disableTool",
+    "experimental_workflow",
+    "isDisabledToolSentinel",
+    "isExperimentalWorkflowToolDefinition",
+    "toolOutput",
+    "toolOutputPart",
+    "toolResultFrom",
+    "webSearch"
+  ]
+}

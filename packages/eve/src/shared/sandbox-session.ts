@@ -121,6 +121,13 @@ export interface SandboxSession extends Pick<
    */
   resolvePath(path: string): string;
   /**
+   * Returns the network policy currently in effect on this session:
+   * either the policy the sandbox was created under, or the most recent
+   * one accepted by `setNetworkPolicy`. Read this before temporarily
+   * widening or brokering egress so it can be restored afterward.
+   */
+  getNetworkPolicy(): SandboxNetworkPolicy;
+  /**
    * Applies a firewall network policy to this live sandbox at run time,
    * for changing the policy *during* a turn (e.g. brokering a credential
    * resolved mid-turn, or tightening egress after fetching data). A

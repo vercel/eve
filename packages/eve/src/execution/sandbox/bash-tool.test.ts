@@ -42,6 +42,7 @@ describe("executeBashOnSandbox", () => {
 function createTestSandboxSession(result: SandboxCommandResult): SandboxSession {
   return {
     id: "test-sandbox",
+    getNetworkPolicy: () => "allow-all",
     readBinaryFile: async () => null,
     readFile: async () => null,
     readTextFile: async () => null,

@@ -12,7 +12,10 @@ import type {
   SandboxWriteFileOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import type {
+  SandboxNetworkPolicy,
+  SandboxNetworkPolicyRef,
+} from "#shared/sandbox-network-policy.js";
 import { bufferToStream, streamToBuffer } from "./stream-utils.js";
 
 export type { InternalSandboxSession };
@@ -29,10 +32,18 @@ export type { InternalSandboxSession };
  * `setNetworkPolicy` applies a firewall policy to the live sandbox. It
  * defaults to a no-op so backends without a firewall (and test doubles)
  * need not supply one; the Vercel backend wires it to `sandbox.update`.
+ *
+ * `networkPolicyRef` backs the public session's `getNetworkPolicy()`. It
+ * defaults to a fresh ref seeded with `"allow-all"`; callers whose
+ * `useSessionFn` applies a policy outside `setNetworkPolicy` (straight to
+ * the provider SDK) must build every session for that handle from the
+ * same ref instance and update it themselves, or `getNetworkPolicy()`
+ * will report a stale value.
  */
 export function buildSandboxSession(
   primitives: InternalSandboxSession,
   setNetworkPolicy: (policy: SandboxNetworkPolicy) => Promise<void> = async () => {},
+  networkPolicyRef: SandboxNetworkPolicyRef = { current: "allow-all" },
 ): SandboxSession {
   async function run(options: SandboxRunOptions) {
     const process = await primitives.spawn(options);
@@ -111,7 +122,13 @@ export function buildSandboxSession(
         recursive: options.recursive,
       });
     },
-    setNetworkPolicy,
+    getNetworkPolicy(): SandboxNetworkPolicy {
+      return networkPolicyRef.current;
+    },
+    async setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void> {
+      await setNetworkPolicy(policy);
+      networkPolicyRef.current = policy;
+    },
   };
 }
 

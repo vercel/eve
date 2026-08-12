@@ -22,6 +22,7 @@ function createRecordingSession(calls: RecordedCall[]): SandboxSession {
 
   return {
     id: "sbx_recording",
+    getNetworkPolicy: () => "allow-all",
     resolvePath: (path: string) => `/workspace/${path}`,
     run: async (options) => {
       record("run", options.abortSignal);

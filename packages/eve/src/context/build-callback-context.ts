@@ -58,6 +58,7 @@ function withRuntimeSandboxStop(
 ): RuntimeSandboxSession {
   return {
     id: sandbox.id,
+    getNetworkPolicy: () => sandbox.getNetworkPolicy(),
     readBinaryFile: (options) => sandbox.readBinaryFile(options),
     readFile: (options) => sandbox.readFile(options),
     readTextFile: (options) => sandbox.readTextFile(options),

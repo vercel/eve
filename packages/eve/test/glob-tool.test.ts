@@ -55,6 +55,9 @@ function createFakeAccess(
         async readTextFile() {
           return null;
         },
+        getNetworkPolicy() {
+          return "allow-all" as const;
+        },
         async setNetworkPolicy() {},
         async removePath() {},
         resolvePath(path: string) {

@@ -140,6 +140,7 @@ export function createDockerSandboxBackend(
             id: prewarmInput.templateKey,
           }),
           (policy) => setDockerNetworkPolicy(cli, buildContainerName, policy),
+          { current: options.networkPolicy },
         );
 
         if (prewarmInput.seedFiles.length > 0) {
@@ -264,6 +265,7 @@ export function createDockerSandboxBackend(
       const session = buildSandboxSession(
         createDockerInternalSession({ cli, containerName, id: createInput.sessionKey }),
         (policy) => setDockerNetworkPolicy(cli, containerName, policy),
+        { current: options.networkPolicy },
       );
 
       return {
