@@ -4442,7 +4442,7 @@ describe("createToolLoopHarness", () => {
       }
     });
 
-    it("retries with the offending tool dropped and a one-shot system note", async () => {
+    it("retries an OpenAI-compatible include rejection without web_search", async () => {
       const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => ({
         runtimeContext: {
           "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
@@ -4453,8 +4453,24 @@ describe("createToolLoopHarness", () => {
           "step.started": resolveRuntimeContext,
         },
       });
+      const responseBodyValue = {
+        error: {
+          code: "invalid_value",
+          message:
+            "Invalid value: 'web_search_call.action.sources'. Supported values are: 'reasoning.encrypted_content'.",
+          param: "include",
+          type: "invalid_request_error",
+        },
+      };
+      const failure = Object.assign(new Error(responseBodyValue.error.message), {
+        data: responseBodyValue,
+        isRetryable: false,
+        name: "AI_APICallError",
+        responseBody: JSON.stringify(responseBodyValue),
+        statusCode: 400,
+      });
       const { constructedCalls } = setupRecoveryAgent({
-        failure: createGatewayUnsupportedToolError({ unsupportedTypes: ["web_search_20250305"] }),
+        failure,
         successResult: {
           finishReason: "stop",
           response: { messages: [{ content: "ok", role: "assistant" }] },

@@ -120,8 +120,6 @@ import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-c
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
 import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
-import { resolveParentLineage } from "#harness/parent-lineage.js";
-import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   consumeDeferredStepInput,
   getApprovedTools,
@@ -154,7 +152,7 @@ import {
   classifyModelCallError,
   EmptyModelResponseError,
   extractModelCallErrorDetails,
-  extractUnsupportedProviderToolTypes,
+  extractUnsupportedProviderToolIdentifiers,
   isNoOutputGeneratedError,
   type UpstreamRejectionSummary,
   extractUpstreamRejectionMessage,
@@ -176,7 +174,7 @@ import {
   detectPromptCachePath,
   getAnthropicCacheMarker,
 } from "#harness/prompt-cache.js";
-import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
+import { resolveFrameworkToolFromUpstreamIdentifier } from "#harness/provider-tools.js";
 import {
   createRuntimeActionRequestFromToolCall,
   resolvePendingRuntimeActions,
@@ -590,7 +588,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       agentName: config.runtimeIdentity?.agentName,
       handleEvent: baseEmit,
       hooks: config.instrumentation?.hooks,
-      parentLineage: resolveParentLineage(parent, store?.get(ChannelKey)),
       parentTraceContext: store?.get(ParentTraceContextKey),
       rootSessionId: parent?.rootSessionId,
       sessionId: session.sessionId,
@@ -1904,10 +1901,9 @@ function extractToolResultCallIds(messages: readonly StepResponseMessage[]): Rea
 }
 
 /**
- * Inspects a model-call failure for the "tool type 'X' is not supported"
- * provider-attempt rejection that AI Gateway returns when a fallback
- * provider cannot serve a provider-specific tool. On a match, retries the
- * step once with the offending tool dropped and a one-shot system note
+ * Inspects a model-call failure for a known upstream rejection caused by a
+ * provider-specific tool. On a match, retries the step once with the offending
+ * tool dropped and a one-shot system note
  * telling the model which capability has been removed.
  *
  * Returns `recovered` when the retry succeeded so the caller can hand
@@ -1916,8 +1912,8 @@ function extractToolResultCallIds(messages: readonly StepResponseMessage[]): Rea
  * threw) otherwise so the caller's existing terminal/recoverable
  * cascade still runs.
  *
- * Recovery is intentionally scoped to known provider tools — entries in
- * {@link UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME} — so an unrelated
+ * Recovery is intentionally scoped to known provider-tool rejection
+ * identifiers so an unrelated
  * upstream rejection cannot accidentally drop a user-authored tool.
  */
 async function attemptUnsupportedProviderToolRecovery(input: {
@@ -1926,14 +1922,14 @@ async function attemptUnsupportedProviderToolRecovery(input: {
   readonly sessionId: string;
   readonly turnId: string;
 }): Promise<ModelCallRecoveryResult> {
-  const unsupportedTypes = extractUnsupportedProviderToolTypes(input.error);
-  if (unsupportedTypes.length === 0) {
+  const unsupportedIdentifiers = extractUnsupportedProviderToolIdentifiers(input.error);
+  if (unsupportedIdentifiers.length === 0) {
     return { outcome: "skipped" };
   }
 
   const toolsToDisable: string[] = [];
-  for (const type of unsupportedTypes) {
-    const frameworkName = resolveFrameworkToolFromUpstreamType(type);
+  for (const identifier of unsupportedIdentifiers) {
+    const frameworkName = resolveFrameworkToolFromUpstreamIdentifier(identifier);
     if (frameworkName !== null && !toolsToDisable.includes(frameworkName)) {
       toolsToDisable.push(frameworkName);
     }
@@ -1947,7 +1943,7 @@ async function attemptUnsupportedProviderToolRecovery(input: {
     disabled: toolsToDisable,
     sessionId: input.sessionId,
     turnId: input.turnId,
-    upstreamTypes: unsupportedTypes,
+    upstreamIdentifiers: unsupportedIdentifiers,
   });
 
   const retryCallOptions: RecoveryRetryCallOptions = {

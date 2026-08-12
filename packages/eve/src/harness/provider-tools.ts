@@ -18,35 +18,37 @@ import type { WebSearchProvider } from "#shared/web-search.js";
 export type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel";
 
 /**
- * Maps an upstream provider tool type (the literal `type` string the AI SDK
- * sends to the provider) back to the framework tool name that injected it.
+ * Maps an upstream provider rejection identifier back to the framework tool
+ * that injected it. Identifiers include literal provider tool `type` strings
+ * and request fields that an OpenAI-compatible endpoint attributes to a tool.
  *
- * Used when the AI Gateway routes a request to a fallback provider that
- * does not support a provider-specific tool — the upstream error references
- * the provider-specific type (e.g. `web_search_20250305`), but the harness
- * needs to drop the framework tool by its public name (`web_search`).
+ * The harness needs this mapping because upstream errors do not use eve's
+ * public framework tool names. For example, both `web_search_20250305` and
+ * `web_search_call.action.sources` originate from `web_search`.
  *
  * Adding a new provider tool requires adding the corresponding mapping
  * entry here alongside its {@link resolveWebSearchProviderTool} switch
  * arm so detection stays in lockstep with injection.
  */
-const UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME: Readonly<Record<string, string>> = {
+const UPSTREAM_REJECTION_IDENTIFIER_TO_FRAMEWORK_NAME: Readonly<Record<string, string>> = {
   // Anthropic's stable web search tool. The Bedrock and Vertex
   // Anthropic backends reject this type because they only host the
   // older Claude Messages surface.
   web_search_20250305: WEB_SEARCH_TOOL_DEFINITION.name,
+  // OpenAI-compatible endpoints quote this AI SDK include value instead of a tool type.
+  "web_search_call.action.sources": WEB_SEARCH_TOOL_DEFINITION.name,
 };
 
 /**
- * Returns the framework tool name that produced an upstream provider tool
- * `type`, or `null` when the type is not one we know how to remove.
+ * Returns the framework tool name that produced an upstream rejection
+ * identifier, or `null` when it is not one we know how to remove.
  *
  * Used by the harness recovery path to decide which tools to drop when a
- * gateway fallback provider rejects a tool. Unknown types fall through to
+ * provider rejects a tool. Unknown identifiers fall through to
  * the existing terminal/recoverable handling.
  */
-export function resolveFrameworkToolFromUpstreamType(type: string): string | null {
-  return UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME[type] ?? null;
+export function resolveFrameworkToolFromUpstreamIdentifier(identifier: string): string | null {
+  return UPSTREAM_REJECTION_IDENTIFIER_TO_FRAMEWORK_NAME[identifier] ?? null;
 }
 
 /**

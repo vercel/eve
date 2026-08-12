@@ -20,6 +20,18 @@ const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
  * in unrelated "not supported" errors.
  */
 const UNSUPPORTED_TOOL_TYPE_REGEX = /tool type ['"]([\w.-]+)['"] is not supported/i;
+// OpenAI-compatible endpoints can reject the include added by the native
+// web-search tool without naming the tool itself. Structured responses are
+// checked only at `error.message` when `error.param` identifies `include`.
+const UNSUPPORTED_WEB_SEARCH_INCLUDE_REGEX =
+  /invalid value:\s*['"](web_search_call\.action\.sources)['"]/i;
+// A response body may be truncated before it can be parsed. Match only a
+// top-level `error.message`; the disjoint string alternatives keep scanning
+// linear on malformed provider payloads.
+const TRUNCATED_API_ERROR_MESSAGE_REGEX =
+  /^\s*\{\s*"error"\s*:\s*\{\s*"message"\s*:\s*"((?:\\.|[^"\\])*)/i;
+const ESCAPED_UNSUPPORTED_WEB_SEARCH_INCLUDE_REGEX =
+  /invalid value:\s*\\?['"](web_search_call\.action\.sources)\\?['"]/i;
 
 /**
  * The most informative human-readable rejection a model-call error
@@ -93,9 +105,9 @@ function isTransientHttpStatus(status: number | undefined): boolean {
 }
 
 /**
- * Returns the distinct upstream tool types referenced by any
- * "tool type 'X' is not supported" rejection in an AI Gateway error's
- * provider attempt list.
+ * Returns the distinct upstream identifiers from provider-tool rejections:
+ * AI Gateway's "tool type 'X' is not supported" provider attempts and
+ * OpenAI-compatible endpoints rejecting the web-search sources include.
  *
  * Walks the cause chain to find the gateway error and inspects both the
  * structured `data` field and the raw `responseBody` JSON. Returns an
@@ -103,29 +115,27 @@ function isTransientHttpStatus(status: number | undefined): boolean {
  *
  * Used by the harness recovery path to identify which framework tools
  * to drop before retrying the failing step. Detection is by string
- * match on the upstream tool type — see
- * {@link resolveFrameworkToolFromUpstreamType} for the mapping back to
+ * match on the upstream identifier — see
+ * {@link resolveFrameworkToolFromUpstreamIdentifier} for the mapping back to
  * framework tool names.
  */
-export function extractUnsupportedProviderToolTypes(error: unknown): readonly string[] {
+export function extractUnsupportedProviderToolIdentifiers(error: unknown): readonly string[] {
   const found = new Set<string>();
 
   for (const candidate of walkCauseChain(error)) {
-    collectUnsupportedToolTypesFromValue(readObjectField(candidate, "data"), found);
+    collectUnsupportedProviderToolIdentifiers(readObjectField(candidate, "data"), found);
 
     const responseBody = readStringField(candidate, "responseBody");
     if (responseBody !== undefined) {
       try {
-        collectUnsupportedToolTypesFromValue(JSON.parse(responseBody), found);
+        collectUnsupportedProviderToolIdentifiers(JSON.parse(responseBody), found);
       } catch {
         // The response body may be truncated mid-JSON when the upstream
         // includes a large request snapshot. Fall back to a raw string
         // scan so we still surface the tool name when the regex match
         // lies before the truncation boundary.
-        const match = UNSUPPORTED_TOOL_TYPE_REGEX.exec(responseBody);
-        if (match?.[1] !== undefined) {
-          found.add(match[1]);
-        }
+        collectUnsupportedToolTypes(responseBody, found);
+        collectTruncatedWebSearchIncludeError(responseBody, found);
       }
     }
   }
@@ -133,14 +143,42 @@ export function extractUnsupportedProviderToolTypes(error: unknown): readonly st
   return [...found];
 }
 
+function collectUnsupportedProviderToolIdentifiers(value: unknown, out: Set<string>): void {
+  collectUnsupportedToolTypesFromValue(value, out);
+
+  if (!isObject(value)) return;
+  const apiError = readObjectField(value, "error");
+  if (apiError === undefined || readStringField(apiError, "param") !== "include") return;
+
+  const message = readStringField(apiError, "message");
+  if (message !== undefined) {
+    collectRegexMatch(message, UNSUPPORTED_WEB_SEARCH_INCLUDE_REGEX, out);
+  }
+}
+
+function collectUnsupportedToolTypes(value: string, out: Set<string>): void {
+  collectRegexMatch(value, UNSUPPORTED_TOOL_TYPE_REGEX, out);
+}
+
+function collectTruncatedWebSearchIncludeError(value: string, out: Set<string>): void {
+  const message = TRUNCATED_API_ERROR_MESSAGE_REGEX.exec(value)?.[1];
+  if (message !== undefined) {
+    collectRegexMatch(message, ESCAPED_UNSUPPORTED_WEB_SEARCH_INCLUDE_REGEX, out);
+  }
+}
+
+function collectRegexMatch(value: string, regex: RegExp, out: Set<string>): void {
+  const match = regex.exec(value);
+  if (match?.[1] !== undefined) {
+    out.add(match[1]);
+  }
+}
+
 function collectUnsupportedToolTypesFromValue(value: unknown, out: Set<string>): void {
   if (value === null || value === undefined) return;
 
   if (typeof value === "string") {
-    const match = UNSUPPORTED_TOOL_TYPE_REGEX.exec(value);
-    if (match?.[1] !== undefined) {
-      out.add(match[1]);
-    }
+    collectUnsupportedToolTypes(value, out);
     return;
   }
 

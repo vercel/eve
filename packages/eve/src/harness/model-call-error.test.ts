@@ -4,7 +4,7 @@ import {
   classifyModelCallError,
   EmptyModelResponseError,
   extractModelCallErrorDetails,
-  extractUnsupportedProviderToolTypes,
+  extractUnsupportedProviderToolIdentifiers,
   isNoOutputGeneratedError,
   normalizeModelStreamError,
   extractUpstreamRejectionMessage,
@@ -469,11 +469,11 @@ function gatewayProviderToolFailure(input: {
   });
 }
 
-describe("extractUnsupportedProviderToolTypes", () => {
+describe("extractUnsupportedProviderToolIdentifiers", () => {
   it("returns the upstream tool type from a Bedrock fallback rejection", () => {
     const error = gatewayProviderToolFailure({ unsupportedTypes: ["web_search_20250305"] });
 
-    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_20250305"]);
+    expect(extractUnsupportedProviderToolIdentifiers(error)).toEqual(["web_search_20250305"]);
   });
 
   it("deduplicates when multiple providerAttempts reference the same tool type", () => {
@@ -481,7 +481,7 @@ describe("extractUnsupportedProviderToolTypes", () => {
       unsupportedTypes: ["web_search_20250305", "web_search_20250305"],
     });
 
-    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_20250305"]);
+    expect(extractUnsupportedProviderToolIdentifiers(error)).toEqual(["web_search_20250305"]);
   });
 
   it("returns multiple types when distinct tools were rejected", () => {
@@ -489,7 +489,7 @@ describe("extractUnsupportedProviderToolTypes", () => {
       unsupportedTypes: ["web_search_20250305", "computer_20251022"],
     });
 
-    expect([...extractUnsupportedProviderToolTypes(error)].sort()).toEqual([
+    expect([...extractUnsupportedProviderToolIdentifiers(error)].sort()).toEqual([
       "computer_20251022",
       "web_search_20250305",
     ]);
@@ -506,7 +506,86 @@ describe("extractUnsupportedProviderToolTypes", () => {
       truncateResponseBody: true,
     });
 
-    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_20250305"]);
+    expect(extractUnsupportedProviderToolIdentifiers(error)).toEqual(["web_search_20250305"]);
+  });
+
+  it("returns the rejected OpenAI web-search include", () => {
+    const data = {
+      error: {
+        code: "invalid_value",
+        message:
+          "Invalid value: 'web_search_call.action.sources'. Supported values are: 'reasoning.encrypted_content'.",
+        param: "include",
+        type: "invalid_request_error",
+      },
+    };
+    const error = directApiCallError({
+      data,
+      responseBody: JSON.stringify(data),
+      statusCode: 400,
+    });
+
+    expect(extractUnsupportedProviderToolIdentifiers(error)).toEqual([
+      "web_search_call.action.sources",
+    ]);
+  });
+
+  it.each([
+    '{"error":{"message":"Invalid value: \'web_search_call.action.sources\'. Supported...<truncated>',
+    '{"error":{"message":"Invalid value: \\"web_search_call.action.sources\\". Supported...<truncated>',
+  ])("returns the rejected web-search include from a truncated response body", (responseBody) => {
+    const error = directApiCallError({ responseBody, statusCode: 400 });
+
+    expect(extractUnsupportedProviderToolIdentifiers(error)).toEqual([
+      "web_search_call.action.sources",
+    ]);
+  });
+
+  it("does not treat a supported value or request echo as a rejection", () => {
+    const enumeration = directApiCallError({
+      data: {
+        error: {
+          message:
+            "Invalid value: 'code_interpreter_call.outputs'. Supported values are: 'web_search_call.action.sources'.",
+          param: "include",
+        },
+      },
+      statusCode: 400,
+    });
+    const fullRejectionPhrase =
+      "Invalid value: 'web_search_call.action.sources'. Supported values are: 'reasoning.encrypted_content'.";
+    const parsedRequestEcho = directApiCallError({
+      data: {
+        error: { message: "Internal error" },
+        request: { prompt: fullRejectionPhrase },
+      },
+      statusCode: 400,
+    });
+    const truncatedRequestEcho = directApiCallError({
+      responseBody: JSON.stringify({
+        error: { message: "Internal error" },
+        request: { prompt: fullRejectionPhrase },
+      }).slice(0, -1),
+      statusCode: 400,
+    });
+    const nestedRequestError = directApiCallError({
+      responseBody: `{"request":{"error":{"message":"${fullRejectionPhrase}...<truncated>`,
+      statusCode: 400,
+    });
+
+    expect(extractUnsupportedProviderToolIdentifiers(enumeration)).toEqual([]);
+    expect(extractUnsupportedProviderToolIdentifiers(parsedRequestEcho)).toEqual([]);
+    expect(extractUnsupportedProviderToolIdentifiers(truncatedRequestEcho)).toEqual([]);
+    expect(extractUnsupportedProviderToolIdentifiers(nestedRequestError)).toEqual([]);
+  });
+
+  it("scans malformed response bodies without ambiguous regex backtracking", () => {
+    const error = directApiCallError({
+      responseBody: `{"error":{"message":"${"\\a".repeat(10_000)}...<truncated>`,
+      statusCode: 400,
+    });
+
+    expect(extractUnsupportedProviderToolIdentifiers(error)).toEqual([]);
   });
 
   it("returns empty for the ambiguous internal server error case (no tool rejection)", () => {
@@ -528,7 +607,7 @@ describe("extractUnsupportedProviderToolTypes", () => {
       type: "internal_server_error",
     });
 
-    expect(extractUnsupportedProviderToolTypes(error)).toEqual([]);
+    expect(extractUnsupportedProviderToolIdentifiers(error)).toEqual([]);
   });
 
   it("returns empty for generic structural 4xx errors", () => {
@@ -537,7 +616,7 @@ describe("extractUnsupportedProviderToolTypes", () => {
       statusCode: 401,
     });
 
-    expect(extractUnsupportedProviderToolTypes(error)).toEqual([]);
+    expect(extractUnsupportedProviderToolIdentifiers(error)).toEqual([]);
   });
 
   it("returns empty for non-tool 'not supported' phrasing", () => {
@@ -552,13 +631,13 @@ describe("extractUnsupportedProviderToolTypes", () => {
       statusCode: 400,
     });
 
-    expect(extractUnsupportedProviderToolTypes(error)).toEqual([]);
+    expect(extractUnsupportedProviderToolIdentifiers(error)).toEqual([]);
   });
 
   it("returns empty for plain Error and null/undefined inputs", () => {
-    expect(extractUnsupportedProviderToolTypes(new Error("mystery"))).toEqual([]);
-    expect(extractUnsupportedProviderToolTypes(null)).toEqual([]);
-    expect(extractUnsupportedProviderToolTypes(undefined)).toEqual([]);
+    expect(extractUnsupportedProviderToolIdentifiers(new Error("mystery"))).toEqual([]);
+    expect(extractUnsupportedProviderToolIdentifiers(null)).toEqual([]);
+    expect(extractUnsupportedProviderToolIdentifiers(undefined)).toEqual([]);
   });
 });
 

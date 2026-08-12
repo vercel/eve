@@ -9,7 +9,7 @@ import {
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
 } from "#runtime/framework-tools/web-search.js";
 import {
-  resolveFrameworkToolFromUpstreamType,
+  resolveFrameworkToolFromUpstreamIdentifier,
   resolveWebSearchBackend,
   resolveWebSearchOutputSchema,
   resolveWebSearchProviderTool,
@@ -217,13 +217,19 @@ describe("resolveWebSearchBackend", () => {
   });
 });
 
-describe("resolveFrameworkToolFromUpstreamType", () => {
+describe("resolveFrameworkToolFromUpstreamIdentifier", () => {
   it("maps the Anthropic web_search_20250305 type back to web_search", () => {
-    expect(resolveFrameworkToolFromUpstreamType("web_search_20250305")).toBe("web_search");
+    expect(resolveFrameworkToolFromUpstreamIdentifier("web_search_20250305")).toBe("web_search");
+  });
+
+  it("maps the OpenAI web-search sources include back to web_search", () => {
+    expect(resolveFrameworkToolFromUpstreamIdentifier("web_search_call.action.sources")).toBe(
+      "web_search",
+    );
   });
 
   it("returns null for unknown upstream tool types", () => {
-    expect(resolveFrameworkToolFromUpstreamType("computer_20251022")).toBeNull();
-    expect(resolveFrameworkToolFromUpstreamType("some.future.tool")).toBeNull();
+    expect(resolveFrameworkToolFromUpstreamIdentifier("computer_20251022")).toBeNull();
+    expect(resolveFrameworkToolFromUpstreamIdentifier("some.future.tool")).toBeNull();
   });
 });
