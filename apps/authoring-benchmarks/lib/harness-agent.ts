@@ -199,7 +199,7 @@ async function bootstrapSubject(
       "pnpm install --frozen-lockfile",
       "pnpm --filter eve build",
       `mkdir -p ${shellQuote(workspace)}`,
-      `AI_AGENT=benchmark node /tmp/eve-source/packages/eve/bin/eve.js init ${shellQuote(workspace)}`,
+      `cd ${shellQuote(workspace)} && AI_AGENT=benchmark node /tmp/eve-source/packages/eve/bin/eve.js init .`,
       `cd ${shellQuote(workspace)} && npm install --save-dev --package-lock=false vitest@4.1.10`,
       `cd ${shellQuote(workspace)} && npm install --save --package-lock=false /tmp/eve-source/apps/authoring-benchmarks/evals/author-000-imessage/seed/mock-imessage-setup`,
       `mkdir -p ${shellQuote(workspace)}/__authoring_eval__/registry/channel`,
