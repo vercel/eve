@@ -96,18 +96,15 @@ describe("upsertProxyInputRequests", () => {
     });
 
     const entries = getProxyInputRequests(session.state);
-    expect(entries.size).toBe(2);
-    expect(entries.get("req-1")).toEqual({
-      childContinuationToken: "child-a",
-      kind: "question",
-    });
+    expect(entries.size).toBe(1);
+    expect(entries.get("req-1")).toBeUndefined();
     expect(entries.get("req-2")).toEqual({
       childContinuationToken: "child-a",
       kind: "question",
     });
   });
 
-  it("replaces only a reused request ID", () => {
+  it("drops a prior child's batch when its request ID is claimed by another child", () => {
     let session = upsertProxyInputRequests({
       entries: [
         ["req-1", { childContinuationToken: "child-a", kind: "question" }],
@@ -123,10 +120,10 @@ describe("upsertProxyInputRequests", () => {
       session,
     });
 
-    expect([...getProxyInputRequests(session.state)]).toEqual([
-      ["req-1", { childContinuationToken: "child-b", kind: "tool-approval" }],
-      ["req-2", { childContinuationToken: "child-a", kind: "question" }],
-    ]);
+    expect(Object.fromEntries(getProxyInputRequests(session.state))).toEqual({
+      "req-1": { childContinuationToken: "child-b", kind: "tool-approval" },
+      "req-2": { childContinuationToken: "child-a", kind: "question" },
+    });
   });
 
   it("keeps entries from other children when upserting", () => {

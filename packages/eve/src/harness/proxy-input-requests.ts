@@ -59,9 +59,10 @@ export function hasProxyInputRequests(state: SessionStateMap | undefined): boole
 }
 
 /**
- * Merges the provided routes into the parent session by request ID. Existing
- * routes with different IDs stay independently answerable; re-recording the
- * same request ID replaces only that route, making durable retries idempotent.
+ * Replaces prior entries for `forChildContinuationToken` with the provided
+ * ones. A child raising a fresh batch overwrites its prior batch so the
+ * parent never keeps stale request metadata. Other children's routes stay
+ * independently answerable.
  */
 export function upsertProxyInputRequests(input: {
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
@@ -84,7 +85,13 @@ export function upsertProxyInputRequestState(input: {
   readonly forChildContinuationToken: string;
   readonly state: SessionStateMap | undefined;
 }): SessionStateMap | undefined {
-  const next: Record<string, ProxyInputRequest> = { ...readMap(input.state) };
+  const next: Record<string, ProxyInputRequest> = {};
+
+  for (const [requestId, route] of Object.entries(readMap(input.state))) {
+    if (route.childContinuationToken !== input.forChildContinuationToken) {
+      next[requestId] = route;
+    }
+  }
 
   for (const [requestId, route] of input.entries) {
     next[requestId] = route;

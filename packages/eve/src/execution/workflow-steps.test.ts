@@ -317,9 +317,11 @@ describe("routeProxiedDeliverStep", () => {
   it("hands a task-owned answer to the task run instead of the child", async () => {
     installSessionStoreMocks([createTaskRouteSession()]);
 
-    await expect(
-      routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
-    ).resolves.toMatchObject({ kind: "continue", remainder: undefined });
+    const result = await routeProxiedDeliverStep({
+      ...taskRouteInput,
+      parentWritable: createTestWritable(),
+    });
+    expect(result).toMatchObject({ kind: "continue", remainder: undefined });
     expect(sendTaskInboundPayload).toHaveBeenCalledWith({
       taskInboxToken: "task-token",
       payload: {
@@ -331,6 +333,7 @@ describe("routeProxiedDeliverStep", () => {
       },
     });
     expect(resumeHookMock).not.toHaveBeenCalled();
+    expect(getProxyInputRequests(result.sessionState.snapshot?.session.state).size).toBe(0);
   });
 
   it("keeps a response for a task this session does not own on the parent", async () => {

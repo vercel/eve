@@ -82,7 +82,13 @@ export async function routeProxiedDeliverStep(input: {
             requestId: createTaskInputRequestId(taskId, response.requestId),
           })),
         );
+        continue;
       }
+      // Hand-off to the task run succeeded. Retire the parent-visible
+      // routes so a later click cannot re-enter the same batch after the
+      // run has already accepted (or no-op'd) this answer.
+      durableSession = retireProxyInputRequests(durableSession, forChild.retireRequestIds);
+      retired = true;
       continue;
     }
 
@@ -93,8 +99,7 @@ export async function routeProxiedDeliverStep(input: {
       sendCommandToDelivery({ auth: input.auth, kind: "send", payload: forChild.payload }),
     );
     // Successfully forwarded request IDs are retired so later deliveries
-    // cannot route through stale entries. Task-owned routes are cleared by
-    // their run instead, under the same durable decision as the forward.
+    // cannot route through stale entries.
     durableSession = retireProxyInputRequests(durableSession, forChild.retireRequestIds);
     retired = true;
   }
