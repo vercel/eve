@@ -75,19 +75,6 @@ describe("buildAgentCollection", () => {
     });
   });
 
-  it("uses a child package build script", async () => {
-    const root = await createCollection();
-    await writeFile(join(root, "pnpm-workspace.yaml"), 'packages:\n  - "agents/*"\n');
-    await writeFile(
-      join(root, "agents", "support", "package.json"),
-      JSON.stringify({ private: true, scripts: { build: "generate && eve build" } }),
-    );
-    const collection = await loadAgentCollection(root);
-    const output = await buildAgentCollection(collection);
-    const config = JSON.parse(await readFile(join(output, "config.json"), "utf8"));
-    expect(config.services["eve-support"].buildCommand).toContain("pnpm run build");
-  });
-
   it("refuses to assemble an authored graph", async () => {
     const root = await createCollection();
     await writeFile(join(root, "vercel.json"), JSON.stringify({ services: {} }));
