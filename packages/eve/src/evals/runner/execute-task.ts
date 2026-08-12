@@ -8,10 +8,11 @@ import type {
   EveEvalSessionResult,
   EveEvalTargetHandle,
   EveEvalTaskResult,
+  EveEvalTraceContext,
   EveEvalTurn,
 } from "#evals/types.js";
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
-import { EvalSessionManager } from "#evals/session.js";
+import { EvalSessionManager, type EvalSessionStartedEvent } from "#evals/session.js";
 import { createEvalContext } from "#evals/context.js";
 import { scopeEvalTargetHandle } from "#evals/target.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
@@ -25,6 +26,8 @@ interface ExecuteTaskOptions {
   readonly evaluation: EveEval;
   /** Receives each `t.log` line as it is written (used by `--verbose`). */
   readonly onLog?: (message: string) => void;
+  /** Receives the first trace context observed for each session. */
+  readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
   readonly target: EveEvalTargetHandle;
   readonly timeoutMs?: number;
 }
@@ -50,7 +53,12 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   const { client, evaluation, target, timeoutMs } = options;
   const signal = timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : neverAbortSignal();
   const collector = new AssertionCollector();
-  const manager = new EvalSessionManager({ client, collector, signal });
+  const manager = new EvalSessionManager({
+    client,
+    collector,
+    onSessionStart: options.onSessionStart,
+    signal,
+  });
   const targetForRun = scopeEvalTargetHandle(target, {
     sessions: manager,
   });
@@ -107,7 +115,22 @@ function buildTaskResult(input: {
     derived: combineDerivedFacts(input.sessions),
     sessions: input.sessions,
     runtimeIdentity: extractRuntimeIdentity(events),
+    traceContexts: collectTraceContexts(input.sessions),
   };
+}
+
+function collectTraceContexts(
+  sessions: readonly EveEvalSessionResult[],
+): readonly EveEvalTraceContext[] {
+  return sessions.flatMap((session) => {
+    const sessionId = session.sessionId;
+    if (sessionId === undefined) return [];
+    return session.traceContexts.map((traceContext) => ({
+      ...traceContext,
+      primary: session.primary,
+      sessionId,
+    }));
+  });
 }
 
 function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEvalDerivedFacts {

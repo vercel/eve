@@ -27,6 +27,10 @@ interface TestRuntime {
   readonly exporter: InMemorySpanExporter;
   readonly hooks: InstrumentationHooks;
   readonly provider: BasicTracerProvider;
+  readonly prepareSessionTrace: ReturnType<
+    typeof createAgentOtelInstrumentation
+  >["prepareSessionTrace"];
+  readonly prepareTurnTrace: ReturnType<typeof createAgentOtelInstrumentation>["prepareTurnTrace"];
   readonly runInContext: InstrumentationContextRunner;
 }
 
@@ -44,7 +48,14 @@ function createRuntime(stateStore = new InMemoryAgentTraceStateStore()): TestRun
     tracer: provider.getTracer("eve.agent"),
   });
   const hooks = createInstrumentationHooks([agentOtel.hook]);
-  return { exporter, hooks, provider, runInContext: agentOtel.runInContext };
+  return {
+    exporter,
+    hooks,
+    prepareSessionTrace: agentOtel.prepareSessionTrace,
+    prepareTurnTrace: agentOtel.prepareTurnTrace,
+    provider,
+    runInContext: agentOtel.runInContext,
+  };
 }
 
 async function emitAttempt(input: {
@@ -223,6 +234,40 @@ function nanos(hrTime: readonly [number, number]): bigint {
 }
 
 describe("createAgentOtelInstrumentation", () => {
+  it("prepares a stable stream trace before lifecycle hooks observe the turn", async () => {
+    const runtime = createRuntime();
+    const sessionEvent = {
+      agentName: "weather",
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+      type: "session.started" as const,
+    };
+    const turnEvent = {
+      rootSessionId: "session-1",
+      sequence: 0,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "turn.started" as const,
+    };
+
+    const sessionTrace = await runtime.prepareSessionTrace(sessionEvent);
+    const turnTrace = await runtime.prepareTurnTrace(turnEvent);
+    await runtime.hooks.publish(sessionEvent);
+    await runtime.hooks.publish(turnEvent);
+    const replayedTrace = await runtime.prepareTurnTrace(turnEvent);
+    await completeTurn(runtime.hooks, "session-1", "turn-1");
+    await runtime.provider.forceFlush();
+
+    expect(turnTrace).toEqual(sessionTrace);
+    expect(replayedTrace).toEqual(turnTrace);
+    const spans = runtime.exporter.getFinishedSpans();
+    const session = byName(spans, "agent.session")[0]!;
+    const turn = byName(spans, "agent.turn")[0]!;
+    expect(session.spanContext()).toMatchObject(turnTrace);
+    expect(turn.spanContext().traceId).toBe(turnTrace.traceId);
+    expect(turn.parentSpanContext?.spanId).toBe(turnTrace.spanId);
+  });
+
   it("emits the agent hierarchy in one session trace", async () => {
     const runtime = createRuntime();
     await emitAttempt({

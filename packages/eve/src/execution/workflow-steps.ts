@@ -76,6 +76,7 @@ import {
   type TurnWorkflowDispatchInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { retireProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
@@ -389,7 +390,19 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       if (completedAuths) {
         let emissionState = getHarnessEmissionState(schemaSession.state);
         if (isHarnessBetweenTurns(schemaSession)) {
-          emissionState = await emitTurnPreamble(handleEvent, {}, emissionState, runtimeIdentity);
+          const traceContext = await prepareWorkflowPreambleTrace({
+            ctx,
+            emissionState,
+            runtimeIdentity,
+            session: schemaSession,
+          });
+          emissionState = await emitTurnPreamble(
+            handleEvent,
+            {},
+            emissionState,
+            runtimeIdentity,
+            traceContext,
+          );
           schemaSession = setHarnessEmissionState(schemaSession, emissionState);
         }
         for (const { authorization, result } of completedAuths) {

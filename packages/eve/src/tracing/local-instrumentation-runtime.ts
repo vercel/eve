@@ -71,6 +71,8 @@ export function installLocalInstrumentationRuntime(input: {
   return registerInstrumentationRuntime({
     forceFlush: () => processor.forceFlush(),
     hooks: createInstrumentationHooks([agentOtel.hook, releaseTrace]),
+    prepareSessionTrace: agentOtel.prepareSessionTrace,
+    prepareTurnTrace: agentOtel.prepareTurnTrace,
     runInContext: agentOtel.runInContext,
   });
 

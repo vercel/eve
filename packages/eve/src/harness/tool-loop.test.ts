@@ -10146,6 +10146,45 @@ describe("createToolLoopHarness", () => {
   });
 
   describe("telemetry metadata", () => {
+    it("emits the authored turn trace with the session and turn preamble", async () => {
+      const authoredTrace = {
+        spanId: "0123456789abcdef",
+        traceFlags: 1,
+        traceId: "0123456789abcdef0123456789abcdef",
+      };
+      const authoredSpan = trace.wrapSpanContext(authoredTrace);
+      const getTracerSpy = vi.spyOn(trace, "getTracer").mockReturnValue({
+        startSpan: vi.fn(() => authoredSpan),
+      } as ReturnType<typeof trace.getTracer>);
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const events: UnstampedMessageStreamEvent[] = [];
+      mockGetInstrumentationConfig.mockReturnValue({});
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", async (event) => {
+          events.push(event);
+        }),
+      );
+
+      try {
+        const result = await runStep(createTestSession(), { message: "hi" });
+        const storedTrace = result.session.state?.["eve.harness.turnTrace"];
+        const sessionStarted = events.find((event) => event.type === "session.started");
+        const turnStarted = events.find((event) => event.type === "turn.started");
+        expect(storedTrace).toEqual(authoredTrace);
+        expect(sessionStarted?.data.trace).toEqual(authoredTrace);
+        expect(turnStarted?.data.trace).toEqual(authoredTrace);
+      } finally {
+        getTracerSpy.mockRestore();
+        mockGetInstrumentationConfig.mockReturnValue(undefined);
+      }
+    });
+
     it("injects eve.version alongside session context into runtimeContext when telemetry is enabled", async () => {
       setupMockAgent({
         finishReason: "stop",

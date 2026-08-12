@@ -23,7 +23,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "21";
+export const EVE_MESSAGE_STREAM_VERSION = "22";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -120,6 +120,17 @@ export interface RuntimeIdentity {
 }
 
 /**
+ * Portable trace coordinates for correlating an eve run with an external
+ * observability backend. The fields follow the W3C trace-context model while
+ * remaining owned by eve rather than exposing an OpenTelemetry type.
+ */
+export interface RuntimeTraceContext {
+  readonly traceId: string;
+  readonly spanId: string;
+  readonly traceFlags: number;
+}
+
+/**
  * JSON request accepted by the canonical message route.
  *
  * `message` is either a plain text string or an AI SDK `UserContent`
@@ -149,6 +160,7 @@ export interface SessionStartedStreamEvent {
   data: {
     invocation?: SubagentSessionInvocationMetadata;
     runtime?: RuntimeIdentity;
+    trace?: RuntimeTraceContext;
   };
   type: "session.started";
 }
@@ -159,6 +171,7 @@ export interface SessionStartedStreamEvent {
 export interface TurnStartedStreamEvent {
   data: {
     sequence: number;
+    trace?: RuntimeTraceContext;
     turnId: string;
   };
   type: "turn.started";
@@ -703,6 +716,7 @@ export function isTurnFailureEvent<TEvent extends UnstampedMessageStreamEvent>(
 export function createSessionStartedEvent(input?: {
   readonly invocation?: SubagentSessionInvocationMetadata;
   readonly runtime?: RuntimeIdentity;
+  readonly trace?: RuntimeTraceContext;
 }): SessionStartedStreamEvent {
   const data: SessionStartedStreamEvent["data"] = {};
 
@@ -712,6 +726,10 @@ export function createSessionStartedEvent(input?: {
 
   if (input?.runtime !== undefined) {
     data.runtime = input.runtime;
+  }
+
+  if (input?.trace !== undefined) {
+    data.trace = input.trace;
   }
 
   return {
@@ -725,13 +743,20 @@ export function createSessionStartedEvent(input?: {
  */
 export function createTurnStartedEvent(input: {
   readonly sequence: number;
+  readonly trace?: RuntimeTraceContext;
   readonly turnId: string;
 }): TurnStartedStreamEvent {
+  const data: TurnStartedStreamEvent["data"] = {
+    sequence: input.sequence,
+    turnId: input.turnId,
+  };
+
+  if (input.trace !== undefined) {
+    data.trace = input.trace;
+  }
+
   return {
-    data: {
-      sequence: input.sequence,
-      turnId: input.turnId,
-    },
+    data,
     type: "turn.started",
   };
 }

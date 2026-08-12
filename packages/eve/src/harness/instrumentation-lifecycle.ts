@@ -1,6 +1,7 @@
 import type { Telemetry } from "ai";
 
 import { createLogger, formatError } from "#internal/logging.js";
+import type { RuntimeTraceContext } from "#protocol/message.js";
 
 type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telemetry[TKey]>>[0];
 
@@ -31,11 +32,7 @@ export interface InstrumentationSessionStartedEvent {
   readonly sessionId: string;
 }
 
-export interface InstrumentationTraceContext {
-  readonly spanId: string;
-  readonly traceFlags: number;
-  readonly traceId: string;
-}
+export type InstrumentationTraceContext = RuntimeTraceContext;
 
 /**
  * Which tool call dispatched a subagent child. The trace structure alone

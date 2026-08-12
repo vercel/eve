@@ -70,6 +70,12 @@ export interface AgentOtelInstrumentationInput {
 /** OTel event definition and its trusted framework context runner. */
 export interface AgentOtelInstrumentation {
   readonly hook: InstrumentationProviderDefinition;
+  readonly prepareSessionTrace: (
+    event: InstrumentationSessionStartedEvent,
+  ) => Promise<InstrumentationTraceContext>;
+  readonly prepareTurnTrace: (
+    event: InstrumentationTurnStartedEvent,
+  ) => Promise<InstrumentationTraceContext>;
   readonly runInContext: InstrumentationContextRunner;
 }
 
@@ -87,11 +93,24 @@ export function createAgentOtelInstrumentation(
   // than resuming this callback sequence in a replacement process.
   const steps = new WeakMap<InstrumentationAttemptScope, AttemptSpanState>();
 
-  const onSessionStarted = async (event: InstrumentationSessionStartedEvent): Promise<void> => {
-    await ensureSessionContext(event);
+  const prepareSessionTrace = async (
+    event: InstrumentationSessionStartedEvent,
+  ): Promise<InstrumentationTraceContext> => {
+    return portableSpanContext((await ensureSessionContext(event)).context);
   };
 
-  const onTurnStarted = async (event: InstrumentationTurnStartedEvent): Promise<void> => {
+  const prepareTurnTrace = async (
+    event: InstrumentationTurnStartedEvent,
+  ): Promise<InstrumentationTraceContext> => {
+    const prepared = await input.stateStore.getTurn(event.sessionId, event.turnId);
+    if (prepared !== undefined) {
+      return {
+        spanId: prepared.parentSpanId,
+        traceFlags: prepared.context.traceFlags,
+        traceId: prepared.context.traceId,
+      };
+    }
+
     const session = advanceSessionWindow(
       event.sessionId,
       await ensureSessionContext({
@@ -124,6 +143,15 @@ export function createAgentOtelInstrumentation(
       sequence: event.sequence,
       startTimeMs: Date.now(),
     });
+    return portableSpanContext(session.context);
+  };
+
+  const onSessionStarted = async (event: InstrumentationSessionStartedEvent): Promise<void> => {
+    await prepareSessionTrace(event);
+  };
+
+  const onTurnStarted = async (event: InstrumentationTurnStartedEvent): Promise<void> => {
+    await prepareTurnTrace(event);
   };
 
   const onAttemptStarted = async (event: InstrumentationAttemptStartedEvent): Promise<void> => {
@@ -498,6 +526,8 @@ export function createAgentOtelInstrumentation(
         "turn.started": onTurnStarted,
       },
     },
+    prepareSessionTrace,
+    prepareTurnTrace,
     runInContext(operation, execute) {
       const contexts = executionContexts.get(operation.scope);
       const parent =
@@ -519,6 +549,14 @@ export function createAgentOtelInstrumentation(
     }
     return state;
   }
+}
+
+function portableSpanContext(spanContext: SpanContext): InstrumentationTraceContext {
+  return {
+    spanId: spanContext.spanId,
+    traceFlags: spanContext.traceFlags,
+    traceId: spanContext.traceId,
+  };
 }
 
 function parentLineageAttributes(

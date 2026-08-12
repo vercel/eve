@@ -65,6 +65,7 @@ function createTaskResult(label: string): TaskOutcome {
       status: "completed",
       events: [],
       derived: createEmptyDerivedFacts(),
+      traceContexts: [],
     },
     assertions: [],
   };
@@ -273,6 +274,69 @@ describe("runEvals", () => {
     });
 
     expect(seen).toEqual(["start:one,two", "eval:one", "eval:two", "complete:2"]);
+  });
+
+  it("reports eval and traced-session starts before completion", async () => {
+    const traceContext = {
+      spanId: "0123456789abcdef",
+      traceFlags: 1,
+      traceId: "0123456789abcdef0123456789abcdef",
+    };
+    mockArtifacts();
+    mockedRunnerDependencies.executeTask.mockImplementation(
+      async ({ onSessionStart }: { onSessionStart?: (event: unknown) => void }) => {
+        onSessionStart?.({
+          primary: true,
+          sessionId: "session-1",
+          startedAt: "2026-01-01T00:00:00.100Z",
+          traceContext,
+        });
+        const outcome = createTaskResult("done");
+        return {
+          ...outcome,
+          result: {
+            ...outcome.result,
+            traceContexts: [{ ...traceContext, primary: true, sessionId: "session-1" }],
+          },
+        };
+      },
+    );
+
+    const seen: string[] = [];
+    const reporter: EvalReporter = {
+      onRunStart: () => {
+        seen.push("run:start");
+      },
+      onEvalStart: (event) => {
+        seen.push(`eval:start:${event.evaluation.id}`);
+      },
+      onEvalSessionStart: (event) => {
+        seen.push(`session:start:${event.sessionId}:${event.traceContext.traceId}`);
+      },
+      onEvalComplete: (result, context) => {
+        seen.push(`eval:complete:${result.id}:${context?.traceContexts.length}`);
+      },
+      onRunComplete: () => {
+        seen.push("run:complete");
+      },
+    };
+
+    await run({
+      evaluations: [createEval("traced")],
+      target: localTarget,
+      client: unusedClient,
+      appRoot: "/tmp/app",
+      reporters: [reporter],
+      maxConcurrency: 1,
+    });
+
+    expect(seen).toEqual([
+      "run:start",
+      "eval:start:traced",
+      `session:start:session-1:${traceContext.traceId}`,
+      "eval:complete:traced:1",
+      "run:complete",
+    ]);
   });
 
   it("scopes eval-defined reporters to the evals referencing them", async () => {

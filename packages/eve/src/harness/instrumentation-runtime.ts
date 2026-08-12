@@ -1,6 +1,9 @@
 import type {
   InstrumentationContextRunner,
   InstrumentationHooks,
+  InstrumentationSessionStartedEvent,
+  InstrumentationTraceContext,
+  InstrumentationTurnStartedEvent,
 } from "#harness/instrumentation-lifecycle.js";
 
 const INSTRUMENTATION_RUNTIME_KEY = Symbol.for("eve.instrumentation-runtime");
@@ -9,11 +12,20 @@ const INSTRUMENTATION_RUNTIME_KEY = Symbol.for("eve.instrumentation-runtime");
 export interface InstrumentationRuntime {
   readonly forceFlush: () => Promise<void>;
   readonly hooks: InstrumentationHooks;
+  readonly prepareSessionTrace?: (
+    event: InstrumentationSessionStartedEvent,
+  ) => Promise<InstrumentationTraceContext>;
+  readonly prepareTurnTrace?: (
+    event: InstrumentationTurnStartedEvent,
+  ) => Promise<InstrumentationTraceContext>;
   readonly runInContext: InstrumentationContextRunner;
 }
 
 /** Instrumentation capabilities consumed inside one harness execution. */
-export type HarnessInstrumentation = Pick<InstrumentationRuntime, "hooks" | "runInContext">;
+export type HarnessInstrumentation = Pick<
+  InstrumentationRuntime,
+  "hooks" | "prepareSessionTrace" | "prepareTurnTrace" | "runInContext"
+>;
 
 type InstrumentationGlobal = typeof globalThis & {
   [INSTRUMENTATION_RUNTIME_KEY]?: InstrumentationRuntime;
