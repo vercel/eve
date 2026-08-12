@@ -231,8 +231,8 @@ describe("githubChannel", () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     const [continuationToken, input] = send.mock.calls[0]!;
-    expect(input.message).toContain("<github_context>");
-    expect(input.message).toContain("help me");
+    expect(input.message).toBe("help me");
+    expect(input.context).toEqual([expect.stringContaining("<github_context>")]);
     expect(input.inputResponses).toBeUndefined();
     expect(continuationToken).toBe("repo:123:issue:5");
     expect(input).toMatchObject({
@@ -255,6 +255,34 @@ describe("githubChannel", () => {
         triggeringCommentId: 10,
       },
     });
+  });
+
+  it("keeps GitHub metadata separate from the comment text", async () => {
+    const channel = githubChannel({
+      botName: "testbot",
+      credentials: { webhookSecret: SECRET },
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "@testbot Yes",
+            html_url: "https://github.test/vercel/eve/issues/5#issuecomment-10",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]!;
+    expect(input.message).toBe("Yes");
+    expect(input.context).toEqual([expect.stringContaining("<github_context>")]);
   });
 
   it("dispatches Connect-forwarded issue comments without GitHub event headers", async () => {
@@ -281,8 +309,10 @@ describe("githubChannel", () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     const [continuationToken, input] = send.mock.calls[0]!;
-    expect(input.message).toContain("delivery_id: inferred:issue_comment:10:created");
-    expect(input.message).toContain("help me");
+    expect(input.message).toBe("help me");
+    expect(input.context).toEqual([
+      expect.stringContaining("delivery_id: inferred:issue_comment:10:created"),
+    ]);
     expect(continuationToken).toBe("repo:123:issue:5");
     expect(input).toMatchObject({
       auth: {
@@ -404,8 +434,9 @@ describe("githubChannel", () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://github.test/repos/vercel/eve/pulls/7");
     const [, input] = send.mock.calls[0]!;
-    expect(input.context?.[0]).toContain("title: Add GitHub context");
-    expect(input.context?.[0]).toContain("head_sha: head-sha");
+    expect(input.context?.[0]).toContain("<github_context>");
+    expect(input.context?.[1]).toContain("title: Add GitHub context");
+    expect(input.context?.[1]).toContain("head_sha: head-sha");
   });
 
   it("dispatches inline review comments to the review-thread token", async () => {

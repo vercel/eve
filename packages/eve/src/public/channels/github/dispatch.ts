@@ -6,7 +6,6 @@ import { buildGitHubBinding } from "#public/channels/github/binding.js";
 import {
   extractGitHubCommentTrigger,
   formatGitHubContextBlock,
-  prependGitHubContext,
   type GitHubCheckRunWebhookEvent,
   type GitHubCheckSuiteWebhookEvent,
   type GitHubCiPayload,
@@ -313,12 +312,11 @@ async function sendGitHubTurn(input: {
     repository: input.event.repository,
     sender: input.event.sender,
   });
-  const turnMessage = prependGitHubContext(input.message, contextBlock);
 
   try {
-    await input.from(continuationTokenFromState(input.state)).send(turnMessage, {
+    await input.from(continuationTokenFromState(input.state)).send(input.message, {
       auth: input.auth,
-      context: input.context,
+      context: [contextBlock, ...(input.context ?? [])],
       state: input.state,
     });
   } catch (error) {
