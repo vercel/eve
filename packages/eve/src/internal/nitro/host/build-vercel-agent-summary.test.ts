@@ -70,16 +70,21 @@ function makeSchedule(name: string, cron: string): CompiledScheduleDefinition {
   };
 }
 
-function makeChannel(input: { name: string; adapterKind?: string }): CompiledChannelDefinition {
+function makeChannel(input: {
+  name: string;
+  adapterKind?: string;
+  method?: CompiledChannelDefinition["method"];
+  urlPath?: string;
+}): CompiledChannelDefinition {
   return {
     adapterKind: input.adapterKind,
     kind: "channel",
     logicalPath: `channels/${input.name}.ts`,
-    method: "POST",
+    method: input.method ?? "POST",
     name: input.name,
     sourceId: `channels/${input.name}.ts`,
     sourceKind: "module",
-    urlPath: `/${input.name}`,
+    urlPath: input.urlPath ?? `/${input.name}`,
   };
 }
 
@@ -143,7 +148,13 @@ describe("buildVercelAgentSummary", () => {
       channels: [
         makeChannel({ name: "slack", adapterKind: "slack" }),
         makeChannel({ name: "weather-bot", adapterKind: "weather-slack" }),
-        makeChannel({ name: "messages", adapterKind: "http" }),
+        makeChannel({ name: "messages", adapterKind: "http", urlPath: "/messages/v1/session" }),
+        makeChannel({
+          name: "messages",
+          adapterKind: "http",
+          method: "GET",
+          urlPath: "/messages/v1/session/:sessionId/stream",
+        }),
         makeChannel({ name: "stripe", adapterKind: "stripe-webhook" }),
         makeChannel({ name: "mystery" }),
         { kind: "disabled", logicalPath: "channels/disabled.ts", name: "disabled" },
@@ -279,46 +290,45 @@ describe("buildVercelAgentSummary", () => {
     ]);
 
     // Disabled channels are dropped; remaining channels are normalized to
-    // the four-value display type.
+    // the four-value display type and grouped one entry per authored
+    // channel, with route-level detail nested under `routes`.
     expect(summary.channels).toEqual([
       {
         adapterKind: "slack",
         logicalPath: "channels/slack.ts",
-        method: "POST",
         name: "slack",
+        routes: [{ method: "POST", urlPath: "/slack" }],
         type: "slack",
-        urlPath: "/slack",
       },
       {
         adapterKind: "weather-slack",
         logicalPath: "channels/weather-bot.ts",
-        method: "POST",
         name: "weather-bot",
+        routes: [{ method: "POST", urlPath: "/weather-bot" }],
         type: "slack",
-        urlPath: "/weather-bot",
       },
       {
         adapterKind: "http",
         logicalPath: "channels/messages.ts",
-        method: "POST",
         name: "messages",
+        routes: [
+          { method: "POST", urlPath: "/messages/v1/session" },
+          { method: "GET", urlPath: "/messages/v1/session/:sessionId/stream" },
+        ],
         type: "http",
-        urlPath: "/messages",
       },
       {
         adapterKind: "stripe-webhook",
         logicalPath: "channels/stripe.ts",
-        method: "POST",
         name: "stripe",
+        routes: [{ method: "POST", urlPath: "/stripe" }],
         type: "webhook",
-        urlPath: "/stripe",
       },
       {
         logicalPath: "channels/mystery.ts",
-        method: "POST",
         name: "mystery",
+        routes: [{ method: "POST", urlPath: "/mystery" }],
         type: "unknown",
-        urlPath: "/mystery",
       },
     ]);
 

@@ -16,6 +16,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   type VercelEveAgentSummary,
   type VercelEveChannelEntry,
+  type VercelEveChannelRoute,
   type VercelEveConnectionEntry,
   type VercelEveInstructionsEntry,
   type VercelEveScheduleEntry,
@@ -60,7 +61,7 @@ export function buildVercelAgentSummary(input: {
     tools: manifest.tools.map(toToolEntry),
     skills: manifest.skills.map(toSkillEntry),
     connections: manifest.connections.map(toConnectionEntry),
-    channels: manifest.channels.filter(isActiveChannel).map(toChannelEntry),
+    channels: groupChannelEntries(manifest.channels.filter(isActiveChannel)),
     sandbox:
       manifest.sandbox === null
         ? null
@@ -165,20 +166,38 @@ function toConnectionEntry(connection: CompiledConnectionDefinition): VercelEveC
   return entry;
 }
 
-function toChannelEntry(channel: CompiledChannelDefinition): VercelEveChannelEntry {
-  const entry: VercelEveChannelEntry = {
-    name: channel.name,
-    method: channel.method,
-    urlPath: channel.urlPath,
-    type: normalizeChannelKindForDisplay(channel.adapterKind),
-    logicalPath: channel.logicalPath,
-  };
+/**
+ * Groups the manifest's route-level channel definitions into one summary
+ * entry per authored channel, preserving first-occurrence order of both
+ * channels and their routes. The manifest stores one definition per
+ * `(method, urlPath)` — the granularity the runtime mounts — but the
+ * summary's unit is the authored channel, with routes nested under it.
+ */
+function groupChannelEntries(
+  channels: readonly CompiledChannelDefinition[],
+): VercelEveChannelEntry[] {
+  const grouped = new Map<string, VercelEveChannelEntry & { routes: VercelEveChannelRoute[] }>();
 
-  if (channel.adapterKind !== undefined) {
-    return { ...entry, adapterKind: channel.adapterKind };
+  for (const channel of channels) {
+    const route: VercelEveChannelRoute = { method: channel.method, urlPath: channel.urlPath };
+    const existing = grouped.get(channel.name);
+    if (existing !== undefined) {
+      existing.routes.push(route);
+      continue;
+    }
+    const entry = {
+      name: channel.name,
+      type: normalizeChannelKindForDisplay(channel.adapterKind),
+      logicalPath: channel.logicalPath,
+      routes: [route],
+    };
+    grouped.set(
+      channel.name,
+      channel.adapterKind === undefined ? entry : { ...entry, adapterKind: channel.adapterKind },
+    );
   }
 
-  return entry;
+  return [...grouped.values()];
 }
 
 function toSubagentEntry(subagent: CompiledSubagentNode): VercelEveSubagentEntry {
