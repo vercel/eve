@@ -1,9 +1,7 @@
-import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
 import { get, head, put } from "@vercel/blob";
 
@@ -14,8 +12,7 @@ import {
   packageManifestPath,
   preparePackageJson,
 } from "../lib/package.mjs";
-
-const execFile = promisify(execFileCallback);
+import { packPackage } from "../lib/pack.mjs";
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(appRoot, "../..");
 const packageRoot = join(repoRoot, "packages/eve");
@@ -51,12 +48,10 @@ const artifactPath = packageArtifactPath(sourceSha);
 try {
   await rm(artifactDirectory, { force: true, recursive: true });
   await writeFile(packageJsonPath, `${JSON.stringify(preparedPackageJson, null, 2)}\n`);
-  await execFile("pnpm", ["--dir", packageRoot, "pack", "--pack-destination", artifactDirectory], {
-    cwd: repoRoot,
-    env: { ...process.env, EVE_MAIN_DEPENDENCY_URL: dependencyUrl },
+  const tarball = await packPackage(packageRoot, version, {
+    ...process.env,
+    EVE_MAIN_DEPENDENCY_URL: dependencyUrl,
   });
-
-  const tarball = await readFile(join(artifactDirectory, `eve-${version}.tgz`));
   const sha256 = createHash("sha256").update(tarball).digest("hex");
   let artifact;
   try {
