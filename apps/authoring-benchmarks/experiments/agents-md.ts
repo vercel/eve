@@ -1,20 +1,18 @@
 import type { ExperimentConfig } from "@vercel/agent-eval";
-import { registerAgent } from "@vercel/agent-eval";
 
-import { harnessAgent } from "../lib/harness-agent.js";
-
-registerAgent(harnessAgent);
+import { setupAuthoringEval } from "../lib/setup.js";
 
 const config: ExperimentConfig = {
-  agent: "eve-harness-pi",
-  model: "openai/gpt-5.6-terra",
+  agent: "vercel-ai-gateway/claude-code",
+  model: "claude-sonnet-4-6",
   evals: "author-000-imessage",
   scripts: ["typecheck", "build"],
   runs: 1,
   earlyExit: true,
   timeout: 900,
-  sandbox: "vercel",
+  sandbox: "auto",
   copyFiles: "changed",
+  setup: (sandbox) => setupAuthoringEval(sandbox, { agentsMd: true, syntheticImessage: true }),
 };
 
 export default config;

@@ -8,10 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/harness": "1.0.68",
-    "@ai-sdk/harness-pi": "1.0.69",
-    "@ai-sdk/sandbox-vercel": "1.0.68",
-    "@vercel/agent-eval": "1.5.0"
+    "@vercel/agent-eval": "1.4.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
