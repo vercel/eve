@@ -12,19 +12,10 @@ const runFile = promisify(execFile);
 const createScratchDirectory = useTemporaryDirectories();
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 
-async function copyPackageScript(packageRoot: string, fileName: string): Promise<void> {
+async function copyScript(packageRoot: string, fileName: string): Promise<void> {
   await writeFile(
     join(packageRoot, "scripts", fileName),
     await readFile(join(testDirectory, "..", "..", "scripts", fileName), "utf8"),
-    "utf8",
-  );
-}
-
-async function copyRootScript(repoRoot: string, fileName: string): Promise<void> {
-  await mkdir(join(repoRoot, "scripts"), { recursive: true });
-  await writeFile(
-    join(repoRoot, "scripts", fileName),
-    await readFile(join(testDirectory, "..", "..", "..", "..", "scripts", fileName), "utf8"),
     "utf8",
   );
 }
@@ -45,8 +36,8 @@ async function createPostBuildFixture(
   });
   await mkdir(join(repoRoot, "docs"), { recursive: true });
 
-  await copyPackageScript(packageRoot, "copy-docs.mjs");
-  await copyPackageScript(packageRoot, "stamp-version-tokens.mjs");
+  await copyScript(packageRoot, "copy-docs.mjs");
+  await copyScript(packageRoot, "stamp-version-tokens.mjs");
   await writeFile(join(repoRoot, "README.md"), "# Monorepo README\n", "utf8");
   await writeFile(join(repoRoot, "docs", "guide.md"), "doc\n", "utf8");
   await writeFile(
@@ -106,44 +97,6 @@ describe("post-build scripts", () => {
     await expect(access(join(packageRoot, "README.md"), constants.F_OK)).rejects.toThrow();
   });
 
-  it("prepares a main package with separate runtime and scaffold dependency versions", async () => {
-    const packageRoot = await createPostBuildFixture();
-    const repoRoot = join(packageRoot, "..", "..");
-    const sha = "a".repeat(40);
-    await copyRootScript(repoRoot, "prepare-main-package.mjs");
-    await writeFile(
-      join(packageRoot, "dist", "src", "internal", "application", "package.js"),
-      'export const version = "__EVE_PACKAGE_VERSION__";\n',
-      "utf8",
-    );
-    await writeFile(
-      join(packageRoot, "dist", "src", "chunks", "scaffold-abc123.js"),
-      'export const dependency = "__EVE_PACKAGE_DEPENDENCY_VERSION__";\n',
-      "utf8",
-    );
-
-    await runFile(process.execPath, [join(repoRoot, "scripts", "prepare-main-package.mjs")], {
-      cwd: repoRoot,
-      env: { ...process.env, EVE_MAIN_SHA: sha },
-    });
-
-    const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-    expect(packageJson).toMatchObject({ version: `1.2.4-main.${sha}` });
-
-    const dependencyUrl = `https://pkg.eve.dev/${sha}/eve.tgz`;
-    await runFile(process.execPath, [join(packageRoot, "scripts", "stamp-version-tokens.mjs")], {
-      cwd: packageRoot,
-      env: { ...process.env, EVE_MAIN_DEPENDENCY_URL: dependencyUrl },
-    });
-
-    await expect(
-      readFile(join(packageRoot, "dist", "src", "internal", "application", "package.js"), "utf8"),
-    ).resolves.toBe(`export const version = "1.2.4-main.${sha}";\n`);
-    await expect(
-      readFile(join(packageRoot, "dist", "src", "chunks", "scaffold-abc123.js"), "utf8"),
-    ).resolves.toBe(`export const dependency = "${dependencyUrl}";\n`);
-  });
-
   it("stamps version tokens across bundled package and scaffold chunks", async () => {
     const packageRoot = await createPostBuildFixture();
     await writeFile(
@@ -159,7 +112,6 @@ describe("post-build scripts", () => {
     await writeFile(
       join(packageRoot, "dist", "src", "chunks", "scaffold-abc123.js"),
       [
-        'export const dependency = "__EVE_PACKAGE_DEPENDENCY_VERSION__";',
         'export const ai = "__AI_SDK_VERSION__";',
         'export const next = "__NEXT_VERSION__";',
         'export const react = "__REACT_VERSION__";',
@@ -189,7 +141,6 @@ describe("post-build scripts", () => {
       readFile(join(packageRoot, "dist", "src", "chunks", "scaffold-abc123.js"), "utf8"),
     ).resolves.toBe(
       [
-        'export const dependency = "1.2.3";',
         'export const ai = "2.0.0";',
         'export const next = "16.2.6";',
         'export const react = "19.2.6";',

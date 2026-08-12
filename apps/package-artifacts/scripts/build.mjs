@@ -5,13 +5,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { head, put } from "@vercel/blob";
+import { get, head, put } from "@vercel/blob";
 
 import {
   SHA_PATTERN,
   packageArtifactPath,
   packageDependencyUrl,
-  packageVersion,
+  packageManifestPath,
+  preparePackageJson,
 } from "../lib/package.mjs";
 
 const execFile = promisify(execFileCallback);
@@ -26,22 +27,24 @@ const branch = process.env.VERCEL_GIT_COMMIT_REF;
 if (!SHA_PATTERN.test(sourceSha ?? "")) {
   throw new Error("VERCEL_GIT_COMMIT_SHA must be a 40-character Git commit SHA.");
 }
-if (typeof branch !== "string" || branch.length === 0) {
-  throw new Error("VERCEL_GIT_COMMIT_REF must identify the source branch.");
+if (branch !== "main" || process.env.VERCEL_ENV !== "production") {
+  await mkdir(join(appRoot, "public"), { recursive: true });
+  await writeFile(
+    join(appRoot, "public/index.html"),
+    "<!doctype html><title>eve packages</title><p>Artifacts are only published from main.</p>\n",
+  );
+  process.exit(0);
 }
 
 const originalPackageJson = await readFile(packageJsonPath, "utf8");
-const stableVersion = JSON.parse(originalPackageJson).version;
-const version = packageVersion(stableVersion, sourceSha);
+const preparedPackageJson = preparePackageJson(JSON.parse(originalPackageJson), sourceSha);
+const version = preparedPackageJson.version;
 const dependencyUrl = packageDependencyUrl(sourceSha);
 const artifactPath = packageArtifactPath(sourceSha, version);
 
 try {
   await rm(artifactDirectory, { force: true, recursive: true });
-  await execFile(process.execPath, [join(repoRoot, "scripts/prepare-main-package.mjs")], {
-    cwd: repoRoot,
-    env: { ...process.env, EVE_MAIN_SHA: sourceSha },
-  });
+  await writeFile(packageJsonPath, `${JSON.stringify(preparedPackageJson, null, 2)}\n`);
   await execFile("pnpm", ["--dir", packageRoot, "pack", "--pack-destination", artifactDirectory], {
     cwd: repoRoot,
     env: { ...process.env, EVE_MAIN_DEPENDENCY_URL: dependencyUrl },
@@ -61,16 +64,35 @@ try {
   } catch (error) {
     if (!(error instanceof Error) || !error.message.includes("already exists")) throw error;
     artifact = await head(artifactPath);
+    const publishedTarball = await fetch(artifact.url);
+    if (!publishedTarball.ok) {
+      throw new Error(`Published package artifact returned ${publishedTarball.status}.`);
+    }
+    const publishedSha256 = createHash("sha256")
+      .update(Buffer.from(await publishedTarball.arrayBuffer()))
+      .digest("hex");
+    if (publishedSha256 !== sha256) {
+      throw new Error(`Commit ${sourceSha} was already published with different package contents.`);
+    }
   }
 
   const manifest = { sourceSha, version, tarball: artifact.url, sha256 };
-  await put(`branches/${encodeURIComponent(branch)}.json`, JSON.stringify(manifest), {
-    access: "public",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    cacheControlMaxAge: 60,
-    contentType: "application/json",
-  });
+  const manifestPath = packageManifestPath(sourceSha);
+  const existingManifest = await get(manifestPath, { access: "public", useCache: false });
+  if (existingManifest === null) {
+    await put(manifestPath, JSON.stringify(manifest), {
+      access: "public",
+      addRandomSuffix: false,
+      allowOverwrite: false,
+      cacheControlMaxAge: 31_536_000,
+      contentType: "application/json",
+    });
+  } else {
+    const published = JSON.parse(await new Response(existingManifest.stream).text());
+    if (published.sha256 !== sha256) {
+      throw new Error(`Commit ${sourceSha} was already published with different package contents.`);
+    }
+  }
 
   await mkdir(join(appRoot, "public"), { recursive: true });
   await writeFile(

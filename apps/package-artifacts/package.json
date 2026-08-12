@@ -9,7 +9,7 @@
     "test:smoke": "node scripts/check-smoke.mjs"
   },
   "dependencies": {
-    "@vercel/blob": "2.8.0"
+    "@vercel/blob": "2.4.0"
   },
   "devDependencies": {
     "vitest": "catalog:"

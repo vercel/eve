@@ -6,8 +6,8 @@
   "rewrites": [
     { "source": "/:ref*/eve.tgz", "destination": "/api/package?ref=:ref" },
     {
-      "source": "/:ref*/latest.json",
-      "destination": "/api/package?ref=:ref&manifest=1"
+      "source": "/main/latest.json",
+      "destination": "/api/package?ref=main&manifest=1"
     }
   ]
 }
