@@ -51,6 +51,12 @@ describe("resolveAgentCollection", () => {
     await expect(resolveAgentCollection(root)).rejects.toThrow(/Move flat authored files/);
   });
 
+  it("rejects child packages", async () => {
+    const root = await createCollection();
+    await writeFile(join(root, "agents", "support", "package.json"), "{}\n");
+    await expect(resolveAgentCollection(root)).rejects.toThrow(/package.json.*not supported/);
+  });
+
   it("keeps nested named agents discoverable without child package files", async () => {
     const root = await createCollection();
     await expect(resolveDiscoveryProject(join(root, "agents", "support"))).resolves.toEqual({

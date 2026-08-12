@@ -8,7 +8,6 @@ import { getPackageManagerStrategy } from "../primitives/pm/index.js";
 import {
   ensurePnpmWorkspaceIncludesProject,
   findAncestorPnpmWorkspaceRoot,
-  findClaimingAncestorPnpmWorkspaceRoot,
 } from "../primitives/pm/pnpm.js";
 import {
   isPathInside,
@@ -99,19 +98,6 @@ function findPackageManagerWorkspaceRoot(
     case "yarn":
       return findAncestorPackageJsonWorkspaceRoot(projectRoot);
   }
-}
-
-/** Whether `projectRoot` is claimed by the specified package-manager workspace. */
-export function packageManagerWorkspaceClaimsProject(
-  packageManager: PackageManagerKind,
-  workspaceRoot: string,
-  projectRoot: string,
-): boolean {
-  const claimingRoot =
-    packageManager === "pnpm"
-      ? findClaimingAncestorPnpmWorkspaceRoot(projectRoot)
-      : findClaimingPackageJsonWorkspaceRoot(projectRoot);
-  return claimingRoot !== undefined && resolve(claimingRoot) === resolve(workspaceRoot);
 }
 
 export function isPackageManagerWorkspaceMember(

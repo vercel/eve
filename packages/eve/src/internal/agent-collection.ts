@@ -70,6 +70,11 @@ export async function resolveAgentCollection(
         `${join(AGENTS_DIRECTORY, entry.name)} is not a collection agent: expected ${join(AGENTS_DIRECTORY, entry.name, "agent")}/.${flatHint}`,
       );
     }
+    if ((await source.stat(join(appRoot, "package.json"))) === "file") {
+      throw new Error(
+        `${join(AGENTS_DIRECTORY, entry.name, "package.json")} is not supported in an eve agent collection. Define dependencies and build scripts at the collection root.`,
+      );
+    }
 
     members.push({ appRoot, name: entry.name });
   }
