@@ -1,5 +1,27 @@
 # eve
 
+## 0.34.0
+
+### Minor Changes
+
+- 11908eb: Tools and connections can now define optional `request` and `response` approval policies, while preserving the existing function shorthand. Response policies can authenticate the responder and return a tagged allow or rejection decision, and authorization token results can expose a stable provider subject.
+
+### Patch Changes
+
+- 82c1314: Instrumentation providers can observe durable inbound channel deliveries from processing start through the resulting turn terminal. OpenTelemetry destinations receive consumer spans under the session window, with traced HTTP requests represented as links rather than parents.
+- 29313be: Reconstruct durable `agent.action` spans when runtime actions settle, including across worker replacement, and record each action's exact caller-accepted duration, kind, outcome, stable error code, and subagent usage. Remote eve sessions join the caller action trace through W3C `traceparent`; older receivers may ignore the header. Human approval waits appear as durable `agent.approval` child spans, while chat spans use standard self-contained model input and output attributes.
+- 749581b: Instrumentation lifecycle events now use eve-owned payloads and flat event names, including `step.attempt.*` and durable `input.requested`/`input.resolved` boundaries, instead of AI SDK callback types and paired hooks. Existing spans and attributes are unchanged.
+- 7770fba: Add an experimental Buzz ACP compatibility adapter that publishes threaded and top-level responses through the local Buzz CLI, prevents duplicate replies, and defaults to Buzz's owner-only author gate. Shared service agents must explicitly opt in to letting multiple accepted Buzz senders use the same eve authentication and connections.
+- 3eba855: Post GitHub human-in-the-loop prompts by default so users can see and answer pending input requests in the issue or pull request thread.
+- f06633b: Give every instrumentation lifecycle event a replay-stable `idempotencyKey` derived from durable eve identity, allowing providers to upsert one record across retries and worker replays.
+- c90a459: Add the experimental `agent/instrumentation/` provider layout with durable lifecycle handlers, including user input boundaries and action settlement-time, outcome, error-code, and usage metadata, final setup context, reserved OpenTelemetry destinations, and coordinated flush and shutdown. OpenTelemetry singleton settings and destinations are exposed through `eve/instrumentation/otel`, and eve's AI SDK bridge composes with registered integrations.
+- d304544: OpenTelemetry destinations can independently decline input or output content. Redaction covers span attributes, exception and custom events, and status messages without mutating spans shared with other destinations; `EVE_TRACES_CONTENT=off` now narrows only local traces.
+- 084f8f1: eve now assembles its local OpenTelemetry runtime from declarative singleton settings and ordered destinations. The local trace spool is an ordinary span processor, and tracer-provider ownership, flushing, and shutdown are managed centrally without changing recorded spans.
+- 3b43b3d: Instrumentation providers can choose metadata-only or content-bearing events. eve builds sensitive projections only when requested and keeps prompts, responses, tool payloads, exceptions, and opaque provider metadata away from metadata-only providers.
+- 1528fda: Add durable operation-scoped state to instrumentation handlers, isolated by provider and automatically released at terminal boundaries. Bound each handler and persist start-handler abandonment so a stalled provider cannot block the bus or later receive a mismatched terminal.
+- 760c14a: Allow canary builds to scaffold projects pinned to their exact package artifact URL.
+- 4138e64: Publish durable lifecycle events for runtime actions and user input requests, including approval decisions that resume in another worker. Action terminals expose caller-accepted settlement time, exact outcome, stable error code, and subagent usage even when settlement crosses workers. Framework skill loads are also preserved in eval tool-call facts.
+
 ## 0.33.3
 
 ### Patch Changes

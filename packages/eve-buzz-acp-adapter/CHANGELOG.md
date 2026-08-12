@@ -1,0 +1,22 @@
+# @eve/buzz-acp-adapter
+
+## 0.0.1
+
+### Patch Changes
+
+- 7770fba: Add an experimental Buzz ACP compatibility adapter that publishes threaded and top-level responses through the local Buzz CLI, prevents duplicate replies, and defaults to Buzz's owner-only author gate. Shared service agents must explicitly opt in to letting multiple accepted Buzz senders use the same eve authentication and connections.
+- Updated dependencies [11908eb]
+- Updated dependencies [82c1314]
+- Updated dependencies [29313be]
+- Updated dependencies [749581b]
+- Updated dependencies [7770fba]
+- Updated dependencies [3eba855]
+- Updated dependencies [f06633b]
+- Updated dependencies [c90a459]
+- Updated dependencies [d304544]
+- Updated dependencies [084f8f1]
+- Updated dependencies [3b43b3d]
+- Updated dependencies [1528fda]
+- Updated dependencies [760c14a]
+- Updated dependencies [4138e64]
+  - eve@0.34.0
