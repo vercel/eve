@@ -57,6 +57,7 @@ function replayTools(metadata: readonly DurableDynamicToolMetadata[]): HarnessTo
       name: m.name,
       approval: buildReplayedApproval(m),
       outputSchema: toOutputSchema(m.outputSchema),
+      toModelOutput: buildReplayedToModelOutput(m),
     });
   }
 
@@ -81,6 +82,30 @@ function buildReplayedApproval(
 
   return async (approvalCtx: ApprovalContext) =>
     (await approvalStepFn(metadata.closureVars ?? {}, approvalCtx)) as ApprovalStatus;
+}
+
+function buildReplayedToModelOutput(
+  metadata: DurableDynamicToolMetadata,
+): HarnessToolDefinition["toModelOutput"] | undefined {
+  if (metadata.toModelOutputStepFnName === undefined) {
+    return undefined;
+  }
+
+  const toModelOutputStepFn = lookupStepFunction(metadata.toModelOutputStepFnName);
+  if (toModelOutputStepFn === null) {
+    // Fail closed: the hook exists to shape or redact what the model
+    // sees, so falling back to the raw output would silently defeat it.
+    log.warn(
+      `Dynamic tool "${metadata.name}" references toModelOutput function ` +
+        `"${metadata.toModelOutputStepFnName}" which is not registered — withholding the raw output.`,
+    );
+    return () => ({
+      type: "text",
+      value: `The ${metadata.name} tool completed, but its output view is unavailable on this step.`,
+    });
+  }
+
+  return (output: unknown) => toModelOutputStepFn(metadata.closureVars ?? {}, output);
 }
 
 /**
