@@ -1,10 +1,10 @@
-import { mkdir, readdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
 import { pathExists, writeTextFile } from "../files.js";
-import { blockingCreateInPlaceEntries } from "../create-in-place.js";
+import { assertCanCreateInPlace } from "../create-in-place.js";
 import { resolveVersionToken } from "../version-tokens.js";
 import {
   applyPackageManagerWorkspaceConfiguration,
@@ -176,25 +176,6 @@ function templateFiles(includeRootOnlyPackageJsonFields: boolean): Record<string
     "CLAUDE.md": CLAUDE_MD_TEMPLATE,
     "package.json": packageJsonTemplate(includeRootOnlyPackageJsonFields),
   };
-}
-
-async function assertCanCreateInPlace(
-  targetRoot: string,
-  overwriteExisting: boolean,
-): Promise<void> {
-  if (!(await pathExists(targetRoot))) {
-    return;
-  }
-
-  const entries = await readdir(targetRoot);
-  const blocking = blockingCreateInPlaceEntries(entries);
-  if (blocking.length > 0 && !overwriteExisting) {
-    const visible = blocking.slice(0, 5).join(", ");
-    const suffix = blocking.length > 5 ? `, and ${blocking.length - 5} more` : "";
-    throw new Error(
-      `Cannot create project in current directory because it is not empty. Found: ${visible}${suffix}. Use an empty directory.`,
-    );
-  }
 }
 
 export interface ScaffoldExtensionProjectOptions {

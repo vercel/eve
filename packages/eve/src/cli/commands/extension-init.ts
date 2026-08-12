@@ -19,7 +19,7 @@ import { pathExists } from "#setup/path-exists.js";
 import { parseProjectName } from "#setup/project-name.js";
 import { runPackageManagerInstall } from "#setup/primitives/index.js";
 import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
-import { blockingCreateInPlaceEntries } from "#setup/scaffold/create-in-place.js";
+import { assertCanCreateInPlace } from "#setup/scaffold/create-in-place.js";
 import {
   DEFAULT_EVE_PACKAGE_CONTRACT,
   type EvePackageContract,
@@ -74,20 +74,6 @@ async function resolveTargetDirectory(
   return stats?.isDirectory() ? targetPath : undefined;
 }
 
-async function assertCanScaffoldInPlace(targetRoot: string): Promise<void> {
-  const entries = await readdir(targetRoot);
-  const blocking = blockingCreateInPlaceEntries(entries);
-  if (blocking.length === 0) {
-    return;
-  }
-
-  const visible = blocking.slice(0, 5).join(", ");
-  const suffix = blocking.length > 5 ? `, and ${blocking.length - 5} more` : "";
-  throw new Error(
-    `Cannot create project in current directory because it is not empty. Found: ${visible}${suffix}. Use an empty directory.`,
-  );
-}
-
 async function moveDirectoryContents(sourceRoot: string, targetRoot: string): Promise<void> {
   for (const entry of await readdir(sourceRoot)) {
     await rename(join(sourceRoot, entry), join(targetRoot, entry));
@@ -140,7 +126,7 @@ async function scaffoldExtension(
   const createInPlace = projectName === CURRENT_DIRECTORY_PROJECT_NAME;
   const projectPath = createInPlace ? parentPath : join(parentPath, projectName);
   if (createInPlace) {
-    await assertCanScaffoldInPlace(projectPath);
+    await assertCanCreateInPlace(projectPath, false);
   } else if (await pathExists(projectPath)) {
     throw new Error(`Cannot create project because "${projectPath}" already exists.`);
   }

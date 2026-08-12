@@ -1,4 +1,4 @@
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
@@ -6,7 +6,7 @@ import { pinnedNodeEngineMajor } from "../../node-engine.js";
 import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
 import { pathExists, writeTextFile } from "../files.js";
-import { blockingCreateInPlaceEntries } from "../create-in-place.js";
+import { assertCanCreateInPlace } from "../create-in-place.js";
 import { resolveVersionToken } from "../version-tokens.js";
 import {
   applyPackageManagerWorkspaceConfiguration,
@@ -346,25 +346,6 @@ function templateFiles(input: {
       packageManager: input.packageManager,
     }),
   };
-}
-
-async function assertCanCreateInPlace(
-  targetRoot: string,
-  overwriteExisting: boolean,
-): Promise<void> {
-  if (!(await pathExists(targetRoot))) {
-    return;
-  }
-
-  const entries = await readdir(targetRoot);
-  const blocking = blockingCreateInPlaceEntries(entries);
-  if (blocking.length > 0 && !overwriteExisting) {
-    const visible = blocking.slice(0, 5).join(", ");
-    const suffix = blocking.length > 5 ? `, and ${blocking.length - 5} more` : "";
-    throw new Error(
-      `Cannot create project in current directory because it is not empty. Found: ${visible}${suffix}. Use an empty directory.`,
-    );
-  }
 }
 
 export interface ScaffoldBaseProjectOptions {
