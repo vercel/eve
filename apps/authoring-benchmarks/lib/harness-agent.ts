@@ -72,10 +72,7 @@ export function createAuthoringAgent(): Agent {
         sandbox,
         sandboxConfig: {
           workDir: WORKSPACE,
-          bootstrapHash: bootstrapHash(
-            authoringCase,
-            options.agentOptions?.agentsMd === true ? "agents-md" : "baseline",
-          ),
+          bootstrapHash: bootstrapHash(authoringCase),
           onBootstrap: async ({ session: bootstrap, workDir }) => {
             const networkSandbox = bootstrap as HarnessV1NetworkSandboxSession;
             await bootstrapSubject(networkSandbox, workDir, authoringCase.startingPoint.workspace);
@@ -103,7 +100,9 @@ export function createAuthoringAgent(): Agent {
       });
 
       try {
-        session = await agent.createSession({ abortSignal: options.signal });
+        session = await withBootstrapInitialization(bootstrapHash(authoringCase), () =>
+          agent.createSession({ abortSignal: options.signal }),
+        );
         if (activeSandbox === undefined || workspace === undefined) {
           throw new Error("HarnessAgent did not initialize its sandbox session.");
         }
@@ -245,12 +244,44 @@ function shellCommands(toolCalls: ReadonlyArray<{ input: unknown }>): string[] {
   });
 }
 
-function bootstrapHash(authoringCase: AuthoringCase, treatment: string): string {
+function bootstrapHash(authoringCase: AuthoringCase): string {
   const setupIds = [authoringCase.startingPoint.setup, authoringCase.setup]
     .filter((setup): setup is AuthoringSetup => setup !== undefined)
     .map((setup) => setup.id)
     .join("-");
-  return `eve-authoring-${SUBJECT_REPOSITORY}-${SUBJECT_REVISION}-${authoringCase.startingPoint.id}-${setupIds}-${treatment}`;
+  return `eve-authoring-${SUBJECT_REPOSITORY}-${SUBJECT_REVISION}-${authoringCase.startingPoint.id}-${setupIds}`;
+}
+
+const bootstrapCoordination = globalThis as typeof globalThis & {
+  __eveAuthoringBootstrapLocks?: Map<string, Promise<void>>;
+  __eveAuthoringBootstrapsReady?: Set<string>;
+};
+
+async function withBootstrapInitialization<T>(
+  key: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const ready = (bootstrapCoordination.__eveAuthoringBootstrapsReady ??= new Set());
+  if (ready.has(key)) return operation();
+
+  const locks = (bootstrapCoordination.__eveAuthoringBootstrapLocks ??= new Map());
+  const previous = locks.get(key) ?? Promise.resolve();
+  let release = () => {};
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  locks.set(key, tail);
+
+  await previous;
+  try {
+    const result = await operation();
+    ready.add(key);
+    return result;
+  } finally {
+    release();
+    if (locks.get(key) === tail) locks.delete(key);
+  }
 }
 
 async function loadAuthoringCase(fixturePath: string): Promise<AuthoringCase> {
