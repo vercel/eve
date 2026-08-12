@@ -179,47 +179,40 @@ export class ClientSession {
     initialStreamIndex: number,
     input: SendTurnPayload,
   ): AsyncGenerator<MessageStreamEvent> {
-    let eventCount = 0;
-    try {
-      for await (const event of this.#readStream({
-        headers: input.headers,
-        signal: input.signal,
-        startIndex: initialStreamIndex,
-        streamReconnectPolicy: input.streamReconnectPolicy,
-      })) {
-        eventCount += 1;
-        yield event;
-        if (isCurrentTurnBoundaryEvent(event)) break;
-      }
-    } finally {
-      this.#state = {
-        sessionId: this.#state.sessionId,
-        streamIndex: initialStreamIndex + eventCount,
-      };
+    let streamIndex = initialStreamIndex;
+    for await (const event of this.#readStream({
+      headers: input.headers,
+      signal: input.signal,
+      startIndex: initialStreamIndex,
+      streamReconnectPolicy: input.streamReconnectPolicy,
+    })) {
+      streamIndex += 1;
+      this.#advanceStreamIndex(streamIndex);
+      yield event;
+      if (isCurrentTurnBoundaryEvent(event)) break;
     }
   }
 
   async *#streamAndAdvance(options?: StreamOptions): AsyncGenerator<MessageStreamEvent> {
     const startIndex = options?.startIndex ?? this.#state.streamIndex;
-    let eventCount = 0;
-    try {
-      for await (const event of this.#readStream({
-        follow: options?.follow,
-        signal: options?.signal,
-        startIndex,
-        streamReconnectPolicy: options?.streamReconnectPolicy,
-      })) {
-        eventCount += 1;
-        yield event;
+    let streamIndex = startIndex;
+    for await (const event of this.#readStream({
+      follow: options?.follow,
+      signal: options?.signal,
+      startIndex,
+      streamReconnectPolicy: options?.streamReconnectPolicy,
+    })) {
+      if (streamIndex >= 0) {
+        streamIndex += 1;
+        this.#advanceStreamIndex(streamIndex);
       }
-    } finally {
-      if (startIndex >= 0) {
-        this.#state = {
-          sessionId: this.#state.sessionId,
-          streamIndex: startIndex + eventCount,
-        };
-      }
+      yield event;
     }
+  }
+
+  #advanceStreamIndex(streamIndex: number): void {
+    if (streamIndex <= this.#state.streamIndex) return;
+    this.#state = { sessionId: this.#state.sessionId, streamIndex };
   }
 
   #readStream(input: {

@@ -837,6 +837,63 @@ describe("ClientSession", () => {
     });
   });
 
+  it("starts a concurrent send after events already consumed by a live stream", async () => {
+    const encoder = new TextEncoder();
+    const streamStartIndices: Array<string | null> = [];
+    let streamRequest = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      const url = new URL(
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url,
+      );
+      if ((init?.method ?? "GET") === "POST") return createAcceptedResponse();
+
+      const startIndex = url.searchParams.get("startIndex");
+      streamStartIndices.push(startIndex);
+      streamRequest += 1;
+      if (streamRequest === 1) {
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  `${JSON.stringify({
+                    data: { messageSoFar: "old turn", sequence: 0, stepIndex: 0, turnId: "old" },
+                    type: "message.appended",
+                  })}\n`,
+                ),
+              );
+            },
+          }),
+        );
+      }
+
+      return startIndex === "1"
+        ? createStreamResponse([
+            { data: { sequence: 1, turnId: "new" }, type: "turn.started" },
+            {
+              data: { continuationToken: "session-id", wait: "next-user-message" },
+              type: "session.waiting",
+            },
+          ])
+        : createStreamResponse([
+            {
+              data: { continuationToken: "session-id", wait: "next-user-message" },
+              type: "session.waiting",
+            },
+          ]);
+    });
+    const session = createSession();
+    const following = session.stream()[Symbol.asyncIterator]();
+
+    await following.next();
+    const eventTypes: string[] = [];
+    for await (const event of await session.send("new turn")) eventTypes.push(event.type);
+    await following.return?.();
+
+    expect(streamStartIndices).toEqual([null, "1"]);
+    expect(eventTypes).toEqual(["turn.started", "session.waiting"]);
+  });
+
   it("keeps session.stream() boundary-blind across subsequent turns", async () => {
     const streamStartIndices: Array<string | null> = [];
     let streamRequest = 0;
