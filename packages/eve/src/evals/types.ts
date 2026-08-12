@@ -289,6 +289,11 @@ export interface EveEvalSessionDriver {
   requireInputRequest(filter?: EveEvalInputRequestMatchOptions): InputRequest;
   /** Resolve specific pending requests and run the resumed turn. */
   respond(responses: readonly InputResponse[], options?: SendTurnOptions): Promise<EveEvalTurn>;
+  /** Start a response turn without waiting for its boundary. */
+  startRespond(
+    responses: readonly InputResponse[],
+    options?: SendTurnOptions,
+  ): Promise<EveEvalLiveTurn>;
   /** Resolve every pending request with the same option id. */
   respondAll(optionId: string): Promise<EveEvalTurn>;
   /** Send one turn through this session. */

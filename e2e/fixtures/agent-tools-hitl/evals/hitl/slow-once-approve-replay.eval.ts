@@ -16,6 +16,7 @@ const TOOL_NAME = "guarded-slow-echo";
  */
 export default defineEval({
   tags: ["real-model"],
+  metadata: { transition: "owner.approval.response.settle-allow" },
   description: "HITL regression (#460): approved slow tool result survives replay.",
   async test(t) {
     const parked = await t.send(

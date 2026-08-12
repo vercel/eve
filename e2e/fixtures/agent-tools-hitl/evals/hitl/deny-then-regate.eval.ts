@@ -7,6 +7,7 @@ import { defineEval } from "eve/evals";
  */
 export default defineEval({
   tags: ["real-model"],
+  metadata: { transition: "owner.approval.response.settle-deny" },
   description: "HITL smoke: a denied once() call does not execute and re-gates the next call.",
   async test(t) {
     await t.send('Call the guarded-echo tool with note "denied-call".');

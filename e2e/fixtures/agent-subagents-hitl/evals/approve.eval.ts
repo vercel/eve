@@ -1,6 +1,8 @@
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
+import { verifyFollowUp } from "./shared";
+
 const GOOG_PRICE = "178.92";
 
 /**
@@ -11,7 +13,9 @@ const GOOG_PRICE = "178.92";
  */
 export default defineEval({
   tags: ["real-model"],
-  description: "Subagent tool approval proxied through the parent session.",
+  metadata: { transition: "projector.route.park.project" },
+  description:
+    "projector.route.park.project: a child-owned approval is actionable through the parent session.",
 
   async test(t) {
     await t.send(
@@ -32,5 +36,7 @@ export default defineEval({
       count: 1,
     });
     t.messageIncludes(GOOG_PRICE);
+
+    await verifyFollowUp(t, resumed.sessionId, "PROXY-APPROVE-FOLLOW-UP-OK");
   },
 });
