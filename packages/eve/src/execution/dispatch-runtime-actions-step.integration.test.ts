@@ -7,7 +7,6 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import {
-  getPendingRuntimeActionBatch,
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";

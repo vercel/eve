@@ -117,10 +117,10 @@ export function createResolvedRuntimeTurnAgent(input: {
       connections: agent.connections,
       instructions: agent.instructions,
       persistentSubagentSessions:
-        agent.config.experimental?.tasks === true ||
-        agent.config.experimental?.subagentPersistentSessions === true,
+        config?.experimental?.tasks === true ||
+        config?.experimental?.subagentPersistentSessions === true,
       subagentsAvailable: subagentDeclaredTool || subagentImplicitRootTool,
-      tasksEnabled: agent.config.experimental?.tasks === true,
+      tasksEnabled: config?.experimental?.tasks === true,
       toolsAvailable: input.tools.length > 0 || subagentImplicitRootTool,
       workspaceSpec: agent.workspaceSpec,
     }),

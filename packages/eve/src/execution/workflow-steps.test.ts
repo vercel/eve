@@ -21,7 +21,7 @@ import { AGENT_HANDLES_STATE_KEY, getAgentHandleStore } from "#harness/handles/s
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import { setPendingInputBatch } from "#harness/input-requests.js";
+import { appendPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -251,8 +251,9 @@ describe("routeProxiedDeliverStep", () => {
         hasProxyInputRequests: true,
         sessionId: "parent-session",
       }),
-    ).resolves.toMatchObject({ kind: "continue", remainder: undefined });
+    });
 
+    expect(result).toMatchObject({ kind: "continue", remainder: undefined });
     expect(resumeHookMock).toHaveBeenCalledWith("child-token", {
       auth,
       caller: undefined,
@@ -460,6 +461,10 @@ describe("recordTaskInputRequestStep", () => {
     expect(
       getProxyInputRequests(result.sessionState.snapshot?.session.state).get("task-1:request-1"),
     ).toEqual({
+      batch: {
+        approvalRequestIds: [],
+        requestIds: ["task-1:request-1"],
+      },
       childContinuationToken: "child-token",
       childRequestId: "request-1",
       kind: "question",

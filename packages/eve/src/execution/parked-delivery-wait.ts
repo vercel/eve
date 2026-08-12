@@ -10,7 +10,7 @@ type NextSessionAction =
   | { readonly kind: "compact" }
   | { readonly kind: "expired" }
   | { readonly kind: "reset" }
-  | Omit<AuthorizationCallbackInstruction, "sessionState">
+  | AuthorizationCallbackInstruction
   | {
       readonly delivery: DeliverHookPayload | null;
       readonly kind: "delivery";
@@ -22,7 +22,6 @@ export interface AuthorizationCallbackInstruction {
   /** True when the authorization hook closed; no further callbacks can arrive. */
   readonly closed: boolean;
   readonly payloads: readonly DeliverPayload[];
-  readonly sessionState: DurableSessionState;
 }
 
 /** What the parked driver should do with the next session activity. */

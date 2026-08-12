@@ -170,6 +170,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
+  const tasksEnabled = bundle.resolvedAgent.config?.experimental?.tasks === true;
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
 
   // Populate the callback base URL so getHookUrl() works during tool
@@ -330,7 +331,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const dynamicSkillResolvers = bundle.resolvedAgent.dynamicSkillResolvers ?? [];
   const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
   const persistentSubagentSessions =
-    bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
+    tasksEnabled || bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
   const effectiveNode = {
     ...bundle.graph.root,

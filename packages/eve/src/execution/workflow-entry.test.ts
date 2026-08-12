@@ -58,11 +58,14 @@ vi.mock("./create-session-step.js", () => ({
 }));
 
 vi.mock("./route-child-delivery.js", () => ({
-  routeDeliverToChildren: vi.fn().mockImplementation(async ({ delivery, sessionState }) => ({
-    kind: "continue",
-    remainder: delivery,
-    sessionState,
-  })),
+  routeDeliverToChildren: vi
+    .fn()
+    .mockImplementation(async ({ payloads, serializedContext = {}, sessionState }) => ({
+      kind: "continue",
+      remainder: payloads[0],
+      serializedContext,
+      sessionState,
+    })),
 }));
 
 vi.mock("./delegated-parent-notification.js", () => ({
@@ -1134,6 +1137,7 @@ describe("workflowEntry", () => {
     vi.mocked(routeDeliverToChildren).mockResolvedValueOnce({
       kind: "continue",
       remainder: undefined,
+      serializedContext: {},
       sessionState: retiredState,
     });
     installHookMocks({

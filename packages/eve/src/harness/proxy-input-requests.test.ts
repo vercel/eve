@@ -4,7 +4,6 @@ import {
   clearProxyInputRequestsForChild,
   getProxyInputRequests,
   hasProxyInputRequests,
-  retireProxyInputRequests,
   toProxyInputRequestEntries,
   upsertProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
@@ -226,30 +225,6 @@ describe("clearProxyInputRequestsForChild", () => {
     const session = createSession();
     const next = clearProxyInputRequestsForChild(session, "missing");
     expect(next).toBe(session);
-  });
-});
-
-describe("retireProxyInputRequests", () => {
-  it("removes only answered request IDs, including partial same-child batches", () => {
-    const session = upsertProxyInputRequests({
-      entries: [
-        ["req-1", { childContinuationToken: "child-a", kind: "question" }],
-        ["req-2", { childContinuationToken: "child-a", kind: "question" }],
-      ],
-      forChildContinuationToken: "child-a",
-      session: createSession(),
-    });
-
-    const next = retireProxyInputRequests(session, ["req-1"]);
-
-    expect([...getProxyInputRequests(next.state)]).toEqual([
-      ["req-2", { childContinuationToken: "child-a", kind: "question" }],
-    ]);
-  });
-
-  it("is idempotent for an already-retired request ID", () => {
-    const session = createSession();
-    expect(retireProxyInputRequests(session, ["req-1"])).toBe(session);
   });
 });
 

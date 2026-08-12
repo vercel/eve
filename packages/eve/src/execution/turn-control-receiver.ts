@@ -83,12 +83,12 @@ export class TurnControlReceiver {
   ): Promise<TurnDriverAction | undefined> {
     if (command.kind === "deliver") {
       if (!this.acceptTaskDelivery(command)) return undefined;
-      this.bufferedDeliveries.push(command);
+      await this.bufferDelivery(command);
       return undefined;
     }
     if (command.kind === "send") {
       if (!this.acceptTaskDelivery(command)) return undefined;
-      this.bufferedDeliveries.push(sendCommandToDelivery(command));
+      await this.bufferDelivery(sendCommandToDelivery(command));
       return undefined;
     }
     if (command.kind === "clear" || command.kind === "compact") {
@@ -232,12 +232,21 @@ export class TurnControlReceiver {
       this.commandInbox.consumeNext();
       if (winner.value.value.kind === "deliver") {
         if (!this.acceptTaskDelivery(winner.value.value)) continue;
-        delivery = winner.value.value;
+        if (deliveryHasMessage(winner.value.value)) {
+          await this.bufferDelivery(winner.value.value);
+        } else {
+          delivery = winner.value.value;
+        }
         continue;
       }
       if (winner.value.value.kind === "send") {
         if (!this.acceptTaskDelivery(winner.value.value)) continue;
-        delivery = sendCommandToDelivery(winner.value.value);
+        const candidate = sendCommandToDelivery(winner.value.value);
+        if (deliveryHasMessage(candidate)) {
+          await this.bufferDelivery(candidate);
+        } else {
+          delivery = candidate;
+        }
         continue;
       }
       const terminal = await this.handleSessionCommand(winner.value.value);

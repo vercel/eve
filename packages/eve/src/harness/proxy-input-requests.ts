@@ -84,13 +84,7 @@ export function upsertProxyInputRequestState(input: {
   readonly forChildContinuationToken: string;
   readonly state: SessionStateMap | undefined;
 }): SessionStateMap | undefined {
-  const next: Record<string, ProxyInputRequest> = {};
-
-  for (const [requestId, route] of Object.entries(readMap(input.state))) {
-    if (route.childContinuationToken !== input.forChildContinuationToken) {
-      next[requestId] = route;
-    }
-  }
+  const next: Record<string, ProxyInputRequest> = { ...readMap(input.state) };
 
   for (const [requestId, route] of input.entries) {
     next[requestId] = route;
@@ -169,13 +163,20 @@ export function toProxyInputRequestEntries(
   payload: SubagentInputRequestHookPayload,
   taskId?: string,
 ): readonly (readonly [requestId: string, route: ProxyInputRequest])[] {
+  const batch: ProxyInputRequestBatch = {
+    approvalRequestIds: payload.event.requests.flatMap((request) =>
+      request.kind === "tool-approval" ? [request.requestId] : [],
+    ),
+    requestIds: payload.event.requests.map((request) => request.requestId),
+  };
   return payload.event.requests.map((request) => {
     const route: {
       readonly childContinuationToken: string;
       childResponseUrl?: string;
       readonly kind: InputRequestKind;
       taskId?: string;
-    } = {
+    } & { readonly batch: ProxyInputRequestBatch } = {
+      batch,
       childContinuationToken: payload.childContinuationToken,
       kind: request.kind,
     };
@@ -248,7 +249,9 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   ) {
     return undefined;
   }
+  const batch = "batch" in value ? parseProxyInputRequestBatch(value.batch) : undefined;
   const request: {
+    batch?: ProxyInputRequestBatch;
     readonly childContinuationToken: string;
     childRequestId?: string;
     childResponseUrl?: string;
@@ -258,10 +261,29 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     childContinuationToken: value.childContinuationToken,
     kind: value.kind,
   };
+  if (batch !== undefined && batch.requestIds.includes(requestId)) request.batch = batch;
   if (typeof childRequestId === "string") request.childRequestId = childRequestId;
   if (typeof childResponseUrl === "string") request.childResponseUrl = childResponseUrl;
   if (typeof taskId === "string") request.taskId = taskId;
   return request;
+}
+
+function parseProxyInputRequestBatch(value: unknown): ProxyInputRequestBatch | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (!("approvalRequestIds" in value) || !("requestIds" in value)) return undefined;
+  if (!isStringArray(value.approvalRequestIds) || !isStringArray(value.requestIds))
+    return undefined;
+  const requestIds = new Set(value.requestIds);
+  if (
+    requestIds.size !== value.requestIds.length ||
+    value.approvalRequestIds.some((requestId) => !requestIds.has(requestId))
+  )
+    return undefined;
+  return { approvalRequestIds: value.approvalRequestIds, requestIds: value.requestIds };
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 function isInputRequestKind(value: unknown): value is InputRequestKind {

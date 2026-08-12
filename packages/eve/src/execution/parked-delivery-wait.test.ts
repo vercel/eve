@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
@@ -10,11 +10,6 @@ import type {
 } from "#execution/session-command-inbox.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-
-vi.mock("./route-child-delivery.js", () => ({
-  routeDeliverToChildren: vi.fn(),
-}));
 
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
@@ -197,11 +192,13 @@ describe("nextTurnDelivery", () => {
       .mockResolvedValueOnce({
         kind: "continue",
         remainder: undefined,
+        serializedContext: {},
         sessionState: retiredState,
       })
       .mockResolvedValueOnce({
         kind: "continue",
         remainder: { message: "parent turn" },
+        serializedContext: {},
         sessionState: retiredState,
       });
 
@@ -211,7 +208,7 @@ describe("nextTurnDelivery", () => {
     });
 
     expect(vi.mocked(routeDeliverToChildren).mock.calls[1]?.[0].sessionState).toBe(retiredState);
-    expect(next).toMatchObject({ kind: "turn", sessionState: retiredState });
+    expect(next).toMatchObject({ kind: "turn", remainder: { message: "parent turn" } });
   });
 });
 

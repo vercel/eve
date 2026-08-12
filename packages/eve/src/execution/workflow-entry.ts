@@ -355,7 +355,6 @@ async function runDriverLoop(input: {
         seenTaskDeliveries,
         stateCursor,
       });
-      sessionState = next.sessionState;
       if (next.kind !== "authorization") return next;
 
       for (const payload of next.payloads) {

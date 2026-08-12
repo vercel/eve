@@ -435,30 +435,41 @@ const compiledWorkflowToolDefinitionSchema: z.ZodType<CompiledWorkflowToolDefini
   })
   .strict();
 
-const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
-  .object({
-    build: compiledAgentBuildDefinitionSchema.optional(),
-    compaction: compiledAgentCompactionDefinitionSchema.optional(),
-    description: z.string().optional(),
-    dynamicModel: compiledDynamicModelDefinitionSchema.optional(),
-    experimental: z
-      .object({
-        subagentPersistentSessions: z.boolean().optional(),
-        tasks: z.boolean().optional(),
-        workflow: compiledAgentWorkflowDefinitionSchema.optional(),
-      })
-      .strict()
-      .optional(),
-    model: compiledRuntimeModelReferenceSchema,
-    name: z.string(),
-    outputSchema: jsonObjectSchema.optional(),
-    reasoning: z
-      .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
-      .optional(),
-    source: moduleSourceRefSchema.optional(),
-    limits: compiledAgentLimitsDefinitionSchema.optional(),
-  })
-  .strict();
+const compiledAgentConfigBaseFields = {
+  build: compiledAgentBuildDefinitionSchema.optional(),
+  compaction: compiledAgentCompactionDefinitionSchema.optional(),
+  description: z.string().optional(),
+  experimental: z
+    .object({
+      subagentPersistentSessions: z.boolean().optional(),
+      tasks: z.boolean().optional(),
+      workflow: compiledAgentWorkflowDefinitionSchema.optional(),
+    })
+    .strict()
+    .optional(),
+  name: z.string(),
+  outputSchema: jsonObjectSchema.optional(),
+  reasoning: z
+    .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
+    .optional(),
+  source: moduleSourceRefSchema.optional(),
+  limits: compiledAgentLimitsDefinitionSchema.optional(),
+};
+
+const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z.union([
+  z
+    .object({
+      ...compiledAgentConfigBaseFields,
+      model: compiledRuntimeModelReferenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...compiledAgentConfigBaseFields,
+      dynamicModel: compiledDynamicModelDefinitionSchema,
+    })
+    .strict(),
+]);
 
 const compiledInstructionsSchema: z.ZodType<CompiledInstructionsDefinition> = z
   .object({
@@ -840,62 +851,6 @@ export function createCompiledAgentResources(
     appRoot: input.appRoot,
     channels: [...(input.channels ?? [])],
     connections: [...(input.connections ?? [])],
-    config: {
-      build:
-        input.config.build === undefined
-          ? undefined
-          : {
-              externalDependencies:
-                input.config.build.externalDependencies === undefined
-                  ? undefined
-                  : [...input.config.build.externalDependencies],
-            },
-      compaction: {
-        model:
-          input.config.compaction?.model === undefined
-            ? undefined
-            : cloneCompiledRuntimeModelReference(input.config.compaction.model),
-        thresholdPercent: input.config.compaction?.thresholdPercent,
-      },
-      description: input.config.description,
-      dynamicModel:
-        input.config.dynamicModel === undefined
-          ? undefined
-          : {
-              ...input.config.dynamicModel,
-            },
-      experimental:
-        input.config.experimental === undefined
-          ? undefined
-          : {
-              subagentPersistentSessions: input.config.experimental.subagentPersistentSessions,
-              tasks: input.config.experimental.tasks,
-              workflow:
-                input.config.experimental.workflow === undefined
-                  ? undefined
-                  : {
-                      world: input.config.experimental.workflow.world,
-                    },
-            },
-      model: cloneCompiledRuntimeModelReference(input.config.model),
-      name: input.config.name,
-      outputSchema: input.config.outputSchema,
-      reasoning: input.config.reasoning,
-      limits:
-        input.config.limits === undefined
-          ? undefined
-          : {
-              maxInputTokensPerSession: input.config.limits.maxInputTokensPerSession,
-              maxOutputTokensPerSession: input.config.limits.maxOutputTokensPerSession,
-              sessionTimeoutMs: input.config.limits.sessionTimeoutMs,
-            },
-      source:
-        input.config.source === undefined
-          ? undefined
-          : {
-              ...input.config.source,
-            },
-    },
     diagnosticsSummary: input.diagnosticsSummary ?? {
       errors: 0,
       warnings: 0,
@@ -964,6 +919,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
         ? undefined
         : {
             subagentPersistentSessions: config.experimental.subagentPersistentSessions,
+            tasks: config.experimental.tasks,
             workflow:
               config.experimental.workflow === undefined
                 ? undefined

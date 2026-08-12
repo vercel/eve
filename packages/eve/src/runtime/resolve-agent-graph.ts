@@ -218,8 +218,8 @@ async function resolveRuntimeAgentNode(
   });
   const subagentRegistry = createRuntimeSubagentRegistry({
     persistentSessions:
-      agent.config.experimental?.tasks === true ||
-      agent.config.experimental?.subagentPersistentSessions === true,
+      agent.config?.experimental?.tasks === true ||
+      agent.config?.experimental?.subagentPersistentSessions === true,
     reservedToolNames: [
       LOAD_SKILL_TOOL_NAME,
       ...toolRegistry.preparedTools.map((tool) => tool.name),

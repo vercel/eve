@@ -43,7 +43,7 @@ export async function dispatchRuntimeActionsStep(
 
   const { batch, bundle, session } = prepared;
   const persistentSessions =
-    bundle.resolvedAgent.config.experimental?.subagentPersistentSessions === true;
+    bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
   // Acquired only once preflight can no longer throw, so a planning failure
   // never leaks the writer lock.
   const writer = input.parentWritable.getWriter();
