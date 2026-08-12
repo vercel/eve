@@ -25,21 +25,25 @@ Experiment files under `experiments/` define treatments independently from cases
 initial pair compares a baseline that removes the scaffolded coding-agent guidance with the
 unaltered `eve init` project, including its version-matched `AGENTS.md` and `CLAUDE.md`.
 
-The initial iMessage case keeps real eve registry discovery, `eve add`, the registry setup
+The HarnessAgent adapter owns only the shared authoring lifecycle: bootstrap the selected eve
+revision, create an isolated session, run one or more turns, capture commands and transcripts,
+and grade the result. Each case supplies an `AuthoringScenario` for the behavior it uniquely
+needs, such as ports, environment variables, fixture setup, or simulated user replies. Cases
+that do not need interaction omit a user simulator and finish after one turn.
+
+The initial iMessage scenario keeps real eve registry discovery, `eve add`, the registry setup
 protocol, package installation, and project validation. Only the external provider is
 synthetic. A fixture-owned setup package implements a deterministic user input → project
 creation → phone registration decision tree and records events under
-`__authoring_eval__/world-events.jsonl`. This tests an agent's setup decisions without
-coupling the authoring suite to Photon or live external services.
+`__authoring_eval__/world-events.jsonl`. The scenario owns this synthetic registry and provider;
+the shared adapter has no Photon or iMessage knowledge.
 
-The iMessage case runs through a registered HarnessAgent-backed Claude Code adapter so the user simulator can
-inspect each completed assistant turn and reply in the same native session. The initial prompt
-omits the phone number; the simulator requires the agent to ask for it before responding. The
-hidden grader verifies both the interaction transcript and the structured non-interactive setup
-protocol.
+The iMessage prompt omits the phone number. Its simulator inspects the first completed assistant
+turn, requires the agent to ask for the number, and replies in the same native session. The
+hidden grader verifies both the transcript and the structured non-interactive setup protocol.
 
-The adapter also uses HarnessAgent's `bootstrapHash` and `onBootstrap` hooks to build one reusable
-Vercel Sandbox snapshot per subject repository and revision. Each benchmark attempt starts from an
+HarnessAgent's `bootstrapHash` and `onBootstrap` hooks build one reusable Vercel Sandbox snapshot
+for each subject repository, revision, and scenario. Each benchmark attempt starts from an
 independent sandbox restored from that prepared project, then applies treatment-specific changes
 in `onSession`.
 
@@ -78,7 +82,13 @@ credential is required.
 
 ## Adding a case
 
-Copy an existing fixture, give it the next `author-NNN-*` name, then edit its prompt, hidden
-grader, and starter project. Prefer final source and deterministic event assertions over an
-LLM judge. Add a synthetic command or API world only when the task genuinely needs external
-state, and mock the external boundary rather than eve itself.
+Copy an existing fixture, give it the next `author-NNN-*` name, then edit its prompt and hidden
+grader. Define a scenario under `lib/scenarios/` only when the case needs additional bootstrap,
+environment, network, or multi-turn behavior, then register it in `lib/scenarios/index.ts`.
+Experiments resolve the scenario for each fixture through the shared agent. One-turn filesystem
+tasks can use an otherwise empty scenario. A scenario
+can set `workspace: "empty"` for project-creation tasks; other cases start from `eve init` output.
+
+Prefer final source and deterministic event assertions over an LLM judge. Add a synthetic
+command or API world only when the task genuinely needs external state, and keep that world in
+the case's fixture or scenario rather than the shared HarnessAgent adapter.

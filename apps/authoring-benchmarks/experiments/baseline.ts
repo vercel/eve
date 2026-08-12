@@ -1,9 +1,10 @@
 import type { ExperimentConfig } from "@vercel/agent-eval";
 import { registerAgent } from "@vercel/agent-eval";
 
-import { harnessAgent, imessageUserSimulator } from "../lib/harness-agent.js";
+import { createAuthoringAgent } from "../lib/harness-agent.js";
+import { authoringScenario } from "../lib/scenarios/index.js";
 
-registerAgent(harnessAgent);
+registerAgent(createAuthoringAgent(authoringScenario));
 
 const config: ExperimentConfig = {
   agent: "eve-harness-pi",
@@ -15,7 +16,7 @@ const config: ExperimentConfig = {
   timeout: 900,
   sandbox: "vercel",
   copyFiles: "changed",
-  agentOptions: { agentsMd: false, maxTurns: 2, userSimulator: imessageUserSimulator },
+  agentOptions: { agentsMd: false },
 };
 
 export default config;
