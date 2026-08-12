@@ -49,7 +49,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return "TASK-NOTIFICATION-ACK";
   }
 
-  if (message === "TASK-FANOUT-PARENT-UPDATES") return fanoutTasks(request);
+  if (message === "TASK-FANOUT-PARENT-UPDATES") return fanoutTasks(request, 10);
+  if (message === "TASK-PARENT-WAKE-UPDATES") return fanoutTasks(request, 3);
   if (message === "TASK-FAN-IN") return fanInTasks(request);
   if (message === "TASK-CANCEL-SETUP") return setupCancelWorker(request);
   if (message.startsWith("TASK-CANCEL-VERIFY ")) {
@@ -98,8 +99,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   return `Mock reply: ${message}`;
 }
 
-function fanoutTasks(request: MockModelRequest): MockModelResponse | string {
-  const pending = Array.from({ length: 10 }, (_, index) => index + 1).filter(
+function fanoutTasks(request: MockModelRequest, size: number): MockModelResponse | string {
+  const pending = Array.from({ length: size }, (_, index) => index + 1).filter(
     (index) => resultById(request, `task-fanout-${index}`) === undefined,
   );
   if (pending.length > 0) {

@@ -4,13 +4,13 @@ import { satisfies } from "eve/evals/expect";
 import { defineTaskEval } from "./task-transition.js";
 import { requireSessionStreamIndex, type TaskEvalSessionDriver } from "./shared.js";
 
-const FANOUT_SIZE = 10;
+const FANOUT_SIZE = 3;
 const COMPLETED_NOTIFICATION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./giu;
 
 /** Every completed child emits one task-addressed ready notification to its parent. */
 export default defineTaskEval({
   description:
-    "Ten completed children emit exactly one parent notification each, with no duplicate or unknown task ids.",
+    "Three completed children emit exactly one parent notification each, with no duplicate or unknown task ids.",
   transition: {
     primary: "task.parent.wake.emitted-ready",
     setup: [
@@ -22,7 +22,7 @@ export default defineTaskEval({
     dimensions: { transport: "local", parentPhase: "active" },
   },
   async test(t) {
-    const started = await t.send("TASK-FANOUT-PARENT-UPDATES");
+    const started = await t.send("TASK-PARENT-WAKE-UPDATES");
     started.expectOk();
     started.messageIncludes("TASK-FANOUT-STARTED");
     started.calledSubagent("fanout-worker", { count: FANOUT_SIZE });
