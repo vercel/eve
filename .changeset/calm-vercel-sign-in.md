@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Refine the Sign in with Vercel Web Chat screen with an app-owned panel, clearer provider copy, and the Vercel mark on the authentication button.
+Align the Sign in with Vercel Web Chat screen with eve's default status page while keeping the generated app name primary and Vercel branding confined to the authentication button.

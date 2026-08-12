@@ -36,30 +36,55 @@ export function SignIn() {
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-6 text-foreground">
-      <section className="w-full max-w-sm rounded-xl border bg-card p-8 text-card-foreground">
-        <p className="text-muted-foreground text-sm">Sign in to</p>
-        <h1 className="mt-1 max-w-full break-words font-medium text-2xl tracking-tight">
-          {AGENT_NAME}
-        </h1>
-        <p className="mt-3 text-muted-foreground text-sm leading-6">
-          Use your Vercel account to continue.
-        </p>
-        <Button className="mt-6 w-full gap-2" disabled={pending} onClick={signIn}>
-          <svg aria-hidden="true" className="size-3 fill-current" viewBox="0 0 24 20">
-            <path d="M12 0 24 20H0L12 0Z" />
-          </svg>
-          <span className="text-sm leading-5">
-            {pending ? "Redirecting…" : "Continue with Vercel"}
-          </span>
-        </Button>
-        {error ? (
-          <p className="mt-3 text-destructive text-sm" role="alert">
-            {error}
+    <main className="flex min-h-dvh items-center justify-center bg-background px-8 text-foreground">
+      <div className="flex w-full max-w-[22rem] flex-col gap-5">
+        <div className="text-foreground opacity-[0.08] dark:opacity-[0.12]">
+          <EveWordmark className="h-auto w-[4.875rem]" />
+        </div>
+        <section aria-label="Sign in" className="flex flex-col gap-2">
+          <h1 className="max-w-full break-words font-medium text-sm leading-6">{AGENT_NAME}</h1>
+          <p className="flex flex-wrap items-center gap-2 text-muted-foreground text-sm leading-6">
+            <span className="inline-flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+              Ready
+            </span>
+            <span aria-hidden="true" className="text-border">
+              /
+            </span>
+            <span>Sign in to start a session</span>
           </p>
-        ) : null}
-      </section>
+          <Button className="mt-3 w-full gap-2 text-sm" disabled={pending} onClick={signIn}>
+            <svg aria-hidden="true" className="size-3 fill-current" viewBox="0 0 24 20">
+              <path d="M12 0 24 20H0L12 0Z" />
+            </svg>
+            <span className="leading-5">{pending ? "Redirecting…" : "Continue with Vercel"}</span>
+          </Button>
+          {error ? (
+            <p className="text-destructive text-sm" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </section>
+      </div>
     </main>
+  );
+}
+
+function EveWordmark({ className }: { readonly className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      viewBox="0 0 169 53"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M169 8.47h-51.39L81.73 53H70.36L113 0H169zM169 44.51v8.47h-45.87V44.5zM45.87 52.98H0V44.5h45.87zM38.66 30.55H0v-8.47h38.66z"
+        fill="currentColor"
+      />
+      <path d="M169 30.55h-38.66v-8.47H169zM75.52 8.47H0V0h75.52z" fill="currentColor" />
+    </svg>
   );
 }
 
