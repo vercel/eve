@@ -6,6 +6,10 @@ import {
   buildAuthRequiredPublicText,
   formatConnectionDisplayName,
 } from "#public/channels/slack/connections.js";
+import {
+  SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH,
+  SLACK_SECTION_TEXT_MAX_LENGTH,
+} from "#public/channels/slack/limits.js";
 
 describe("formatConnectionDisplayName", () => {
   it("title-cases the first character", () => {
@@ -81,6 +85,18 @@ describe("buildAuthEphemeralBlocks", () => {
     expect(button.style).toBe("primary");
   });
 
+  it("renders URL-less device-flow instructions without an action button", () => {
+    const blocks = buildAuthEphemeralBlocks({
+      displayName: "Notion",
+      instructions: "Open the provider app.",
+      userCode: "OTB-DGO",
+    });
+
+    expect(JSON.stringify(blocks)).toContain("Open the provider app.");
+    expect(JSON.stringify(blocks)).toContain("OTB-DGO");
+    expect(JSON.stringify(blocks)).not.toContain("button");
+  });
+
   it("prepends a section with the device user code when one is provided", () => {
     const blocks = buildAuthEphemeralBlocks({
       displayName: "Notion",
@@ -92,5 +108,20 @@ describe("buildAuthEphemeralBlocks", () => {
     expect(section.type).toBe("section");
     expect(section.text.text).toBe("Use code `OTB-DGO` when prompted.");
     expect((blocks[1] as { type: string }).type).toBe("actions");
+  });
+
+  it("caps authored text at Slack Block Kit limits", () => {
+    const blocks = buildAuthEphemeralBlocks({
+      displayName: "x".repeat(SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH + 100),
+      instructions: "y".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 100),
+      url: "https://connect.example.com/authorize/sca_abc",
+    });
+    const section = blocks[0] as { text: { text: string } };
+    const actions = blocks[1] as { elements: Array<{ text: { text: string } }> };
+
+    expect(section.text.text.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
+    expect(actions.elements[0]?.text.text.length).toBeLessThanOrEqual(
+      SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH,
+    );
   });
 });

@@ -33,6 +33,7 @@ import {
   ThreadImpl,
 } from "#compiled/chat/index.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
+import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
 import {
   defineChannel,
   GET,
@@ -344,6 +345,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   inputActionPrefix: string,
 ): ChatSdkChannelEvents<TAdapters> {
   return {
+    ...defaultAuthorizationEvents,
     async "turn.started"(_event, channel, _ctx) {
       channel.state.pendingToolCallMessage = null;
       clearStream(channel.state);

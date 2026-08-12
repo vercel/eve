@@ -1,6 +1,10 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
+import {
+  renderAuthorizationCompleted,
+  renderAuthorizationRequired,
+} from "#public/channels/authorization-rendering.js";
 import type {
   TwilioTextMessage,
   TwilioVoiceCall,
@@ -67,8 +71,22 @@ export function defaultOnVoiceTranscription(
   };
 }
 
-/** Built-in Twilio event handlers for text delivery and terminal errors. */
+/** Built-in Twilio event handlers for text delivery, auth, and terminal errors. */
 export const defaultEvents: TwilioChannelEvents = {
+  async "authorization.required"(event, channel, _ctx) {
+    await channel.twilio.sendMessage(
+      renderAuthorizationRequired({
+        authorization: event.authorization,
+        description: event.description,
+        name: event.name,
+      }),
+    );
+  },
+
+  async "authorization.completed"(event, channel, _ctx) {
+    await channel.twilio.sendMessage(renderAuthorizationCompleted(event));
+  },
+
   async "message.completed"(event, channel, _ctx) {
     if (event.finishReason === "tool-calls" || !event.message) return;
     await channel.twilio.sendMessage(event.message);

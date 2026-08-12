@@ -1,14 +1,24 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import {
+  authorizationDisplayName,
+  renderAuthorizationCompleted,
+  renderAuthorizationRequired,
+} from "#public/channels/authorization-rendering.js";
 import { splitDiscordMessageContent } from "#public/channels/discord/api.js";
-import type { DiscordCommandInteraction } from "#public/channels/discord/inbound.js";
+import {
+  DISCORD_EPHEMERAL_MESSAGE_FLAG,
+  type DiscordCommandInteraction,
+} from "#public/channels/discord/inbound.js";
 import { renderInputRequestComponents } from "#public/channels/discord/hitl.js";
 import type {
   DiscordChannelEvents,
   DiscordCommandResult,
   DiscordContext,
 } from "#public/channels/discord/discordChannel.js";
+
+const log = createLogger("discord.defaults");
 
 /**
  * Builds the default {@link SessionAuthContext} for a Discord command
@@ -49,16 +59,49 @@ export function defaultOnCommand(
   return { auth: defaultDiscordAuth(interaction) };
 }
 
-/** Built-in Discord event handlers for typing, replies, HITL, and terminal errors. */
+/** Built-in Discord event handlers for typing, replies, auth, HITL, and terminal errors. */
 export const defaultEvents: DiscordChannelEvents = {
   async "turn.started"(_event, channel, _ctx) {
     await channel.discord.startTyping();
+  },
+
+  async "authorization.required"(event, channel, _ctx) {
+    const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
+    const challenge = renderAuthorizationRequired({
+      authorization: event.authorization,
+      description: event.description,
+      name: event.name,
+    });
+
+    if (channel.discord.guildId) {
+      await channel.discord.post(`Authorization required for ${displayName}.`);
+    }
+    if (!channel.discord.interactionToken || !channel.discord.applicationId) {
+      if (!channel.discord.guildId) {
+        await channel.discord.post(
+          `Authorization required for ${displayName}. Open the matching eve session to continue.`,
+        );
+      }
+      return;
+    }
+    try {
+      await channel.discord.followup({
+        content: challenge,
+        flags: DISCORD_EPHEMERAL_MESSAGE_FLAG,
+      });
+    } catch (error) {
+      log.error("Discord ephemeral auth challenge delivery failed", {
+        name: event.name,
+        error,
+      });
+    }
   },
 
   async "authorization.completed"(event, channel, _ctx) {
     if (event.outcome === "authorized") {
       await channel.discord.startTyping();
     }
+    await channel.discord.post(renderAuthorizationCompleted(event));
   },
 
   async "actions.requested"(_event, channel, _ctx) {

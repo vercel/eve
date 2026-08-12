@@ -609,6 +609,130 @@ describe("chatSdkChannel", () => {
       },
     });
   });
+
+  it("posts connection authorization challenges directly in DM threads", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const channelAdapter = withState(getAdapter(bridge.channel), {
+      thread: { ...serializedThread(), isDM: true },
+    });
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("authorization.required", {
+        authorization: {
+          displayName: "GitHub",
+          instructions: "Approve access in your browser.",
+          url: "https://connect.example.com/auth",
+          userCode: "ABCD-1234",
+        },
+        description: "Connect your account to continue.",
+        name: "github",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.posted).toEqual([
+      {
+        message: {
+          markdown: [
+            "Authorization required for GitHub.",
+            "Connect your account to continue.",
+            "Approve access in your browser.",
+            "Code: ABCD-1234",
+            "[Sign in with GitHub](https://connect.example.com/auth)",
+          ].join("\n\n"),
+        },
+        threadId: THREAD_ID,
+      },
+    ]);
+  });
+
+  it("keeps connection authorization challenges private in shared threads", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const channelAdapter = withState(getAdapter(bridge.channel), {
+      thread: { ...serializedThread(), currentMessage: message("connect").toJSON() },
+    });
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("authorization.required", {
+        authorization: {
+          url: "https://connect.example.com/auth",
+          userCode: "ABCD-1234",
+        },
+        description: "Connect your account to continue.",
+        name: "linear",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.openedDMs).toEqual(["user-1"]);
+    expect(adapter.posted).toEqual([
+      {
+        message: { markdown: "Authorization required for Linear." },
+        threadId: THREAD_ID,
+      },
+      {
+        message: {
+          markdown: [
+            "Authorization required for Linear.",
+            "Connect your account to continue.",
+            "Code: ABCD-1234",
+            "[Sign in with Linear](https://connect.example.com/auth)",
+          ].join("\n\n"),
+        },
+        threadId: "test:dm:user-1",
+      },
+    ]);
+  });
+
+  it("posts connection authorization outcomes", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const channelAdapter = withState(getAdapter(bridge.channel), {
+      thread: serializedThread(),
+    });
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("authorization.completed", {
+        authorization: { displayName: "GitHub" },
+        name: "github",
+        outcome: "authorized",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.posted).toEqual([
+      { message: { markdown: "GitHub connected. Resuming." }, threadId: THREAD_ID },
+    ]);
+  });
 });
 
 describe("messageToUserContent", () => {
@@ -715,6 +839,7 @@ class TestAdapter {
   chat: ChatInstance | null = null;
   posted: Array<{ message: AdapterPostableMessage; threadId: string }> = [];
   edited: Array<{ message: AdapterPostableMessage; messageId: string; threadId: string }> = [];
+  openedDMs: string[] = [];
   typingStatuses: Array<string | undefined> = [];
   startTypingError: Error | null = null;
   editError: Error | null = null;
@@ -801,6 +926,11 @@ class TestAdapter {
       isDM: false,
       metadata: {},
     };
+  }
+
+  async openDM(userId: string): Promise<string> {
+    this.openedDMs.push(userId);
+    return `test:dm:${userId}`;
   }
 
   async postMessage(threadId: string, posted: AdapterPostableMessage): Promise<RawMessage> {

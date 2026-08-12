@@ -47,9 +47,8 @@ describe("defaultEvents authorization.required", () => {
     await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, sessionCtx);
 
     const message = post.mock.calls[0]?.[0] as { text: string };
-    expect(message.text).toBe(
-      "Authorization required for Notion: https://connect.example.com/a/sca_1",
-    );
+    expect(message.text).toContain("Authorization required for Notion.");
+    expect(message.text).toContain("https://connect.example.com/a/sca_1");
     expect(channel.state.pendingAuthActivityId).toBe("act1");
   });
 
@@ -63,10 +62,44 @@ describe("defaultEvents authorization.required", () => {
     );
 
     const message = post.mock.calls[0]?.[0] as { text: string; attachments: unknown[] };
-    expect(message.text).toBe(
-      "Authorization required for Notion Workspace: https://connect.example.com/a/sca_1",
-    );
+    expect(message.text).toContain("Authorization required for Notion Workspace.");
+    expect(message.text).toContain("https://connect.example.com/a/sca_1");
     expect(JSON.stringify(message.attachments)).toContain("Sign in with Notion Workspace");
+  });
+
+  it("keeps the authorization credential out of shared conversations", async () => {
+    const { channel, post } = buildChannelStub({ conversationType: "channel" });
+
+    await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, sessionCtx);
+
+    const message = post.mock.calls[0]?.[0] as { text: string; attachments?: unknown[] };
+    expect(message.text).toBe(
+      "Authorization required for Notion. Open the matching eve session to continue.",
+    );
+    expect(message.text).not.toContain("https://");
+    expect(message.attachments).toBeUndefined();
+  });
+
+  it("renders URL-less device instructions and codes in personal chats", async () => {
+    const { channel, post } = buildChannelStub();
+
+    await defaultEvents["authorization.required"]!(
+      {
+        authorization: { instructions: "Open the provider app.", userCode: "ABCD-1234" },
+        description: "Connect your account.",
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    const message = post.mock.calls[0]?.[0] as { text: string; attachments: unknown[] };
+    expect(message.text).toContain("Open the provider app.");
+    expect(message.text).toContain("Code: ABCD-1234");
+    expect(JSON.stringify(message.attachments)).toContain("ABCD-1234");
   });
 });
 

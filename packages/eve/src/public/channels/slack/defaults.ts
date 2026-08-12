@@ -1,13 +1,16 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import {
+  authorizationDisplayName,
+  renderAuthorizationRequired,
+} from "#public/channels/authorization-rendering.js";
 import { describeActionRequests } from "#public/channels/slack/action-status.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
   buildAuthEphemeralBlocks,
   buildAuthRequiredPublicText,
-  formatConnectionDisplayName,
   type ConnectionAuthorizationOutcome,
 } from "#public/channels/slack/connections.js";
 import {
@@ -241,7 +244,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "authorization.required"(event, channel, ctx) {
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+    const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
     const triggeringUserId =
       slackUserIdFromAuthContext(ctx.session.auth.current) ??
       channel.state.triggeringUserId ??
@@ -273,24 +276,32 @@ export const defaultEvents: SlackChannelInternalEvents = {
       }
     }
 
-    // The challenge is user-specific: the sign-in link (and device code)
-    // must only ever be visible to the triggering user, never posted into
-    // the shared thread.
-    if (triggeringUserId && challengeUrl) {
+    // The challenge is user-specific: its description, sign-in link, and
+    // device code must only ever be visible to the triggering user, never
+    // posted into the shared thread. `authorization` itself is optional,
+    // so description-only challenges still require private delivery.
+    if (triggeringUserId) {
       const userCode = event.authorization?.userCode;
-      try {
-        await channel.thread.postEphemeral(triggeringUserId, {
-          blocks: buildAuthEphemeralBlocks({
-            displayName,
-            url: challengeUrl,
-            userCode,
+      const blocks = buildAuthEphemeralBlocks({
+        displayName,
+        instructions: event.authorization?.instructions,
+        url: challengeUrl,
+        userCode,
+      });
+      const privateMessage: { blocks?: unknown[]; text: string } = {
+        text: truncateMessageText(
+          renderAuthorizationRequired({
+            authorization: event.authorization,
+            description: event.description,
+            name: event.name,
           }),
-          // Fallback text mirrors the blocks: clients that render only the
-          // notification text still get everything needed to complete the flow.
-          text: userCode
-            ? `Sign in with ${displayName}: ${challengeUrl} (code: ${userCode})`
-            : `Sign in with ${displayName}: ${challengeUrl}`,
-        });
+        ),
+      };
+      if (blocks.length > 0) privateMessage.blocks = blocks;
+      try {
+        // Fallback text complements the blocks: clients that render only
+        // notification text still get everything needed to complete the flow.
+        await channel.thread.postEphemeral(triggeringUserId, privateMessage);
       } catch (error) {
         log.error("Slack auth ephemeral delivery failed", {
           name: event.name,
@@ -301,7 +312,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "authorization.completed"(event, channel, _ctx) {
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+    const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
     if (event.outcome === "authorized") {
       await channel.thread.startTyping(`Connected to ${displayName}. Resuming...`);
     }

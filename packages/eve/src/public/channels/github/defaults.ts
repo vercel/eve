@@ -1,6 +1,10 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
+import {
+  authorizationDisplayName,
+  renderAuthorizationCompleted,
+} from "#public/channels/authorization-rendering.js";
 import type { GitHubApiOptions } from "#public/channels/github/api.js";
 import type { GitHubChannelCredentials } from "#public/channels/github/auth.js";
 import { checkoutGitHubRepository } from "#public/channels/github/checkout.js";
@@ -90,6 +94,18 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
       }
 
       await checkoutRepositoryForTurn(channel, ctx, options);
+    },
+
+    async "authorization.required"(event, channel, _ctx) {
+      const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
+      await postCommentChunks(
+        channel,
+        `Authorization required for ${displayName}. Open the matching eve session to continue.`,
+      );
+    },
+
+    async "authorization.completed"(event, channel, _ctx) {
+      await postCommentChunks(channel, renderAuthorizationCompleted(event));
     },
 
     async "message.completed"(event, channel, _ctx) {

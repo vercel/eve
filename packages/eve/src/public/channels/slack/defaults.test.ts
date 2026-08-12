@@ -93,7 +93,51 @@ describe("defaultEvents authorization.required", () => {
 
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string; blocks: unknown[] };
     expect(JSON.stringify(message.blocks)).toContain("OTB-DGO");
-    expect(message.text).toContain("(code: OTB-DGO)");
+    expect(message.text).toContain("Code: OTB-DGO");
+  });
+
+  it("delivers URL-less device instructions and codes ephemerally", async () => {
+    const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
+
+    await defaultEvents["authorization.required"]!(
+      {
+        authorization: { instructions: "Open the provider app.", userCode: "OTB-DGO" },
+        description: "Connect your account.",
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_0",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(String(post.mock.calls[0]?.[0])).not.toContain("OTB-DGO");
+    const message = postEphemeral.mock.calls[0]?.[1] as { text: string; blocks: unknown[] };
+    expect(message.text).toContain("Open the provider app.");
+    expect(message.text).toContain("Code: OTB-DGO");
+    expect(JSON.stringify(message.blocks)).toContain("Open the provider app.");
+    expect(JSON.stringify(message.blocks)).toContain("OTB-DGO");
+  });
+
+  it("delivers description-only challenges ephemerally", async () => {
+    const { channel, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
+
+    await defaultEvents["authorization.required"]!(
+      {
+        description: "Approve the request in your provider app.",
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_0",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(postEphemeral).toHaveBeenCalledWith("U777", {
+      text: expect.stringContaining("Approve the request in your provider app."),
+    });
   });
 
   it("renders the challenge displayName instead of the title-cased connection name", async () => {

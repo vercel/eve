@@ -1,6 +1,11 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import {
+  authorizationDisplayName,
+  renderAuthorizationCompleted,
+  renderAuthorizationRequired,
+} from "#public/channels/authorization-rendering.js";
 import {
   registerTelegramFreeformPrompt,
   renderTelegramInputRequest,
@@ -11,6 +16,8 @@ import type {
   TelegramContext,
   TelegramInboundResult,
 } from "#public/channels/telegram/telegramChannel.js";
+
+const log = createLogger("telegram.defaults");
 
 /** Default auth projection for Telegram webhook actors. */
 export function defaultTelegramAuth(message: TelegramMessage): SessionAuthContext | null {
@@ -53,16 +60,61 @@ export async function defaultOnMessage(
   return { auth: defaultTelegramAuth(message) };
 }
 
-/** Built-in Telegram event handlers for typing, replies, HITL, and terminal errors. */
+/** Built-in Telegram event handlers for typing, replies, auth, HITL, and terminal errors. */
 export const defaultEvents: TelegramChannelEvents = {
   async "turn.started"(_event, channel, _ctx) {
     await channel.telegram.startTyping();
+  },
+
+  async "authorization.required"(event, channel, ctx) {
+    const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
+    const challenge = renderAuthorizationRequired({
+      authorization: event.authorization,
+      description: event.description,
+      name: event.name,
+    });
+
+    if (channel.telegram.chatType === "private") {
+      await channel.telegram.post(challenge);
+      return;
+    }
+
+    await channel.telegram.post(`Authorization required for ${displayName}.`);
+    const userId = ctx.session.auth.current?.attributes.user_id;
+    if (!userId) {
+      log.warn("Telegram private auth challenge delivery skipped without a user id", {
+        name: event.name,
+      });
+      return;
+    }
+    try {
+      const response = await channel.telegram.request("sendMessage", {
+        chat_id: userId,
+        link_preview_options: { is_disabled: true },
+        protect_content: true,
+        text: challenge,
+      });
+      if (!response.ok) {
+        log.error("Telegram private auth challenge delivery failed", {
+          name: event.name,
+          status: response.status,
+        });
+      }
+    } catch (error) {
+      // The public status still explains why the session is blocked when the
+      // private user chat cannot be reached.
+      log.error("Telegram private auth challenge delivery failed", {
+        error,
+        name: event.name,
+      });
+    }
   },
 
   async "authorization.completed"(event, channel, _ctx) {
     if (event.outcome === "authorized") {
       await channel.telegram.startTyping();
     }
+    await channel.telegram.post(renderAuthorizationCompleted(event));
   },
 
   async "actions.requested"(_event, channel, _ctx) {

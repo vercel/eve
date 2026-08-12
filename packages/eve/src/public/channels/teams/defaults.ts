@@ -1,6 +1,10 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
+import {
+  authorizationDisplayName,
+  renderAuthorizationRequired,
+} from "#public/channels/authorization-rendering.js";
 import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
 import { splitTeamsMessageText, type TeamsMention } from "#public/channels/teams/api.js";
 import {
@@ -112,46 +116,52 @@ export const defaultEvents: TeamsChannelEvents = {
   },
 
   async "authorization.required"(event, channel, _ctx) {
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+    const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
     const url = event.authorization?.url;
-    const text = url
-      ? `Authorization required for ${displayName}: ${url}`
-      : `Authorization required for ${displayName}.`;
+    const isPersonal = channel.state.conversationType === "personal";
+    const text = isPersonal
+      ? renderAuthorizationRequired({
+          authorization: event.authorization,
+          description: event.description,
+          name: event.name,
+        })
+      : `Authorization required for ${displayName}. Open the matching eve session to continue.`;
     const posted = await channel.thread.post({
-      attachments: [
-        {
-          content: parseJsonObject({
-            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-            actions: url
-              ? [
-                  {
-                    title: `Sign in with ${displayName}`,
-                    type: "Action.OpenUrl",
-                    url,
-                  },
-                ]
-              : [],
-            body: [
+      ...(isPersonal
+        ? {
+            attachments: [
               {
-                text: `Authorization required for ${displayName}`,
-                type: "TextBlock",
-                weight: "Bolder",
-                wrap: true,
-              },
-              {
-                text: channel.state.triggeringUser
-                  ? `Requested by ${channel.state.triggeringUser.name ?? channel.state.triggeringUser.id}.`
-                  : "No triggering user is available for a private prompt.",
-                type: "TextBlock",
-                wrap: true,
+                content: parseJsonObject({
+                  $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+                  actions: url
+                    ? [
+                        {
+                          title: `Sign in with ${displayName}`,
+                          type: "Action.OpenUrl",
+                          url,
+                        },
+                      ]
+                    : [],
+                  body: [
+                    {
+                      text: renderAuthorizationRequired({
+                        authorization: event.authorization,
+                        description: event.description,
+                        includeUrl: false,
+                        name: event.name,
+                      }),
+                      type: "TextBlock",
+                      wrap: true,
+                    },
+                  ],
+                  type: "AdaptiveCard",
+                  version: channel.adaptiveCardVersion,
+                }),
+                contentType: "application/vnd.microsoft.card.adaptive",
               },
             ],
-            type: "AdaptiveCard",
-            version: channel.adaptiveCardVersion,
-          }),
-          contentType: "application/vnd.microsoft.card.adaptive",
-        },
-      ],
+          }
+        : {}),
       text,
     });
     if (posted.id) {
@@ -166,7 +176,7 @@ export const defaultEvents: TeamsChannelEvents = {
 
     const activityId = channel.state.pendingAuthActivityId;
     if (!activityId) return;
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+    const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
     const text = buildAuthCompletedText({
       displayName,
       outcome: event.outcome as ConnectionAuthorizationOutcome,

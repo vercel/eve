@@ -405,8 +405,11 @@ describe("discordChannel() default event handlers", () => {
       ctx,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    for (const [url, init] of fetchMock.mock.calls) {
+    const typingCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).endsWith("/channels/C01/typing"),
+    );
+    expect(typingCalls).toHaveLength(3);
+    for (const [url, init] of typingCalls) {
       expect(String(url)).toBe("https://discord.com/api/v10/channels/C01/typing");
       expect(new Headers((init as RequestInit).headers).get("authorization")).toBe("Bot bot-token");
       expect((init as RequestInit).body).toBeUndefined();
