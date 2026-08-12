@@ -126,7 +126,7 @@ export function createAuthoringAgent(): Agent {
 
         const context = setupContext(activeSandbox, workspace);
         if (authoringCase.startingPoint.workspace === "empty") {
-          await context.run("npm install --no-save --package-lock=false vitest@4.1.10");
+          await context.run("pnpm add --save-dev vitest@4.1.10");
         }
         await context.write(
           "__agent_eval__/results.json",
@@ -208,10 +208,7 @@ async function bootstrapSubject(
     `cd ${shellQuote(workspace)}`,
   ];
   if (workspaceKind === "scaffolded") {
-    commands.push(
-      "AI_AGENT=benchmark eve init .",
-      "npm install --save-dev --package-lock=false vitest@4.1.10",
-    );
+    commands.push("AI_AGENT=benchmark eve init .", "pnpm add --save-dev vitest@4.1.10");
   }
   await run(sandbox, commands.join(" && "));
 }

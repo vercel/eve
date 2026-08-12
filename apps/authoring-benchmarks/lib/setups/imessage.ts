@@ -8,9 +8,7 @@ export const imessageSetup: AuthoringSetup = {
   ports: [REGISTRY_PORT],
   environment: { EVE_DEV_OFFICIAL_REGISTRY_URL: REGISTRY_URL },
   async onBootstrap({ run, sourceRoot, write }) {
-    await run(
-      `npm install --save --package-lock=false ${sourceRoot}/apps/authoring-benchmarks/lib/setups/mock-imessage-setup`,
-    );
+    await run(`pnpm add ${sourceRoot}/apps/authoring-benchmarks/lib/setups/mock-imessage-setup`);
     await run("mkdir -p __authoring_eval__/registry/channel");
 
     const channel = {
