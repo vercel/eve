@@ -341,7 +341,7 @@
     "@vercel/otel": "catalog:",
     "@vercel/sandbox": "catalog:",
     "@vercel/sdk": "1.28.8",
-    "@workflow/core": "5.0.0-beta.40",
+    "@workflow/core": "5.0.0-beta.41",
     "@workflow/errors": "5.0.0-beta.16",
     "@workflow/serde": "5.0.0-beta.2",
     "@workflow/utils": "5.0.0-beta.8",
