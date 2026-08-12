@@ -7,7 +7,7 @@ const { default: handler } = await import("./package.js");
 const sha = "a".repeat(40);
 const manifest = {
   sourceSha: sha,
-  version: `0.33.1-main.${sha}`,
+  version: `0.33.0+main.${sha}`,
   tarball: "https://example.public.blob.vercel-storage.com/eve.tgz",
   sha256: "b".repeat(64),
 };

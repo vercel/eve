@@ -18,8 +18,7 @@ export function packageDependencyUrl(baseUrl, sourceSha) {
 export function packageVersion(stableVersion, sourceSha) {
   const match = stableVersion.match(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
   if (match === null) throw new Error(`Expected a stable eve version, received ${stableVersion}.`);
-  const [, major, minor, patch] = match;
-  return `${major}.${minor}.${Number(patch) + 1}-main.${sourceSha}`;
+  return `${stableVersion}+main.${sourceSha}`;
 }
 
 export function preparePackageJson(packageJson, sourceSha) {
