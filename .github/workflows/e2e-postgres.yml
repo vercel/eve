@@ -151,7 +151,7 @@ jobs:
           pnpm exec eve build
 
           server_log="$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-server.log"
-          EVE_DEV=1 pnpm exec eve start --host 127.0.0.1 --port 3000 >"$server_log" 2>&1 &
+          NODE_ENV=development pnpm exec eve start --host 127.0.0.1 --port 3000 >"$server_log" 2>&1 &
           server_pid=$!
 
           cleanup() {

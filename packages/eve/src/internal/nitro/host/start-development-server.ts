@@ -1,3 +1,4 @@
+import { defaultNodeEnv } from "#internal/application/dev-environment.js";
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 
 import type { Nitro } from "nitro/types";
@@ -368,6 +369,7 @@ async function startNitroDevelopmentServer(
   // that must never run in production (for example auto-installing
   // optional sandbox engine packages) can gate on it.
   process.env[EVE_DEV_ENV_FLAG] ??= "1";
+  defaultNodeEnv("development");
 
   const project = await resolveDiscoveryProject(rootDir);
   loadDevelopmentEnvironmentFiles(project.appRoot);

@@ -803,6 +803,9 @@ export async function createProductionApplicationNitro(
   const preset = resolveProductionNitroPreset();
   const bundler = createApplicationNitroBundlerConfiguration(preparedHost, preset);
   const nitroPlugins = createApplicationNitroPlugins(preparedHost);
+  nitroPlugins.unshift(
+    resolvePackageSourceFilePath("src/internal/nitro/host/production-node-env-plugin.ts"),
+  );
   nitroPlugins.push(
     resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"),
   );

@@ -324,7 +324,7 @@ describe("none", () => {
 });
 
 describe("localDev", () => {
-  // `localDev()` keys off the deployment (an `eve dev` or `vercel dev`
+  // `localDev()` keys off the deployment (`NODE_ENV` or a `vercel dev`
   // process), never the inbound request. A spoofable request header such as
   // `Host` must not be able to authenticate the local-dev principal.
   function requestFor(url: string): Request {
@@ -335,8 +335,8 @@ describe("localDev", () => {
     vi.unstubAllEnvs();
   });
 
-  it("authenticates when the process is an `eve dev` server", () => {
-    vi.stubEnv("EVE_DEV", "1");
+  it("authenticates when the process is a development server", () => {
+    vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("VERCEL_ENV", "");
     expect(localDev()(requestFor("http://localhost:3000/eve/v1/info"))).toEqual({
@@ -348,7 +348,7 @@ describe("localDev", () => {
   });
 
   it("authenticates when the process is a `vercel dev` server", () => {
-    vi.stubEnv("EVE_DEV", "");
+    vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "development");
     expect(localDev()(requestFor("http://localhost:3000/"))).toMatchObject({
@@ -358,9 +358,9 @@ describe("localDev", () => {
 
   it("rejects a `Host: localhost` request on a production deployment", () => {
     // On a self-hosted Node server the request URL host comes from the `Host`
-    // header. Neither dev flag is set on a production deployment, so a localhost
-    // host must not authenticate.
-    vi.stubEnv("EVE_DEV", "");
+    // header. A production deployment is not a development server, so a
+    // localhost host must not authenticate.
+    vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("VERCEL_ENV", "");
     expect(localDev()(requestFor("http://localhost:3000/eve/v1/info"))).toBeNull();
@@ -369,8 +369,8 @@ describe("localDev", () => {
     expect(localDev()(requestFor("http://agent.localhost:3000/"))).toBeNull();
   });
 
-  it("rejects public and preview requests when no dev flag is set", () => {
-    vi.stubEnv("EVE_DEV", "");
+  it("rejects public and preview requests on a production deployment", () => {
+    vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
     expect(localDev()(requestFor("https://example.com/eve/v1/info"))).toBeNull();
@@ -1421,7 +1421,7 @@ describe("vercelOidc strategy helper", () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "");
     vi.stubEnv("VERCEL_TARGET_ENV", "");
     vi.stubEnv("VERCEL_ENV", "");
-    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("NODE_ENV", "development");
     const issuer = await installMockedVercelIssuer("local-host-binding");
 
     try {

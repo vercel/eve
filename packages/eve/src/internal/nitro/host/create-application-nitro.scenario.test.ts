@@ -650,6 +650,12 @@ describe("application Nitro creation", () => {
     expect(devPlugins).not.toEqual(
       expect.arrayContaining([expect.stringContaining("sandbox-shutdown-plugin.ts")]),
     );
+    expect(productionPlugins).toEqual(
+      expect.arrayContaining([expect.stringContaining("production-node-env-plugin.ts")]),
+    );
+    expect(devPlugins).not.toEqual(
+      expect.arrayContaining([expect.stringContaining("production-node-env-plugin.ts")]),
+    );
   });
 
   it("deduplicates defaults when the app also lists them", async () => {

@@ -87,15 +87,15 @@ Any other thrown error follows the normal channel failure path. When building a 
 
 `eve/channels/auth` ships these channel-auth helpers:
 
-| Helper           | Use when                                                                                           |
-| ---------------- | -------------------------------------------------------------------------------------------------- |
-| `localDev()`     | Local development. Accepts requests only while the process is an `eve dev` or `vercel dev` server. |
-| `vercelOidc()`   | The common Vercel deployment path. Verifies a Vercel OIDC bearer JWT.                              |
-| `none()`         | You want to accept anonymous traffic explicitly (use as the final entry).                          |
-| `httpBasic(...)` | Operator or service access via a shared username/password.                                         |
-| `jwtHmac(...)`   | You control a shared-secret JWT signer.                                                            |
-| `jwtEcdsa(...)`  | You verify asymmetric JWTs minted by another system.                                               |
-| `oidc(...)`      | You want eve to verify OIDC-issued tokens from an arbitrary issuer.                                |
+| Helper           | Use when                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------ |
+| `localDev()`     | Local development. Accepts requests only on a development server (`NODE_ENV=development`). |
+| `vercelOidc()`   | The common Vercel deployment path. Verifies a Vercel OIDC bearer JWT.                      |
+| `none()`         | You want to accept anonymous traffic explicitly (use as the final entry).                  |
+| `httpBasic(...)` | Operator or service access via a shared username/password.                                 |
+| `jwtHmac(...)`   | You control a shared-secret JWT signer.                                                    |
+| `jwtEcdsa(...)`  | You verify asymmetric JWTs minted by another system.                                       |
+| `oidc(...)`      | You want eve to verify OIDC-issued tokens from an arbitrary issuer.                        |
 
 `httpBasic(credentials, { realm })` accepts an optional `realm`, rendered on the `WWW-Authenticate: Basic` challenge (e.g. `Basic realm="agent", charset="UTF-8"`) so browsers label their native login prompt. It defaults to `"eve"`, ensuring every Basic challenge includes the required realm. Usernames and passwords are normalized to Unicode NFC before comparison, matching the advertised UTF-8 credential encoding.
 
@@ -103,7 +103,7 @@ Exercise caution for agents that process non-public, sensitive, regulated, or pr
 
 ### `localDev()`
 
-Authenticates a synthetic `local-dev` principal, but only while the process is a local development server: `eve dev` (which sets `EVE_DEV=1`) or `vercel dev` (detected by `VERCEL=1` and `VERCEL_ENV=development` together). This is a property of the deployment, not the request, so no request header can flip it. A production deployment (`eve start`, a Vercel deployment, or any container host) sets neither flag, so `localDev()` authenticates nothing there and every request falls through to the next entry.
+Authenticates a synthetic `local-dev` principal, but only on a local development server: `NODE_ENV=development` (set by `eve dev` and by `vercel dev`). This is a property of the deployment, not the request, so no request header can flip it. A production deployment (`eve start`, a Vercel deployment, or any container host) runs with `NODE_ENV=production`, so `localDev()` authenticates nothing there and every request falls through to the next entry.
 
 Because it never opens a production deployment, `localDev()` is safe to leave in the walk. Still put a real authenticator ahead of it so production traffic has something to match.
 

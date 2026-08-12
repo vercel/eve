@@ -25,6 +25,7 @@ import { fork, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
+import { defaultNodeEnv } from "#internal/application/dev-environment.js";
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 import type {
   DevelopmentServer,
@@ -88,6 +89,7 @@ export function createDevelopmentServer(
     const shellEnvironment = { ...process.env };
     loadDevelopmentEnvironmentFiles(appRoot);
     process.env[EVE_DEV_ENV_FLAG] ??= "1";
+    defaultNodeEnv("development");
     const spawned = fork(
       childPath,
       [
@@ -100,7 +102,11 @@ export function createDevelopmentServer(
       {
         cwd: appRoot,
         detached: true,
-        env: { ...shellEnvironment, [EVE_DEV_ENV_FLAG]: "1" },
+        env: {
+          ...shellEnvironment,
+          [EVE_DEV_ENV_FLAG]: "1",
+          NODE_ENV: shellEnvironment.NODE_ENV ?? "development",
+        },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       },
     );

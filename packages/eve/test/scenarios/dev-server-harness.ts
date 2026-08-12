@@ -76,9 +76,10 @@ export async function signalEveDevDuringStartup(
 
 /**
  * Spawns `eve dev --no-ui` for the app and resolves once the server URL is
- * printed and the state record exists. `NODE_ENV=test` activates the
- * deterministic mock-model adapter so streamed turns complete without model
- * credentials.
+ * printed and the state record exists. `EVE_MOCK_AUTHORED_MODELS=1` activates
+ * the deterministic mock-model adapter so streamed turns complete without model
+ * credentials, while `NODE_ENV=development` keeps the server a real dev server
+ * so `localDev()` authenticates requests.
  */
 export async function startEveDev(
   appRoot: string,
@@ -225,7 +226,8 @@ function spawnEveDev(
     env: {
       ...process.env,
       ...options.env,
-      NODE_ENV: "test",
+      NODE_ENV: "development",
+      EVE_MOCK_AUTHORED_MODELS: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

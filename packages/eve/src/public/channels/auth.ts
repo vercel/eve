@@ -8,7 +8,6 @@
 import { decodeJwt } from "#compiled/jose/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { authenticateHttpBasicStrategy } from "#runtime/governance/auth/http-basic.js";
 import { authenticateJwtEcdsaStrategy } from "#runtime/governance/auth/jwt-ecdsa.js";
@@ -664,13 +663,12 @@ export function none<TEvent = unknown>(): AuthFn<TEvent> {
  * `null` everywhere else so the {@link routeAuth} walk falls through to the
  * next entry.
  *
- * A process counts as a local development server when it is `eve dev`
- * (`EVE_DEV=1`) or `vercel dev` (`VERCEL=1` with `VERCEL_ENV=development`).
- * This is a property of the deployment, never of the inbound request, so no
- * request header (for example `Host`) can flip the decision. A production
- * deployment (`eve start`, a Vercel deployment, or any container host) sets
- * neither flag, so `localDev()` authenticates nothing there. Layer a real
- * authenticator on those hosts.
+ * A process counts as a local development server when `NODE_ENV=development`
+ * (set by `eve dev`) or when it is a `vercel dev` session
+ * (`VERCEL_ENV=development`), a property of the deployment rather than the
+ * inbound request. A production deployment runs with `NODE_ENV=production`, so
+ * `localDev()` authenticates nothing there; layer a real authenticator on those
+ * hosts.
  */
 export function localDev(): AuthFn<Request> {
   return () => (isLocalDevelopmentServer() ? LOCAL_DEV_SESSION_AUTH_CONTEXT : null);
@@ -680,7 +678,7 @@ function isLocalDevelopmentServer(): boolean {
   if (process.env.VERCEL && process.env.VERCEL_ENV === "development") {
     return true;
   }
-  return isEveDevEnvironment();
+  return process.env.NODE_ENV === "development";
 }
 
 const ANONYMOUS_SESSION_AUTH_CONTEXT: SessionAuthContext = {
@@ -965,7 +963,7 @@ function isLocalDevelopmentVercelOidc(): boolean {
   if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
     return false;
   }
-  return isEveDevEnvironment();
+  return process.env.NODE_ENV === "development";
 }
 
 /**

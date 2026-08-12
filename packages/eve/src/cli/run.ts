@@ -282,7 +282,9 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 3000)", parsePortOption)
     .action(async (options: ProductionCliOptions) => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
+      const { defaultNodeEnv } = await import("#internal/application/dev-environment.js");
 
+      defaultNodeEnv("production");
       loadDevelopmentEnvironmentFiles(appRoot);
 
       const startProductionHost = runtime.startProductionHost ?? (await loadStartProductionHost());

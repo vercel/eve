@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
+import { defaultNodeEnv } from "#internal/application/dev-environment.js";
 import { prewarmBuiltAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { EVE_HEALTH_ROUTE_PATH } from "#protocol/routes.js";
 import type { ProductionServerHandle } from "#internal/nitro/host/types.js";
@@ -240,6 +241,8 @@ export async function startProductionServer(
     );
   }
 
+  // Default before loading env files so a committed .env cannot flip the mode.
+  defaultNodeEnv("production");
   loadDevelopmentEnvironmentFiles(appRoot);
   await prewarmBuiltAppSandboxes({
     appRoot,

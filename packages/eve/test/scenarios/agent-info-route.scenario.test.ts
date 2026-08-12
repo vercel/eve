@@ -19,12 +19,12 @@ const EVE_TOOLS_IMPORT_URL = new URL("../../dist/src/public/tools/index.js", imp
 const INFO_ROUTE_KEY = `GET ${EVE_INFO_ROUTE_PATH}`;
 
 // A request to the local server. The deployment environment, not this
-// URL, decides auth: `localDev()` authenticates only when the process
-// is an `eve dev` or `vercel dev` server (stubbed via EVE_DEV below).
+// URL, decides auth: `localDev()` authenticates only on a development
+// server (stubbed via NODE_ENV below).
 const LOOPBACK_REQUEST = new Request("http://localhost/eve/v1/info");
 
-// A request a real deployment sees on the wire. With no dev flag set,
-// `localDev()` skips it and the walk falls through to `vercelOidc()`.
+// A request a real deployment sees on the wire. Outside a development
+// server, `localDev()` skips it and the walk falls through to `vercelOidc()`.
 const DEPLOYED_REQUEST = new Request("https://weather-agent.vercel.app/eve/v1/info");
 const AUTHORIZED_DEPLOYED_REQUEST = new Request("https://weather-agent.vercel.app/eve/v1/info", {
   headers: {
@@ -96,7 +96,7 @@ describe("eve agent info route", () => {
   });
 
   it("returns inspection JSON in a local dev environment", async () => {
-    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("NODE_ENV", "development");
 
     const { agentRoot, appRoot } = await createAppRoot("eve-agent-info-route-", APP_ROOT_OPTIONS);
 
@@ -166,9 +166,10 @@ describe("eve agent info route", () => {
   });
 
   it("returns 401 for a deployment request without a Vercel OIDC bearer token", async () => {
-    // With no dev flag set, the default chain must reject a request that
-    // carries no token: `vercelOidc()` skips without a bearer token and
-    // `localDev()` skips outside an `eve dev` or `vercel dev` server.
+    // On a production deployment the default chain must reject a request
+    // that carries no token: `vercelOidc()` skips without a bearer token
+    // and `localDev()` skips outside a development server.
+    vi.stubEnv("NODE_ENV", "production");
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-agent-info-route-deployed-",
       APP_ROOT_OPTIONS,
