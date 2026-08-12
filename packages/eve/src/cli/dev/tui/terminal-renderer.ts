@@ -2770,6 +2770,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
+  suspendPromptForInput(): void {
+    this.#streamDraft = { cursor: this.#inputCursor, text: this.#inputText };
+    this.#stop();
+  }
+
   requestInterrupt(): void {
     this.#interrupted = true;
     if (this.#setupFlow !== undefined) this.#consumeKey?.({ type: "ctrl-c" });

@@ -726,6 +726,93 @@ describe("EveTUIRunner idle session follow", () => {
     ]);
   });
 
+  it("answers a background-task approval that arrives while the prompt is idle", async () => {
+    const session = stubSession();
+    const prompt = createDeferred<string | undefined>();
+    const requestId = "task_123:approval-1";
+    const wakeEvents = [
+      stampTestEvent({
+        type: "input.requested",
+        data: {
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "wake-turn",
+          requests: [
+            {
+              action: {
+                callId: "call-1",
+                input: { summary: "Return LOCAL-OK" },
+                kind: "tool-call",
+                toolName: "confirm_local_task",
+              },
+              display: "confirmation",
+              kind: "tool-approval",
+              options: [
+                { id: "approve", label: "Approve" },
+                { id: "cancel", label: "Cancel" },
+              ],
+              prompt: "Approve tool call: confirm_local_task",
+              requestId,
+            },
+          ],
+        },
+      } as UnstampedMessageStreamEvent),
+      stampTestEvent({
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      }),
+    ];
+    let streamCalls = 0;
+    vi.spyOn(session, "stream").mockImplementation((options?: { signal?: AbortSignal }) => {
+      streamCalls += 1;
+      const events = streamCalls === 1 ? wakeEvents : [];
+      return {
+        async *[Symbol.asyncIterator]() {
+          for (const event of events) yield event;
+          await new Promise<void>((resolve) => {
+            if (options?.signal?.aborted) resolve();
+            else options?.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+        },
+      };
+    });
+    const send = vi.spyOn(session, "send");
+    const respond = vi.spyOn(session, "respond").mockImplementation(async () =>
+      messageResponseOf([
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ]),
+    );
+    const renderer = fakeRenderer({
+      readPrompt: vi
+        .fn()
+        .mockImplementationOnce(() => prompt.promise)
+        .mockResolvedValueOnce(undefined),
+      readToolApproval: vi.fn(async () => ({ approved: true })),
+      renderIdleStream: vi.fn(async (result) => {
+        for await (const event of result.events) void event;
+      }),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events) void event;
+      }),
+      suspendPromptForInput: vi.fn(() => prompt.reject(interruptedError())),
+    });
+
+    await new EveTUIRunner({ session, renderer, name: "Task Agent" }).run();
+
+    expect(renderer.suspendPromptForInput).toHaveBeenCalledOnce();
+    expect(renderer.readToolApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalId: requestId, toolName: "confirm_local_task" }),
+      { title: "Task Agent" },
+    );
+    expect(respond).toHaveBeenCalledWith([{ requestId, optionId: "approve" }], {
+      signal: expect.any(AbortSignal),
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("parks idle authorization wake turns until their callback completes", async () => {
     const session = stubSession();
     const prompt = createDeferred<string | undefined>();

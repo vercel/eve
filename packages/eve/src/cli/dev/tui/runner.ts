@@ -360,6 +360,8 @@ export type AgentTUIRenderer = {
    * lifecycle ends.
    */
   shutdown?(): void;
+  /** Suspends an idle prompt so a server-initiated HITL request can own input. */
+  suspendPromptForInput?(): void;
   requestInterrupt?(): void;
   exitRequested?(): boolean;
 };
@@ -527,6 +529,8 @@ export class EveTUIRunner {
    * eve `InputResponse[]` payloads on the next `send()`.
    */
   readonly #pendingInputRequests = new Map<string, InputRequest>();
+  /** Idle wake result handed from the prompt follower into the normal HITL response loop. */
+  #idleInputResult?: AgentTUIStreamResult;
   /**
    * callId → live state for one subagent dispatch. Persists across turn
    * boundaries because a subagent dispatched in one turn may not emit
@@ -776,18 +780,20 @@ export class EveTUIRunner {
             prompt = await this.#readPromptFollowingSession(promptOptions);
           } catch (error) {
             if (isInterruptedError(error)) {
-              return;
+              if (this.#idleInputResult === undefined) return;
+              streamWithoutPrompt = true;
+              prompt = "";
+            } else {
+              throw error;
             }
-
-            throw error;
           }
 
-          if (prompt == null) {
+          if (prompt == null && this.#idleInputResult === undefined) {
             return;
           }
         }
 
-        const command = parsePromptCommand(prompt);
+        const command = this.#idleInputResult === undefined ? parsePromptCommand(prompt!) : null;
 
         if (command?.type === "exit") {
           this.#lifecycle?.requestStop();
@@ -964,15 +970,19 @@ export class EveTUIRunner {
         hasRunTurn = true;
       }
 
-      let result = followCurrentSession
-        ? this.#streamCurrentSession()
-        : await (async () => {
-            this.#recoverFailedSession();
-            return await this.#streamTurn({
-              prompt: streamWithoutPrompt ? undefined : prompt,
-              inputResponses: pendingInputResponses,
-            });
-          })();
+      const idleInputResult = this.#idleInputResult;
+      this.#idleInputResult = undefined;
+      let result =
+        idleInputResult ??
+        (followCurrentSession
+          ? this.#streamCurrentSession()
+          : await (async () => {
+              this.#recoverFailedSession();
+              return await this.#streamTurn({
+                prompt: streamWithoutPrompt ? undefined : prompt,
+                inputResponses: pendingInputResponses,
+              });
+            })());
       // The session id becomes known once the send is accepted; keep the
       // renderer's copy fresh so the parting line can name the session.
       const acceptedSessionId = this.#session?.state.sessionId;
@@ -1288,6 +1298,17 @@ export class EveTUIRunner {
           continueSession: true,
         });
         this.#enterPendingConnectionAuthorization(result);
+        if (
+          (result.turnState?.pendingApprovals.length ?? 0) > 0 ||
+          (result.turnState?.pendingQuestions.length ?? 0) > 0
+        ) {
+          this.#idleInputResult = {
+            events: (async function* () {})(),
+            turnState: result.turnState,
+          };
+          this.#renderer.suspendPromptForInput?.();
+          return;
+        }
         if (!consumed) return;
       }
     } finally {
