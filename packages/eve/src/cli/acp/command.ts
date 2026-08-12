@@ -6,7 +6,9 @@ import {
   type DevelopmentRequestHeaders,
 } from "#cli/dev/url-target.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
+import { createServerCloseLatch, loadStartDevelopmentHost } from "#cli/dev/supervised-server.js";
 import { FORCED_EXIT_BACKSTOP_MS, installShutdownSignal } from "#cli/shutdown.js";
+import { hasDevelopmentAuthorizationHeader } from "#services/dev-client/client-options.js";
 import type { ClientOptions } from "#client/types.js";
 import type { DevelopmentServer, DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
@@ -68,17 +70,11 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
       }
 
       let server: DevelopmentServer | undefined;
-      let closePromise: Promise<void> | undefined;
-      const closeServer = () => {
-        if (server === undefined) return Promise.resolve();
-        closePromise ??= server.close();
-        void closePromise.catch(() => undefined);
-        return closePromise;
-      };
+      const closeServer = createServerCloseLatch(() => server);
       lifecycle.signal.addEventListener("abort", () => void closeServer(), { once: true });
 
       try {
-        const startHost = options.startHost ?? (await loadStartHost());
+        const startHost = options.startHost ?? (await loadStartDevelopmentHost());
         server = startHost(options.appRoot, {
           existing: "reject",
           host: "127.0.0.1",
@@ -110,17 +106,22 @@ interface AcpCliOptions {
   readonly url?: string;
 }
 
-async function runAcp(
-  options: RegisterAcpCommandOptions,
-  input: Omit<Parameters<RunAcpServer>[0], "eveVersion"> & { readonly vercelScope?: string },
-): Promise<void> {
+/** How the command reaches an agent: a supervised local server, or a URL target. */
+interface AcpTargetInput {
+  readonly headers?: DevelopmentRequestHeaders;
+  readonly serverUrl: string;
+  readonly signal: AbortSignal;
+  readonly vercelScope?: string;
+  readonly workspaceRoot?: string;
+}
+
+async function runAcp(options: RegisterAcpCommandOptions, input: AcpTargetInput): Promise<void> {
   const run = options.runAcpServer ?? (await import("#acp/server.js")).runAcpServer;
   const { vercelScope, ...serverInput } = input;
-  const staticHeaders = typeof serverInput.headers === "function" ? undefined : serverInput.headers;
-  const ownsAuthorization = Object.keys(staticHeaders ?? {}).some(
-    (name) => name.toLowerCase() === "authorization",
-  );
-  if (serverInput.workspaceRoot !== undefined || ownsAuthorization) {
+  if (
+    serverInput.workspaceRoot !== undefined ||
+    hasDevelopmentAuthorizationHeader(serverInput.headers)
+  ) {
     await run({ eveVersion: options.eveVersion, ...serverInput });
     return;
   }
@@ -129,7 +130,7 @@ async function runAcp(
     options.resolveVerifiedRemoteDevelopmentClient ??
     (await import("#setup/verified-remote-client.js")).resolveVerifiedRemoteDevelopmentClient;
   const { options: clientOptions } = await resolveVerifiedRemoteDevelopmentClient({
-    headers: staticHeaders,
+    headers: serverInput.headers,
     serverUrl: serverInput.serverUrl,
     signal: serverInput.signal,
     vercelScope,
@@ -142,8 +143,4 @@ async function runAcp(
     serverUrl: serverInput.serverUrl,
     signal: serverInput.signal,
   });
-}
-
-async function loadStartHost(): Promise<NonNullable<RegisterAcpCommandOptions["startHost"]>> {
-  return (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
 }

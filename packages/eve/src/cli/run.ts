@@ -20,6 +20,7 @@ import {
   type CommandLifecycle,
   waitForShutdownSignal,
 } from "#cli/shutdown.js";
+import { createServerCloseLatch, loadStartDevelopmentHost } from "#cli/dev/supervised-server.js";
 import { waitForServerOrStop, waitForUiOrServer } from "#cli/dev/wait-for-ui.js";
 import { parseDevelopmentHeaderOption, resolveDevelopmentUrlTarget } from "#cli/dev/url-target.js";
 import type { DevelopmentCliOptions, ProductionCliOptions } from "#cli/dev/command-options.js";
@@ -128,10 +129,6 @@ async function loadRunDevelopmentTui(): Promise<CliRuntimeDependencies["runDevel
 
 async function loadRunEvalCommand(): Promise<CliRuntimeDependencies["runEvalCommand"]> {
   return (await import("#evals/cli/eval.js")).runEvalCommand;
-}
-
-async function loadStartHost(): Promise<CliRuntimeDependencies["startHost"]> {
-  return (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
 }
 
 const loadIsActiveDevelopmentServerForApp = async () =>
@@ -471,13 +468,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       buildProgress?.update("Building your agent");
 
       let server: DevelopmentServer | undefined;
-      let closePromise: Promise<void> | undefined;
-      const closeServer = () => {
-        if (server === undefined) return Promise.resolve();
-        closePromise ??= server.close();
-        void closePromise.catch(() => undefined);
-        return closePromise;
-      };
+      const closeServer = createServerCloseLatch(() => server);
       const lifecycle = installShutdownSignal({
         exitAfterMs: FORCED_EXIT_BACKSTOP_MS,
         onStop: () => {
@@ -486,7 +477,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       });
 
       try {
-        const startHost = runtime.startHost ?? (await loadStartHost());
+        const startHost = runtime.startHost ?? (await loadStartDevelopmentHost());
         server = startHost(appRoot, {
           existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
           host: options.host,
