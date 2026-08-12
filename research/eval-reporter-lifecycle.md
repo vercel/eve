@@ -15,7 +15,7 @@ session can span several traces, so the contract does not pretend that an eval o
 ```text
 onRunStart
   +-- onEvalStart
-        +-- onEvalSessionStart (first traced event in each session)
+        +-- onSessionStart     (first traced event in each session)
         +-- onEvalComplete     (all observed session traces)
   +-- onRunComplete
 ```
@@ -25,7 +25,7 @@ onRunStart
 `EvalReporter` adds two optional callbacks:
 
 - `onEvalStart` fires when the runner schedules an observed eval. No session or trace exists yet.
-- `onEvalSessionStart` fires once for each session after its first trace-bearing stream event. It
+- `onSessionStart` fires once for each session after its first trace-bearing stream event. It
   includes the session id, whether the session is primary, and eve-owned W3C trace coordinates.
 
 `onEvalComplete` keeps the existing result argument and receives additional context containing the
@@ -33,7 +33,7 @@ evaluation, target, and every distinct trace observed across its sessions. The s
 are retained on task/session results, JSON artifacts, and Braintrust metadata.
 
 Tracing is optional at the target boundary. `onEvalStart` and `onEvalComplete` always fire, while
-`onEvalSessionStart` only fires when the target emits trace context. Reporters must therefore treat
+`onSessionStart` only fires when the target emits trace context. Reporters must therefore treat
 an empty completed trace list as a supported uninstrumented run.
 
 ## Runtime boundary

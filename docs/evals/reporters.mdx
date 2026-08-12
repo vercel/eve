@@ -62,7 +62,7 @@ A reporter implements the `EvalReporter` interface from `eve/evals/reporters` an
 interface EvalReporter {
   onRunStart(evaluations: readonly EveEval[], target: EveEvalTarget): void | Promise<void>;
   onEvalStart?(event: EveEvalStartEvent): void | Promise<void>;
-  onEvalSessionStart?(event: EveEvalSessionStartEvent): void | Promise<void>;
+  onSessionStart?(event: EveEvalSessionStartEvent): void | Promise<void>;
   onEvalComplete(result: EveEvalResult, context?: EveEvalCompleteContext): void | Promise<void>;
   onRunComplete(summary: EveEvalRunSummary): void | Promise<void>;
 }
@@ -71,10 +71,10 @@ interface EvalReporter {
 `onRunStart` fires once before any eval runs, and `onRunComplete` fires once with the aggregated summary. Within that run:
 
 - `onEvalStart` fires when an eval is scheduled. It includes the eval definition, target, and start time.
-- `onEvalSessionStart` fires once for each session after eve receives its first trace context. It includes `sessionId`, `primary`, and `traceContext` with `traceId`, `spanId`, and `traceFlags`.
+- `onSessionStart` fires once for each session after eve receives its first trace context. It includes `sessionId`, `primary`, and `traceContext` with `traceId`, `spanId`, and `traceFlags`.
 - `onEvalComplete` fires with the checks, scores, and verdict. The runner also supplies `context`, including every distinct trace context collected across the eval's sessions. The same list is available as `result.result.traceContexts`.
 
-An eval can create several sessions, and a long session can produce several traces, so completion exposes a list instead of a single trace id. `onEvalStart` does not include a trace because the agent session has not started yet. If the target has no tracing configured, `onEvalSessionStart` does not fire and the completed trace list is empty.
+An eval can create several sessions, and a long session can produce several traces, so completion exposes a list instead of a single trace id. `onEvalStart` does not include a trace because the agent session has not started yet. If the target has no tracing configured, `onSessionStart` does not fire and the completed trace list is empty.
 
 Reporter callbacks for an eval stay ordered—eval start, traced session starts, then completion—even when several evals run concurrently. Reach for a custom reporter only when a destination isn't covered. The per-run artifacts under `.eve/evals/` retain the trace contexts alongside the result for ad-hoc inspection.
 

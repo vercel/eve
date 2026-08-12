@@ -310,7 +310,7 @@ describe("runEvals", () => {
       onEvalStart: (event) => {
         seen.push(`eval:start:${event.evaluation.id}`);
       },
-      onEvalSessionStart: (event) => {
+      onSessionStart: (event) => {
         seen.push(`session:start:${event.sessionId}:${event.traceContext.traceId}`);
       },
       onEvalComplete: (result, context) => {

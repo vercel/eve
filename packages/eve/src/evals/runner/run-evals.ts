@@ -124,7 +124,7 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
               : (message) => options.onEvalLog?.(evaluation.id, message),
           onSessionStart: (event) => {
             enqueueReporterCallback(evaluation, async (reporter) => {
-              await reporter.onEvalSessionStart?.({
+              await reporter.onSessionStart?.({
                 evaluation,
                 primary: event.primary,
                 sessionId: event.sessionId,

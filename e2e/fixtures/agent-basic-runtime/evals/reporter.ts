@@ -14,7 +14,7 @@ export const evalLifecycleReporter: EvalReporter = {
   onEvalStart(event) {
     scheduled.add(event.evaluation.id);
   },
-  onEvalSessionStart(event) {
+  onSessionStart(event) {
     if (!scheduled.has(event.evaluation.id)) {
       throw new Error(`Session callback preceded eval start: ${event.evaluation.id}`);
     }

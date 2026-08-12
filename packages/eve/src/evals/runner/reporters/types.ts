@@ -50,7 +50,7 @@ export interface EvalReporter {
    * The runner calls this once per session when its first trace context is
    * observed. Sessions without trace instrumentation do not trigger it.
    */
-  onEvalSessionStart?(event: EveEvalSessionStartEvent): void | Promise<void>;
+  onSessionStart?(event: EveEvalSessionStartEvent): void | Promise<void>;
 
   /**
    * The runner calls this after each observed eval completes, with its
