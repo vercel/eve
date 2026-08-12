@@ -51,13 +51,14 @@ export default defineTaskEval({
     );
     const taskCall = peeked.turn.requireToolCall("task_peek", { input: { taskIds: [taskId] } });
     const blockedView = requireTaskView(taskCall.output, taskId);
+    const authorizationRequestId = `task:authorization:${required.event.data.attemptId ?? AUTHORIZATION_NAME}`;
     await t.require(
       blockedView,
       satisfies(
         (view: Record<string, unknown>) =>
           Reflect.get(view, "status") === "input_required" &&
           hasMetadata(view, "approval-worker", "local") &&
-          hasAuthorizationBlocker(view),
+          hasAuthorizationBlocker(view, authorizationRequestId),
         "task view exposes only the reserved authorization blocker",
       ),
     );
@@ -114,12 +115,15 @@ export default defineTaskEval({
   },
 });
 
-function hasAuthorizationBlocker(view: Record<string, unknown>): boolean {
+function hasAuthorizationBlocker(
+  view: Record<string, unknown>,
+  authorizationRequestId: string,
+): boolean {
   const requests = Reflect.get(view, "inputRequests");
   return (
     Array.isArray(requests) &&
     requests.length === 1 &&
-    Reflect.get(requests[0] ?? {}, "requestId") === "task:authorization" &&
+    Reflect.get(requests[0] ?? {}, "requestId") === authorizationRequestId &&
     Reflect.get(requests[0] ?? {}, "blockedOn") === "authorization"
   );
 }

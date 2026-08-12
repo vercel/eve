@@ -10,7 +10,7 @@ import {
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
 
 function respond(request: MockModelRequest): MockModelResponse | string {
-  const message = request.lastUserMessage ?? "";
+  const message = request.userMessages.findLast((entry) => !entry.startsWith("[Agents]")) ?? "";
   if (message.includes("TASK-FANOUT-INTERACTIVE-CHECK")) return "TASK-FANOUT-INTERACTIVE-OK";
   if (message.includes("TASK-CANCEL-NOW")) return cancelWorkerTask(request);
   if (message.includes("CHILD-TASK-EXCLUSIVITY-RACE")) return raceBusyWorker(request);

@@ -35,6 +35,7 @@ export default defineTaskEval({
     firstAnswer.expectOk();
 
     const second = await waitForTaskInput(t, first.session, "second_gate");
+    const secondChildRequestId = second.request.requestId.replace(`${taskId}:`, "");
     const stale = await second.session.respond([
       {
         optionId: "approve",
@@ -60,7 +61,7 @@ export default defineTaskEval({
           Reflect.get(view, "status") === "input_required" &&
           Array.isArray(requests) &&
           requests.length === 1 &&
-          Reflect.get(requests[0], "requestId") === second.request.requestId
+          Reflect.get(requests[0], "requestId") === secondChildRequestId
         );
       }, "the stale Q1 answer leaves exactly Q2 outstanding"),
     );
