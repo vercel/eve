@@ -85,7 +85,7 @@ try {
 
   const manifest = { sourceSha, version, tarball: artifact.url, sha256 };
   const manifestPath = packageManifestPath(sourceSha);
-  const existingManifest = await get(manifestPath, { access: "public", useCache: false });
+  const existingManifest = await get(manifestPath, { access: "public" });
   if (existingManifest === null) {
     await put(manifestPath, JSON.stringify(manifest), {
       access: "public",

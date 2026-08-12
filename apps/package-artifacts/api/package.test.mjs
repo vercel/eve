@@ -37,7 +37,6 @@ describe("package route", () => {
 
     expect(get).toHaveBeenCalledWith(`packages/${sha}/manifest.json`, {
       access: "public",
-      useCache: false,
     });
     expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "public, max-age=60");
     expect(res.redirect).toHaveBeenCalledWith(302, manifest.tarball);

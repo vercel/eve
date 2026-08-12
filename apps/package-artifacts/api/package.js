@@ -33,7 +33,7 @@ function packageNotFound(response) {
 }
 
 async function resolveManifest(sourceSha) {
-  const result = await get(packageManifestPath(sourceSha), { access: "public", useCache: false });
+  const result = await get(packageManifestPath(sourceSha), { access: "public" });
   if (result === null) return undefined;
 
   const manifest = JSON.parse(await new Response(result.stream).text());
