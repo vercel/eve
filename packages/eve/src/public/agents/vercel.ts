@@ -26,12 +26,12 @@ export interface VercelBranchAgentInput extends Omit<RemoteAgentDefinitionInput,
  * preview; forwarding the end-user principal remains an explicit opt-in.
  */
 export function defineVercelBranchAgent(input: VercelBranchAgentInput): RemoteAgentDefinition {
-  const branch = input.branch.trim();
+  const { branch: rawBranch, ...remote } = input;
+  const branch = rawBranch.trim();
   if (!branch) throw new Error("defineVercelBranchAgent requires a non-empty branch.");
 
   return defineRemoteAgent({
-    ...input,
+    ...remote,
     auth: vercelOidc(),
-    url: input.url,
   });
 }
