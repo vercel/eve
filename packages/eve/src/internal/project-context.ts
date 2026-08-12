@@ -10,23 +10,23 @@ import {
 export type EveProjectContext =
   | {
       readonly collection: AgentCollection;
-      readonly environmentRoots: readonly string[];
+      readonly environmentRoot: string;
       readonly kind: "collection";
     }
   | {
       readonly collection: AgentCollection;
-      readonly environmentRoots: readonly string[];
+      readonly environmentRoot: string;
       readonly kind: "collection-member";
       readonly member: AgentCollectionMember;
     }
   | {
       readonly appRoot: string;
-      readonly environmentRoots: readonly string[];
+      readonly environmentRoot: string;
       readonly kind: "standalone";
     };
 
 function standalone(appRoot: string): Extract<EveProjectContext, { kind: "standalone" }> {
-  return { appRoot, environmentRoots: [appRoot], kind: "standalone" };
+  return { appRoot, environmentRoot: appRoot, kind: "standalone" };
 }
 
 /** Classify a direct `agents/<name>` root using the canonical ownership rules. */
@@ -46,7 +46,7 @@ export async function resolveNamedAgentProjectContext(
     ? undefined
     : {
         collection,
-        environmentRoots: [collection.root, member.appRoot],
+        environmentRoot: collection.root,
         kind: "collection-member",
         member,
       };
@@ -65,5 +65,5 @@ export async function resolveEveProjectContext(
   const collection = await resolveAgentCollection(resolvedAppRoot, { source });
   return collection === undefined
     ? standalone(resolvedAppRoot)
-    : { collection, environmentRoots: [collection.root], kind: "collection" };
+    : { collection, environmentRoot: collection.root, kind: "collection" };
 }

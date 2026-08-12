@@ -103,12 +103,12 @@ describe("resolveAgentCollection", () => {
 
     await expect(resolveEveProjectContext(root)).resolves.toEqual({
       appRoot: root,
-      environmentRoots: [root],
+      environmentRoot: root,
       kind: "standalone",
     });
     await expect(resolveEveProjectContext(supportRoot)).resolves.toEqual({
       appRoot: supportRoot,
-      environmentRoots: [supportRoot],
+      environmentRoot: supportRoot,
       kind: "standalone",
     });
     await expect(resolveDiscoveryProject(supportRoot)).rejects.toThrow(
@@ -121,7 +121,7 @@ describe("resolveAgentCollection", () => {
     const supportRoot = join(root, "agents", "support");
     await expect(resolveEveProjectContext(supportRoot)).resolves.toMatchObject({
       collection: { root },
-      environmentRoots: [root, supportRoot],
+      environmentRoot: root,
       kind: "collection-member",
       member: { appRoot: supportRoot, name: "support" },
     });
