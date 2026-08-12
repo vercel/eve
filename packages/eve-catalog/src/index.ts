@@ -318,7 +318,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     kind: "extension",
     tagline:
       "Give your agent workspace-scoped long-term memory with recall, storage, and brain notes.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "hindsight",
@@ -725,7 +725,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Tinybird",
     kind: "connection",
     tagline: "Query pipes and data sources in your Tinybird Workspace.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description:
         "Tinybird: query pipes and data sources, and run SQL. A token grants one Workspace, so add a connection per Workspace.",

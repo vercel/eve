@@ -11,7 +11,7 @@ const info: AgentInfoResult = {
   agent: {
     agentRoot: "/tmp/weather-agent/agent",
     appRoot: "/tmp/weather-agent",
-    model: { id: "openai/gpt-5.5" },
+    model: { id: "openai/gpt-5.5", routing: { kind: "gateway", target: "openai" } },
     name: "Weather Agent",
   },
   capabilities: { devRoutes: true },
