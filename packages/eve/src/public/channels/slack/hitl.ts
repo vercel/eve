@@ -228,12 +228,11 @@ export function renderInputRequestPostParts(request: InputRequest): {
 
 /**
  * Creates the fallback text for one HITL request. Slack clients use this
- * outside the rich Block Kit surface, so include the same approval details
- * that appear in the blocks.
+ * outside the rich Block Kit surface. Keep it concise because Slack includes
+ * this text alongside the full block list in interaction callbacks.
  */
 export function formatInputRequestFallbackText(request: InputRequest): string {
-  const details = formatToolInputDetails(request);
-  return details === undefined ? request.prompt : `${request.prompt}\n${details}`;
+  return request.prompt;
 }
 
 /**

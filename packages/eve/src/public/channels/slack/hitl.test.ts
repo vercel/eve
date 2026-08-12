@@ -363,7 +363,7 @@ describe("renderInputRequestBlocks", () => {
 });
 
 describe("formatInputRequestFallbackText", () => {
-  it("includes approval tool input in Slack fallback text", () => {
+  it("keeps approval tool input out of Slack fallback text", () => {
     const text = formatInputRequestFallbackText(
       makeRequest({
         action: {
@@ -386,9 +386,7 @@ describe("formatInputRequestFallbackText", () => {
       }),
     );
 
-    expect(text).toContain("Approve tool call: mongodb-mutate");
-    expect(text).toContain('"collection": "orgs"');
-    expect(text).toContain('"_id": "48gtnni64rxqtaoh"');
+    expect(text).toBe("Approve tool call: mongodb-mutate");
   });
 
   it("leaves non-approval fallback text unchanged", () => {

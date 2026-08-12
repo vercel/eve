@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { defaultEvents } from "#public/channels/slack/defaults.js";
+import { defaultEvents, defaultInputRequestedHandler } from "#public/channels/slack/defaults.js";
+import { HITL_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 
 function sessionContext(
@@ -50,6 +51,72 @@ function authRequiredEvent(
     turnId: "turn_0",
   };
 }
+
+describe("defaultInputRequestedHandler", () => {
+  it("bounds callback payloads independently of the full approval input", async () => {
+    const { channel, post } = buildChannelStub();
+    const handler = defaultInputRequestedHandler();
+
+    for (const inputLength of [5_000, 50_000]) {
+      await handler(
+        {
+          requests: [
+            {
+              action: {
+                callId: "call_cloud_agent",
+                input: {
+                  prompt: `cloud-agent-prompt ${"x".repeat(inputLength)} tail-sentinel`,
+                },
+                kind: "tool-call",
+                toolName: "spawn-cloud-agent",
+              },
+              display: "confirmation",
+              kind: "tool-approval",
+              options: [
+                { id: "approve", label: "Approve" },
+                { id: "cancel", label: "Cancel" },
+              ],
+              prompt: "Approve tool call: spawn-cloud-agent",
+              requestId: "approval_cloud_agent",
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "t1",
+        },
+        channel,
+        sessionCtx,
+      );
+    }
+
+    const callbackSizes = post.mock.calls.map(([message]) => {
+      const renderedMessage = JSON.stringify(message);
+      expect(renderedMessage.split("cloud-agent-prompt").length - 1).toBe(1);
+      expect(renderedMessage).not.toContain("tail-sentinel");
+
+      const callbackBody = new URLSearchParams({
+        payload: JSON.stringify({
+          actions: [
+            {
+              action_id: `${HITL_ACTION_PREFIX}approval_cloud_agent:button:1`,
+              value: "approve",
+            },
+          ],
+          channel: { id: "C123" },
+          message,
+          team: { id: "T01" },
+          type: "block_actions",
+          user: { id: "U01" },
+        }),
+      }).toString();
+      return new TextEncoder().encode(callbackBody).byteLength;
+    });
+
+    expect(callbackSizes).toHaveLength(2);
+    expect(callbackSizes[1]).toBe(callbackSizes[0]);
+    expect(callbackSizes[0]).toBeLessThanOrEqual(6_000);
+  });
+});
 
 describe("defaultEvents authorization.required", () => {
   it("posts a public status and delivers the challenge ephemerally to the triggering user", async () => {

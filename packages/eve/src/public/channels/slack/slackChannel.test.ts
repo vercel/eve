@@ -510,7 +510,7 @@ describe("slackChannel() default event handlers", () => {
     };
     expect(detailsBody).toMatchObject({
       channel: "C01",
-      text: 'Approve tool call: mongodb-mutate\n*Tool input*\n```\n{\n  "operation": "deleteMany"\n}\n```',
+      text: "Approve tool call: mongodb-mutate",
       thread_ts: "1700000000.000001",
     });
     expect(detailsBody.blocks).toEqual([
