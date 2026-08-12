@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { get, head, put } from "@vercel/blob";
+import { get, put } from "@vercel/blob";
 
 import {
   SHA_PATTERN,
@@ -53,10 +53,9 @@ try {
     EVE_MAIN_DEPENDENCY_URL: dependencyUrl,
   });
   const sha256 = createHash("sha256").update(tarball).digest("hex");
-  let artifact;
   try {
-    artifact = await put(artifactPath, tarball, {
-      access: "public",
+    await put(artifactPath, tarball, {
+      access: "private",
       addRandomSuffix: false,
       allowOverwrite: false,
       cacheControlMaxAge: 31_536_000,
@@ -65,25 +64,24 @@ try {
   } catch (error) {
     // Redeploys are valid only when this commit still produces identical package bytes.
     if (!(error instanceof Error) || !error.message.includes("already exists")) throw error;
-    artifact = await head(artifactPath);
-    const publishedTarball = await fetch(artifact.url);
-    if (!publishedTarball.ok) {
-      throw new Error(`Published package artifact returned ${publishedTarball.status}.`);
+    const publishedArtifact = await get(artifactPath, { access: "private", useCache: false });
+    if (publishedArtifact === null) {
+      throw new Error("Published package artifact could not be read.");
     }
     const publishedSha256 = createHash("sha256")
-      .update(Buffer.from(await publishedTarball.arrayBuffer()))
+      .update(Buffer.from(await new Response(publishedArtifact.stream).arrayBuffer()))
       .digest("hex");
     if (publishedSha256 !== sha256) {
       throw new Error(`Commit ${sourceSha} was already published with different package contents.`);
     }
   }
 
-  const manifest = { sourceSha, version, tarball: artifact.url, sha256 };
+  const manifest = { sourceSha, version, tarball: dependencyUrl, sha256 };
   const manifestPath = packageManifestPath(sourceSha);
-  const existingManifest = await get(manifestPath, { access: "public" });
+  const existingManifest = await get(manifestPath, { access: "private", useCache: false });
   if (existingManifest === null) {
     await put(manifestPath, JSON.stringify(manifest), {
-      access: "public",
+      access: "private",
       addRandomSuffix: false,
       allowOverwrite: false,
       cacheControlMaxAge: 31_536_000,
