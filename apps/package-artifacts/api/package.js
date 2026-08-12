@@ -8,7 +8,7 @@ export default async function handler(request, response) {
     return response.status(404).send("Package not found.\n");
   }
 
-  // The production deployment itself is the moving main pointer; Blob stores only SHA data.
+  // Resolve `main` to the commit represented by the current production deployment.
   const sourceSha = ref === "main" ? process.env.VERCEL_GIT_COMMIT_SHA : ref;
   if (!SHA_PATTERN.test(sourceSha ?? "")) {
     return response.status(404).send("Package not found.\n");
