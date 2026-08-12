@@ -225,6 +225,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
   const mergedEvents: GitHubChannelEvents = {
     ...createDefaultEvents({
       api: config.api,
+      botName,
       credentials: config.credentials,
       progress: config.progress,
     }),

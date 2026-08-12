@@ -74,6 +74,7 @@ export function defaultOnComment(
 /** Options used by built-in GitHub event handlers. */
 export interface GitHubDefaultEventOptions {
   readonly api?: GitHubApiOptions;
+  readonly botName?: string;
   readonly credentials?: GitHubChannelCredentials;
   readonly progress?: GitHubProgressConfig;
 }
@@ -100,7 +101,10 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
 
     async "input.requested"(event, channel, _ctx) {
       if (event.requests.length === 0) return;
-      await postCommentChunks(channel, event.requests.map(renderInputRequest).join("\n\n"));
+      const sections = event.requests.map(renderInputRequest);
+      const replyInstruction = renderReplyInstruction(event.requests, options.botName);
+      if (replyInstruction !== undefined) sections.push(replyInstruction);
+      await postCommentChunks(channel, sections.join("\n\n"));
     },
 
     async "session.failed"(event, channel) {
@@ -144,6 +148,19 @@ function renderInputRequest(request: InputRequest): string {
     lines.push("", "You can also reply with a custom answer.");
   }
   return lines.join("\n");
+}
+
+// The default onComment hook only dispatches comments that @mention the bot,
+// so a prompt without this instruction invites replies that are silently ignored.
+function renderReplyInstruction(
+  requests: readonly InputRequest[],
+  botName: string | undefined,
+): string | undefined {
+  const name = botName?.trim();
+  if (!name) return undefined;
+  const firstOption = requests.find((request) => (request.options?.length ?? 0) > 0)?.options?.[0];
+  const example = firstOption?.label ?? "<your answer>";
+  return `Answer by mentioning me in a reply, e.g. \`@${name} ${example}\`.`;
 }
 
 async function checkoutRepositoryForTurn(
