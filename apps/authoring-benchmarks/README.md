@@ -47,10 +47,11 @@ for each subject repository, revision, and scenario. Each benchmark attempt star
 independent sandbox restored from that prepared project, then applies treatment-specific changes
 in `onSession`.
 
-## Subject package
+## Subject revision
 
-By default, the runner builds and packs eve from the current checkout's exact `HEAD`. Set both
-variables below to evaluate a reachable branch or SHA from another checkout:
+By default, the runner evaluates the current checkout's exact `HEAD` from its `origin` remote.
+Push the commit first so the sandbox can fetch it. Set both variables below to evaluate a
+reachable branch or SHA from another repository:
 
 ```sh
 EVE_BENCHMARK_REPOSITORY=https://github.com/<owner>/eve.git \
@@ -58,10 +59,9 @@ EVE_BENCHMARK_REVISION=<branch-or-SHA> \
   pnpm benchmark:authoring author-000-imessage
 ```
 
-Remote revisions are resolved to a commit SHA before checkout. The built tarball is cached at
-`.eve/authoring-benchmarks/packages/<sha>/eve.tgz`, so repeated runs use exactly the same eve
-package without relying on a published version or a mutable monorepo path. Remove that file to
-force a package rebuild.
+Remote revisions are resolved to a commit SHA before the experiments start. HarnessAgent then
+builds that exact checkout once in the scenario's reusable sandbox snapshot, without relying on
+a published package or mutable branch reference.
 
 ## Run
 
