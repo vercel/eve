@@ -36,23 +36,29 @@ export function SignIn() {
   }
 
   return (
-    <main className="flex h-dvh items-center justify-center bg-background px-6 text-foreground">
-      <div className="flex w-full max-w-sm flex-col items-center gap-6 text-center">
-        <div className="space-y-2">
-          <h1 className="break-words font-medium text-4xl tracking-tighter">{AGENT_NAME}</h1>
-          <p className="text-muted-foreground text-sm">
-            Team members can sign in with Vercel to chat.
-          </p>
-        </div>
-        <Button disabled={pending} onClick={signIn}>
-          Sign in with Vercel
+    <main className="flex min-h-dvh items-center justify-center bg-background px-6 text-foreground">
+      <section className="w-full max-w-sm rounded-xl border bg-card p-8 text-card-foreground">
+        <p className="text-muted-foreground text-sm">Sign in to</p>
+        <h1 className="mt-1 max-w-full break-words font-medium text-2xl tracking-tight">
+          {AGENT_NAME}
+        </h1>
+        <p className="mt-3 text-muted-foreground text-sm leading-6">
+          Use your Vercel account to continue.
+        </p>
+        <Button className="mt-6 w-full gap-2" disabled={pending} onClick={signIn}>
+          <svg aria-hidden="true" className="size-3 fill-current" viewBox="0 0 24 20">
+            <path d="M12 0 24 20H0L12 0Z" />
+          </svg>
+          <span className="text-sm leading-5">
+            {pending ? "Redirecting…" : "Continue with Vercel"}
+          </span>
         </Button>
         {error ? (
-          <p className="text-destructive text-sm" role="alert">
+          <p className="mt-3 text-destructive text-sm" role="alert">
             {error}
           </p>
         ) : null}
-      </div>
+      </section>
     </main>
   );
 }

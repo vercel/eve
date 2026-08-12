@@ -334,6 +334,9 @@ describe("ensureChannel", () => {
       "utf8",
     );
     expect(accountSource).toContain('className="size-9 cursor-pointer');
+    expect(accountSource).toContain("Continue with Vercel");
+    expect(accountSource).toContain('viewBox="0 0 24 20"');
+    expect(accountSource).toContain("Use your Vercel account to continue.");
     expect(accountSource).toContain("Log out");
     expect(accountSource).not.toContain("__EVE_INIT_APP_NAME__");
   });
