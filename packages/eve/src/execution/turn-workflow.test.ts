@@ -574,7 +574,7 @@ describe("turnWorkflow", () => {
       sessionState: withRunningChildren(pendingState, [
         { callId: "call-1", sessionId: "child-session" },
       ]),
-      taskReadiness: [],
+      pendingTasks: [],
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -650,13 +650,13 @@ describe("turnWorkflow", () => {
       | ((value: {
           results: readonly [];
           sessionState: DurableSessionState;
-          taskReadiness: readonly [];
+          pendingTasks: readonly [];
         }) => void)
       | undefined;
     const dispatchResult = new Promise<{
       results: readonly [];
       sessionState: DurableSessionState;
-      taskReadiness: readonly [];
+      pendingTasks: readonly [];
     }>((resolve) => {
       finishDispatch = resolve;
     });
@@ -686,7 +686,7 @@ describe("turnWorkflow", () => {
     await vi.waitFor(() => expect(dispatchRuntimeActionsStep).toHaveBeenCalledOnce());
     expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
 
-    finishDispatch?.({ results: [], sessionState: adoptedState, taskReadiness: [] });
+    finishDispatch?.({ results: [], sessionState: adoptedState, pendingTasks: [] });
     await workflow;
 
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].abortSignal?.aborted).toBe(true);
@@ -716,7 +716,7 @@ describe("turnWorkflow", () => {
         },
       ],
       sessionState: pendingState,
-      taskReadiness: [],
+      pendingTasks: [],
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -800,7 +800,7 @@ describe("turnWorkflow", () => {
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
       sessionState: withRunningChildren(pendingState, runningChildren),
-      taskReadiness: [],
+      pendingTasks: [],
     });
     vi.mocked(runProxySubagentEventStep).mockResolvedValue({
       serializedContext: { state: "proxied" },
@@ -884,7 +884,7 @@ describe("turnWorkflow", () => {
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
       sessionState: pendingState,
-      taskReadiness: [],
+      pendingTasks: [],
     });
     vi.mocked(runProxySubagentEventStep).mockResolvedValue({
       serializedContext: { state: "proxied" },
@@ -988,7 +988,7 @@ describe("turnWorkflow", () => {
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
       sessionState: dispatchedState,
-      taskReadiness: [],
+      pendingTasks: [],
     });
     vi.mocked(runProxySubagentEventStep)
       .mockResolvedValueOnce({
@@ -1104,7 +1104,7 @@ describe("turnWorkflow", () => {
         { callId: "call-1", sessionId: "child-session-1" },
         { callId: "call-2", sessionId: "child-session-2" },
       ]),
-      taskReadiness: [],
+      pendingTasks: [],
     });
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "continue",

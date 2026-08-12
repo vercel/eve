@@ -169,7 +169,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           sessionState: cursor.sessionState,
         });
         await cursor.adopt(dispatchResult);
-        await acknowledgeDelegatedTasksStep({ tasks: dispatchResult.taskReadiness });
+        await acknowledgeDelegatedTasksStep({ tasks: dispatchResult.pendingTasks });
 
         const results = await waitForRuntimeActionResults({
           bufferedDeliveries,

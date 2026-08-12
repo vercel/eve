@@ -118,14 +118,14 @@ export interface RuntimeActionDispatchInput {
 }
 
 /**
- * Result contract shared by both dispatch steps. `taskReadiness` is
+ * Result contract shared by both dispatch steps. `pendingTasks` is
  * always empty in plain mode; keeping it on both keeps the turn
  * workflow's acknowledgement call site uniform.
  */
 export interface RuntimeActionDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly sessionState: DurableSessionState;
-  readonly taskReadiness: readonly {
+  readonly pendingTasks: readonly {
     readonly taskInboxToken: string;
     readonly taskId: string;
     readonly taskRunId: string;

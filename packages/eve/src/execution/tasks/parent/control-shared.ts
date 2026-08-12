@@ -1,5 +1,6 @@
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
-import { isFinishedTaskRunTarget, readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
+import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
+import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import { taskViewsToJson } from "#tasks/json.js";
@@ -49,7 +50,7 @@ export async function readTaskView(entry: SessionTaskIndexEntry): Promise<TaskVi
       (await readLatestTaskView({ taskRunId: entry.taskRunId })) ?? createPendingTaskView(entry)
     );
   } catch (error) {
-    if (isFinishedTaskRunTarget(error) && entry.terminalView !== undefined) {
+    if (isTaskWorkflowTargetGone(error) && entry.terminalView !== undefined) {
       return entry.terminalView;
     }
     throw error;
@@ -57,7 +58,7 @@ export async function readTaskView(entry: SessionTaskIndexEntry): Promise<TaskVi
 }
 
 /** The placeholder view for a run that has not published anything yet. */
-export function createPendingTaskView(entry: SessionTaskIndexEntry): TaskView {
+function createPendingTaskView(entry: SessionTaskIndexEntry): TaskView {
   return {
     metadata: entry.metadata,
     status: "working",

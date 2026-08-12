@@ -32,9 +32,9 @@ import { createDurableSessionState } from "#execution/durable-session-store.js";
 import {
   beginDelegatedTask,
   type DelegatedTask,
-  executeTaskControlAction,
   settleDelegatedDispatch,
-} from "#execution/tasks/parent/dispatch.js";
+} from "#execution/tasks/parent/delegate.js";
+import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import {
   checkTaskContinuationAvailability,
   describeTaskDispatch,
@@ -55,7 +55,7 @@ export async function dispatchTaskStep(
     taskControls: true,
   });
   if (prepared === undefined) {
-    return { results: [], sessionState: input.sessionState, taskReadiness: [] };
+    return { results: [], sessionState: input.sessionState, pendingTasks: [] };
   }
 
   const { batch, bundle, session } = prepared;
@@ -65,7 +65,7 @@ export async function dispatchTaskStep(
 
   let nextSession = session;
   const results: RuntimeActionResult[] = [];
-  const taskReadiness: DelegatedTask[] = [];
+  const pendingTasks: DelegatedTask[] = [];
 
   try {
     for (const entry of prepared.plan) {
@@ -83,10 +83,8 @@ export async function dispatchTaskStep(
           session: nextSession,
         });
         nextSession = control.session;
-        if (control.taskReadiness !== undefined) taskReadiness.push(control.taskReadiness);
-        if (control.result !== undefined) {
-          results.push(control.result);
-        }
+        if (control.pendingTask !== undefined) pendingTasks.push(control.pendingTask);
+        results.push(control.result);
         continue;
       }
 
@@ -172,14 +170,12 @@ export async function dispatchTaskStep(
       if (outcome.kind === "error") {
         results.push(
           await settleTaskDispatchError({
-            agentId: entry.kind === "resume" ? entry.agentId : undefined,
             delegated,
             outcome,
             persisted: persistedContinuation,
-            session: nextSession,
           }),
         );
-        if (persistedContinuation !== undefined) taskReadiness.push(delegated);
+        if (persistedContinuation !== undefined) pendingTasks.push(delegated);
         continue;
       }
 
@@ -195,7 +191,7 @@ export async function dispatchTaskStep(
         nextSession = settled.session;
         results.push(settled.receipt);
       }
-      taskReadiness.push(delegated);
+      pendingTasks.push(delegated);
 
       await emitSubagentCalled({
         adapter: prepared.adapter,
@@ -217,6 +213,6 @@ export async function dispatchTaskStep(
       nextSession === session
         ? input.sessionState
         : createDurableSessionState({ session: nextSession }),
-    taskReadiness,
+    pendingTasks,
   };
 }

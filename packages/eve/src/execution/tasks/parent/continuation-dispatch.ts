@@ -69,10 +69,9 @@ export async function checkTaskContinuationAvailability(input: {
 export async function persistContinuationTaskInParentSession(input: {
   readonly action: RuntimeAgentHandleAction;
   readonly agentId: string;
-  readonly delegated: DelegatedTask | undefined;
+  readonly delegated: DelegatedTask;
   readonly session: RuntimeSession;
 }): Promise<PersistedContinuationTask | undefined> {
-  if (input.delegated === undefined) return undefined;
   const handle = findTaskAgentAddress(input.session, input.agentId);
   if (handle === undefined) return undefined;
   return settleDelegatedDispatch({
@@ -84,14 +83,12 @@ export async function persistContinuationTaskInParentSession(input: {
 }
 
 export async function settleTaskDispatchError(input: {
-  readonly agentId: string | undefined;
-  readonly delegated: DelegatedTask | undefined;
+  readonly delegated: DelegatedTask;
   readonly outcome: Extract<DispatchOutcome, { readonly kind: "error" }>;
   readonly persisted: PersistedContinuationTask | undefined;
-  readonly session: RuntimeSession;
 }): Promise<RuntimeSubagentDispatchFailure> {
   const ambiguous = input.persisted !== undefined && input.outcome.deliveryAmbiguous === true;
-  if (input.delegated !== undefined && !ambiguous) {
+  if (!ambiguous) {
     const settle = input.persisted === undefined ? rejectDelegatedDispatch : failDelegatedDispatch;
     await settle({ error: input.outcome.result.output, task: input.delegated });
   }
@@ -99,12 +96,11 @@ export async function settleTaskDispatchError(input: {
     ? input.outcome.result
     : {
         ...input.outcome.result,
-        output: attachTaskId(input.outcome.result.output, input.delegated?.taskId),
+        output: attachTaskId(input.outcome.result.output, input.delegated.taskId),
       };
 }
 
-function attachTaskId(output: JsonValue, taskId: string | undefined): JsonValue {
-  if (taskId === undefined) return output;
+function attachTaskId(output: JsonValue, taskId: string): JsonValue {
   return output !== null && typeof output === "object" && !Array.isArray(output)
     ? { ...output, taskId }
     : { error: output, taskId };

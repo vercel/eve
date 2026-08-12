@@ -16,7 +16,7 @@ import { isTerminalTaskStatus, readTaskInputRequestId } from "#tasks/types.js";
  * - `rejected`: the command is invalid for the current status; the
  *   reason is diagnostic only.
  */
-export type TaskTransitionResult =
+type TaskTransitionResult =
   | { readonly outcome: "accepted"; readonly view: TaskView }
   | { readonly outcome: "noop"; readonly view: TaskView }
   | { readonly outcome: "rejected"; readonly view: TaskView; readonly reason: string };
@@ -180,7 +180,7 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
       }
 
       const answered = new Set(command.requestIds);
-      const outstanding = view.inputRequests ?? [];
+      const outstanding = view.inputRequests;
       const remaining = outstanding.filter((request) => {
         const requestId = readTaskInputRequestId(request);
         return requestId === undefined || !answered.has(requestId);

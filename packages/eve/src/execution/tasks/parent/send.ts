@@ -39,9 +39,9 @@ export async function executeTaskSend(input: {
   readonly parentTurnId: string;
   readonly session: RuntimeSession;
 }): Promise<{
-  readonly result: RuntimeActionResult | undefined;
+  readonly result: RuntimeActionResult;
   readonly session: RuntimeSession;
-  readonly taskReadiness?: DelegatedTask;
+  readonly pendingTask?: DelegatedTask;
 }> {
   const { action, session } = input;
   const send = readTaskSendInput(action.input);
@@ -98,7 +98,7 @@ async function followUpTerminalTask(input: {
 }): Promise<{
   readonly result: RuntimeActionResult;
   readonly session: RuntimeSession;
-  readonly taskReadiness?: DelegatedTask;
+  readonly pendingTask?: DelegatedTask;
 }> {
   const { action, view } = input;
   const active = await findActiveTaskForAgent(
@@ -184,7 +184,7 @@ async function followUpTerminalTask(input: {
         toolName: action.toolName,
       },
       session: outcome.session,
-      taskReadiness: task,
+      pendingTask: task,
     };
   }
 
@@ -196,7 +196,7 @@ async function followUpTerminalTask(input: {
       toolName: action.toolName,
     },
     session: outcome.session,
-    taskReadiness: task,
+    pendingTask: task,
   };
 }
 

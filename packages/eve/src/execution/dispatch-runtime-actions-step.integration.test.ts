@@ -303,7 +303,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
     const state = readResultSessionState(result, session);
 
-    expect(result.taskReadiness).toEqual([]);
+    expect(result.pendingTasks).toEqual([]);
     expect(getSessionTaskIndex(state)).toEqual([]);
     expect(result.results[0]).toMatchObject({
       isError: true,

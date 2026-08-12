@@ -1,20 +1,13 @@
 import { getWritable } from "#compiled/@workflow/core/index.js";
-import {
-  EntityConflictError,
-  HookNotFoundError,
-  RunExpiredError,
-  WorkflowRunNotFoundError,
-} from "#compiled/@workflow/errors/index.js";
-
 import type {
   SessionAuthContext,
   SessionCommand,
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
+import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { createLogger } from "#internal/logging.js";
-import { walkCauseChain } from "#shared/errors.js";
 import {
   isTerminalTaskStatus,
   TASK_VIEW_STREAM_NAMESPACE,
@@ -84,7 +77,7 @@ export async function wakeTaskAuthorizationParentStep(input: {
   try {
     await resumeHook(input.token, command);
   } catch (error) {
-    if (isGoneParentTarget(error)) return;
+    if (isTaskWorkflowTargetGone(error)) return;
     throw error;
   }
 }
@@ -115,7 +108,7 @@ export async function wakeTaskParentStep(input: {
   try {
     await resumeHook(input.token, command);
   } catch (error) {
-    if (isGoneParentTarget(error)) {
+    if (isTaskWorkflowTargetGone(error)) {
       log.warn("task wake target is gone; the parent session already ended", {
         status: input.view.status,
         taskId: input.view.taskId,
@@ -151,7 +144,7 @@ export async function wakeTaskInputRequestParentStep(input: {
   try {
     await resumeHook(input.token, command);
   } catch (error) {
-    if (isGoneParentTarget(error)) return;
+    if (isTaskWorkflowTargetGone(error)) return;
     throw error;
   }
 }
@@ -198,7 +191,7 @@ export async function deliverTaskInputResponsesStep(input: {
     }
     return "delivered";
   } catch (error) {
-    if (isGoneParentTarget(error)) {
+    if (isTaskWorkflowTargetGone(error)) {
       log.warn("task input answer target is gone; the child turn already ended", {
         taskId: input.answer.taskId,
       });
@@ -214,18 +207,4 @@ function formatTaskNotification(view: TaskView): string {
     return `${subject} needs input. Use task_peek to inspect the outstanding requests.`;
   }
   return `${subject} is ${view.status}. Use task_peek to read its output.`;
-}
-
-function isGoneParentTarget(error: unknown): boolean {
-  for (const candidate of walkCauseChain(error)) {
-    if (
-      HookNotFoundError.is(candidate) ||
-      WorkflowRunNotFoundError.is(candidate) ||
-      RunExpiredError.is(candidate) ||
-      EntityConflictError.is(candidate)
-    ) {
-      return true;
-    }
-  }
-  return false;
 }

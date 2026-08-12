@@ -50,7 +50,7 @@ const taskViewJsonSchema = z.discriminatedUnion("status", [
  * `executor` and `usage`, and its module must stay zod-free because it is
  * bundled into workflow bodies.
  */
-export type TaskViewJson = z.infer<typeof taskViewJsonSchema>;
+type TaskViewJson = z.infer<typeof taskViewJsonSchema>;
 
 /** Projects a task view into the JSON value carried by tool results. */
 export function taskViewToJson(view: TaskView): TaskViewJson {

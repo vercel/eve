@@ -49,11 +49,9 @@ describe("settleTaskDispatchError", () => {
     const rejected = outcome(false);
 
     await settleTaskDispatchError({
-      agentId: "agent-1",
       delegated: task,
       outcome: rejected,
       persisted: { receipt: {} as never, session: rejected.session },
-      session: rejected.session,
     });
 
     expect(failDelegatedDispatch).toHaveBeenCalledWith({
@@ -67,11 +65,9 @@ describe("settleTaskDispatchError", () => {
     const ambiguous = outcome(true);
 
     await settleTaskDispatchError({
-      agentId: "agent-1",
       delegated: task,
       outcome: ambiguous,
       persisted: { receipt: {} as never, session: ambiguous.session },
-      session: ambiguous.session,
     });
 
     expect(failDelegatedDispatch).not.toHaveBeenCalled();

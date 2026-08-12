@@ -1,21 +1,13 @@
-import {
-  EntityConflictError,
-  HookNotFoundError,
-  RunExpiredError,
-  WorkflowRunNotFoundError,
-} from "#compiled/@workflow/errors/index.js";
-
 import type { TaskRunWorkflowInput } from "#execution/tasks/child/workflow.js";
+import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import {
   startWorkflowPreferLatest,
   taskRunWorkflowReference,
   waitForCommandHookOwner,
 } from "#execution/workflow-runtime.js";
 import { getRun, resumeHook } from "#internal/workflow/runtime.js";
-import { walkCauseChain } from "#shared/errors.js";
 import {
   TASK_VIEW_STREAM_NAMESPACE,
-  isReadyTaskStatus,
   type TaskCommand,
   type TaskCommandHookPayload,
   type TaskRunInboundPayload,
@@ -36,11 +28,8 @@ const TASK_VIEW_READ_TIMEOUT_MS = 10_000;
  */
 
 /** Starts the durable run owning one task's lifecycle. */
-export async function startTaskRun(
-  input: TaskRunWorkflowInput,
-): Promise<{ readonly runId: string }> {
-  const run = await startWorkflowPreferLatest(taskRunWorkflowReference, [input]);
-  return { runId: run.runId };
+export async function startTaskRun(input: TaskRunWorkflowInput): Promise<void> {
+  await startWorkflowPreferLatest(taskRunWorkflowReference, [input]);
 }
 
 /** Resolves the task run that won ownership of one replay-stable command token. */
@@ -89,7 +78,7 @@ export async function sendTaskCommandToOwner(input: {
       }
       return { runId: owner.runId };
     } catch (error) {
-      if (!isFinishedTaskRunTarget(error)) {
+      if (!isTaskWorkflowTargetGone(error)) {
         throw error;
       }
       if (attempt + 1 >= attempts) {
@@ -116,7 +105,7 @@ export async function sendTaskInboundPayload(input: {
     await resumeHook(input.taskInboxToken, input.payload);
     return "delivered";
   } catch (error) {
-    if (!isFinishedTaskRunTarget(error)) {
+    if (!isTaskWorkflowTargetGone(error)) {
       throw error;
     }
     return "unreachable";
@@ -152,41 +141,6 @@ export async function readLatestTaskView(input: {
   }
 }
 
-/**
- * Waits until a task run publishes a ready view — terminal or
- * `input_required` — starting from the latest published state. Returns
- * immediately when the task is already ready.
- *
- * Unlike {@link readLatestTaskView} this read has no timeout; the
- * caller owns cancellation by racing this promise (for example against
- * turn cancellation) and abandoning it.
- */
-export async function waitForReadyTaskView(input: {
-  readonly taskRunId: string;
-}): Promise<TaskView> {
-  const stream = getRun<unknown>(input.taskRunId).getReadable<TaskView>({
-    namespace: TASK_VIEW_STREAM_NAMESPACE,
-    startIndex: -1,
-  });
-  const reader = stream.getReader();
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done || value === undefined) {
-        throw new Error(
-          `Task run "${input.taskRunId}" closed its view stream without a ready view.`,
-        );
-      }
-      if (isReadyTaskStatus(value.status)) {
-        return value;
-      }
-    }
-  } finally {
-    await reader.cancel("eve task view wait complete").catch(() => {});
-    reader.releaseLock();
-  }
-}
-
 async function readWithTimeout(
   reader: ReadableStreamDefaultReader<TaskView>,
   what: string,
@@ -211,18 +165,4 @@ async function readWithTimeout(
       clearTimeout(timeout);
     }
   }
-}
-
-export function isFinishedTaskRunTarget(error: unknown): boolean {
-  for (const candidate of walkCauseChain(error)) {
-    if (
-      HookNotFoundError.is(candidate) ||
-      WorkflowRunNotFoundError.is(candidate) ||
-      RunExpiredError.is(candidate) ||
-      EntityConflictError.is(candidate)
-    ) {
-      return true;
-    }
-  }
-  return false;
 }

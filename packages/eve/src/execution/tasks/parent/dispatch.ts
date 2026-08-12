@@ -32,13 +32,6 @@ import {
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import { isTerminalTaskStatus, type TaskView } from "#tasks/types.js";
 
-export {
-  beginDelegatedTask,
-  failDelegatedDispatch,
-  settleDelegatedDispatch,
-  type DelegatedTask,
-} from "#execution/tasks/parent/delegate.js";
-
 const log = createLogger("execution.tasks.dispatch");
 
 const CANCEL_COMMIT_POLL_ATTEMPTS = 10;
@@ -66,9 +59,9 @@ export async function executeTaskControlAction(input: {
   readonly parentTurnId: string;
   readonly session: RuntimeSession;
 }): Promise<{
-  readonly result: RuntimeActionResult | undefined;
+  readonly result: RuntimeActionResult;
   readonly session: RuntimeSession;
-  readonly taskReadiness?: DelegatedTask;
+  readonly pendingTask?: DelegatedTask;
 }> {
   const { action, session } = input;
 
@@ -127,8 +120,7 @@ export async function cancelOwnedTask(input: {
   let view = await readTaskView(entry);
   for (
     let attempt = 0;
-    attempt < CANCEL_COMMIT_POLL_ATTEMPTS &&
-    !(view !== undefined && isTerminalTaskStatus(view.status));
+    attempt < CANCEL_COMMIT_POLL_ATTEMPTS && !isTerminalTaskStatus(view.status);
     attempt += 1
   ) {
     await new Promise((resolve) => setTimeout(resolve, CANCEL_COMMIT_POLL_DELAY_MS));
@@ -167,7 +159,7 @@ async function propagateTaskCancel(input: {
   }
 
   try {
-    if (handle !== undefined && handle.address.kind === "agent/remote") {
+    if (handle.address.kind === "agent/remote") {
       const resolved = resolveRemoteAgentForAction({
         nodeId: handle.identity.nodeId,
         remoteAgentName: handle.identity.name,

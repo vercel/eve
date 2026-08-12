@@ -38,7 +38,7 @@ export async function dispatchRuntimeActionsStep(
     taskControls: false,
   });
   if (prepared === undefined) {
-    return { results: [], sessionState: input.sessionState, taskReadiness: [] };
+    return { results: [], sessionState: input.sessionState, pendingTasks: [] };
   }
 
   const { batch, bundle, session } = prepared;
@@ -125,6 +125,6 @@ export async function dispatchRuntimeActionsStep(
       nextSession === session
         ? input.sessionState
         : createDurableSessionState({ session: nextSession }),
-    taskReadiness: [],
+    pendingTasks: [],
   };
 }
