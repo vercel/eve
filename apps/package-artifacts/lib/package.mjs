@@ -1,15 +1,18 @@
 export const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
-export function packageArtifactPath(sourceSha, version) {
-  return `packages/${sourceSha}/eve-${version}.tgz`;
+export function packageArtifactPath(sourceSha) {
+  return `packages/${sourceSha}/eve.tgz`;
 }
 
 export function packageManifestPath(sourceSha) {
   return `packages/${sourceSha}/manifest.json`;
 }
 
-export function packageDependencyUrl(sourceSha) {
-  return `https://pkg.eve.dev/${sourceSha}/eve.tgz`;
+export function packageDependencyUrl(baseUrl, sourceSha) {
+  const url = new URL(baseUrl);
+  if (url.protocol !== "https:") throw new Error("EVE_PACKAGE_BASE_URL must use HTTPS.");
+  url.pathname = `${url.pathname.replace(/\/$/, "")}/${sourceSha}/eve.tgz`;
+  return url.toString();
 }
 
 export function packageVersion(stableVersion, sourceSha) {

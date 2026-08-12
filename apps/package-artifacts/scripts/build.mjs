@@ -23,6 +23,7 @@ const packageJsonPath = join(packageRoot, "package.json");
 const artifactDirectory = join(appRoot, ".artifacts");
 const sourceSha = process.env.VERCEL_GIT_COMMIT_SHA;
 const branch = process.env.VERCEL_GIT_COMMIT_REF;
+const baseUrl = process.env.EVE_PACKAGE_BASE_URL;
 
 if (!SHA_PATTERN.test(sourceSha ?? "")) {
   throw new Error("VERCEL_GIT_COMMIT_SHA must be a 40-character Git commit SHA.");
@@ -36,11 +37,16 @@ if (branch !== "main" || process.env.VERCEL_ENV !== "production") {
   process.exit(0);
 }
 
+if (typeof baseUrl !== "string" || baseUrl.length === 0) {
+  throw new Error("EVE_PACKAGE_BASE_URL is required for package publishing.");
+}
+
 const originalPackageJson = await readFile(packageJsonPath, "utf8");
 const preparedPackageJson = preparePackageJson(JSON.parse(originalPackageJson), sourceSha);
 const version = preparedPackageJson.version;
-const dependencyUrl = packageDependencyUrl(sourceSha);
-const artifactPath = packageArtifactPath(sourceSha, version);
+// Generated projects pin this deployment's immutable SHA route, never the moving main route.
+const dependencyUrl = packageDependencyUrl(baseUrl, sourceSha);
+const artifactPath = packageArtifactPath(sourceSha);
 
 try {
   await rm(artifactDirectory, { force: true, recursive: true });
@@ -62,6 +68,7 @@ try {
       contentType: "application/gzip",
     });
   } catch (error) {
+    // Redeploys are valid only when this commit still produces identical package bytes.
     if (!(error instanceof Error) || !error.message.includes("already exists")) throw error;
     artifact = await head(artifactPath);
     const publishedTarball = await fetch(artifact.url);

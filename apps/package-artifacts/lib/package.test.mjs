@@ -16,11 +16,15 @@ describe("package artifacts", () => {
   });
 
   test("derives immutable artifact and dependency URLs", () => {
-    expect(packageArtifactPath(sha, `0.33.1-main.${sha}`)).toBe(
-      `packages/${sha}/eve-0.33.1-main.${sha}.tgz`,
-    );
+    expect(packageArtifactPath(sha)).toBe(`packages/${sha}/eve.tgz`);
     expect(packageManifestPath(sha)).toBe(`packages/${sha}/manifest.json`);
-    expect(packageDependencyUrl(sha)).toBe(`https://pkg.eve.dev/${sha}/eve.tgz`);
+    expect(packageDependencyUrl("https://packages.example.com", sha)).toBe(
+      `https://packages.example.com/${sha}/eve.tgz`,
+    );
+  });
+
+  test("requires an HTTPS package base URL", () => {
+    expect(() => packageDependencyUrl("http://packages.example.com", sha)).toThrow("use HTTPS");
   });
 
   test("prepares package metadata without mutating the source", () => {
