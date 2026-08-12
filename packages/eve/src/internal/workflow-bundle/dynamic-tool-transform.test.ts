@@ -184,6 +184,46 @@ export default defineDynamic({
     expect(result).toBe(50);
   });
 
+  it("namespaces step ids by module so sibling files do not overwrite each other", async () => {
+    const sourceFor = (toolName: string) => `
+import { defineDynamic, defineTool } from "eve/tools";
+
+export default defineDynamic({
+  events: {
+    "session.started": async () => {
+      return {
+        ${toolName}: defineTool({
+          description: "${toolName}",
+          inputSchema: { type: "object" },
+          execute(input) { return "${toolName}:" + input.x; },
+        }),
+      };
+    },
+  },
+});
+`;
+
+    const first = await transformAndEval("tools/search.ts", sourceFor("search"));
+    const second = await transformAndEval("tools/tokenize.ts", sourceFor("tokenize"));
+
+    const searchTools = await first.callHandler();
+    const tokenizeTools = await second.callHandler();
+    const searchStep = (searchTools.search as Record<string, unknown>)
+      .__executeStepFn as Function & {
+      stepId: string;
+    };
+    const tokenizeStep = (tokenizeTools.tokenize as Record<string, unknown>)
+      .__executeStepFn as Function & { stepId: string };
+
+    expect(searchStep.stepId).toMatch(/^eve:dynamic-tool\/\/[^/]+\/__eve_dynamic_exec_/);
+    expect(tokenizeStep.stepId).toMatch(/^eve:dynamic-tool\/\/[^/]+\/__eve_dynamic_exec_/);
+    expect(searchStep.stepId).not.toBe(tokenizeStep.stepId);
+    expect(first.registry.get(searchStep.stepId)).toBe(searchStep);
+    expect(second.registry.get(tokenizeStep.stepId)).toBe(tokenizeStep);
+    expect(first.registry.get(searchStep.stepId)!({}, { x: 1 })).toBe("search:1");
+    expect(second.registry.get(tokenizeStep.stepId)!({}, { x: 2 })).toBe("tokenize:2");
+  });
+
   it("replay path: step function + stored closure vars produce correct result", async () => {
     const source = `
 import { defineDynamic, defineTool } from "eve/tools";

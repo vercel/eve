@@ -32,6 +32,7 @@ import {
   type DynamicToolAstNode as AstNode,
   walkNode,
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
+import { moduleStepScope } from "#internal/workflow-bundle/module-step-scope.js";
 
 interface HandlerInfo {
   /** The handler function AST node */
@@ -96,14 +97,22 @@ export async function transformDynamicToolExecute(
     return null;
   }
 
-  const ast = await parseSource(filename, source);
-  const handlers = findDynamicToolHandlers(source, ast);
+  // Per-file counters keep `__eve_dynamic_exec_N` stable when other modules
+  // are added or reordered; moduleStepScope disambiguates the shared registry.
+  const previousCounter = transformCounter;
+  transformCounter = 0;
+  try {
+    const ast = await parseSource(filename, source);
+    const handlers = findDynamicToolHandlers(source, ast);
 
-  if (handlers.every((h) => h.executes.length === 0)) {
-    return null;
+    if (handlers.every((h) => h.executes.length === 0)) {
+      return null;
+    }
+
+    return applyTransform(source, handlers, filename);
+  } finally {
+    transformCounter = previousCounter;
   }
-
-  return applyTransform(source, handlers);
 }
 
 // Keep the old export name for backward compatibility with the plugin
@@ -452,11 +461,16 @@ function extractFnBody(source: string, fn: AstNode): string {
 // Transform application
 // ---------------------------------------------------------------------------
 
-function applyTransform(source: string, handlers: HandlerInfo[]): { code: string } {
+function applyTransform(
+  source: string,
+  handlers: HandlerInfo[],
+  filename: string,
+): { code: string } {
   const replacements: Array<{ start: number; end: number; text: string }> = [];
   const hoistedFunctions: string[] = [];
   const registrations: string[] = [];
   const allExecNames: string[] = [];
+  const stepScope = moduleStepScope(filename);
 
   for (const handler of handlers) {
     for (const exec of handler.executes) {
@@ -499,7 +513,7 @@ function applyTransform(source: string, handlers: HandlerInfo[]): { code: string
       const originalParams = exec.params;
       const hoistedParams = originalParams ? `__vars, ${originalParams}` : "__vars";
       const bodyContent = exec.body.slice(1, -1).trim();
-      const stepId = `eve:dynamic-tool//${exec.hoistedName}`;
+      const stepId = `eve:dynamic-tool//${stepScope}/${exec.hoistedName}`;
 
       hoistedFunctions.push(
         `${asyncPrefix}function ${exec.hoistedName}(${hoistedParams}) {\n` +

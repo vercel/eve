@@ -4,6 +4,7 @@ import {
   type DynamicToolAstNode as AstNode,
   walkNode,
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
+import { moduleStepScope } from "#internal/workflow-bundle/module-step-scope.js";
 
 interface CredentialsFactoryInfo {
   readonly authPropertySource?: string;
@@ -32,9 +33,15 @@ export async function transformDynamicRemoteAgentCredentials(
     return null;
   }
 
-  const ast = (await parseWithNitroRolldownAst(filename, source)) as AstNode;
-  const factories = findCredentialsFactories(source, ast);
-  return factories.length === 0 ? null : applyTransform(source, factories);
+  const previousCounter = transformCounter;
+  transformCounter = 0;
+  try {
+    const ast = (await parseWithNitroRolldownAst(filename, source)) as AstNode;
+    const factories = findCredentialsFactories(source, ast);
+    return factories.length === 0 ? null : applyTransform(source, factories, filename);
+  } finally {
+    transformCounter = previousCounter;
+  }
 }
 
 function findCredentialsFactories(source: string, ast: AstNode): CredentialsFactoryInfo[] {
@@ -77,18 +84,20 @@ function findCredentialsFactories(source: string, ast: AstNode): CredentialsFact
 function applyTransform(
   source: string,
   factories: readonly CredentialsFactoryInfo[],
+  filename: string,
 ): {
   code: string;
 } {
   const replacements: Array<{ start: number; end: number; text: string }> = [];
   const hoistedFunctions: string[] = [];
   const registrations: string[] = [];
+  const stepScope = moduleStepScope(filename);
 
   for (const credentials of factories) {
     const properties = [credentials.authPropertySource, credentials.headersPropertySource].filter(
       (property) => property !== undefined,
     );
-    const stepId = `eve:dynamic-remote-agent//${credentials.hoistedName}`;
+    const stepId = `eve:dynamic-remote-agent//${stepScope}/${credentials.hoistedName}`;
     hoistedFunctions.push(
       `function ${credentials.hoistedName}() {\n` +
         `  return { ${properties.join(", ")} };\n` +

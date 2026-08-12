@@ -65,7 +65,9 @@ export default defineDynamic({
       stepId?: string;
     };
     expect(Object.keys(remote)).not.toContain("__eveResolveRemoteAgentCredentials");
-    expect(credentialsFactory.stepId).toMatch(/^eve:dynamic-remote-agent\/\//);
+    expect(credentialsFactory.stepId).toMatch(
+      /^eve:dynamic-remote-agent\/\/[^/]+\/__eve_dynamic_remote_credentials_/,
+    );
     const key = Symbol.for("@workflow/core//registeredSteps");
     const registry = (globalThis as Record<symbol, Map<string, Function> | undefined>)[key];
     if (registry === undefined) throw new Error("Step registry was not created");
