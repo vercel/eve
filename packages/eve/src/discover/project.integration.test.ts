@@ -82,6 +82,11 @@ describe("resolveDiscoveryProject (memory)", () => {
     await expect(
       resolveDiscoveryProject(project.appRoot, { source: project.source }),
     ).rejects.toBeInstanceOf(DiscoveryProjectResolutionError);
+    await expect(
+      resolveDiscoveryProject(project.appRoot, { source: project.source }),
+    ).rejects.toMatchObject({
+      message: "No eve agent found. Create one with `eve init my-agent`.",
+    });
   });
 
   it("does not treat a standalone lib directory as a flat agent root", async () => {

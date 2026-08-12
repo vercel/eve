@@ -370,6 +370,17 @@ describe("runInitCommand", () => {
     },
   );
 
+  it("suggests a named project directory and shows why the current directory is not empty", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-non-empty-"));
+    await mkdir(join(projectPath, "test"));
+
+    await expect(
+      runInitCommand(logger(), projectPath, undefined, {}, dependencies()),
+    ).rejects.toThrow(
+      "This folder isn't empty (found: test). Create an agent in a new folder with `eve init my-agent`, or run `eve init` from an empty folder.",
+    );
+  });
+
   it("scaffolds the current directory when mise.toml already exists", async () => {
     const projectPath = await mkdtemp(join(tmpdir(), "eve-init-mise-"));
     const miseConfig = '[tools]\nnode = "24"\n';
