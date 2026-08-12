@@ -2625,6 +2625,7 @@ async function handleStepResult(input: {
       )) {
         await emit(
           createAuthorizationCompletedEvent({
+            attemptId: superseded.attemptId,
             authorization: superseded.challenge,
             name: superseded.name,
             outcome: "failed",
@@ -2638,6 +2639,7 @@ async function handleStepResult(input: {
       for (const ch of challenges) {
         await emit(
           createAuthorizationRequiredEvent({
+            attemptId: ch.attemptId,
             authorization: ch.challenge,
             name: ch.name,
             description: ch.challenge.instructions ?? `Authorization required for ${ch.name}`,

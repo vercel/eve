@@ -4,6 +4,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import {
   cancelRemoteAgentTurn,
   continueRemoteAgentSession,
+  isAmbiguousRemoteAgentContinueError,
   isRetryableRemoteAgentCancelError,
   isRetryableRemoteAgentContinueError,
   resolveRemoteAgentForAction,
@@ -712,6 +713,7 @@ describe("continueRemoteAgentSession", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ code: "SESSION_NOT_RESUMABLE" }), { status: 410 }),
       )
@@ -732,7 +734,10 @@ describe("continueRemoteAgentSession", () => {
     const transient = await continueRemoteAgentSession(continueInput()).catch(
       (error: unknown) => error,
     );
-    const notResumable = await continueRemoteAgentSession(continueInput()).catch(
+    const rejected = await continueRemoteAgentSession(continueInput()).catch(
+      (error: unknown) => error,
+    );
+    const sessionNotResumable = await continueRemoteAgentSession(continueInput()).catch(
       (error: unknown) => error,
     );
     const missing = await continueRemoteAgentSession(continueInput()).catch(
@@ -740,9 +745,15 @@ describe("continueRemoteAgentSession", () => {
     );
 
     expect(isRetryableRemoteAgentContinueError(transient)).toBe(true);
-    expect(isRetryableRemoteAgentContinueError(notResumable)).toBe(false);
+    expect(isAmbiguousRemoteAgentContinueError(transient)).toBe(true);
+    expect(isRetryableRemoteAgentContinueError(rejected)).toBe(true);
+    expect(isAmbiguousRemoteAgentContinueError(rejected)).toBe(false);
+    expect(isRetryableRemoteAgentContinueError(sessionNotResumable)).toBe(false);
+    expect(isAmbiguousRemoteAgentContinueError(sessionNotResumable)).toBe(false);
     expect(isRetryableRemoteAgentContinueError(missing)).toBe(false);
+    expect(isAmbiguousRemoteAgentContinueError(missing)).toBe(false);
     expect(isRetryableRemoteAgentContinueError(new TypeError("network unavailable"))).toBe(true);
+    expect(isAmbiguousRemoteAgentContinueError(new TypeError("network unavailable"))).toBe(true);
   });
 });
 

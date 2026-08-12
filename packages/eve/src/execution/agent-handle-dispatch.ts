@@ -31,6 +31,7 @@ import type {
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import {
   continueRemoteAgentSession,
+  isAmbiguousRemoteAgentContinueError,
   isRetryableRemoteAgentContinueError,
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
@@ -81,6 +82,7 @@ export type DispatchOutcome =
       readonly toolName: string;
     }
   | {
+      readonly deliveryAmbiguous?: boolean;
       readonly kind: "error";
       readonly result: RuntimeSubagentDispatchFailure;
       readonly session: RuntimeSession;
@@ -195,6 +197,7 @@ export async function dispatchToAgentHandle(input: {
     // child's accumulated conversation); a transiently unreachable agent is
     // restored to `parked` so the model can retry the same agentId.
     return {
+      deliveryAmbiguous: delivery.error.deliveryAmbiguous,
       kind: "error",
       result: createAgentErrorResult({
         action,
@@ -275,6 +278,7 @@ export async function dispatchToTaskAgentAddress(input: {
       subagentName: record.identity.name,
     });
     return {
+      deliveryAmbiguous: delivery.error.deliveryAmbiguous,
       kind: "error",
       result: createAgentErrorResult({
         action,
@@ -315,7 +319,12 @@ async function deliverToAgentAddress(input: {
   readonly bundle: CompiledBundle;
   readonly identity: AgentIdentity;
   readonly parentToken: string;
-}): Promise<Result<void, { readonly cause: unknown; readonly permanent: boolean }>> {
+}): Promise<
+  Result<
+    void,
+    { readonly cause: unknown; readonly deliveryAmbiguous: boolean; readonly permanent: boolean }
+  >
+> {
   const { action, address, bundle, identity } = input;
 
   if (address.kind === "agent/remote") {
@@ -329,7 +338,7 @@ async function deliverToAgentAddress(input: {
     } catch (error) {
       // The agent's node is gone from the compiled bundle; no retry can
       // reach this handle again.
-      return err({ cause: error, permanent: true });
+      return err({ cause: error, deliveryAmbiguous: false, permanent: true });
     }
     try {
       await continueRemoteAgentSession({
@@ -351,6 +360,7 @@ async function deliverToAgentAddress(input: {
     } catch (error) {
       return err({
         cause: error,
+        deliveryAmbiguous: isAmbiguousRemoteAgentContinueError(error),
         permanent: !isRetryableRemoteAgentContinueError(error),
       });
     }
@@ -381,11 +391,13 @@ async function deliverToAgentAddress(input: {
     if (result.status === "session_not_active") {
       return err({
         cause: new Error(`Agent session "${address.sessionId}" is no longer active.`),
+        deliveryAmbiguous: false,
         permanent: true,
       });
     }
   } catch (error) {
-    return err({ cause: error, permanent: isRuntimeNoActiveSessionError(error) });
+    const permanent = isRuntimeNoActiveSessionError(error);
+    return err({ cause: error, deliveryAmbiguous: !permanent, permanent });
   }
   return ok(undefined);
 }

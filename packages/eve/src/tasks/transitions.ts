@@ -45,7 +45,7 @@ export type TaskTransitionResult =
  */
 function terminalView(
   view: TaskView,
-  command: Extract<TaskCommand, { kind: "complete" | "fail" | "cancel" }>,
+  command: Extract<TaskCommand, { kind: "complete" | "fail" | "reject-dispatch" | "cancel" }>,
   settled:
     | {
         readonly lastOutput: Extract<TaskOutput, { type: "result" }>;
@@ -107,6 +107,7 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
         }),
       };
     case "fail":
+    case "reject-dispatch":
       return {
         outcome: "accepted",
         view: terminalView(view, command, {
@@ -125,6 +126,32 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
         reason: `Task "${view.taskId}" is not terminal; usage settles with its terminal command.`,
         view,
       };
+    case "require-authorization": {
+      const blocker = { blockedOn: "authorization", requestId: command.requestId };
+      if (view.status === "input_required") {
+        if (
+          view.inputRequests.some(
+            (request) => readTaskInputRequestId(request) === command.requestId,
+          )
+        ) {
+          return { outcome: "noop", view };
+        }
+        return {
+          outcome: "accepted",
+          view: { ...view, inputRequests: [...view.inputRequests, blocker] },
+        };
+      }
+      return {
+        outcome: "accepted",
+        view: {
+          inputRequests: [blocker],
+          executor: view.executor,
+          metadata: view.metadata,
+          status: "input_required",
+          taskId: view.taskId,
+        },
+      };
+    }
     case "require-input":
       if (!isValidInputRequestBatch(command.inputRequests)) {
         return {

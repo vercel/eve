@@ -1,4 +1,5 @@
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
+import { readTaskInputTargetToken } from "#execution/task-input-capability.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { EVE_TASK_INPUT_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
@@ -33,6 +34,10 @@ export async function handleTaskInputResponseRequest(
   if (typeof token !== "string" || token.length === 0) {
     return Response.json({ error: "Missing task input token.", ok: false }, { status: 400 });
   }
+  const targetToken = readTaskInputTargetToken(token);
+  if (targetToken === undefined) {
+    return Response.json({ error: "Invalid task input token.", ok: false }, { status: 403 });
+  }
   let body: unknown;
   try {
     body = await request.json();
@@ -50,7 +55,7 @@ export async function handleTaskInputResponseRequest(
   // delivery envelope like every other session-inbox producer.
   const command = sendCommandToDelivery({ kind: "send", payload: { inputResponses } });
   try {
-    await resumeHook(token, command);
+    await resumeHook(targetToken, command);
   } catch {
     return Response.json(
       { error: "Task input target is not pending.", ok: false },

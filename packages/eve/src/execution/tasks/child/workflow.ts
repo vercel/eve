@@ -88,7 +88,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
     let view = input.initialView;
     let pendingInputRequest: TaskInboundInputRequest | undefined;
-    let pendingAuthorizationEvent: TaskInboundAuthorizationEvent | undefined;
+    let pendingAuthorizationEvents: TaskInboundAuthorizationEvent[] = [];
     let dispatchAcknowledged = false;
     await appendTaskViewStep({ view });
 
@@ -99,12 +99,16 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         next.value.kind === "subagent-authorization-event"
           ? { ...next.value, kind: "authorization-event" }
           : next.value;
-      if (payload.kind === "task-command") dispatchAcknowledged = true;
+      const isReadinessCommand =
+        payload.kind === "task-command" && payload.command.kind === "ready";
+      const isRejectedDispatch =
+        payload.kind === "task-command" && payload.command.kind === "reject-dispatch";
+      if (isReadinessCommand || isRejectedDispatch) dispatchAcknowledged = true;
       if (payload.kind === "subagent-input-request") {
         pendingInputRequest = payload;
       }
       if (payload.kind === "authorization-event") {
-        pendingAuthorizationEvent = payload;
+        pendingAuthorizationEvents.push(payload);
       }
       const isExecutorResultAfterCancellation =
         view.status === "cancelled" && payload.kind === "runtime-action-result";
@@ -123,6 +127,10 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         command = translateTaskInboundPayload(payload);
       }
       if (command === undefined) continue;
+      if (isReadinessCommand && isTerminalTaskStatus(view.status)) {
+        await wakeTaskParentStep({ token: input.parentContinuationToken, view });
+        continue;
+      }
       const result = applyTaskTransition(view, command);
       if (result.outcome !== "accepted") continue;
       const becameTerminal =
@@ -130,14 +138,15 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       const becameReady = !isReadyTaskStatus(view.status) && isReadyTaskStatus(result.view.status);
       view = result.view;
       await appendTaskViewStep({ view });
-      if (pendingAuthorizationEvent !== undefined && dispatchAcknowledged) {
+      const routableAuthorizationEvents = dispatchAcknowledged ? pendingAuthorizationEvents : [];
+      for (const request of routableAuthorizationEvents) {
         await wakeTaskAuthorizationParentStep({
-          request: pendingAuthorizationEvent,
+          request,
           taskId: view.taskId,
           token: input.parentContinuationToken,
         });
-        pendingAuthorizationEvent = undefined;
       }
+      if (routableAuthorizationEvents.length > 0) pendingAuthorizationEvents = [];
       const routableInputRequest =
         pendingInputRequest !== undefined &&
         dispatchAcknowledged &&
@@ -149,7 +158,12 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
           token: input.parentContinuationToken,
         });
         pendingInputRequest = undefined;
-      } else if (becameTerminal || (becameReady && pendingInputRequest === undefined)) {
+      } else if (
+        !isRejectedDispatch &&
+        routableAuthorizationEvents.length === 0 &&
+        dispatchAcknowledged &&
+        (becameTerminal || (becameReady && pendingInputRequest === undefined))
+      ) {
         await wakeTaskParentStep({ token: input.parentContinuationToken, view });
       }
       // An unrouted request cannot outlive the block it described, or a

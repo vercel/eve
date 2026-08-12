@@ -52,6 +52,7 @@ describe("task HITL delivery routing", () => {
     const recordedState = state(true);
     vi.mocked(recordTaskInputRequestStep).mockResolvedValue({
       accepted: true,
+      hookPayload,
       sessionState: recordedState,
     });
     vi.mocked(emitRecordedTaskInputRequestStep).mockResolvedValue({
@@ -75,6 +76,9 @@ describe("task HITL delivery routing", () => {
     expect(result).toMatchObject({ kind: "continue", remainder: undefined });
     expect(recordTaskInputRequestStep).toHaveBeenCalledOnce();
     expect(emitRecordedTaskInputRequestStep).toHaveBeenCalledOnce();
+    expect(emitRecordedTaskInputRequestStep).toHaveBeenCalledWith(
+      expect.objectContaining({ hookPayload }),
+    );
     expect(vi.mocked(recordTaskInputRequestStep).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(emitRecordedTaskInputRequestStep).mock.invocationCallOrder[0] ?? 0,
     );

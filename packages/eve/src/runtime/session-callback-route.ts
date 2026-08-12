@@ -16,6 +16,7 @@ import type {
   TaskInboundInputRequest,
   TaskInboundTurnStarted,
 } from "#tasks/types.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
 
 export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
 
@@ -61,6 +62,7 @@ const taskAuthorizationEventSchema: z.ZodType<SubagentAuthorizationEvent> = z.di
   [
     z.looseObject({
       data: z.looseObject({
+        attemptId: z.string().optional(),
         authorization: authorizationChallengeSchema.optional(),
         description: z.string(),
         name: z.string(),
@@ -73,6 +75,7 @@ const taskAuthorizationEventSchema: z.ZodType<SubagentAuthorizationEvent> = z.di
     }),
     z.looseObject({
       data: z.looseObject({
+        attemptId: z.string().optional(),
         authorization: authorizationChallengeSchema.optional(),
         name: z.string(),
         outcome: z.enum(["authorized", "declined", "failed", "timed-out"]),
@@ -195,7 +198,7 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }
 
-  const taskEvent = projectTaskEvent(body);
+  const taskEvent = projectTaskEvent(body, token);
   if (taskEvent instanceof Response) return taskEvent;
   if (taskEvent !== undefined) {
     try {
@@ -206,7 +209,7 @@ export async function handleSessionCallbackRequest(
     return Response.json({ ok: true }, { status: 202 });
   }
 
-  const started = projectTaskTurnStarted(body);
+  const started = projectTaskTurnStarted(body, token);
   if (started instanceof Response) return started;
   if (started !== undefined) {
     try {
@@ -241,6 +244,7 @@ function callbackKind(value: unknown): unknown {
 
 function projectTaskEvent(
   value: unknown,
+  token: string,
 ): TaskInboundInputRequest | TaskInboundAuthorizationEvent | Response | undefined {
   const kind = callbackKind(value);
   if (kind !== "task.input-requested" && kind !== "task.authorization") return undefined;
@@ -249,6 +253,8 @@ function projectTaskEvent(
     return Response.json({ error: "Invalid task event callback.", ok: false }, { status: 400 });
   }
   const payload = parsed.data;
+  const tokenRejection = rejectMismatchedTaskToken(token, payload.taskId);
+  if (tokenRejection !== undefined) return tokenRejection;
   if (payload.kind === "task.input-requested") {
     return {
       callId: payload.callId,
@@ -268,7 +274,10 @@ function projectTaskEvent(
   };
 }
 
-function projectTaskTurnStarted(value: unknown): TaskInboundTurnStarted | Response | undefined {
+function projectTaskTurnStarted(
+  value: unknown,
+  token: string,
+): TaskInboundTurnStarted | Response | undefined {
   if (callbackKind(value) !== "turn.started") return undefined;
   const parsed = taskTurnStartedCallbackSchema.safeParse(value);
   if (!parsed.success) {
@@ -277,12 +286,20 @@ function projectTaskTurnStarted(value: unknown): TaskInboundTurnStarted | Respon
       { status: 400 },
     );
   }
+  const tokenRejection = rejectMismatchedTaskToken(token, parsed.data.taskId);
+  if (tokenRejection !== undefined) return tokenRejection;
   return {
     childSessionId: parsed.data.sessionId,
     childTurnId: parsed.data.turnId,
     kind: "turn-started",
     taskId: parsed.data.taskId,
   };
+}
+
+function rejectMismatchedTaskToken(token: string, taskId: string): Response | undefined {
+  return readTaskIdFromInboxToken(token) === taskId
+    ? undefined
+    : Response.json({ error: "Task callback token mismatch.", ok: false }, { status: 403 });
 }
 
 function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResult | Response {

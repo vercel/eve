@@ -106,12 +106,15 @@ describe("task-derived agent availability", () => {
     vi.mocked(readLatestTaskView).mockResolvedValue(task("task_0", "working"));
 
     const next = await appendTaskAgentAnnouncement(createSession(["run-0"]));
-    const announcement = next.history.at(-1)?.content;
+    const message = next.history.at(-1);
+    const announcement = message?.content;
 
+    expect(message?.role).toBe("user");
     expect(announcement).toContain('availability="busy"');
     expect(announcement).toContain('taskId="task_0"');
     expect(announcement).not.toContain("child-token");
     expect(announcement).not.toContain("child-session");
+    await expect(appendTaskAgentAnnouncement(next)).resolves.toBe(next);
   });
 
   it("rejects two nonterminal tasks bound to one child agent", async () => {

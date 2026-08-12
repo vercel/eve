@@ -55,13 +55,22 @@ describe("upsertProxyInputRequests", () => {
   it("round-trips task ownership without exposing malformed ownership as an unscoped route", () => {
     const next = upsertProxyInputRequests({
       entries: [
-        ["req-1", { childContinuationToken: "child-a", kind: "question", taskId: "task-1" }],
+        [
+          "task-1:req-1",
+          {
+            childContinuationToken: "child-a",
+            childRequestId: "req-1",
+            kind: "question",
+            taskId: "task-1",
+          },
+        ],
       ],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });
-    expect(getProxyInputRequests(next.state).get("req-1")).toEqual({
+    expect(getProxyInputRequests(next.state).get("task-1:req-1")).toEqual({
       childContinuationToken: "child-a",
+      childRequestId: "req-1",
       kind: "question",
       taskId: "task-1",
     });

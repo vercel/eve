@@ -117,7 +117,12 @@ export interface TaskInputResponse {
  * bound to the same entry, so completing authorization can never clear
  * an unrelated request batch the child raised in the meantime.
  */
-export const TASK_AUTHORIZATION_REQUEST_ID = "task:authorization";
+const TASK_AUTHORIZATION_REQUEST_ID_PREFIX = "task:authorization";
+
+/** Stable task blocker id shared by one authorization attempt's events. */
+export function taskAuthorizationRequestId(event: SubagentAuthorizationEvent): string {
+  return `${TASK_AUTHORIZATION_REQUEST_ID_PREFIX}:${event.data.attemptId ?? event.data.name}`;
+}
 
 /** Reads the `requestId` of one opaque outstanding request. */
 export function readTaskInputRequestId(request: TaskInputRequest): string | undefined {
@@ -194,6 +199,13 @@ export type TaskCommand =
       readonly lifecycle?: "parked" | "terminal";
       readonly usage?: TaskUsage;
     }
+  /** Terminal dispatch rejection for a task that was never indexed by its parent. */
+  | {
+      readonly kind: "reject-dispatch";
+      readonly data: JsonValue;
+      readonly lifecycle?: never;
+      readonly usage?: never;
+    }
   | {
       readonly kind: "cancel";
       readonly lifecycle?: "parked" | "terminal";
@@ -201,6 +213,7 @@ export type TaskCommand =
     }
   /** Retains a late executor settlement without changing task terminal status. */
   | { readonly kind: "settle-executor"; readonly usage?: TaskUsage }
+  | { readonly kind: "require-authorization"; readonly requestId: string }
   | { readonly kind: "require-input"; readonly inputRequests: readonly TaskInputRequest[] }
   | { readonly kind: "ready" }
   /**

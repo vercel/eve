@@ -172,7 +172,7 @@ async function followUpTerminalTask(input: {
     parentToken: task.taskInboxToken,
   });
   if (outcome.kind === "error") {
-    if (findTaskAgentAddress(outcome.session, handle.identity.id) === undefined) {
+    if (outcome.deliveryAmbiguous !== true) {
       await failDelegatedDispatch({ error: outcome.result.output, task });
     }
     return {

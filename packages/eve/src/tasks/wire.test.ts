@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { TASK_AUTHORIZATION_REQUEST_ID } from "#tasks/types.js";
 import { translateTaskInboundPayload } from "#tasks/wire.js";
 
 const ZERO_USAGE = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
@@ -144,12 +143,14 @@ describe("translateTaskInboundPayload", () => {
   });
 
   it("blocks authorization under a reserved id that only its completion clears", () => {
+    const requestId = "task:authorization:attempt-1";
     expect(
       translateTaskInboundPayload({
         callId: "call-1",
         childSessionId: "child-session",
         event: {
           data: {
+            attemptId: "attempt-1",
             description: "Authorize GitHub",
             name: "github",
             sequence: 1,
@@ -162,8 +163,8 @@ describe("translateTaskInboundPayload", () => {
         subagentName: "research",
       }),
     ).toEqual({
-      inputRequests: [{ blockedOn: "authorization", requestId: TASK_AUTHORIZATION_REQUEST_ID }],
-      kind: "require-input",
+      kind: "require-authorization",
+      requestId,
     });
     expect(
       translateTaskInboundPayload({
@@ -171,6 +172,7 @@ describe("translateTaskInboundPayload", () => {
         childSessionId: "child-session",
         event: {
           data: {
+            attemptId: "attempt-1",
             name: "github",
             outcome: "authorized",
             sequence: 2,
@@ -182,7 +184,7 @@ describe("translateTaskInboundPayload", () => {
         kind: "authorization-event",
         subagentName: "research",
       }),
-    ).toEqual({ kind: "answered", requestIds: [TASK_AUTHORIZATION_REQUEST_ID] });
+    ).toEqual({ kind: "answered", requestIds: [requestId] });
   });
 
   it("leaves answered input to the run, which must deliver before recording it", () => {

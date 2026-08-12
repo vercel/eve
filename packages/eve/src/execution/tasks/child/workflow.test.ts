@@ -76,6 +76,7 @@ function appendedStatuses(): readonly string[] {
 describe("taskRunWorkflow", () => {
   it("publishes the initial view, applies commands, and stops at terminal", async () => {
     mockCommandHook([
+      { command: { kind: "ready" }, kind: "task-command" },
       {
         command: {
           inputRequests: [{ question: "which?", requestId: "req-1" }],
@@ -95,7 +96,13 @@ describe("taskRunWorkflow", () => {
       parentContinuationToken: "parent-session-token",
     });
 
-    expect(appendedStatuses()).toEqual(["working", "input_required", "working", "completed"]);
+    expect(appendedStatuses()).toEqual([
+      "working",
+      "working",
+      "input_required",
+      "working",
+      "completed",
+    ]);
     expect(disposeHook).toHaveBeenCalledTimes(1);
   });
 
@@ -148,6 +155,7 @@ describe("taskRunWorkflow", () => {
   it("translates a settled child turn from the wire and wakes the parent once ready", async () => {
     const ZERO = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
     mockCommandHook([
+      { command: { kind: "ready" }, kind: "task-command" },
       {
         kind: "runtime-action-result",
         results: [
@@ -177,7 +185,7 @@ describe("taskRunWorkflow", () => {
       parentContinuationToken: "parent-session-token",
     });
 
-    expect(appendedStatuses()).toEqual(["working", "completed"]);
+    expect(appendedStatuses()).toEqual(["working", "working", "completed"]);
     expect(wakeTaskParentStep).toHaveBeenCalledTimes(1);
     expect(vi.mocked(wakeTaskParentStep).mock.calls[0]?.[0]).toMatchObject({
       token: "parent-session-token",
@@ -209,6 +217,26 @@ describe("taskRunWorkflow", () => {
     });
 
     expect(appendedStatuses()).toEqual(["working", "completed"]);
+    expect(wakeTaskParentStep).toHaveBeenCalledTimes(1);
+    expect(disposeHook).toHaveBeenCalledTimes(1);
+  });
+
+  it("silently terminates a dispatch rejected before parent indexing", async () => {
+    mockCommandHook([
+      {
+        command: { data: { code: "START_FAILED" }, kind: "reject-dispatch" },
+        kind: "task-command",
+      },
+    ]);
+
+    await taskRunWorkflow({
+      taskInboxToken: "task-token",
+      initialView: createWorkingView(),
+      parentContinuationToken: "parent-session-token",
+    });
+
+    expect(appendedStatuses()).toEqual(["working", "failed"]);
+    expect(wakeTaskParentStep).not.toHaveBeenCalled();
     expect(disposeHook).toHaveBeenCalledTimes(1);
   });
 
@@ -254,8 +282,26 @@ describe("taskRunWorkflow", () => {
         childSessionId: "child-session",
         event: {
           data: {
+            attemptId: "github-1",
             description: "Authorize GitHub",
             name: "github",
+            sequence: 1,
+            stepIndex: 2,
+            turnId: "turn-child",
+          },
+          type: "authorization.required",
+        },
+        kind: "subagent-authorization-event",
+        subagentName: "research",
+      },
+      {
+        callId: "call-task",
+        childSessionId: "child-session",
+        event: {
+          data: {
+            attemptId: "linear-1",
+            description: "Authorize Linear",
+            name: "linear",
             sequence: 1,
             stepIndex: 2,
             turnId: "turn-child",
@@ -274,12 +320,33 @@ describe("taskRunWorkflow", () => {
       parentContinuationToken: "parent-session-token",
     });
 
-    expect(appendedStatuses()).toEqual(["working", "input_required", "input_required"]);
-    expect(wakeTaskAuthorizationParentStep).toHaveBeenCalledExactlyOnceWith({
-      request: expect.objectContaining({ kind: "authorization-event" }),
-      taskId: "task_abc123",
-      token: "parent-session-token",
-    });
+    expect(appendedStatuses()).toEqual([
+      "working",
+      "input_required",
+      "input_required",
+      "input_required",
+    ]);
+    expect(wakeTaskAuthorizationParentStep).toHaveBeenCalledTimes(2);
+    expect(wakeTaskAuthorizationParentStep).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        request: expect.objectContaining({
+          event: expect.objectContaining({
+            data: expect.objectContaining({ name: "github" }),
+          }),
+        }),
+      }),
+    );
+    expect(wakeTaskAuthorizationParentStep).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: expect.objectContaining({
+          event: expect.objectContaining({
+            data: expect.objectContaining({ name: "linear" }),
+          }),
+        }),
+      }),
+    );
     expect(vi.mocked(wakeTaskAuthorizationParentStep).mock.invocationCallOrder[0]).toBeGreaterThan(
       vi.mocked(appendTaskViewStep).mock.invocationCallOrder[2] ?? 0,
     );
@@ -287,6 +354,7 @@ describe("taskRunWorkflow", () => {
 
   it("never wakes twice for one blocked child", async () => {
     mockCommandHook([
+      { command: { kind: "ready" }, kind: "task-command" },
       {
         command: { inputRequests: [{ q: 1, requestId: "q1" }], kind: "require-input" },
         kind: "task-command",

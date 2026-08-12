@@ -64,6 +64,6 @@ export async function appendTaskAgentAnnouncement(
     ? session
     : {
         ...session,
-        history: [...session.history, { content: announcement, role: "assistant" }],
+        history: [...session.history, { content: announcement, role: "user" }],
       };
 }

@@ -9,6 +9,9 @@ import {
 } from "#runtime/task-input-response-route.js";
 
 const resumeHookMock = vi.fn();
+const DIGEST = "0123456789abcdef0123456789abcdef";
+const CAPABILITY_TOKEN = `eve:task-input:${DIGEST}`;
+const TARGET_TOKEN = `eve:eve:op:${DIGEST}`;
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
@@ -27,12 +30,12 @@ describe("task input response capability", () => {
     resumeHookMock.mockResolvedValue(undefined);
     const response = await handleTaskInputResponseRequest(
       request({ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }),
-      context("child-token"),
+      context(CAPABILITY_TOKEN),
     );
 
     expect(response.status).toBe(202);
     expect(resumeHookMock).toHaveBeenCalledWith(
-      "child-token",
+      TARGET_TOKEN,
       sendCommandToDelivery({
         kind: "send",
         payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
@@ -42,9 +45,22 @@ describe("task input response capability", () => {
 
   it("rejects messages and empty response batches", async () => {
     for (const body of [{ message: "not allowed" }, { inputResponses: [] }]) {
-      const response = await handleTaskInputResponseRequest(request(body), context("child-token"));
+      const response = await handleTaskInputResponseRequest(
+        request(body),
+        context(CAPABILITY_TOKEN),
+      );
       expect(response.status).toBe(400);
     }
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects generic workflow hook tokens", async () => {
+    const response = await handleTaskInputResponseRequest(
+      request({ inputResponses: [{ requestId: "req-1", text: "forged" }] }),
+      context("eve:session:victim:inbox"),
+    );
+
+    expect(response.status).toBe(403);
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 });

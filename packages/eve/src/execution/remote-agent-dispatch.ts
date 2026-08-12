@@ -10,6 +10,7 @@ import type { CancelTurnResult, SessionAuthContext, SessionTraceContext } from "
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import type { HeadersValue } from "#client/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
+import { createRemoteAgentRouteUrl } from "#execution/remote-agent-route-url.js";
 import { formatTraceparent } from "#protocol/traceparent.js";
 import {
   formatSubagentInput,
@@ -197,7 +198,10 @@ export async function continueRemoteAgentSession(input: {
       `Remote agent "${input.remote.name}" continue-session request failed${
         permanent ? " permanently" : ""
       } with HTTP ${response.status}.`,
-      { retryable: !permanent },
+      {
+        deliveryAmbiguous: isAmbiguousRemoteContinueStatus(response.status),
+        retryable: !permanent,
+      },
     );
   }
 }
@@ -208,11 +212,16 @@ export async function continueRemoteAgentSession(input: {
  * with real instances instead of re-encoding the classification.
  */
 export class RemoteAgentContinueRequestError extends Error {
+  readonly deliveryAmbiguous: boolean;
   readonly retryable: boolean;
 
-  constructor(message: string, options: { readonly retryable: boolean }) {
+  constructor(
+    message: string,
+    options: { readonly deliveryAmbiguous: boolean; readonly retryable: boolean },
+  ) {
     super(message);
     this.name = "RemoteAgentContinueRequestError";
+    this.deliveryAmbiguous = options.deliveryAmbiguous;
     this.retryable = options.retryable;
   }
 }
@@ -228,6 +237,15 @@ export class RemoteAgentContinueRequestError extends Error {
  */
 export function isRetryableRemoteAgentContinueError(error: unknown): boolean {
   return !(error instanceof RemoteAgentContinueRequestError) || error.retryable;
+}
+
+/** Whether the callee may have accepted the continuation before delivery failed. */
+export function isAmbiguousRemoteAgentContinueError(error: unknown): boolean {
+  return !(error instanceof RemoteAgentContinueRequestError) || error.deliveryAmbiguous;
+}
+
+function isAmbiguousRemoteContinueStatus(status: number): boolean {
+  return status === 408 || status === 425 || status >= 500;
 }
 
 async function readRemoteAgentErrorCode(response: Response): Promise<string | undefined> {
@@ -490,10 +508,6 @@ function createRemoteAgentContinueUrl(
   return createRemoteAgentRouteUrl(remote.url, createEveSessionRoutePath(sessionId));
 }
 
-function createRemoteAgentRouteUrl(baseUrl: string, routePath: string): string {
-  return new URL(routePath.replace(/^\/+/, ""), `${trimTrailingSlash(baseUrl)}/`).toString();
-}
-
 function isRetryableRemoteCancelStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
@@ -527,8 +541,4 @@ function formatRemoteAgentCallInputMessage(input: {
     persistentSession: input.persistentSession,
     type: "remote",
   }).message;
-}
-
-function trimTrailingSlash(value: string): string {
-  return value.endsWith("/") ? value.slice(0, -1) : value;
 }

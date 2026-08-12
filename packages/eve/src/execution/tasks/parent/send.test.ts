@@ -208,6 +208,7 @@ describe("task_send persistent-agent availability", () => {
       session: persisted,
     });
     vi.mocked(dispatchToTaskAgentAddress).mockResolvedValue({
+      deliveryAmbiguous: true,
       kind: "error",
       result: {
         callId: action.callId,
@@ -235,5 +236,49 @@ describe("task_send persistent-agent availability", () => {
     );
     expect(result.result).toMatchObject({ isError: true, output: { taskId: "task_active" } });
     expect(result.session).toBe(persisted);
+    expect(failDelegatedDispatch).not.toHaveBeenCalled();
+  });
+
+  it("fails a persisted continuation after a definitive remote rejection", async () => {
+    const current = createSession();
+    const persisted = createSession(true, "turn-2");
+    vi.mocked(readLatestTaskView).mockResolvedValue(task("task_terminal", "completed"));
+    vi.mocked(beginDelegatedTask).mockResolvedValue({
+      taskInboxToken: "task-token-new",
+      createdByTurnId: "turn-2",
+      metadata,
+      operationId: "operation-new",
+      taskId: "task_active",
+      taskRunId: "run-active",
+    });
+    vi.mocked(settleDelegatedDispatch).mockResolvedValue({
+      receipt: {} as never,
+      session: persisted,
+    });
+    vi.mocked(dispatchToTaskAgentAddress).mockResolvedValue({
+      deliveryAmbiguous: false,
+      kind: "error",
+      result: {
+        callId: action.callId,
+        isError: true,
+        kind: "subagent-result",
+        origin: "dispatch",
+        output: { code: "AGENT_UNREACHABLE", message: "HTTP 401" },
+        subagentName: "research",
+      },
+      session: persisted,
+    });
+
+    await executeTaskSend({
+      action,
+      bundle: {} as CompiledBundle,
+      parentTurnId: "turn-2",
+      session: current,
+    });
+
+    expect(failDelegatedDispatch).toHaveBeenCalledWith({
+      error: { code: "AGENT_UNREACHABLE", message: "HTTP 401" },
+      task: expect.objectContaining({ taskId: "task_active" }),
+    });
   });
 });

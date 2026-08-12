@@ -10,11 +10,12 @@ import {
 } from "#execution/tasks/parent/control-shared.js";
 import {
   failDelegatedDispatch,
+  rejectDelegatedDispatch,
   settleDelegatedDispatch,
   type DelegatedTask,
 } from "#execution/tasks/parent/delegate.js";
 import { describeTaskAgent } from "#execution/tasks/parent/agent-identity.js";
-import { AGENT_BUSY, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
+import { AGENT_BUSY } from "#harness/agent-handle-errors.js";
 import type { RuntimeSubagentDispatchFailure } from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";
 
@@ -89,14 +90,10 @@ export async function settleTaskDispatchError(input: {
   readonly persisted: PersistedContinuationTask | undefined;
   readonly session: RuntimeSession;
 }): Promise<RuntimeSubagentDispatchFailure> {
-  const retainedAddress =
-    input.agentId !== undefined && findTaskAgentAddress(input.session, input.agentId) !== undefined;
-  const ambiguous =
-    input.persisted !== undefined &&
-    readErrorCode(input.outcome.result.output) === AGENT_UNREACHABLE &&
-    retainedAddress;
+  const ambiguous = input.persisted !== undefined && input.outcome.deliveryAmbiguous === true;
   if (input.delegated !== undefined && !ambiguous) {
-    await failDelegatedDispatch({ error: input.outcome.result.output, task: input.delegated });
+    const settle = input.persisted === undefined ? rejectDelegatedDispatch : failDelegatedDispatch;
+    await settle({ error: input.outcome.result.output, task: input.delegated });
   }
   return input.persisted === undefined
     ? input.outcome.result
@@ -111,10 +108,4 @@ function attachTaskId(output: JsonValue, taskId: string | undefined): JsonValue 
   return output !== null && typeof output === "object" && !Array.isArray(output)
     ? { ...output, taskId }
     : { error: output, taskId };
-}
-
-function readErrorCode(output: JsonValue): string | undefined {
-  if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
-  const code = Reflect.get(output, "code");
-  return typeof code === "string" ? code : undefined;
 }

@@ -6,6 +6,7 @@ import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
+import { createTaskInputRequestId } from "#harness/proxy-input-requests.js";
 
 export type RoutedDeliverResult =
   | {
@@ -48,8 +49,9 @@ export async function routeProxiedDeliverStep(input: {
     // directly: the run must forward and clear the batch under one
     // durable decision, or a late answer could unblock a question the
     // child raised after this one.
-    if (forChild.taskId !== undefined) {
-      const entry = findSessionTaskEntry(durableSession.state, forChild.taskId);
+    const taskId = forChild.taskId;
+    if (taskId !== undefined) {
+      const entry = findSessionTaskEntry(durableSession.state, taskId);
       if (entry === undefined) {
         strandedResponses.push(...forChild.payload.inputResponses);
         continue;
@@ -62,10 +64,17 @@ export async function routeProxiedDeliverStep(input: {
           childResponseUrl: forChild.childResponseUrl,
           inputResponses: forChild.payload.inputResponses,
           kind: "input-response",
-          taskId: forChild.taskId,
+          taskId,
         },
       });
-      if (delivery === "unreachable") strandedResponses.push(...forChild.payload.inputResponses);
+      if (delivery === "unreachable") {
+        strandedResponses.push(
+          ...forChild.payload.inputResponses.map((response) => ({
+            ...response,
+            requestId: createTaskInputRequestId(taskId, response.requestId),
+          })),
+        );
+      }
       continue;
     }
 

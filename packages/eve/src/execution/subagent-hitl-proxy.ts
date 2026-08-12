@@ -122,12 +122,12 @@ export function routeDeliverPayload(input: {
     if (existing === undefined) {
       responsesByChild.set(bucketKey, {
         childContinuationToken: route.childContinuationToken,
-        responses: [response],
+        responses: [toChildInputResponse(response, route)],
         ...(route.childResponseUrl !== undefined && { childResponseUrl: route.childResponseUrl }),
         ...(route.taskId !== undefined && { taskId: route.taskId }),
       });
     } else {
-      existing.responses.push(response);
+      existing.responses.push(toChildInputResponse(response, route));
     }
   }
 
@@ -162,31 +162,8 @@ export function routeDeliverPayload(input: {
   return { forChildren, forSelf, parentAction };
 }
 
-function batchResolves(input: {
-  readonly batch: NonNullable<ProxyInputRequest["batch"]>;
-  readonly childContinuationToken: string;
-  readonly entries: ReadonlyMap<string, ProxyInputRequest>;
-  readonly responseIds: ReadonlySet<string>;
-}): boolean {
-  if (input.batch.approvalRequestIds.length === 0) return true;
-
-  return input.batch.approvalRequestIds.every((requestId) => {
-    const route = input.entries.get(requestId);
-    if (route === undefined || !sameBatch(route, input)) return true;
-    return input.responseIds.has(requestId);
-  });
-}
-
-function sameBatch(
-  route: ProxyInputRequest,
-  input: {
-    readonly batch: NonNullable<ProxyInputRequest["batch"]>;
-    readonly childContinuationToken: string;
-  },
-): boolean {
-  return (
-    route.childContinuationToken === input.childContinuationToken &&
-    route.batch?.requestIds.length === input.batch.requestIds.length &&
-    route.batch.requestIds.every((requestId, index) => requestId === input.batch.requestIds[index])
-  );
+function toChildInputResponse(response: InputResponse, route: ProxyInputRequest): InputResponse {
+  return route.childRequestId === undefined
+    ? response
+    : { ...response, requestId: route.childRequestId };
 }

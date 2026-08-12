@@ -1,5 +1,5 @@
 import type { TaskCommand, TaskRunInboundPayload, TaskUsage } from "#tasks/types.js";
-import { TASK_AUTHORIZATION_REQUEST_ID, readTaskUsage } from "#tasks/types.js";
+import { readTaskUsage, taskAuthorizationRequestId } from "#tasks/types.js";
 
 /**
  * Translates one inbound hook payload into a lifecycle command.
@@ -64,15 +64,12 @@ export function translateTaskInboundPayload(
         kind: "start-turn",
         taskId: payload.taskId,
       };
-    case "authorization-event":
+    case "authorization-event": {
+      const requestId = taskAuthorizationRequestId(payload.event);
       return payload.event.type === "authorization.required"
-        ? {
-            inputRequests: [
-              { blockedOn: "authorization", requestId: TASK_AUTHORIZATION_REQUEST_ID },
-            ],
-            kind: "require-input",
-          }
-        : { kind: "answered", requestIds: [TASK_AUTHORIZATION_REQUEST_ID] };
+        ? { kind: "require-authorization", requestId }
+        : { kind: "answered", requestIds: [requestId] };
+    }
     default:
       return undefined;
   }

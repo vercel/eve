@@ -112,8 +112,24 @@ describe("routeDeliverPayload", () => {
   it("keeps one task response batch atomic and marks it for its task run", () => {
     const session = upsertProxyInputRequests({
       entries: [
-        ["req-a", { childContinuationToken: "child-a", kind: "tool-approval", taskId: "task-1" }],
-        ["req-b", { childContinuationToken: "child-a", kind: "question", taskId: "task-1" }],
+        [
+          "task-1:req-a",
+          {
+            childContinuationToken: "child-a",
+            childRequestId: "req-a",
+            kind: "tool-approval",
+            taskId: "task-1",
+          },
+        ],
+        [
+          "task-1:req-b",
+          {
+            childContinuationToken: "child-a",
+            childRequestId: "req-b",
+            kind: "question",
+            taskId: "task-1",
+          },
+        ],
       ],
       forChildContinuationToken: "child-a",
       session: createSession(),
@@ -122,8 +138,8 @@ describe("routeDeliverPayload", () => {
     const routed = routeDeliverPayload({
       payload: {
         inputResponses: [
-          { optionId: "approve", requestId: "req-a" },
-          { text: "west", requestId: "req-b" },
+          { optionId: "approve", requestId: "task-1:req-a" },
+          { text: "west", requestId: "task-1:req-b" },
         ],
       },
       state: session.state,
@@ -138,6 +154,54 @@ describe("routeDeliverPayload", () => {
             { text: "west", requestId: "req-b" },
           ],
         },
+        taskId: "task-1",
+      },
+    ]);
+  });
+
+  it("keeps identical child-local ids isolated across tasks", () => {
+    let session = upsertProxyInputRequests({
+      entries: [
+        [
+          "task-1:req-shared",
+          {
+            childContinuationToken: "child-a",
+            childRequestId: "req-shared",
+            kind: "tool-approval",
+            taskId: "task-1",
+          },
+        ],
+      ],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+    session = upsertProxyInputRequests({
+      entries: [
+        [
+          "task-2:req-shared",
+          {
+            childContinuationToken: "child-b",
+            childRequestId: "req-shared",
+            kind: "tool-approval",
+            taskId: "task-2",
+          },
+        ],
+      ],
+      forChildContinuationToken: "child-b",
+      session,
+    });
+
+    const routed = routeDeliverPayload({
+      payload: {
+        inputResponses: [{ optionId: "approve", requestId: "task-1:req-shared" }],
+      },
+      state: session.state,
+    });
+
+    expect(routed.forChildren).toEqual([
+      {
+        childContinuationToken: "child-a",
+        payload: { inputResponses: [{ optionId: "approve", requestId: "req-shared" }] },
         taskId: "task-1",
       },
     ]);

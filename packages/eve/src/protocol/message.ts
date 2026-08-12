@@ -596,6 +596,8 @@ export interface CompactionCompletedStreamEvent {
  */
 export interface AuthorizationRequiredStreamEvent {
   data: {
+    /** Stable identity of this exact authorization attempt. */
+    attemptId?: string;
     authorization?: ConnectionAuthorizationChallenge;
     candidateId?: string;
     description: string;
@@ -629,6 +631,8 @@ export type ConnectionAuthorizationOutcome = AuthorizationOutcome;
  */
 export interface AuthorizationCompletedStreamEvent {
   data: {
+    /** Stable identity shared with the matching required event. */
+    attemptId?: string;
     candidateId?: string;
     /**
      * The challenge from the matching `authorization.required` event,
@@ -1060,6 +1064,7 @@ export function createActionsRequestedEvent(input: {
  * for `getToken`-only authorization sources that authorize out of band.
  */
 export function createAuthorizationRequiredEvent(input: {
+  readonly attemptId?: string;
   readonly authorization?: ConnectionAuthorizationChallenge;
   readonly candidateId?: string;
   readonly description: string;
@@ -1076,6 +1081,9 @@ export function createAuthorizationRequiredEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.attemptId !== undefined) {
+    data.attemptId = input.attemptId;
+  }
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
   }
@@ -1097,6 +1105,7 @@ export function createAuthorizationRequiredEvent(input: {
  * authorization deadline has expired.
  */
 export function createAuthorizationCompletedEvent(input: {
+  readonly attemptId?: string;
   readonly authorization?: ConnectionAuthorizationChallenge;
   readonly candidateId?: string;
   readonly name: string;
@@ -1113,6 +1122,9 @@ export function createAuthorizationCompletedEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.attemptId !== undefined) {
+    data.attemptId = input.attemptId;
+  }
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
   }

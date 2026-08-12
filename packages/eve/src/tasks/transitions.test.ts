@@ -23,7 +23,9 @@ const TERMINAL_STATUSES: readonly TaskStatus[] = ["completed", "failed", "cancel
 const ALL_COMMANDS: readonly TaskCommand[] = [
   { data: { answer: 42 }, kind: "complete" },
   { data: { message: "boom" }, kind: "fail" },
+  { data: { message: "unindexed" }, kind: "reject-dispatch" },
   { kind: "cancel" },
+  { kind: "require-authorization", requestId: "auth-1" },
   { inputRequests: [{ question: "which?" }], kind: "require-input" },
   { kind: "ready" },
   { kind: "answered", requestIds: ["req-1"] },
@@ -153,6 +155,33 @@ describe("applyTaskTransition", () => {
     expect(stale.outcome).toBe("noop");
     expect(stale.view.status).toBe("input_required");
     expect(stale.view.inputRequests).toEqual([{ question: "second", requestId: "req-2" }]);
+  });
+
+  it("keeps independent authorization attempts blocked until each completes", () => {
+    const first = applyTaskTransition(createView("working"), {
+      kind: "require-authorization",
+      requestId: "auth-1",
+    });
+    const second = applyTaskTransition(first.view, {
+      kind: "require-authorization",
+      requestId: "auth-2",
+    });
+    const completedFirst = applyTaskTransition(second.view, {
+      kind: "answered",
+      requestIds: ["auth-1"],
+    });
+
+    expect(second.view).toMatchObject({
+      inputRequests: [
+        { blockedOn: "authorization", requestId: "auth-1" },
+        { blockedOn: "authorization", requestId: "auth-2" },
+      ],
+      status: "input_required",
+    });
+    expect(completedFirst.view).toMatchObject({
+      inputRequests: [{ blockedOn: "authorization", requestId: "auth-2" }],
+      status: "input_required",
+    });
   });
 
   it("replaces the outstanding batch on repeated require-input", () => {

@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   dispatchSession: vi.fn(),
   hydrateDurableSession: vi.fn(),
   readDurableSession: vi.fn(),
+  resumeHook: vi.fn(),
   createSession: vi.fn(),
   startRemoteAgentSession: vi.fn(),
   startWorkflowPreferLatest: vi.fn(),
@@ -49,6 +50,11 @@ vi.mock("#context/serialize.js", () => ({
 vi.mock("#execution/durable-session-store.js", () => ({
   createDurableSessionState: mocks.createDurableSessionState,
   readDurableSession: mocks.readDurableSession,
+}));
+
+vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/workflow/runtime.js")>()),
+  resumeHook: mocks.resumeHook,
 }));
 
 vi.mock("#execution/session.js", () => ({
@@ -143,6 +149,7 @@ beforeEach(() => {
     sessionId: "remote-session-123456789012",
   });
   mocks.startWorkflowPreferLatest.mockResolvedValue({ runId: "task-run-1" });
+  mocks.resumeHook.mockResolvedValue({ runId: "task-run-1" });
   mocks.hydrateDurableSession.mockImplementation(({ durable }) => durable);
   mocks.createDurableSessionState.mockImplementation(({ session }) => ({
     ...BASE_STATE,
@@ -276,6 +283,36 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         taskRunId: "task-run-1",
       }),
     ]);
+  });
+
+  it("silently rejects a tasks-mode start that failed before index admission", async () => {
+    const session = createStartSession({ kind: "local" });
+    installContext(
+      session,
+      { definition: { description: "Research", kind: "subagent" }, nodeId: "subagents/research" },
+      true,
+    );
+    mocks.createSession.mockRejectedValue(new Error("child start failed"));
+    vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({ runId: "task-run-1" });
+
+    const result = await dispatchTaskStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+    const state = readResultSessionState(result, session);
+
+    expect(result.taskReadiness).toEqual([]);
+    expect(getSessionTaskIndex(state)).toEqual([]);
+    expect(result.results[0]).toMatchObject({
+      isError: true,
+      output: { code: "SUBAGENT_START_FAILED" },
+    });
+    expect(mocks.resumeHook).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ command: expect.objectContaining({ kind: "reject-dispatch" }) }),
+    );
   });
 
   it("adopts the child a replayed start already created instead of failing it", async () => {
@@ -800,7 +837,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     mocks.continueRemoteAgentSession.mockRejectedValue(
       new RemoteAgentContinueRequestError(
         "continue-session request failed permanently with HTTP 404.",
-        { retryable: false },
+        { deliveryAmbiguous: false, retryable: false },
       ),
     );
 

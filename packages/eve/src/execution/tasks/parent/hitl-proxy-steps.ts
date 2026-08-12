@@ -1,8 +1,11 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import { createRemoteAgentRouteUrl } from "#execution/remote-agent-route-url.js";
+import { createTaskInputCapabilityToken } from "#execution/task-input-capability.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import {
+  createTaskInputRequestId,
   toProxyInputRequestEntries,
   upsertProxyInputRequestState,
 } from "#harness/proxy-input-requests.js";
@@ -19,7 +22,14 @@ export async function recordTaskInputRequestStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly taskId: string;
-}): Promise<{ readonly accepted: boolean; readonly sessionState: DurableSessionState }> {
+}): Promise<
+  | { readonly accepted: false; readonly sessionState: DurableSessionState }
+  | {
+      readonly accepted: true;
+      readonly hookPayload: SubagentInputRequestHookPayload;
+      readonly sessionState: DurableSessionState;
+    }
+> {
   "use step";
 
   const durableSession = await readDurableSession(input.sessionState);
@@ -60,12 +70,26 @@ export async function recordTaskInputRequestStep(input: {
     return { accepted: false, sessionState: input.sessionState };
   }
 
-  let entries = toProxyInputRequestEntries(input.hookPayload, input.taskId);
+  const hookPayload = namespaceTaskInputRequests(input.hookPayload, input.taskId);
+  let entries = toProxyInputRequestEntries(hookPayload, input.taskId).map(
+    ([requestId, route], index) => {
+      const childRequestId = input.hookPayload.event.requests[index]!.requestId;
+      return [
+        requestId,
+        {
+          ...route,
+          childRequestId,
+        },
+      ] as const;
+    },
+  );
   if (handle.address.kind === "agent/remote") {
-    const childResponseUrl = new URL(
-      createEveTaskInputRoutePath(input.hookPayload.childContinuationToken),
+    const childResponseUrl = createRemoteAgentRouteUrl(
       handle.address.url,
-    ).href;
+      createEveTaskInputRoutePath(
+        createTaskInputCapabilityToken(input.hookPayload.childContinuationToken),
+      ),
+    );
     entries = entries.map(
       ([requestId, route]) => [requestId, { ...route, childResponseUrl }] as const,
     );
@@ -77,6 +101,7 @@ export async function recordTaskInputRequestStep(input: {
   });
   return {
     accepted: true,
+    hookPayload,
     sessionState: {
       ...input.sessionState,
       hasProxyInputRequests: true,
@@ -84,6 +109,22 @@ export async function recordTaskInputRequestStep(input: {
         session: { ...durableSession, state },
         version: input.sessionState.version,
       },
+    },
+  };
+}
+
+function namespaceTaskInputRequests(
+  hookPayload: SubagentInputRequestHookPayload,
+  taskId: string,
+): SubagentInputRequestHookPayload {
+  return {
+    ...hookPayload,
+    event: {
+      ...hookPayload.event,
+      requests: hookPayload.event.requests.map((request) => ({
+        ...request,
+        requestId: createTaskInputRequestId(taskId, request.requestId),
+      })),
     },
   };
 }

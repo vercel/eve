@@ -179,7 +179,7 @@ export async function dispatchTaskStep(
             session: nextSession,
           }),
         );
-        taskReadiness.push(delegated);
+        if (persistedContinuation !== undefined) taskReadiness.push(delegated);
         continue;
       }
 

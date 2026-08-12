@@ -15,6 +15,8 @@ export interface ProxyInputRequest {
   /** Batch semantics are optional so sessions written before this field remain routable. */
   readonly batch?: ProxyInputRequestBatch;
   readonly childContinuationToken: string;
+  /** Child-local id restored before forwarding a namespaced task response. */
+  readonly childRequestId?: string;
   /** Trusted parent-derived capability URL for a remote task child. */
   readonly childResponseUrl?: string;
   readonly kind: InputRequestKind;
@@ -29,6 +31,11 @@ export interface ProxyInputRequestBatch {
 
 /** `requestId → route` map stored on the parent session. */
 type ProxyInputRequestMap = Readonly<Record<string, ProxyInputRequest>>;
+
+/** Parent-visible id for one task-owned child-local input request. */
+export function createTaskInputRequestId(taskId: string, childRequestId: string): string {
+  return `${taskId}:${childRequestId}`;
+}
 
 /**
  * Returns the proxy-routing map as a fresh `Map`. Never returns a live
@@ -223,10 +230,18 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     return undefined;
   }
   const taskId = "taskId" in value ? value.taskId : undefined;
+  const childRequestId = "childRequestId" in value ? value.childRequestId : undefined;
   const childResponseUrl = "childResponseUrl" in value ? value.childResponseUrl : undefined;
   if (taskId !== undefined && (typeof taskId !== "string" || taskId.length === 0)) {
     return undefined;
   }
+  if (
+    childRequestId !== undefined &&
+    (typeof childRequestId !== "string" || childRequestId.length === 0)
+  ) {
+    return undefined;
+  }
+  if ((taskId === undefined) !== (childRequestId === undefined)) return undefined;
   if (
     childResponseUrl !== undefined &&
     (typeof childResponseUrl !== "string" || !childResponseUrl.startsWith("https://"))
@@ -235,6 +250,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   }
   const request: {
     readonly childContinuationToken: string;
+    childRequestId?: string;
     childResponseUrl?: string;
     readonly kind: InputRequestKind;
     taskId?: string;
@@ -242,6 +258,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     childContinuationToken: value.childContinuationToken,
     kind: value.kind,
   };
+  if (typeof childRequestId === "string") request.childRequestId = childRequestId;
   if (typeof childResponseUrl === "string") request.childResponseUrl = childResponseUrl;
   if (typeof taskId === "string") request.taskId = taskId;
   return request;

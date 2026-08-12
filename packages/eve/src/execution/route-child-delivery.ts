@@ -53,7 +53,7 @@ export async function routeDeliverToChildren(input: {
     sessionState = recorded.sessionState;
     if (!recorded.accepted) continue;
     const emitted = await emitRecordedTaskInputRequestStep({
-      hookPayload: request.hookPayload,
+      hookPayload: recorded.hookPayload,
       parentWritable: input.parentWritable,
       serializedContext,
       sessionState,

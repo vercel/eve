@@ -477,6 +477,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           )?.candidateId;
           await handleEvent(
             createAuthorizationCompletedEvent({
+              attemptId: result.attemptId,
               authorization,
               candidateId,
               name: result.name,

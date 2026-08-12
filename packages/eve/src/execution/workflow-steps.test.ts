@@ -269,8 +269,13 @@ describe("routeProxiedDeliverStep", () => {
     return upsertProxyInputRequests({
       entries: [
         [
-          "request-1",
-          { childContinuationToken: "child-token", kind: "tool-approval", taskId: "task-1" },
+          "task-1:request-1",
+          {
+            childContinuationToken: "child-token",
+            childRequestId: "request-1",
+            kind: "tool-approval",
+            taskId: "task-1",
+          },
         ],
       ],
       forChildContinuationToken: "child-token",
@@ -304,7 +309,7 @@ describe("routeProxiedDeliverStep", () => {
   }
 
   const taskRouteInput = {
-    payload: { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
+    payload: { inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }] },
     sessionState: createStubSessionState({ hasProxyInputRequests: true }),
   };
 
@@ -334,7 +339,9 @@ describe("routeProxiedDeliverStep", () => {
       routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
     ).resolves.toMatchObject({
       kind: "continue",
-      remainder: { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
+      remainder: {
+        inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }],
+      },
     });
     expect(sendTaskInboundPayload).not.toHaveBeenCalled();
     expect(resumeHookMock).not.toHaveBeenCalled();
@@ -348,7 +355,9 @@ describe("routeProxiedDeliverStep", () => {
       routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
     ).resolves.toMatchObject({
       kind: "continue",
-      remainder: { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
+      remainder: {
+        inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }],
+      },
     });
   });
 
@@ -449,11 +458,18 @@ describe("recordTaskInputRequestStep", () => {
 
     expect(result.accepted).toBe(true);
     expect(
-      getProxyInputRequests(result.sessionState.snapshot?.session.state).get("request-1"),
+      getProxyInputRequests(result.sessionState.snapshot?.session.state).get("task-1:request-1"),
     ).toEqual({
       childContinuationToken: "child-token",
+      childRequestId: "request-1",
       kind: "question",
       taskId: "task-1",
+    });
+    expect(result).toMatchObject({
+      accepted: true,
+      hookPayload: {
+        event: { requests: [{ requestId: "task-1:request-1" }] },
+      },
     });
   });
 
