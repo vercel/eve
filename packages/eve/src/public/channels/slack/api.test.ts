@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Card, CardText } from "#compiled/chat/index.js";
 import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
-import { buildSlackBinding, callSlackApi } from "#public/channels/slack/api.js";
+import {
+  buildSlackBinding,
+  callSlackApi,
+  type SlackBotTokenContext,
+} from "#public/channels/slack/api.js";
 
 interface FetchCall {
   url: string;
@@ -875,5 +879,172 @@ describe("auto-anchor on first post", () => {
     await Promise.all([thread.post("a"), thread.post("b"), thread.post("c")]);
 
     expect(anchors).toHaveLength(1);
+  });
+});
+
+describe("SlackBotTokenContext threading", () => {
+  let mock: ReturnType<typeof buildFetchMock>;
+
+  beforeEach(() => {
+    mock = buildFetchMock();
+    vi.stubGlobal("fetch", mock.fetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("thread.post forwards teamId/channelId/threadTs to a context-aware token callback", async () => {
+    const seen: unknown[] = [];
+    const botToken = vi.fn((context: SlackBotTokenContext) => {
+      seen.push(context);
+      return "xoxb-resolved";
+    });
+    const { thread } = buildSlackBinding({
+      botToken,
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: "T01",
+    });
+
+    await thread.post("hello");
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0]).toEqual({ teamId: "T01", channelId: "C01", threadTs: "1.0" });
+
+    // The resolved (workspace-specific) token — not a static env token —
+    // must be what actually signs the request.
+    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage");
+    expect(post).toBeDefined();
+  });
+
+  it("slack.request forwards the binding identity to a context-aware token callback", async () => {
+    const seen: unknown[] = [];
+    const botToken = vi.fn((context: SlackBotTokenContext) => {
+      seen.push(context);
+      return "xoxb-resolved";
+    });
+    const { slack } = buildSlackBinding({
+      botToken,
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: "T01",
+    });
+
+    await slack.request("chat.postMessage", { channel: "C99", text: "hi" });
+
+    expect(seen).toEqual([{ teamId: "T01", channelId: "C01", threadTs: "1.0" }]);
+  });
+
+  it("uploadFiles reflects per-call channel/thread overrides in the context", async () => {
+    const seen: unknown[] = [];
+    const botToken = vi.fn((context: SlackBotTokenContext) => {
+      seen.push(context);
+      return "xoxb-resolved";
+    });
+    const { slack } = buildSlackBinding({
+      botToken,
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: "T01",
+    });
+
+    await slack.uploadFiles([{ data: new Uint8Array([1, 2, 3]), filename: "a.bin" }], {
+      channelId: "C02",
+      threadTs: "9.9",
+    });
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0]).toMatchObject({ teamId: "T01", channelId: "C02", threadTs: "9.9" });
+  });
+
+  it("passes the live (post-anchor) threadTs after auto-anchoring on the first post", async () => {
+    const seen: unknown[] = [];
+    const botToken = vi.fn((context: SlackBotTokenContext) => {
+      seen.push(context);
+      return "xoxb-resolved";
+    });
+    const { thread } = buildSlackBinding({
+      botToken,
+      channelId: "C01",
+      threadTs: "",
+      teamId: "T01",
+    });
+
+    await thread.post("first");
+    await thread.refresh();
+
+    // The final resolution happens during conversations.replies, after the
+    // first post anchored the thread at ts 1700000001.000001.
+    const last = seen.at(-1);
+    expect(last).toEqual({ teamId: "T01", channelId: "C01", threadTs: "1700000001.000001" });
+  });
+
+  it("omits undefined identity fields instead of passing empty-ish context", async () => {
+    const seen: unknown[] = [];
+    const botToken = vi.fn((context: SlackBotTokenContext) => {
+      seen.push(context);
+      return "xoxb-resolved";
+    });
+    const { thread } = buildSlackBinding({
+      botToken,
+      channelId: "",
+      threadTs: "",
+      teamId: undefined,
+    });
+
+    await thread.post("first");
+
+    // No team/channel/thread identity known yet → the callback receives an
+    // empty context object rather than keys holding undefined/empty strings.
+    expect(seen[0]).toEqual({});
+  });
+
+  it("never calls a zero-argument token callback with a context", async () => {
+    // A legacy zero-arg callback exposes no parameter. Even if a caller
+    // passes one anyway (arity > 0), the resolver forwards the context only
+    // when the declared arity requires it, so legacy code is unaffected.
+    const botToken = vi.fn(() => "xoxb-zero");
+    const { thread } = buildSlackBinding({
+      botToken,
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: "T01",
+    });
+
+    await thread.post("hello");
+
+    expect(botToken).toHaveBeenCalledWith();
+  });
+
+  it("keeps literal string tokens working with no context object", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-literal",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: "T01",
+    });
+
+    await thread.post("hello");
+
+    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage");
+    expect(post).toBeDefined();
+  });
+
+  it("callSlackApi forwards an explicit context to a context-aware token callback", async () => {
+    const seen: unknown[] = [];
+    const botToken = vi.fn((context: SlackBotTokenContext) => {
+      seen.push(context);
+      return "xoxb-resolved";
+    });
+
+    await callSlackApi({
+      botToken,
+      operation: "chat.postMessage",
+      body: { channel: "C01", text: "hi" },
+      context: { teamId: "T02", channelId: "C01", threadTs: "2.0" },
+    });
+
+    expect(seen).toEqual([{ teamId: "T02", channelId: "C01", threadTs: "2.0" }]);
   });
 });
