@@ -1,19 +1,20 @@
 # eve canary artifacts
 
-Static Vercel project that builds a canary tarball from each checked-out `vercel/eve` commit, uploads an immutable SHA-addressed artifact to public Vercel Blob using deployment OIDC, and serves a convenient latest pointer.
+Static Vercel project that builds and serves an installable `eve` tarball from every checked-out commit, following `vercel/workflow`'s tarball project pattern.
+
+Each deployment serves:
 
 ```text
-/canary/latest
-/canary/latest.json
-/canary/<full-sha>/eve.tgz
+/canary/eve.tgz
+/canary/manifest.json
 ```
 
-Generated projects pin the immutable public Blob URL. The deployment's static `/canary/latest` tarball is only for acquiring the current canary CLI.
+The production alias is the convenient latest entry point:
 
-The Vercel project must:
+```bash
+npm exec --yes --package=https://<production-alias>/canary/eve.tgz -- eve init my-agent
+```
 
-- use this directory as its project root;
-- connect a public Blob store to Production;
-- set `BLOB_STORE_ID`;
-- omit `BLOB_READ_WRITE_TOKEN` so Blob writes use Vercel OIDC;
-- disable Deployment Protection so npm can download tarballs.
+The packaged CLI knows the immutable `VERCEL_URL` of the deployment that built it, so generated projects pin that exact deployment URL rather than the moving production alias.
+
+The Vercel project must use this directory as its project root and disable Deployment Protection so npm can download tarballs. The smoke check verifies public access and the gzip signature.

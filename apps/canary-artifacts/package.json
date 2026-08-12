@@ -8,9 +8,6 @@
     "test": "vitest run --config vitest.config.ts",
     "test:smoke": "node scripts/check-smoke.mjs"
   },
-  "dependencies": {
-    "@vercel/blob": "2.8.0"
-  },
   "devDependencies": {
     "vitest": "catalog:"
   }
