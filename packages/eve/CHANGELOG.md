@@ -1,5 +1,11 @@
 # eve
 
+## 0.33.2
+
+### Patch Changes
+
+- 89255bd: Update `@workflow/core` to `5.0.0-beta.41` to pick up event log corruption fixes.
+
 ## 0.33.1
 
 ### Patch Changes
