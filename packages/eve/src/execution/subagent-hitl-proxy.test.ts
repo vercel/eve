@@ -130,6 +130,7 @@ describe("routeDeliverPayload", () => {
             { text: "west", requestId: "req-b" },
           ],
         },
+        retireRequestIds: ["task-1:req-a", "task-1:req-b"],
         taskId: "task-1",
       },
     ]);
@@ -178,6 +179,7 @@ describe("routeDeliverPayload", () => {
       {
         childContinuationToken: "child-a",
         payload: { inputResponses: [{ optionId: "approve", requestId: "req-shared" }] },
+        retireRequestIds: ["task-1:req-shared"],
         taskId: "task-1",
       },
     ]);
@@ -201,6 +203,7 @@ describe("routeDeliverPayload", () => {
       {
         childContinuationToken: "child-a",
         payload: { inputResponses: [{ optionId: "stop", requestId: "req-limit" }] },
+        retireRequestIds: ["req-limit"],
       },
     ]);
     expect(routed.parentAction).toEqual({ kind: "cancel-turn" });

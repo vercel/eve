@@ -126,6 +126,25 @@ export function clearProxyInputRequestsForChild(
   return writeMap(session, next);
 }
 
+/** Removes only the request IDs whose responses were successfully forwarded. */
+export function retireProxyInputRequests<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  requestIds: readonly string[],
+): T {
+  const current = readMap(session.state);
+  const next = { ...current };
+  let changed = false;
+
+  for (const requestId of requestIds) {
+    if (Object.hasOwn(next, requestId)) {
+      delete next[requestId];
+      changed = true;
+    }
+  }
+
+  return changed ? writeMap(session, next) : session;
+}
+
 /** Removes every proxy route owned by one durable task. */
 export function clearProxyInputRequestsForTask(
   session: HarnessSession,

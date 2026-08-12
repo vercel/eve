@@ -34,5 +34,6 @@ export function sendCommandToDelivery(
     payloads: [command.payload],
     requestId: command.requestId,
     taskDeliveryId: command.taskDeliveryId,
+    turnPolicy: command.turnPolicy,
   };
 }

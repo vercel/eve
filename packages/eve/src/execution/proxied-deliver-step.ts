@@ -1,12 +1,19 @@
 import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  type DurableSessionState,
+  readDurableSession,
+  replaceDurableSessionSnapshot,
+} from "#execution/durable-session-store.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
-import { createTaskInputRequestId } from "#harness/proxy-input-requests.js";
+import {
+  createTaskInputRequestId,
+  retireProxyInputRequests,
+} from "#harness/proxy-input-requests.js";
 
 export type RoutedDeliverResult =
   | {
@@ -31,7 +38,7 @@ export async function routeProxiedDeliverStep(input: {
 }): Promise<RoutedDeliverResult> {
   "use step";
 
-  const durableSession = await readDurableSession(input.sessionState);
+  let durableSession = await readDurableSession(input.sessionState);
   // A task-owned route is only routable while this session still owns
   // the task; anything else stays parent-local and reaches the model as
   // ordinary stale input.
@@ -44,6 +51,7 @@ export async function routeProxiedDeliverStep(input: {
   });
 
   const strandedResponses: InputResponse[] = [];
+  let retired = false;
   for (const forChild of routed.forChildren) {
     // Task-owned children are addressed through their run, never
     // directly: the run must forward and clear the batch under one
@@ -84,11 +92,18 @@ export async function routeProxiedDeliverStep(input: {
       forChild.childContinuationToken,
       sendCommandToDelivery({ auth: input.auth, kind: "send", payload: forChild.payload }),
     );
+    // Successfully forwarded request IDs are retired so later deliveries
+    // cannot route through stale entries. Task-owned routes are cleared by
+    // their run instead, under the same durable decision as the forward.
+    durableSession = retireProxyInputRequests(durableSession, forChild.retireRequestIds);
+    retired = true;
   }
 
   const context = {
     serializedContext: input.serializedContext ?? {},
-    sessionState: input.sessionState,
+    sessionState: retired
+      ? replaceDurableSessionSnapshot({ session: durableSession, state: input.sessionState })
+      : input.sessionState,
   };
   const remainder = mergeStrandedResponses(routed.forSelf, strandedResponses);
   return routed.parentAction === undefined
