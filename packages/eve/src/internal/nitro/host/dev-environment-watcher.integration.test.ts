@@ -76,7 +76,7 @@ describe("development environment reload transactions", () => {
     temporaryDirectories.push(collectionRoot);
     const appRoot = join(collectionRoot, "agents", "support");
     await mkdir(join(appRoot, "agent"), { recursive: true });
-    await writeFile(join(collectionRoot, "package.json"), "{}\n");
+    await writeFile(join(collectionRoot, "package.json"), '{"eve":{"collection":true}}\n');
     await writeFile(
       join(collectionRoot, ".env.local"),
       "EVE_WATCH_ENV_ROOT_ONLY=from-root\nEVE_WATCH_ENV_SHARED=from-root\n",

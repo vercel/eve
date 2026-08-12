@@ -2,12 +2,6 @@ import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
 import { appendEnv } from "../../append-env.js";
-import {
-  hasVercelHostFramework,
-  resolveVercelHostFrameworkPreset,
-} from "#internal/vercel-host-framework.js";
-
-export { hasVercelHostFramework, resolveVercelHostFrameworkPreset };
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor, type NodeEngineOverride } from "../../node-engine.js";
@@ -168,6 +162,37 @@ async function hasPackageDependency(
 ): Promise<boolean> {
   const parsed = await readPackageJsonObject(packageJsonPath);
   return parsed !== undefined && packageJsonHasDependency(parsed, dependencyName);
+}
+
+/**
+ * Host-framework dependency → the Vercel Framework Preset slug it must deploy
+ * under (so the framework owns the top-level build and eve runs as a sibling).
+ */
+const VERCEL_HOST_FRAMEWORK_PRESETS: Readonly<Record<string, string>> = {
+  "@sveltejs/kit": "sveltekit",
+  [NEXT_PACKAGE_NAME]: "nextjs",
+  nuxt: "nuxtjs",
+  nuxt3: "nuxtjs",
+  "nuxt-edge": "nuxtjs",
+  "nuxt-nightly": "nuxtjs",
+};
+
+/** The Vercel Framework Preset slug for the host framework a project declares. */
+export async function resolveVercelHostFrameworkPreset(
+  projectRoot: string,
+): Promise<string | undefined> {
+  const parsed = await readPackageJsonObject(join(projectRoot, "package.json"));
+  if (parsed === undefined) return undefined;
+
+  for (const [dependencyName, preset] of Object.entries(VERCEL_HOST_FRAMEWORK_PRESETS)) {
+    if (packageJsonHasDependency(parsed, dependencyName)) return preset;
+  }
+  return undefined;
+}
+
+/** Whether the root app declares a Vercel framework that owns its top-level deployment. */
+export async function hasVercelHostFramework(projectRoot: string): Promise<boolean> {
+  return (await resolveVercelHostFrameworkPreset(projectRoot)) !== undefined;
 }
 
 /**

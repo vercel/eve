@@ -1,4 +1,4 @@
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import {
@@ -6,7 +6,6 @@ import {
   type AgentCollection,
   type AgentCollectionMember,
 } from "#internal/agent-collection.js";
-import { hasVercelHostFramework } from "#internal/vercel-host-framework.js";
 
 export type EveProjectContext =
   | {
@@ -41,9 +40,6 @@ export async function resolveNamedAgentProjectContext(
 
   const source = options.source ?? createDiskProjectSource();
   const collectionRoot = dirname(agentsRoot);
-  if (await hasVercelHostFramework(collectionRoot, { source })) return standalone(resolvedAppRoot);
-  if ((await source.stat(join(collectionRoot, "package.json"))) !== "file") return undefined;
-
   const collection = await resolveAgentCollection(collectionRoot, { source });
   const member = collection?.members.find((candidate) => candidate.appRoot === resolvedAppRoot);
   return collection === undefined || member === undefined
@@ -65,7 +61,6 @@ export async function resolveEveProjectContext(
   const source = options.source ?? createDiskProjectSource();
   const namedAgent = await resolveNamedAgentProjectContext(resolvedAppRoot, { source });
   if (namedAgent !== undefined) return namedAgent;
-  if (await hasVercelHostFramework(resolvedAppRoot, { source })) return standalone(resolvedAppRoot);
 
   const collection = await resolveAgentCollection(resolvedAppRoot, { source });
   return collection === undefined

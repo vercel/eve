@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
+import { parseJsonObject } from "#shared/json.js";
 import { detectPackageManager } from "#setup/package-manager.js";
 import { packageManagerWorkspaceClaimsProject } from "#setup/scaffold/workspace-root.js";
 
@@ -18,17 +19,32 @@ export interface AgentCollection {
   readonly root: string;
 }
 
-/** Materialize and validate a strict, direct-child `agents/<name>/agent/` collection. */
+async function declaresAgentCollection(source: ProjectSource, root: string): Promise<boolean> {
+  const packageJsonPath = join(root, "package.json");
+  if ((await source.stat(packageJsonPath)) !== "file") return false;
+
+  const packageJson = parseJsonObject(JSON.parse(await source.readTextFile(packageJsonPath)));
+  const eve = packageJson.eve;
+  return (
+    typeof eve === "object" &&
+    eve !== null &&
+    !Array.isArray(eve) &&
+    (eve as Record<string, unknown>).collection === true
+  );
+}
+
+/** Materialize and validate a declared, strict direct-child `agents/<name>/agent/` collection. */
 export async function resolveAgentCollection(
   root: string,
   options: { readonly source?: ProjectSource } = {},
 ): Promise<AgentCollection | undefined> {
   const source = options.source ?? createDiskProjectSource();
   const collectionRoot = resolve(root);
+  if (!(await declaresAgentCollection(source, collectionRoot))) return undefined;
+
   const agentsRoot = join(collectionRoot, AGENTS_DIRECTORY);
-  if ((await source.stat(agentsRoot)) !== "directory") return undefined;
-  if ((await source.stat(join(collectionRoot, "package.json"))) !== "file") {
-    throw new Error("An eve agent collection requires package.json at the collection root.");
+  if ((await source.stat(agentsRoot)) !== "directory") {
+    throw new Error("An eve agent collection requires an agents/ directory.");
   }
   if ((await source.stat(join(collectionRoot, "agent"))) === "directory") {
     throw new Error(
