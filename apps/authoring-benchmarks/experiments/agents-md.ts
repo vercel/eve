@@ -8,7 +8,7 @@ registerAgent(createAuthoringAgent());
 const config: ExperimentConfig = {
   agent: "eve-harness-pi",
   model: "claude-sonnet-4-6",
-  evals: "author-000-imessage",
+  evals: process.env.EVE_BENCHMARK_EVAL ?? "*",
   scripts: ["typecheck", "build"],
   runs: 1,
   earlyExit: true,

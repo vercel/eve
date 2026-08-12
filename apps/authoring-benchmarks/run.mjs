@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -45,7 +45,7 @@ const subject = local
 const executable = join(appRoot, "node_modules/.bin/agent-eval");
 mkdirSync(join(appRoot, "results"), { recursive: true });
 const selectedEval = positionals[0];
-if (selectedEval !== undefined && selectedEval !== "author-000-imessage") {
+if (selectedEval !== undefined && !existsSync(join(appRoot, "evals", selectedEval, "case.ts"))) {
   throw new Error(`Unknown eval ${JSON.stringify(selectedEval)}.`);
 }
 const experiments = values.dry
@@ -60,6 +60,7 @@ const result = spawnSync(executable, experiments, {
     ...process.env,
     EVE_BENCHMARK_REPOSITORY: subject.repository,
     EVE_BENCHMARK_REVISION: subject.revision,
+    EVE_BENCHMARK_EVAL: selectedEval ?? "*",
   },
 });
 if (result.error) throw result.error;

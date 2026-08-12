@@ -49,12 +49,12 @@ export interface AuthoringCase {
 }
 
 export const emptyProject: AuthoringStartingPoint = {
-  id: "empty-v1",
+  id: "empty-v2",
   workspace: "empty",
 };
 
 export const simpleProject: AuthoringStartingPoint = {
-  id: "simple-v1",
+  id: "simple-v2",
   workspace: "scaffolded",
 };
 

@@ -47,7 +47,10 @@ export function createAuthoringAgent(): Agent {
         runtime: "node24",
         ports: [...new Set(setups.flatMap((setup) => setup.ports ?? []))],
         timeout: 15 * 60_000,
-        env: Object.assign({}, ...setups.map((setup) => setup.environment ?? {})),
+        env: {
+          EVE_INIT_PACKAGE_SPEC: "/tmp/eve-package/eve.tgz",
+          ...Object.assign({}, ...setups.map((setup) => setup.environment ?? {})),
+        },
         networkPolicy: "allow-all",
       });
       const startedAt = Date.now();
@@ -118,6 +121,9 @@ export function createAuthoringAgent(): Agent {
         });
 
         const context = setupContext(activeSandbox, workspace);
+        if (authoringCase.startingPoint.workspace === "empty") {
+          await context.run("npm install --no-save --package-lock=false vitest@4.1.10");
+        }
         await context.write(
           "__agent_eval__/results.json",
           JSON.stringify({
@@ -190,12 +196,13 @@ async function bootstrapSubject(
     "pnpm --filter eve build",
     "mkdir -p /tmp/eve-package",
     "pnpm --dir packages/eve pack --pack-destination /tmp/eve-package",
-    "npm install --global --package-lock=false $(find /tmp/eve-package -name '*.tgz' -print -quit) vitest@4.1.10",
+    "mv $(find /tmp/eve-package -name '*.tgz' -print -quit) /tmp/eve-package/eve.tgz",
+    "npm install --global --package-lock=false /tmp/eve-package/eve.tgz vitest@4.1.10",
     `cd ${shellQuote(workspace)}`,
   ];
   if (workspaceKind === "scaffolded") {
     commands.push(
-      "AI_AGENT=benchmark EVE_INIT_PACKAGE_SPEC=$(find /tmp/eve-package -name '*.tgz' -print -quit) eve init .",
+      "AI_AGENT=benchmark eve init .",
       "npm install --save-dev --package-lock=false vitest@4.1.10",
     );
   }

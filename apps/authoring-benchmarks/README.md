@@ -75,9 +75,14 @@ pnpm benchmark:authoring --dry
 pnpm benchmark:authoring author-000-imessage --force
 ```
 
-The command runs both `baseline` and `agents-md` treatments. Agent-eval writes transcripts,
-validation output, token usage, and summaries under `apps/authoring-benchmarks/results/`.
-Use its playground command to inspect or compare results.
+These benchmarks do not run in CI or as part of `pnpm test`; they run only when invoked with
+`pnpm benchmark:authoring`. Passing a case name runs that case, while no name or `--all` runs
+every case. Each invocation runs both the `baseline` and `agents-md` treatments.
+
+Agent-eval writes ignored local results under
+`apps/authoring-benchmarks/results/<treatment>/<timestamp>/<case>/`. Each case directory contains
+`summary.json` and per-run result, transcript, grader output, and copied project files. Use
+agent-eval's playground command to inspect or compare results.
 
 `@vercel/agent-eval` chooses Vercel Sandbox when credentials are available and can otherwise
 use local Docker. The configured coding agent uses Vercel AI Gateway, so an applicable Gateway
