@@ -16,6 +16,7 @@ import type {
 } from "./authoring-case.js";
 
 const WORKSPACE = "workspace";
+const HARNESS_BRIDGE_PORT = 4172;
 const SUBJECT_REVISION = requiredEnvironmentVariable("EVE_BENCHMARK_REVISION");
 const SUBJECT_REPOSITORY = requiredEnvironmentVariable("EVE_BENCHMARK_REPOSITORY");
 const INSTRUCTIONS =
@@ -45,7 +46,7 @@ export function createAuthoringAgent(): Agent {
       );
       const sandbox = createVercelSandbox({
         runtime: "node24",
-        ports: [...new Set(setups.flatMap((setup) => setup.ports ?? []))],
+        ports: [HARNESS_BRIDGE_PORT, ...new Set(setups.flatMap((setup) => setup.ports ?? []))],
         timeout: 15 * 60_000,
         env: {
           EVE_INIT_PACKAGE_SPEC: "/tmp/eve-package/eve.tgz",
@@ -66,6 +67,7 @@ export function createAuthoringAgent(): Agent {
           auth: { gateway: { apiKey: options.apiKey } },
           ...(options.model === undefined ? {} : { model: options.model }),
           thinking: { type: "adaptive", display: "summarized" },
+          port: HARNESS_BRIDGE_PORT,
         }),
         sandbox,
         sandboxConfig: {
