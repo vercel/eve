@@ -17,6 +17,11 @@ test("installs the discovered iMessage registry item through the headless setup 
   expect(commands).toMatch(/--answer(?:=|\s+)["']?phoneNumber=/i);
 });
 
+test("asks for and uses the phone number from the follow-up turn", () => {
+  expect(readFileSync("__agent_eval__/harness-transcript.json", "utf8")).toMatch(/phone number/i);
+  expect(readFileSync("__agent_eval__/harness-transcript.json", "utf8")).toContain("+15551234567");
+});
+
 test("completes the synthetic provider setup decision tree", () => {
   expect(events.map((event) => event.type)).toEqual(
     expect.arrayContaining(["project.created", "phone.registered", "setup.completed"]),
