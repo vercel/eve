@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/vercel/eve/blob/main/SECURITY.md
+    about: Please report security vulnerabilities via responsible disclosure, not public issues.
+  - name: Question / discussion
+    url: https://github.com/vercel/eve/discussions
+    about: Ask questions and discuss ideas with the community.
