@@ -10,6 +10,7 @@ import {
 const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
 
 function respond(request: MockModelRequest): MockModelResponse | string {
+  // Framework agent-list notes are model context, not scenario turns.
   const message = [...request.userMessages].reverse().find(isScenarioMessage) ?? "";
   if (message.includes("TASK-FANOUT-INTERACTIVE-CHECK")) return "TASK-FANOUT-INTERACTIVE-OK";
   if (message.includes("TASK-CANCEL-NOW")) return cancelWorkerTask(request);
