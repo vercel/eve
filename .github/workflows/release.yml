@@ -38,7 +38,6 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: "pnpm"
-          registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -60,5 +59,3 @@ jobs:
           commitMode: github-api
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Bootstrap @eve/buzz-acp-adapter before npm trusted publishing can be configured.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_RELEASE_BOT }}
