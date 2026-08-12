@@ -8,7 +8,7 @@ Git-linked Vercel project that builds an eve tarball from each `vercel/eve` `mai
 /<full-sha>/eve.tgz
 ```
 
-Set `EVE_PACKAGE_BASE_URL` in Production to the project's public HTTPS origin, without a route suffix. For example, if it is `https://packages.example.com`, initialize an agent from the current `main` build with:
+The publisher uses Vercel's `VERCEL_PROJECT_PRODUCTION_URL` system environment variable as the public package domain. For example, if the production domain is `packages.example.com`, initialize an agent from the current `main` build with:
 
 ```bash
 npm exec --yes --package=https://packages.example.com/main/eve.tgz -- eve init my-agent
@@ -19,9 +19,9 @@ The production deployment resolves `main` to its checked-out commit. Its `latest
 The Vercel project must:
 
 - use this directory as its project root;
+- enable access to Vercel system environment variables;
 - deploy `main` to Production;
 - connect a public Blob store to Production;
-- set `EVE_PACKAGE_BASE_URL` to its public production origin;
 - omit `BLOB_READ_WRITE_TOKEN` so Blob writes use Vercel OIDC; and
 - disable Deployment Protection so npm can reach the production origin anonymously.
 

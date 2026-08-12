@@ -24,7 +24,9 @@ describe("package artifacts", () => {
   });
 
   test("requires an HTTPS package base URL", () => {
-    expect(() => packageDependencyUrl("http://packages.example.com", sha)).toThrow("use HTTPS");
+    expect(() => packageDependencyUrl("http://packages.example.com", sha)).toThrow(
+      "must use HTTPS",
+    );
   });
 
   test("prepares package metadata without mutating the source", () => {

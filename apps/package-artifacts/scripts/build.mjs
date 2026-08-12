@@ -20,7 +20,7 @@ const packageJsonPath = join(packageRoot, "package.json");
 const artifactDirectory = join(appRoot, ".artifacts");
 const sourceSha = process.env.VERCEL_GIT_COMMIT_SHA;
 const branch = process.env.VERCEL_GIT_COMMIT_REF;
-const baseUrl = process.env.EVE_PACKAGE_BASE_URL;
+const productionDomain = process.env.VERCEL_PROJECT_PRODUCTION_URL;
 
 if (!SHA_PATTERN.test(sourceSha ?? "")) {
   throw new Error("VERCEL_GIT_COMMIT_SHA must be a 40-character Git commit SHA.");
@@ -34,15 +34,15 @@ if (branch !== "main" || process.env.VERCEL_ENV !== "production") {
   process.exit(0);
 }
 
-if (typeof baseUrl !== "string" || baseUrl.length === 0) {
-  throw new Error("EVE_PACKAGE_BASE_URL is required for package publishing.");
+if (typeof productionDomain !== "string" || productionDomain.length === 0) {
+  throw new Error("VERCEL_PROJECT_PRODUCTION_URL is required for package publishing.");
 }
 
 const originalPackageJson = await readFile(packageJsonPath, "utf8");
 const preparedPackageJson = preparePackageJson(JSON.parse(originalPackageJson), sourceSha);
 const version = preparedPackageJson.version;
 // Generated projects pin this deployment's immutable SHA route, never the moving main route.
-const dependencyUrl = packageDependencyUrl(baseUrl, sourceSha);
+const dependencyUrl = packageDependencyUrl(`https://${productionDomain}`, sourceSha);
 const artifactPath = packageArtifactPath(sourceSha);
 
 try {

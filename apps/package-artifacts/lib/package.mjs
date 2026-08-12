@@ -10,7 +10,7 @@ export function packageManifestPath(sourceSha) {
 
 export function packageDependencyUrl(baseUrl, sourceSha) {
   const url = new URL(baseUrl);
-  if (url.protocol !== "https:") throw new Error("EVE_PACKAGE_BASE_URL must use HTTPS.");
+  if (url.protocol !== "https:") throw new Error("Package base URL must use HTTPS.");
   url.pathname = `${url.pathname.replace(/\/$/, "")}/${sourceSha}/eve.tgz`;
   return url.toString();
 }
