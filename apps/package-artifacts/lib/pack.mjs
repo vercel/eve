@@ -13,6 +13,7 @@ export async function packPackage(packageRoot, version, env = process.env) {
   const finalDirectory = join(workDirectory, "final");
 
   try {
+    // Let pnpm resolve workspace and catalog specifiers in the published manifest.
     await execFile("pnpm", ["--dir", packageRoot, "pack", "--out", pnpmTarballPath], { env });
     await mkdir(extractedDirectory);
     await execFile("tar", ["-xzf", pnpmTarballPath, "-C", extractedDirectory]);
@@ -23,6 +24,7 @@ export async function packPackage(packageRoot, version, env = process.env) {
     packedPackageJson.version = version;
     await writeFile(packedPackageJsonPath, `${JSON.stringify(packedPackageJson, null, 2)}\n`);
 
+    // Repack outside the workspace so pnpm's cached stable version cannot replace the canary version.
     await mkdir(finalDirectory);
     const { stdout } = await execFile(
       "npm",
