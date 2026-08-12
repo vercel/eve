@@ -3,15 +3,12 @@ import { join, resolve } from "node:path";
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { parseJsonObject } from "#shared/json.js";
-import { detectPackageManager } from "#setup/package-manager.js";
-import { packageManagerWorkspaceClaimsProject } from "#setup/scaffold/workspace-root.js";
 
 const AGENTS_DIRECTORY = "agents";
 
 export interface AgentCollectionMember {
   readonly appRoot: string;
   readonly name: string;
-  readonly packageJsonPath?: string;
 }
 
 export interface AgentCollection {
@@ -60,8 +57,6 @@ export async function resolveAgentCollection(
     throw new Error("The agents/ collection must contain at least one direct child agent.");
   }
 
-  const packageManager =
-    source.kind === "disk" ? await detectPackageManager(collectionRoot) : undefined;
   const members: AgentCollectionMember[] = [];
   for (const entry of directories) {
     assertValidPublicAgentName(entry.name, "Agent collection member");
@@ -76,23 +71,7 @@ export async function resolveAgentCollection(
       );
     }
 
-    const packageJsonPath = join(appRoot, "package.json");
-    const hasPackageJson = (await source.stat(packageJsonPath)) === "file";
-    if (
-      source.kind === "disk" &&
-      hasPackageJson &&
-      !packageManagerWorkspaceClaimsProject(packageManager!.kind, collectionRoot, appRoot)
-    ) {
-      throw new Error(
-        `${join(AGENTS_DIRECTORY, entry.name, "package.json")} defines a child package that is not a member of the root ${packageManager!.kind} workspace. Add agents/* to the workspace configuration.`,
-      );
-    }
-    const member: { appRoot: string; name: string; packageJsonPath?: string } = {
-      appRoot,
-      name: entry.name,
-    };
-    if (hasPackageJson) member.packageJsonPath = packageJsonPath;
-    members.push(member);
+    members.push({ appRoot, name: entry.name });
   }
 
   return { members, root: collectionRoot };
