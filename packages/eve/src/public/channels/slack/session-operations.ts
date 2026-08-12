@@ -4,7 +4,10 @@ import type {
   ChannelRespondOptions,
   ChannelSendOptions,
   ChannelSource,
+  InternalChannelSource,
 } from "#channel/channel-operations.js";
+import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
+import type { SendPayload } from "#channel/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { UserContent } from "ai";
@@ -25,6 +28,8 @@ export type SlackRespondOptions = Omit<ChannelRespondOptions, "auth"> & {
 /** Current-owner operations already bound to one Slack thread. */
 export interface SlackSessionOperations {
   send(message: string | UserContent, options?: SlackSendOptions): ReturnType<SlackSource["send"]>;
+  /** @internal Delivers Slack-owned payload metadata through the channel adapter. */
+  deliver(payload: SendPayload, options?: SlackSendOptions): ReturnType<SlackSource["send"]>;
   respond(
     inputResponses: readonly InputResponse[],
     options?: SlackRespondOptions,
@@ -44,13 +49,20 @@ export function bindSlackSessionOperations(input: {
   readonly resolveSession: ChannelResolveSession;
   readonly state: SlackChannelState;
 }): SlackSessionOperations {
-  const source = input.from(input.address);
+  const source = input.from(input.address) as InternalChannelSource<SlackChannelState>;
   const auth = (value: SessionAuthContext | null | undefined) =>
     value === undefined ? input.defaultAuth : value;
 
   return {
     async send(message, options = {}) {
       return await source.send(message, {
+        ...options,
+        auth: auth(options.auth),
+        state: input.state,
+      });
+    },
+    async deliver(payload, options = {}) {
+      return await source[INTERNAL_CHANNEL_DELIVER](payload, {
         ...options,
         auth: auth(options.auth),
         state: input.state,

@@ -22,7 +22,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { runStep } from "#context/run-step.js";
+import { runStep, withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   emitTurnPreamble,
@@ -211,7 +211,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     ctx.set(AuthKey, input.input.auth ?? null);
   }
 
-  const initialSession = hydrateDurableSession({
+  let initialSession = hydrateDurableSession({
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
     },
@@ -251,26 +251,39 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   };
   const adapterCtx = buildAdapterContext(adapter, ctx);
 
-  // Run the adapter's deliver hook for each queued payload and
-  // coalesce the resulting StepInput values.
+  // Run the adapter's deliver hook for each queued payload inside the same
+  // hydrated ALS scope as tools and event handlers. Durable channel policies
+  // can therefore use SessionContext, defineState, sandbox access, and other
+  // context-backed APIs before deciding whether the delivery starts a turn.
   let resolved: StepInput | undefined;
+  let deliverySessionChanged = false;
   if (input.input?.kind === "deliver") {
-    const results: StepInput[] = [];
+    const delivery = input.input;
+    const beforeDeliverySession = initialSession;
     try {
-      for (const payload of input.input.payloads) {
-        const result = adapter.deliver
-          ? await adapter.deliver(payload, adapterCtx)
-          : defaultDeliverResult(payload);
+      const scoped = await withContextScope(ctx, initialSession, async (enrichedSession) => {
+        const results: StepInput[] = [];
+        for (const payload of delivery.payloads) {
+          const result = adapter.deliver
+            ? await adapter.deliver(payload, adapterCtx)
+            : defaultDeliverResult(payload);
 
-        if (result !== undefined && result !== null) {
-          results.push(result);
+          if (result !== undefined && result !== null) {
+            results.push(result);
+          }
         }
-      }
+        return {
+          result: results.length === 0 ? undefined : results.reduce(coalesceTurnInputs),
+          session: enrichedSession,
+        };
+      });
+      resolved = scoped.result;
+      initialSession = scoped.session;
+      deliverySessionChanged = initialSession !== beforeDeliverySession;
     } catch (error) {
       await failChannelDeliveries(error);
       throw error;
     }
-    resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
   } else if (input.input?.kind === "runtime-action-result") {
     recordSubagentUsageSpans(input.input.results);
     if (input.input.acceptedAtMsByCallId !== undefined) {
@@ -302,7 +315,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     const rekeyed = reconcileSessionContinuationToken(ctx, initialSession);
     const nextSerializedContext = serializeContext(ctx);
     const nextState =
-      rekeyed === initialSession
+      !deliverySessionChanged && rekeyed === initialSession
         ? input.sessionState
         : createDurableSessionState({ session: rekeyed });
 
