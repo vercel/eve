@@ -1,0 +1,17 @@
+{
+  "name": "eve-canary-artifacts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "vitest run --config vitest.config.ts",
+    "test:smoke": "node scripts/check-smoke.mjs"
+  },
+  "dependencies": {
+    "@vercel/blob": "2.8.0"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}
