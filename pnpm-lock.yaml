@@ -143,7 +143,7 @@ importers:
       '@ai-sdk/harness':
         specifier: 1.0.68
         version: 1.0.68(ws@8.21.1(bufferutil@4.1.0))(zod@4.4.3)
-      '@ai-sdk/harness-claude-code':
+      '@ai-sdk/harness-codex':
         specifier: 1.0.70
         version: 1.0.70(bufferutil@4.1.0)(zod@4.4.3)
       '@ai-sdk/sandbox-vercel':
@@ -1569,8 +1569,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/harness-claude-code@1.0.70':
-    resolution: {integrity: sha512-AvmB18+cNqPRlxEqNx5ag92pQH0tHxtHiVbhoo4l6MZf7JeO9vkx2fIBz4gyU6UWFRfxLNg7rQFAZERzEyqO7A==}
+  '@ai-sdk/harness-codex@1.0.70':
+    resolution: {integrity: sha512-yaxMNWOQ7GbVkIFWThfLI/IMb8zrX4upma4F/ak4KOsito9+OL7ROHyXEcofbUYhfYcIxtYa6G2lmLruWWoCrA==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -15933,7 +15933,7 @@ snapshots:
       zod: 4.4.3
     optional: true
 
-  '@ai-sdk/harness-claude-code@1.0.70(bufferutil@4.1.0)(zod@4.4.3)':
+  '@ai-sdk/harness-codex@1.0.70(bufferutil@4.1.0)(zod@4.4.3)':
     dependencies:
       '@ai-sdk/harness': 1.0.68(ws@8.21.1(bufferutil@4.1.0))(zod@4.4.3)
       '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)

@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import type { HarnessAgentSession } from "@ai-sdk/harness/agent";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
-import { createClaudeCode } from "@ai-sdk/harness-claude-code";
+import { createCodex } from "@ai-sdk/harness-codex";
 import type { Agent, AgentRunResult } from "@vercel/agent-eval";
 
 import type {
@@ -27,6 +27,7 @@ import {
 import type { AuthoringTranscriptEntry } from "./protocol.js";
 
 const HARNESS_BRIDGE_PORT = 4172;
+const HARNESS_NAME = "codex";
 export function createAuthoringAgent(subject: {
   readonly name: string;
   readonly archive: Uint8Array;
@@ -42,7 +43,7 @@ export function createAuthoringAgent(subject: {
       name: subject.name,
       displayName: "eve authoring harness",
       defaultModel: AUTHORING_MODEL,
-      o11yAgentName: "claude-code",
+      o11yAgentName: HARNESS_NAME,
       runnerPath: "",
       getApiKeyEnvVar: () => "AI_GATEWAY_API_KEY",
       install: () => [],
@@ -77,11 +78,11 @@ export function createAuthoringAgent(subject: {
       let workspace: string | undefined;
 
       const agent = new HarnessAgent({
-        id: "eve-authoring-eval",
-        harness: createClaudeCode({
+        id: "eve-benchmark",
+        harness: createCodex({
           auth: { gateway: { apiKey: options.apiKey } },
           ...(options.model === undefined ? {} : { model: options.model }),
-          thinking: { type: "adaptive", display: "summarized" },
+          reasoningEffort: "high",
           port: HARNESS_BRIDGE_PORT,
         }),
         sandbox,
@@ -106,7 +107,9 @@ export function createAuthoringAgent(subject: {
             workspace = sessionWorkDir;
             const context = setupContext(activeSandbox, workspace);
             for (const setup of setups) await setup.onSession?.(context);
-            if (options.agentOptions?.agentsMd !== true) {
+            if (options.agentOptions?.agentsMd === true) {
+              await assertAgentGuidance(context);
+            } else {
               await context.run("rm -f AGENTS.md CLAUDE.md");
             }
             await context.write(
@@ -177,7 +180,7 @@ export function createAuthoringAgent(subject: {
         log("[grade] running deterministic assertions");
         const test = await resultOf(
           activeSandbox,
-          `vitest run ${workspace}/${AGENT_EVAL_DIRECTORY}/EVAL.test.ts`,
+          `cd ${AGENT_EVAL_DIRECTORY} && vitest run EVAL.test.ts`,
           workspace,
         );
         const scriptsResults = Object.fromEntries(
@@ -283,7 +286,7 @@ async function bootstrapSubject(
       `npm install --global --package-lock=false ${EVE_PACKAGE_PATH}`,
     ].join(" && "),
   );
-  const artifactsRoot = `${workspace}/${AGENT_EVAL_DIRECTORY}`;
+  const artifactsRoot = AGENT_EVAL_DIRECTORY;
   const workspaceCommands: string[] = [];
   if (workspaceKind === "scaffolded") {
     workspaceCommands.push(`cd ${shellQuote(workspace)} && AI_AGENT=benchmark eve init .`);
@@ -317,6 +320,10 @@ function setupContext(
       });
     },
   };
+}
+
+async function assertAgentGuidance(context: AuthoringSetupContext): Promise<void> {
+  await context.run("test -s AGENTS.md && test -s CLAUDE.md && grep -Fq '@AGENTS.md' CLAUDE.md");
 }
 
 function shellCommands(toolCalls: ReadonlyArray<{ input: unknown }>): string[] {

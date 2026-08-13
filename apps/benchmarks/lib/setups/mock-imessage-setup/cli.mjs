@@ -6,8 +6,7 @@ import { parseArgs } from "node:util";
 import { authoringStatePath, recordAuthoringEvent } from "./authoring-world.mjs";
 
 const PROTOCOL_VERSION = 2;
-const STATE_FILE = authoringStatePath("mock-imessage-state");
-const EXPECTED_PHONE = process.env.EVE_AUTHORING_PHONE_NUMBER ?? "+15551234567";
+const STATE_FILE = authoringStatePath("photon-state");
 
 const { values } = parseArgs({
   options: {
@@ -36,7 +35,7 @@ let outcome;
 if (!values["non-interactive"]) {
   finish({
     kind: "failed",
-    error: { message: "This deterministic setup requires --non-interactive." },
+    error: { message: "This setup requires --non-interactive." },
   });
 } else if (answers.phoneNumber === undefined) {
   record("phone.requested");
@@ -53,7 +52,7 @@ if (!values["non-interactive"]) {
       },
     },
   });
-} else if (answers.phoneNumber !== EXPECTED_PHONE) {
+} else if (!/^\+[1-9]\d{7,14}$/u.test(String(answers.phoneNumber))) {
   record("phone.rejected", { supplied: String(answers.phoneNumber) });
   finish({
     kind: "blocked",
@@ -66,25 +65,26 @@ if (!values["non-interactive"]) {
         required: true,
         sensitive: false,
       },
-      issue: { code: "invalid_answer", message: "Use the user's supplied phone number." },
+      issue: { code: "invalid_answer", message: "Use an E.164 phone number." },
     },
   });
 } else {
+  const phoneNumber = String(answers.phoneNumber);
   if (!state.projectCreated) {
     state.projectCreated = true;
-    record("project.created", { id: "mock-imessage-project" });
+    record("project.created", { id: "photon-project" });
   }
   if (!state.phoneRegistered) {
     state.phoneRegistered = true;
-    record("phone.registered", { phoneNumber: EXPECTED_PHONE });
+    record("phone.registered", { phoneNumber });
   }
   persist();
   record("setup.completed");
   finish({
     kind: "completed",
     facts: [
-      { label: "Provider project", value: "mock-imessage-project" },
-      { label: "Phone number", value: EXPECTED_PHONE, kind: "phone" },
+      { label: "Provider project", value: "photon-project" },
+      { label: "Phone number", value: phoneNumber, kind: "phone" },
     ],
     deploymentRequired: true,
   });

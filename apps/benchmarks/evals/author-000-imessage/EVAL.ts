@@ -14,7 +14,7 @@ test("installs the discovered iMessage registry item through the headless setup 
 
 test("asks for and uses the phone number from the follow-up turn", () => {
   expect(transcript.some((entry) => /phone number/i.test(entry.content))).toBe(true);
-  expect(transcript.some((entry) => entry.content.includes("+15551234567"))).toBe(true);
+  expect(transcript.some((entry) => entry.content.includes("+447700900123"))).toBe(true);
 });
 
 test("completes the synthetic provider setup decision tree", () => {
@@ -22,7 +22,7 @@ test("completes the synthetic provider setup decision tree", () => {
     expect.arrayContaining(["project.created", "phone.registered", "setup.completed"]),
   );
   const registration = worldEvents.find((event) => event.type === "phone.registered");
-  expect(registration?.data?.phoneNumber).toBe("+15551234567");
+  expect(registration?.data?.phoneNumber).toBe("+447700900123");
 });
 
 test("creates an iMessage channel and leaves the project valid", () => {

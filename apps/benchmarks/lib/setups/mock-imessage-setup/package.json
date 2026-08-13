@@ -1,9 +1,9 @@
 {
-  "name": "@eve-internal/mock-imessage-setup",
+  "name": "@photon-ai/setup",
   "version": "0.0.0",
   "private": true,
   "bin": {
-    "mock-imessage-setup": "./cli.mjs"
+    "photon-setup": "./cli.mjs"
   },
   "type": "module"
 }

@@ -10,7 +10,7 @@ export const imessageSetup: AuthoringSetup = {
   ports: [REGISTRY_PORT],
   environment: { EVE_DEV_OFFICIAL_REGISTRY_URL: REGISTRY_URL },
   async onBootstrap({ run, artifactsRoot, write }) {
-    const setupRoot = `${artifactsRoot}/mock-imessage-setup`;
+    const setupRoot = `${artifactsRoot}/photon-setup`;
     await Promise.all(
       ["authoring-world.mjs", "cli.mjs", "package.json"].map((file) =>
         write(
@@ -19,29 +19,29 @@ export const imessageSetup: AuthoringSetup = {
         ),
       ),
     );
-    await run(`pnpm add ./${setupRoot}`);
+    await run(`pnpm add ${setupRoot}`);
     await run(`mkdir -p ${artifactsRoot}/registry/channel`);
 
     const channel = {
       $schema: "https://ui.shadcn.com/schema/registry-item.json",
       name: "channel/photon-imessage",
       title: "Photon iMessage",
-      description: "Connect an eve agent to iMessage through a deterministic provider setup flow.",
+      description: "Connect an eve agent to iMessage through Photon.",
       files: [
         {
           path: "registry/channels/photon-imessage.ts",
           type: "registry:file",
           target: "agent/channels/imessage.ts",
           content:
-            'import { photonIMessageChannel } from "eve/channels/photon";\n\nexport default photonIMessageChannel({ credentials: async () => ({ projectId: "mock-imessage-project", projectSecret: "mock-imessage-secret" }) });\n',
+            'import { photonIMessageChannel } from "eve/channels/photon";\n\nexport default photonIMessageChannel({ credentials: async () => ({ projectId: "photon-project", projectSecret: "photon-project-secret" }) });\n',
         },
       ],
       meta: {
         eve: {
           setup: {
-            command: "mock-imessage-setup",
-            package: "@eve-internal/mock-imessage-setup",
-            bin: "mock-imessage-setup",
+            command: "photon-setup",
+            package: "@photon-ai/setup",
+            bin: "photon-setup",
             args: [],
           },
         },
@@ -50,7 +50,7 @@ export const imessageSetup: AuthoringSetup = {
     };
     const registry = {
       $schema: "https://ui.shadcn.com/schema/registry.json",
-      name: "eve-authoring-eval",
+      name: "eve-official",
       homepage: REGISTRY_URL,
       items: [
         {
@@ -68,13 +68,9 @@ export const imessageSetup: AuthoringSetup = {
       write(`${artifactsRoot}/registry/channel/photon-imessage.json`, JSON.stringify(channel)),
     ]);
   },
-  async onSession({ run, artifactsRoot, write }) {
+  async onSession({ run, artifactsRoot }) {
     await run(
       `nohup python3 -m http.server ${REGISTRY_PORT} --directory ${artifactsRoot}/registry >${artifactsRoot}/registry.log 2>&1 </dev/null &`,
-    );
-    await write(
-      ".claude/settings.json",
-      JSON.stringify({ env: { EVE_DEV_OFFICIAL_REGISTRY_URL: REGISTRY_URL } }),
     );
   },
 };
