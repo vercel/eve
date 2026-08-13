@@ -1,5 +1,23 @@
 # eve
 
+## 0.35.0
+
+### Minor Changes
+
+- 3f92f7d: Instrumentation now records trace metadata without model or tool inputs and outputs by default. Set `recordInputs` or `recordOutputs` to `true`, or use `EVE_TRACES_CONTENT=on` for the automatic local trace spool, to opt into content capture.
+
+### Patch Changes
+
+- 9a07754: Recognize repository-style Vercel link metadata during guided setup, so Vercel Connect integrations can continue after Vercel CLI links a repository-backed project.
+- 1cd563b: A model step that requests a tool approval (or question) and a subagent or remote-agent call in the same response no longer drops the approval. The harness now parks on both: the input request surfaces immediately, the delegation runs, and when its result arrives the turn re-parks on the still-pending approval instead of calling the model with a dangling tool call (`AI_MissingToolResultsError`).
+- 02b7b7e: `githubChannel({ botName })` now also accepts a lazy resolver function, resolved on first use inside request handling, cached on success, and retried after a failure, so resolvers that depend on request-scoped credentials work in production. When `botName` is omitted, the channel falls back to the new `appSlug` field on `GitHubChannelCredentials`, then to `GITHUB_APP_SLUG`.
+- 77eb819: Traced session and turn start events now carry portable trace context. Eval reporters can observe individual eval and traced-session starts, correlate completed results across every session trace, and read those contexts from artifacts and Braintrust metadata.
+- df0804e: Instructions now accept `content` with an optional `system` or `user` role, and dynamic instruction resolvers have a lifecycle-specific typed API. User-role instructions enter durable conversation history at their static, session, or turn boundary; the legacy `markdown` form remains available as a deprecated system-role definition.
+- a19c743: The local trace viewer now reads user messages and runtime actions from durable channel delivery and action spans, avoiding duplicate SDK tool details in `eve traces` output.
+- 23c7354: Organize the internal harness instrumentation modules under a dedicated directory without changing runtime behavior.
+- 891aed8: Fix authored-module evaluation on Windows when configured external dependencies resolve to absolute paths.
+- df398a9: Update eve's bundled Workflow SDK packages to the latest 5.0.0 beta releases, aligning the worlds with the `@workflow/core` beta already pinned.
+
 ## 0.34.0
 
 ### Minor Changes
