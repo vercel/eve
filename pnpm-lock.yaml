@@ -614,6 +614,25 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  e2e/fixtures/agent-dynamic-model-session:
+    dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
+      '@workflow/world-postgres':
+        specifier: 'catalog:'
+        version: 5.0.0-beta.33(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.9.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   e2e/fixtures/agent-model:
     dependencies:
       '@eve-e2e/config':
@@ -7786,6 +7805,7 @@ packages:
 
   '@workflow/world-postgres@5.0.0-beta.33':
     resolution: {integrity: sha512-yBuMdic/jCm24x+dszmWHiqOnGpD37o/4ySls8yFwCw7DxZU+nq7hUq7I4HJoYwybkBP6BhqN6ZUCWKouE4EFA==}
+    hasBin: true
 
   '@workflow/world-vercel@5.0.0-beta.37':
     resolution: {integrity: sha512-jfbWAZl/9D+bNPrqWCmJ6ohLA3M4+MXR1tagrmEpjGFPFH11f/1lRRARcn6Dwi1+27EQ7HwxeTTpE63BZftt9w==}
@@ -14208,6 +14228,7 @@ packages:
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
     engines: {node: '>=16.20.0'}
+    hasBin: true
 
   ua-parser-js@1.0.41:
     resolution: {integrity: sha512-LbBDqdIC5s8iROCUjMbW1f5dJQTEFB1+KO9ogbvlb3nm9n4YHa5p4KTvFPWvh2Hs8gZMBuiB1/8+pdfe/tDPug==}
