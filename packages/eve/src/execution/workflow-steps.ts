@@ -58,8 +58,6 @@ import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessSession, SettledTurn, StepInput, StepResult } from "#harness/types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { JsonObject } from "#shared/json.js";
-import type { RunMode } from "#shared/run-mode.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import {
   createAuthorizationCompletedEvent,
@@ -76,6 +74,8 @@ import {
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import { forwardTaskEventToSessionCallback } from "#execution/task-event-callback.js";
+import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -389,6 +389,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     event: UnstampedMessageStreamEvent,
     messages?: readonly import("ai").ModelMessage[],
   ): Promise<void> => {
+    // Task children report HITL and authorization transitions to their
+    // parent's session callback before local emission, so the parent's
+    // task run can block/unblock the task under one durable decision.
+    await forwardTaskEventToSessionCallback(ctx, event);
     const emitted = await emit(event);
     await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted });
     if (emitted.type !== "step.started") {
@@ -668,35 +672,4 @@ function derivePendingState(session: HarnessSession): {
     };
   }
   return base;
-}
-
-/**
- * Resolves the single output schema in effect for this turn, decoupling schema
- * enforcement from {@link RunMode}: downstream the harness reads
- * `session.outputSchema` unconditionally and never re-derives it from mode.
- *
- * A run-scoped (client-supplied) schema on the turn's {@link StepInput} always
- * wins. With no run-scoped schema, a task run adopts the agent's declared
- * return schema — its function-output contract, which only applies when the
- * agent is invoked as a function (subagent / schedule / job), i.e. task mode.
- * A conversation run with no run-scoped schema enforces nothing. Continuation
- * steps (no new `StepInput`) preserve whatever is already in effect.
- */
-export function resolveEffectiveOutputSchema(input: {
-  readonly agentOutputSchema: JsonObject | undefined;
-  readonly input: StepInput | undefined;
-  readonly mode: RunMode;
-  readonly session: HarnessSession;
-}): HarnessSession {
-  const { agentOutputSchema, input: stepInput, mode, session } = input;
-
-  if (stepInput?.outputSchema !== undefined) {
-    return { ...session, outputSchema: stepInput.outputSchema };
-  }
-
-  if (mode === "task" && session.outputSchema === undefined && agentOutputSchema !== undefined) {
-    return { ...session, outputSchema: agentOutputSchema };
-  }
-
-  return session;
 }

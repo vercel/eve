@@ -42,7 +42,8 @@ import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.
 import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
-import { resolveEffectiveOutputSchema, turnStep } from "#execution/workflow-steps.js";
+import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
+import { turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import {
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
