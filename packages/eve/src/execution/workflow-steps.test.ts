@@ -43,6 +43,7 @@ import { emitTerminalSessionFailureStep } from "#execution/terminal-session-fail
 import { routeProxiedDeliverStep } from "#execution/route-proxied-deliver-step.js";
 import { resolveEffectiveOutputSchema, turnStep } from "#execution/workflow-steps.js";
 import {
+  clearLatestDeploymentFallbackMemoForTest,
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
   turnWorkflowReference,
   workflowEntryReference,
@@ -198,6 +199,7 @@ function createSerializedContext(
 }
 
 afterEach(() => {
+  clearLatestDeploymentFallbackMemoForTest();
   getRunMock.mockReset();
   resumeHookMock.mockReset();
   startMock.mockReset();
@@ -430,29 +432,6 @@ describe("dispatchTurnStep", () => {
       turnWorkflowReference,
       [createTurnWorkflowInput(input)],
       expect.objectContaining({ deploymentId: "latest" }),
-    );
-  });
-
-  it("pins turn workflows to the current deployment off production", async () => {
-    vi.stubEnv("VERCEL_ENV", "preview");
-    const input = createTurnInput();
-    startMock.mockResolvedValue({ runId: "turn-run" });
-
-    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
-
-    expect(startMock).toHaveBeenCalledTimes(1);
-    expect(startMock).toHaveBeenCalledWith(
-      turnWorkflowReference,
-      [createTurnWorkflowInput(input)],
-      {
-        allowReservedAttributes: true,
-        attributes: {
-          "$eve.channel_request_id": "req_turn",
-          "$eve.parent": "sess-test",
-          "$eve.root": "sess-test",
-          "$eve.type": "turn",
-        },
-      },
     );
   });
 

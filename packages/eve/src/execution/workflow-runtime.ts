@@ -25,7 +25,6 @@ import {
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   getHookByToken,
@@ -60,6 +59,7 @@ const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
+export const LATEST_DEPLOYMENT_NO_GIT_BRANCH_MESSAGE = "Source deployment has no git branch";
 
 /**
  * Workflow function names whose bundled id is stable across deployments
@@ -80,6 +80,7 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
 const log = createLogger("execution.workflow-runtime");
+let latestDeploymentFallbackMemoized = false;
 
 interface WorkflowHookRecord {
   readonly runId: string;
@@ -370,44 +371,59 @@ async function waitForCommandHookRelease(token: string, sessionId: string): Prom
 }
 
 /**
- * Starts a workflow on the latest deployment when latest routing applies,
- * while preserving local/dev worlds that do not implement latest routing.
+ * Starts a workflow on the latest deployment when the active workflow world can
+ * resolve it, while preserving worlds and deployments that cannot.
  */
 export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
   options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
-  if (!shouldRouteToLatestDeployment()) {
-    return options === undefined
-      ? await start(workflow, args)
-      : await start(workflow, args, options);
+  if (latestDeploymentFallbackMemoized) {
+    return await startWorkflowOnCurrentDeployment(workflow, args, options);
   }
 
   try {
     return await start(workflow, args, { ...options, deploymentId: "latest" });
   } catch (error) {
-    if (!isLatestDeploymentUnsupportedError(error)) {
+    if (!isLatestDeploymentFallbackError(error)) {
       throw error;
     }
 
-    return options === undefined
-      ? await start(workflow, args)
-      : await start(workflow, args, options);
+    const run = await startWorkflowOnCurrentDeployment(workflow, args, options);
+    latestDeploymentFallbackMemoized = true;
+    return run;
   }
 }
 
 /**
- * Local development resolves "latest" to the active promoted generation.
- * Vercel resolves it only for production deployments; previews and CLI
- * deployments have no branch reference and remain pinned to themselves.
+ * Clears the latest-routing fallback memo between tests. Production code keeps
+ * the memo for the life of the process because unsupported worlds and
+ * branchless deployments cannot start resolving "latest" mid-process.
  */
-function shouldRouteToLatestDeployment(): boolean {
-  return process.env.VERCEL_ENV === "production" || isEveDevEnvironment();
+export function clearLatestDeploymentFallbackMemoForTest(): void {
+  latestDeploymentFallbackMemoized = false;
 }
 
-function isLatestDeploymentUnsupportedError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes(LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE);
+async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], TResult>(
+  workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
+  args: TArgs,
+  options?: StartOptionsWithoutDeploymentId,
+): Promise<Run<unknown> | Run<TResult>> {
+  return options === undefined ? await start(workflow, args) : await start(workflow, args, options);
+}
+
+function isLatestDeploymentFallbackError(error: unknown): boolean {
+  return (
+    errorMessageIncludes(error, LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE) ||
+    errorMessageIncludes(error, LATEST_DEPLOYMENT_NO_GIT_BRANCH_MESSAGE)
+  );
+}
+
+function errorMessageIncludes(error: unknown, message: string): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.message.includes(message)) return true;
+  return error.cause !== undefined && errorMessageIncludes(error.cause, message);
 }
 
 function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {

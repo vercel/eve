@@ -37,7 +37,9 @@ describe("session timeout steps", () => {
     };
 
     await expect(startSessionTimeoutStep(input)).resolves.toEqual({ runId: "timer-run" });
-    expect(startMock).toHaveBeenCalledWith(sessionTimeoutWorkflowReference, [input]);
+    expect(startMock).toHaveBeenCalledWith(sessionTimeoutWorkflowReference, [input], {
+      deploymentId: "latest",
+    });
   });
 
   it("signals the owning session hook", async () => {
