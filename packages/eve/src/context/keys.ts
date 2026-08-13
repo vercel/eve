@@ -118,6 +118,11 @@ export const SessionDynamicModelReferenceKey = new ContextKey<RuntimeModelRefere
   "eve.sessionDynamicModelReference",
 );
 
+/** Runtime revision that produced the session-scoped dynamic model selection. */
+export const SessionDynamicModelRuntimeRevisionKey = new ContextKey<string>(
+  "eve.sessionDynamicModelRuntimeRevision",
+);
+
 /** Turn-scoped dynamic model selection (from `turn.started`). */
 export const TurnDynamicModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
   "eve.turnDynamicModelReference",
