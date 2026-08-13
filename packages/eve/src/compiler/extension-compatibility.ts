@@ -45,7 +45,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   skill: { current: 1, supported: [1], dropped: {} },
   dynamicSkill: { current: 11, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dropped: {} },
-  instructions: { current: 1, supported: [1], dropped: {} },
+  instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: { current: 11, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dropped: {} },
   config: { current: 1, supported: [1], dropped: {} },
   state: { current: 3, supported: [1, 2, 3], dropped: {} },
@@ -61,7 +61,9 @@ export const EXTENSION_CAPABILITY_VERSIONS = Object.fromEntries(
     contract.current,
   ]),
 ) as {
-  readonly [TCapability in ExtensionCapability]: (typeof EXTENSION_CAPABILITY_CONTRACTS)[TCapability]["current"];
+  readonly [
+    TCapability in ExtensionCapability
+  ]: (typeof EXTENSION_CAPABILITY_CONTRACTS)[TCapability]["current"];
 };
 
 /** Capability requirements stamped by one extension build. */
