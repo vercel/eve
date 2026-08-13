@@ -183,7 +183,7 @@ describe("compiler artifacts", () => {
           sourceId: "instructions.md",
         },
       ],
-      version: 12,
+      version: 13,
     });
     expect(normalizeArtifactValue(JSON.parse(compiledManifestText), appRoot)).toMatchObject({
       agentRoot: "<app-root>/agent",
