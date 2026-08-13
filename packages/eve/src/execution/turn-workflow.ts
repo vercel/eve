@@ -356,7 +356,11 @@ async function waitForRuntimeActionResults(input: {
       continue;
     }
 
-    if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
+    if (
+      value.kind === "subagent-input-request" ||
+      value.kind === "subagent-authorization-event" ||
+      value.kind === "subagent-progress-event"
+    ) {
       const proxyResult = await runProxySubagentEventStep({
         hookPayload: value,
         parentWritable: input.cursor.parentWritable,

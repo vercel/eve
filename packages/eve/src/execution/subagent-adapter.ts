@@ -5,6 +5,8 @@ import type {
   SubagentAuthorizationEvent,
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
+  SubagentProgressEvent,
+  SubagentProgressEventHookPayload,
 } from "#channel/types.js";
 import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import {
@@ -12,6 +14,7 @@ import {
   isSubagentAdapterState,
 } from "#execution/subagent-adapter-state.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
+import type { RuntimeActionRequest } from "#runtime/actions/types.js";
 
 const log = createLogger("execution.subagent-adapter");
 
@@ -20,10 +23,32 @@ const log = createLogger("execution.subagent-adapter");
  * parent.
  *
  * It proxies child `input.requested` events upward so the parent channel
- * can render HITL prompts and route responses back down to the child.
+ * can render HITL prompts and route responses back down to the child, and
+ * proxies the child's nested-dispatch lifecycle upward so a parent progress
+ * surface sees past its own `subagent-call` into the work the child
+ * delegated onward.
  */
 export const SUBAGENT_ADAPTER: ChannelAdapter = {
   kind: SUBAGENT_ADAPTER_KIND,
+  async "actions.requested"(data, ctx) {
+    const actions = data.actions.filter(isDispatchActionRequest);
+
+    if (actions.length === 0) {
+      return;
+    }
+
+    await forwardSubagentProgressEvent(
+      { data: { ...data, actions }, type: "actions.requested" },
+      ctx,
+    );
+  },
+  async "action.result"(data, ctx) {
+    if (data.result.kind !== "subagent-result") {
+      return;
+    }
+
+    await forwardSubagentProgressEvent({ data, type: "action.result" }, ctx);
+  },
   async "approval.candidate"(data, ctx) {
     await forwardSubagentAuthorizationEvent({ data, type: "approval.candidate" }, ctx);
   },
@@ -64,6 +89,39 @@ export const SUBAGENT_ADAPTER: ChannelAdapter = {
   },
 };
 
+/**
+ * Nested dispatch is the unit a parent progress surface can render: it is the
+ * child's own `subagent.called` boundary, one event per delegated run. A
+ * child's tool calls are per-step chatter with unbounded result payloads, and
+ * every hop up the chain replays them into another durable step and another
+ * parent stream.
+ */
+function isDispatchActionRequest(action: RuntimeActionRequest): boolean {
+  return action.kind === "remote-agent-call" || action.kind === "subagent-call";
+}
+
+async function forwardSubagentProgressEvent(
+  event: SubagentProgressEvent,
+  ctx: ChannelAdapterContext,
+): Promise<void> {
+  const state = ctx.state;
+
+  if (!isSubagentAdapterState(state)) {
+    return;
+  }
+
+  await forwardSubagentProgressEventStep({
+    hookPayload: {
+      callId: state.callId,
+      childSessionId: ctx.ctx.require(SessionIdKey),
+      event,
+      kind: "subagent-progress-event",
+      subagentName: state.subagentName,
+    },
+    parentContinuationToken: state.parentContinuationToken,
+  });
+}
+
 async function forwardSubagentAuthorizationEvent(
   event: SubagentAuthorizationEvent,
   ctx: ChannelAdapterContext,
@@ -84,6 +142,30 @@ async function forwardSubagentAuthorizationEvent(
     },
     parentContinuationToken: state.parentContinuationToken,
   });
+}
+
+/** Forwards one child nested-dispatch event to its active parent turn. */
+async function forwardSubagentProgressEventStep(input: {
+  readonly hookPayload: SubagentProgressEventHookPayload;
+  readonly parentContinuationToken: string;
+}): Promise<void> {
+  "use step";
+
+  try {
+    await resumeHook(input.parentContinuationToken, input.hookPayload);
+  } catch (error) {
+    const errorId = createErrorId();
+    log.warn("failed to forward subagent progress event to parent", {
+      callId: input.hookPayload.callId,
+      childSessionId: input.hookPayload.childSessionId,
+      errorId,
+      eventType: input.hookPayload.event.type,
+      parentContinuationToken: input.parentContinuationToken,
+      subagentName: input.hookPayload.subagentName,
+      error,
+    });
+    throw error;
+  }
 }
 
 /** Forwards one child authorization event to its active parent turn. */

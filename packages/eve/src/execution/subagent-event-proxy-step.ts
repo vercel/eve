@@ -3,6 +3,7 @@ import { callAdapterEventHandler } from "#channel/adapter.js";
 import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
+  SubagentProgressEventHookPayload,
 } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
 import { ModeKey } from "#context/keys.js";
@@ -28,7 +29,8 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 
 type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload
-  | SubagentInputRequestHookPayload;
+  | SubagentInputRequestHookPayload
+  | SubagentProgressEventHookPayload;
 
 type ProxyInputRequestEntries = readonly (readonly [requestId: string, route: ProxyInputRequest])[];
 
@@ -89,7 +91,10 @@ export async function emitProxiedSubagentEvent(input: {
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
-      if (input.hookPayload.kind === "subagent-authorization-event") {
+      if (
+        input.hookPayload.kind === "subagent-authorization-event" ||
+        input.hookPayload.kind === "subagent-progress-event"
+      ) {
         await emit(input.hookPayload.event);
         return { result: undefined, session: enrichedSession };
       }

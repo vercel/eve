@@ -5,12 +5,15 @@ import { buildSessionHandle } from "#channel/session.js";
 import { type SubagentAdapterState } from "#execution/subagent-adapter-state.js";
 import { ContextContainer } from "#context/container.js";
 import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
+import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
 
 const SUBAGENT_INPUT_REQUESTED = SUBAGENT_ADAPTER["input.requested"];
 const SUBAGENT_AUTHORIZATION_REQUIRED = SUBAGENT_ADAPTER["authorization.required"];
 const SUBAGENT_AUTHORIZATION_COMPLETED = SUBAGENT_ADAPTER["authorization.completed"];
+const SUBAGENT_ACTIONS_REQUESTED = SUBAGENT_ADAPTER["actions.requested"];
+const SUBAGENT_ACTION_RESULT = SUBAGENT_ADAPTER["action.result"];
 
 if (SUBAGENT_INPUT_REQUESTED === undefined) {
   throw new Error("SUBAGENT_ADAPTER is missing its input.requested handler.");
@@ -20,6 +23,12 @@ if (SUBAGENT_AUTHORIZATION_REQUIRED === undefined) {
 }
 if (SUBAGENT_AUTHORIZATION_COMPLETED === undefined) {
   throw new Error("SUBAGENT_ADAPTER is missing its authorization.completed handler.");
+}
+if (SUBAGENT_ACTIONS_REQUESTED === undefined) {
+  throw new Error("SUBAGENT_ADAPTER is missing its actions.requested handler.");
+}
+if (SUBAGENT_ACTION_RESULT === undefined) {
+  throw new Error("SUBAGENT_ADAPTER is missing its action.result handler.");
 }
 
 const resumeHookMock = vi.fn();
@@ -67,6 +76,43 @@ const authorization = {
   displayName: "Linear",
   instructions: "Sign in to continue.",
   url: "https://idp.example/authorize",
+};
+
+const dispatchAction: RuntimeActionRequest = {
+  callId: "call-fetch-sentry",
+  description: "Fetch recent Sentry issues",
+  input: { message: "What broke today?" },
+  kind: "subagent-call",
+  name: "fetch_sentry",
+  nodeId: "node-1",
+  subagentName: "fetch-sentry",
+};
+
+const toolCallAction: RuntimeActionRequest = {
+  callId: "call-grep",
+  input: { pattern: "TODO" },
+  kind: "tool-call",
+  toolName: "grep",
+};
+
+const subagentResult: RuntimeActionResult = {
+  callId: "call-fetch-sentry",
+  kind: "subagent-result",
+  origin: "child",
+  outcome: {
+    kind: "terminal",
+    result: { kind: "succeeded", output: "3 new issues" },
+    usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 12, outputTokens: 8 },
+  },
+  output: "3 new issues",
+  subagentName: "fetch-sentry",
+};
+
+const toolResult: RuntimeActionResult = {
+  callId: "call-grep",
+  kind: "tool-result",
+  output: "no matches",
+  toolName: "grep",
 };
 
 describe("SUBAGENT_ADAPTER authorization handlers", () => {
@@ -192,6 +238,128 @@ describe("SUBAGENT_ADAPTER input.requested handler", () => {
   });
 });
 
+describe("SUBAGENT_ADAPTER progress handlers", () => {
+  it("forwards a child's nested dispatch batch through each subagent adapter hop", async () => {
+    resumeHookMock.mockClear();
+    const data = {
+      actions: [dispatchAction],
+      sequence: 4,
+      stepIndex: 2,
+      turnId: "child-turn",
+    };
+
+    await callAdapterEventHandler(
+      SUBAGENT_ADAPTER,
+      { data, type: "actions.requested" },
+      makeContext(),
+    );
+
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childSessionId: "child-session",
+      event: { data, type: "actions.requested" },
+      kind: "subagent-progress-event",
+      subagentName: "linear",
+    });
+  });
+
+  it("narrows a mixed batch to the dispatch entries", async () => {
+    resumeHookMock.mockClear();
+
+    await SUBAGENT_ACTIONS_REQUESTED(
+      {
+        actions: [toolCallAction, dispatchAction],
+        sequence: 4,
+        stepIndex: 2,
+        turnId: "child-turn",
+      },
+      makeContext(),
+    );
+
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childSessionId: "child-session",
+      event: {
+        data: { actions: [dispatchAction], sequence: 4, stepIndex: 2, turnId: "child-turn" },
+        type: "actions.requested",
+      },
+      kind: "subagent-progress-event",
+      subagentName: "linear",
+    });
+  });
+
+  it("does not forward a batch of the child's own tool calls", async () => {
+    resumeHookMock.mockClear();
+
+    await SUBAGENT_ACTIONS_REQUESTED(
+      {
+        actions: [toolCallAction],
+        sequence: 4,
+        stepIndex: 2,
+        turnId: "child-turn",
+      },
+      makeContext(),
+    );
+
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards a settled nested dispatch unchanged via resumeHook", async () => {
+    resumeHookMock.mockClear();
+    const data = {
+      result: subagentResult,
+      sequence: 5,
+      stepIndex: 2,
+      status: "completed" as const,
+      turnId: "child-turn",
+    };
+
+    await SUBAGENT_ACTION_RESULT(data, makeContext());
+
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childSessionId: "child-session",
+      event: { data, type: "action.result" },
+      kind: "subagent-progress-event",
+      subagentName: "linear",
+    });
+  });
+
+  it("does not forward the child's own tool results", async () => {
+    resumeHookMock.mockClear();
+
+    await SUBAGENT_ACTION_RESULT(
+      {
+        result: toolResult,
+        sequence: 5,
+        stepIndex: 2,
+        status: "completed",
+        turnId: "child-turn",
+      },
+      makeContext(),
+    );
+
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("skips forwarding when the adapter state is invalid", async () => {
+    resumeHookMock.mockClear();
+    const base = makeContext();
+
+    await SUBAGENT_ACTIONS_REQUESTED(
+      {
+        actions: [dispatchAction],
+        sequence: 4,
+        stepIndex: 2,
+        turnId: "child-turn",
+      },
+      { ctx: base.ctx, state: {}, session: base.session },
+    );
+
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("SUBAGENT_ADAPTER forward failure logging", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -246,6 +414,36 @@ describe("SUBAGENT_ADAPTER forward failure logging", () => {
       error: expect.objectContaining({
         message: expect.stringContaining("parent gone"),
       }),
+    });
+  });
+
+  it("includes the progress event type when progress forwarding fails", async () => {
+    resumeHookMock.mockClear();
+    resumeHookMock.mockRejectedValueOnce(new Error("parent gone"));
+
+    await expect(
+      SUBAGENT_ACTIONS_REQUESTED(
+        {
+          actions: [dispatchAction],
+          sequence: 4,
+          stepIndex: 2,
+          turnId: "child-turn",
+        },
+        makeContext(),
+      ),
+    ).rejects.toThrow("parent gone");
+
+    const warnCall = warnSpy.mock.calls.find((call: unknown[]) =>
+      String(call[0]).startsWith("[eve:execution.subagent-adapter]"),
+    );
+    expect(warnCall?.[1]).toMatchObject({
+      callId: "call-123",
+      childSessionId: "child-session",
+      errorId: expect.any(String),
+      eventType: "actions.requested",
+      parentContinuationToken: "parent-token",
+      subagentName: "linear",
+      error: expect.objectContaining({ message: expect.stringContaining("parent gone") }),
     });
   });
 

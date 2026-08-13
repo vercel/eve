@@ -318,6 +318,33 @@ export interface SubagentAuthorizationEventHookPayload {
 }
 
 /**
+ * Nested-dispatch lifecycle event forwarded from a delegated child.
+ *
+ * Narrowed to the two action lifecycle events at the forwarding site: a child
+ * only forwards the entries that describe work it delegated onward, never its
+ * own tool calls.
+ */
+export type SubagentProgressEvent = Extract<
+  UnstampedMessageStreamEvent,
+  { type: "action.result" | "actions.requested" }
+>;
+
+/**
+ * Proxy payload sent from a child subagent when it dispatches nested work.
+ *
+ * Runtime-internal. The parent re-emits the unchanged event through its own
+ * channel so a progress surface bound to the parent session observes what its
+ * descendants are doing; the dispatched work itself stays owned by the child.
+ */
+export interface SubagentProgressEventHookPayload {
+  readonly callId: string;
+  readonly childSessionId: string;
+  readonly event: SubagentProgressEvent;
+  readonly kind: "subagent-progress-event";
+  readonly subagentName: string;
+}
+
+/**
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
@@ -327,7 +354,8 @@ export type HookPayload =
   | RuntimeActionResultHookPayload
   | SessionTimeoutHookPayload
   | SubagentAuthorizationEventHookPayload
-  | SubagentInputRequestHookPayload;
+  | SubagentInputRequestHookPayload
+  | SubagentProgressEventHookPayload;
 
 /**
  * Initial caller callback attached to a delegated session at creation.
