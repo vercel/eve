@@ -42,6 +42,12 @@ import {
 
 import { initAgentDevHandoff, initAgentReplPrompt } from "./agent-instructions.js";
 import { confirmInitInNonEmptyDirectory } from "./init-confirm.js";
+import {
+  cleanupFreshInitTarget,
+  initRetryCommand,
+  workspaceFailureNote,
+  type InitFailurePolicy,
+} from "./init-recovery.js";
 import { tryInitializeGit, type GitInitResult } from "./init-git.js";
 import { selectInitHandoff, spawnCodingAgentRepl, type InitHandoff } from "./init-repl.js";
 
@@ -286,7 +292,7 @@ type PreparedInitProject =
       projectPath: string;
     }
   | {
-      failurePolicy: "clear" | "preserve" | "remove";
+      failurePolicy: InitFailurePolicy;
       kind: "created";
       packageManager: PackageManagerKind;
       preservedTargetEntries: readonly string[];
@@ -335,38 +341,6 @@ function installProgressDetail(
 
 const NPM_NOISE_LINE = /^\s*npm (?:silly|verbose|http|timing)\b/u;
 const INSTALL_OUTPUT_FALLBACK_LINES = 20;
-
-async function cleanupFreshInitTarget(
-  projectPath: string,
-  policy: "clear" | "remove",
-  preservedEntries: readonly string[] = [],
-): Promise<boolean> {
-  try {
-    if (policy === "remove") {
-      await rm(projectPath, { recursive: true, force: true });
-    } else {
-      const preserved = new Set(preservedEntries);
-      for (const entry of await readdir(projectPath)) {
-        if (!preserved.has(entry)) {
-          await rm(join(projectPath, entry), { recursive: true, force: true });
-        }
-      }
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function workspaceFailureNote(workspaceMember: boolean): string {
-  return workspaceMember
-    ? "\n\nShared workspace files may have changed. Review your workspace changes before committing."
-    : "";
-}
-
-function initRetryCommand(target: string): string {
-  return `eve init ${/^[-\w./]+$/u.test(target) ? target : JSON.stringify(target)}`;
-}
 
 async function runInitSteps(input: {
   dependencies: InitCommandDependencies;
@@ -512,7 +486,7 @@ async function runInitSteps(input: {
     const installCommand = dependencies.packageManagerInstallCommand(
       project.packageManager,
       project.projectPath,
-      installOptions,
+      { bypassMinimumReleaseAge: true },
     );
     progress.update("Installing dependencies", `${project.packageManager} install`);
     initLog.debug(`installing dependencies with ${project.packageManager}`, { installCommand });

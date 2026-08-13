@@ -1288,7 +1288,9 @@ describe("runInitCommand", () => {
     deps.runPackageManagerInstall.mockResolvedValue(false);
 
     await expect(runInitCommand(output, projectRoot, ".", {}, deps)).rejects.toThrow(
-      `pnpm --dir ${projectRoot} install --no-frozen-lockfile --config.minimum-release-age=0`,
+      deps.packageManagerInstallCommand("pnpm", projectRoot, {
+        bypassMinimumReleaseAge: true,
+      }),
     );
 
     await expect(readFile(join(projectRoot, "notes.md"), "utf8")).resolves.toBe("keep me\n");
@@ -1303,7 +1305,9 @@ describe("runInitCommand", () => {
     deps.runPackageManagerInstall.mockResolvedValue(false);
 
     await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
-      `pnpm --dir ${projectRoot} install --no-frozen-lockfile --config.minimum-release-age=0`,
+      deps.packageManagerInstallCommand("pnpm", projectRoot, {
+        bypassMinimumReleaseAge: true,
+      }),
     );
 
     await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);

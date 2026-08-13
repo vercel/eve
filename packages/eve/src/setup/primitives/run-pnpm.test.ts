@@ -153,6 +153,14 @@ describe("packageManagerInstallCommand", () => {
       'pnpm --dir "/tmp/my agent" install --no-frozen-lockfile --config.minimum-release-age=0',
     );
   });
+
+  test("omits progress-only flags from a copyable npm command", () => {
+    expect(
+      packageManagerInstallCommand("npm", "/tmp/app", {
+        bypassMinimumReleaseAge: true,
+      }),
+    ).toBe("npm install --min-release-age=0");
+  });
 });
 
 describe("runPackageManagerInstall", () => {
