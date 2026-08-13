@@ -32,8 +32,8 @@ exactly one of these categories:
 - **Tests** — tests, evals, test-only fixtures, and snapshots
 
 Use three full-width category blocks in the order above, including categories
-with no changes. Do not use a table: file paths and justification need the full
-description width to remain readable on GitHub.
+with no changes. Do not use a table: the overview and any reviewer-relevant
+context need the full description width to remain readable on GitHub.
 
 ```markdown
 ### Diff size
@@ -44,47 +44,51 @@ Not applicable.
 
 **Implementation** — 1 file · `+12 / -4`
 
-- `packages/eve/src/example.ts`
-
 Focused implementation of the behavior above.
 
 **Tests** — 1 file · `+28 / -0`
-
-- `packages/eve/src/example.test.ts`
 
 Regression coverage for success and failure paths.
 ```
 
 Keep each category's file count, additions, and deletions visible on its bold
-heading line. List its paths as bullets; compact path groups are acceptable only
-when every changed path remains accounted for. For an unwieldy path list, put
-only the paths in a `<details>` block with a `Files (N)` summary. Do not collapse
-the category totals or the entire Diff size section.
+heading line. Treat the section as an overview, not a file inventory: do not
+list every changed path. Mention individual files only when they are critical
+to understanding or reviewing the change, under a short `Key files` list. Omit
+paths entirely when no file needs special attention. The category counts must
+still include every changed file. Do not collapse the category totals or the
+entire Diff size section.
 
 Report additions and deletions from the full branch diff against the PR base,
 and verify that the three categories reconcile with the complete diff. Note
 binary files separately instead of treating them as zero-line changes. Classify
-a mixed-purpose file by its primary purpose and say that it is mixed-purpose in
-the justification.
+a mixed-purpose file by its primary purpose; mention that ambiguity only when it
+is useful to the reviewer.
 
 The justification must explain why each category needs that amount of change,
-not merely restate its line count. Explicitly call out unusually large files or
-categories, especially generated files, snapshots, fixtures, mechanical
-changes, or a file that disproportionately dominates the diff, and explain why
-that outlier is necessary and could not reasonably be smaller. Keep a concise
-outlier warning visible, then put a long explanation in a category-local
-`<details>` block titled `Why this category is unusually large`. If the size is
+not merely restate its line count. Call out a file or category only when its
+size is genuinely surprising or materially disproportionate to the behavior
+and review scope, especially for generated files, snapshots, fixtures, or
+mechanical changes. Being the only changed file, the largest category, or a
+modest one-file diff does not make something an outlier.
+
+Keep a concise explanation visible. If supporting detail would be lengthy, use
+a category-local `<details>` block with a specific, natural summary such as
+`Generated output`, `Fixture expansion`, or `Mechanical migration`; do not use
+a prescribed heading or force words such as `unusually`. Explain why the large
+portion is necessary and could not reasonably be smaller. If the size is
 surprising for the stated behavior, flag it for reviewer attention rather than
-normalizing it. The rest of the description should still discuss behavior
-rather than enumerate files; this section is the required exception.
+normalizing it. Do not manufacture an outlier explanation for an ordinary diff.
+The rest of the description should still discuss behavior rather than enumerate
+files; this section is the required exception.
 
 ```markdown
-This category is unusually large because generated output dominates the diff.
+Generated output accounts for most of the implementation diff.
 
 <details>
-<summary>Why this category is unusually large</summary>
+<summary>Generated output</summary>
 
-Explain the outlier, why it is necessary, and why it could not reasonably be
+Explain why the generated changes are necessary and could not reasonably be
 smaller.
 
 </details>
@@ -122,13 +126,9 @@ Not applicable.
 
 **Implementation** — 1 file · `+6 / -2`
 
-- `packages/eve/src/compiler/example.ts`
-
 Keeps the missing-directory handling local to the compiler.
 
 **Tests** — 1 file · `+14 / -0`
-
-- `packages/eve/src/compiler/example.test.ts`
 
 Covers the regression without broad fixture changes.
 ```
