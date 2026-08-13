@@ -24,7 +24,7 @@ export type ResolveVerifiedRemoteDevelopmentClient =
   typeof import("#setup/verified-remote-client.js").resolveVerifiedRemoteDevelopmentClient;
 
 export interface RegisterAcpCommandOptions {
-  readonly application: CliApplicationContext;
+  readonly applicationContext: CliApplicationContext;
   readonly eveVersion: string;
   readonly program: Command;
   readonly resolveVerifiedRemoteDevelopmentClient?: ResolveVerifiedRemoteDevelopmentClient;
@@ -34,7 +34,7 @@ export interface RegisterAcpCommandOptions {
 
 /** Registers the ACP stdio bridge for local and deployed eve agents. */
 export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
-  applicationCommand(options.program.command("acp"), (command) => {
+  applicationCommand(options.program.command("acp"), options.applicationContext, (command) => {
     const commandOptions = command.opts<AcpCliOptions>();
     return (
       resolveDevelopmentUrlTarget(
@@ -58,7 +58,7 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
     )
     .action(async (positionalUrl: string | undefined, commandOptions: AcpCliOptions) => {
       const target = resolveDevelopmentUrlTarget(commandOptions, positionalUrl);
-      loadDevelopmentEnvironmentFiles(options.application.root);
+      loadDevelopmentEnvironmentFiles(options.applicationContext.root);
       const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
 
       if (target !== undefined) {
@@ -87,7 +87,7 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
 
       try {
         const startHost = options.startHost ?? (await loadStartHost());
-        server = startHost(options.application.root, {
+        server = startHost(options.applicationContext.root, {
           existing: "reject",
           host: "127.0.0.1",
           output: "stderr",
@@ -141,7 +141,7 @@ async function runAcp(
     serverUrl: serverInput.serverUrl,
     signal: serverInput.signal,
     vercelScope,
-    workspaceRoot: options.application.root,
+    workspaceRoot: options.applicationContext.root,
   });
   await run({
     auth: clientOptions.auth,

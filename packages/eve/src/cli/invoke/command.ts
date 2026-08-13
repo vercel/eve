@@ -38,7 +38,7 @@ interface InvokeCommandLogger {
 
 /** Registers the invoke command with lazily loaded production dependencies. */
 export function registerRuntimeInvokeCommand(input: {
-  readonly application: CliApplicationContext;
+  readonly applicationContext: CliApplicationContext;
   readonly logger: InvokeCommandLogger;
   readonly program: Command;
   readonly runtime: Partial<InvokeCliRuntimeDependencies>;
@@ -61,12 +61,12 @@ export function registerRuntimeInvokeCommand(input: {
 
 /** Registers the non-interactive invoke command. */
 export function registerInvokeCommand(input: {
-  readonly application: CliApplicationContext;
+  readonly applicationContext: CliApplicationContext;
   readonly deps: InvokeCommandDependencies;
   readonly logger: InvokeCommandLogger;
   readonly program: Command;
 }): void {
-  applicationCommand(input.program.command("invoke"), (command) => {
+  applicationCommand(input.program.command("invoke"), input.applicationContext, (command) => {
     const options = command.opts<InvokeCliOptions>();
     return options.url === undefined && options.jsonSchema !== true;
   })
@@ -87,7 +87,7 @@ export function registerInvokeCommand(input: {
 }
 
 async function runInvokeCommand(input: {
-  readonly application: CliApplicationContext;
+  readonly applicationContext: CliApplicationContext;
   readonly deps: InvokeCommandDependencies;
   readonly logger: InvokeCommandLogger;
   readonly options: InvokeCliOptions;
@@ -127,14 +127,14 @@ async function runInvokeCommand(input: {
   }
   const operation = resolveInvokeOperation({ previous, prompt: input.prompt });
 
-  await input.deps.loadEnvironment(input.application.root);
+  await input.deps.loadEnvironment(input.applicationContext.root);
   if (remoteTarget !== undefined) {
     await executeWithSignals(
       input,
       {
         kind: "remote",
         serverUrl: remoteTarget.serverUrl,
-        workspaceRoot: input.application.root,
+        workspaceRoot: input.applicationContext.root,
       },
       remoteTarget.headers,
       operation,
@@ -143,7 +143,7 @@ async function runInvokeCommand(input: {
     return;
   }
 
-  const server = await input.deps.startHost(input.application.root);
+  const server = await input.deps.startHost(input.applicationContext.root);
   try {
     const handle = await server.start();
     await executeWithSignals(

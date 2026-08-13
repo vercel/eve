@@ -2,21 +2,18 @@ import type { Command } from "#compiled/commander/index.js";
 
 export interface CliApplicationContext {
   root: string;
+  resolve(): Promise<void>;
 }
 
 export type CliApplicationRootRequirement = (command: Command) => boolean;
 
-const applicationRootRequirement = new WeakMap<Command, CliApplicationRootRequirement>();
-
-/** Marks a CLI command as requiring a resolved eve application root. */
+/** Adds application-root resolution to a project-scoped CLI command. */
 export function applicationCommand(
   command: Command,
+  applicationContext: CliApplicationContext,
   requirement: CliApplicationRootRequirement = () => true,
 ): Command {
-  applicationRootRequirement.set(command, requirement);
-  return command;
-}
-
-export function commandRequiresApplicationRoot(command: Command): boolean {
-  return applicationRootRequirement.get(command)?.(command) ?? false;
+  return command.hook("preAction", async (_command, actionCommand) => {
+    if (requirement(actionCommand)) await applicationContext.resolve();
+  });
 }

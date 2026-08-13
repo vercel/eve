@@ -23,14 +23,14 @@ interface BuildCliOptions {
 
 /** Registers the production application build command. */
 export function registerBuildCommand(input: {
-  readonly application: CliApplicationContext;
+  readonly applicationContext: CliApplicationContext;
   readonly buildHost?: BuildHost;
   readonly logger: BuildCommandLogger;
   readonly program: Command;
 }): void {
   const theme = createCliTheme();
 
-  applicationCommand(input.program.command("build"))
+  applicationCommand(input.program.command("build"), input.applicationContext)
     .description("Build the current eve application.")
     .option("--profile <path>", "Write best-effort timing and output-size profile JSON to a file")
     .option(
@@ -40,14 +40,14 @@ export function registerBuildCommand(input: {
     .action(async (options: BuildCliOptions) => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 
-      loadDevelopmentEnvironmentFiles(input.application.root);
+      loadDevelopmentEnvironmentFiles(input.applicationContext.root);
 
       const buildHost =
         input.buildHost ?? (await import("#internal/nitro/host.js")).buildApplication;
       const profileOutputPath =
         options.profile === undefined
           ? undefined
-          : resolve(input.application.root, options.profile);
+          : resolve(input.applicationContext.root, options.profile);
       const buildOptions: {
         profileOutputPath?: string;
         readonly publicRoutePrefix: ApplicationBuildOptions["publicRoutePrefix"];
@@ -56,12 +56,12 @@ export function registerBuildCommand(input: {
       } = {
         publicRoutePrefix: normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV]),
         skipVercelSandboxPrewarm: options.skipSandboxPrewarm === true,
-        vercelServiceOutput: resolveInternalVercelServiceOutput(input.application.root),
+        vercelServiceOutput: resolveInternalVercelServiceOutput(input.applicationContext.root),
       };
       if (profileOutputPath !== undefined) {
         buildOptions.profileOutputPath = profileOutputPath;
       }
-      const outputDir = await buildHost(input.application.root, buildOptions);
+      const outputDir = await buildHost(input.applicationContext.root, buildOptions);
       input.logger.log(
         renderCliTaggedLine(theme, {
           message: `built output at ${outputDir}`,

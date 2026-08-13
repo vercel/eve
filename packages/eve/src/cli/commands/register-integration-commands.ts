@@ -12,13 +12,13 @@ interface IntegrationCommandLogger {
 export function registerIntegrationCommands(input: {
   program: Command;
   logger: IntegrationCommandLogger;
-  application: CliApplicationContext;
+  applicationContext: CliApplicationContext;
 }): void {
-  const { application, logger, program } = input;
+  const { applicationContext, logger, program } = input;
 
   const integration = program.command("integration", { hidden: true });
 
-  applicationCommand(integration.command("setup <kind>"))
+  applicationCommand(integration.command("setup <kind>"), applicationContext)
     .option("-y, --yes")
     .option(
       "--non-interactive",
@@ -40,7 +40,7 @@ export function registerIntegrationCommands(input: {
         },
       ) => {
         const { runIntegrationSetupCommand } = await import("./integration-setup.js");
-        await runIntegrationSetupCommand(logger, application.root, kind, {
+        await runIntegrationSetupCommand(logger, applicationContext.root, kind, {
           yes: options.yes,
           nonInteractive: options.nonInteractive,
           answers: options.answer,
@@ -48,7 +48,10 @@ export function registerIntegrationCommands(input: {
       },
     );
 
-  applicationCommand(integration.command("connect <slug> <service> [canonical-name]"))
+  applicationCommand(
+    integration.command("connect <slug> <service> [canonical-name]"),
+    applicationContext,
+  )
     .option("-y, --yes")
     .option(
       "--non-interactive",
@@ -64,7 +67,7 @@ export function registerIntegrationCommands(input: {
         const { runIntegrationConnectCommand } = await import("./integration-connect.js");
         await runIntegrationConnectCommand(
           logger,
-          application.root,
+          applicationContext.root,
           slug,
           service,
           canonicalName,
