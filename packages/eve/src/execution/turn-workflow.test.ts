@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HookPayload } from "#channel/types.js";
+import { SessionDynamicModelReferenceKey } from "#context/keys.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
@@ -355,13 +356,20 @@ describe("turnWorkflow", () => {
 
   it("honors cancellation observed while a durable turn step returns", async () => {
     const sessionState = createSessionState();
+    const sessionModel = {
+      id: "openai/gpt-5.6-sol",
+      contextWindowTokens: 1_000_000,
+    };
     installInbox([], { cancelPayloads: [{}] });
     vi.mocked(turnStep).mockImplementationOnce(async (stepInput) => {
       await vi.waitFor(() => expect(stepInput.abortSignal?.aborted).toBe(true));
       return {
         action: "done",
         output: "must not complete",
-        serializedContext: { state: "done" },
+        serializedContext: {
+          state: "done",
+          [SessionDynamicModelReferenceKey.name]: sessionModel,
+        },
         sessionState,
       };
     });
@@ -372,15 +380,19 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
+    const cancelledContext = {
+      state: "start",
+      [SessionDynamicModelReferenceKey.name]: sessionModel,
+    };
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-      serializedContext: { state: "start" },
+      serializedContext: cancelledContext,
       sessionState,
     });
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
       action: {
         cancelled: true,
         kind: "park",
-        serializedContext: { state: "start" },
+        serializedContext: cancelledContext,
         sessionState,
       },
       kind: "turn-result",

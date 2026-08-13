@@ -6,6 +6,7 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
+import { preserveSerializedSessionDynamicModelSelection } from "#context/dynamic-model-lifecycle.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
@@ -116,6 +117,16 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       }
 
       if (cancellation?.signal.aborted === true && pendingActionKeys === undefined) {
+        // Some worlds cannot interrupt a running step, so it can complete
+        // normally after the workflow observes cancellation. Roll that result
+        // back except for a session model selected by its one-time preamble.
+        await cursor.adopt({
+          serializedContext: preserveSerializedSessionDynamicModelSelection(
+            cursor.serializedContext,
+            result.serializedContext,
+          ),
+          sessionState: cursor.sessionState,
+        });
         // No `canPark` check here: that gate rejects model-authored waits
         // (`next: null`) in task mode, whereas every session can resume by
         // stable ID after a cancelled turn. The epilogue runs in the driver
