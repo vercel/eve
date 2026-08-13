@@ -352,6 +352,41 @@ describe("taskRunWorkflow", () => {
     );
   });
 
+  it("drops stale authorization events and still wakes on terminal settlement", async () => {
+    mockCommandHook([
+      { command: { kind: "ready" }, kind: "task-command" },
+      {
+        callId: "call-task",
+        childSessionId: "child-session-1",
+        event: {
+          data: {
+            outcome: "approved",
+            requestId: "stale-1",
+            responderPrincipalId: "user-1",
+            sequence: 1,
+            stepIndex: 2,
+            turnId: "turn-child",
+          },
+          type: "approval.settled",
+        },
+        kind: "subagent-authorization-event",
+        subagentName: "research",
+      },
+      { command: { data: "done", kind: "complete" }, kind: "task-command" },
+    ]);
+
+    await taskRunWorkflow({
+      taskInboxToken: "task-token",
+      initialView: createWorkingView(),
+      parentContinuationToken: "parent-session-token",
+    });
+
+    expect(wakeTaskAuthorizationParentStep).not.toHaveBeenCalled();
+    expect(wakeTaskParentStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ view: expect.objectContaining({ status: "completed" }) }),
+    );
+  });
+
   it("never wakes twice for one blocked child", async () => {
     mockCommandHook([
       { command: { kind: "ready" }, kind: "task-command" },

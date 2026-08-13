@@ -14,7 +14,7 @@ import { removeTaskAgentAddressFromState } from "#harness/handles/transitions.js
 import { isInputRequest } from "#runtime/input/types.js";
 import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
-import type { TaskView } from "#tasks/types.js";
+import { isTerminalTaskStatus, type TaskView } from "#tasks/types.js";
 
 /** Validates and durably records one task-owned child HITL route batch. */
 export async function recordTaskInputRequestStep(input: {
@@ -152,7 +152,9 @@ export async function acceptTaskAuthorizationEventStep(input: {
   }
   const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
   return (
-    view?.executor?.childSessionId === input.hookPayload.childSessionId &&
+    view !== undefined &&
+    !isTerminalTaskStatus(view.status) &&
+    view.executor?.childSessionId === input.hookPayload.childSessionId &&
     view.metadata.agentId === entry.metadata.agentId
   );
 }

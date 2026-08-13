@@ -138,7 +138,8 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       const becameReady = !isReadyTaskStatus(view.status) && isReadyTaskStatus(result.view.status);
       view = result.view;
       await appendTaskViewStep({ view });
-      const routableAuthorizationEvents = dispatchAcknowledged ? pendingAuthorizationEvents : [];
+      const routableAuthorizationEvents =
+        dispatchAcknowledged && !becameTerminal ? pendingAuthorizationEvents : [];
       for (const request of routableAuthorizationEvents) {
         await wakeTaskAuthorizationParentStep({
           request,
@@ -146,7 +147,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
           token: input.parentContinuationToken,
         });
       }
-      if (routableAuthorizationEvents.length > 0) pendingAuthorizationEvents = [];
+      if (becameTerminal || routableAuthorizationEvents.length > 0) pendingAuthorizationEvents = [];
       const routableInputRequest =
         pendingInputRequest !== undefined &&
         dispatchAcknowledged &&
