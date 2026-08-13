@@ -152,6 +152,9 @@ importers:
       '@vercel/agent-eval':
         specifier: 1.5.0
         version: 1.5.0(supports-color@10.2.2)
+      '@vercel/sandbox':
+        specifier: 'catalog:'
+        version: 2.8.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

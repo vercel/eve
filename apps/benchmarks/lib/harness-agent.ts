@@ -5,7 +5,6 @@ import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import type { HarnessAgentSession } from "@ai-sdk/harness/agent";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
 import { createClaudeCode } from "@ai-sdk/harness-claude-code";
-import { createVercelSandbox } from "@ai-sdk/sandbox-vercel";
 import type { Agent, AgentRunResult } from "@vercel/agent-eval";
 
 import type {
@@ -14,6 +13,7 @@ import type {
   AuthoringSetupContext,
   AuthoringTurn,
 } from "./authoring-case.js";
+import { createDependencyCachedSandbox } from "./dependency-sandbox.js";
 import {
   AGENT_EVAL_DIRECTORY,
   AUTHORING_EVAL_DIRECTORY,
@@ -31,6 +31,7 @@ export function createAuthoringAgent(subject: {
   readonly name: string;
   readonly archive: Uint8Array;
   readonly digest: string;
+  readonly dependencyDigest: string;
 }): Agent {
   return {
     name: subject.name,
@@ -57,16 +58,16 @@ export function createAuthoringAgent(subject: {
       const setups = [authoringCase.startingPoint.setup, authoringCase.setup].filter(
         (setup): setup is AuthoringSetup => setup !== undefined,
       );
-      const sandbox = createVercelSandbox({
-        runtime: "node24",
+      const sandbox = createDependencyCachedSandbox({
+        archive: subject.archive,
+        dependencyDigest: subject.dependencyDigest,
         ports: [HARNESS_BRIDGE_PORT, ...new Set(setups.flatMap((setup) => setup.ports ?? []))],
-        timeout: 15 * 60_000,
         env: {
           EVE_INIT_PACKAGE_SPEC: EVE_PACKAGE_PATH,
           [AUTHORING_EVAL_DIRECTORY_ENV]: AUTHORING_EVAL_DIRECTORY,
           ...Object.assign({}, ...setups.map((setup) => setup.environment ?? {})),
         },
-        networkPolicy: "allow-all",
+        log,
       });
       const startedAt = Date.now();
       const commands: string[] = [];
@@ -176,7 +177,7 @@ export function createAuthoringAgent(subject: {
         log("[grade] running deterministic assertions");
         const test = await resultOf(
           activeSandbox,
-          `${AGENT_EVAL_DIRECTORY}/node_modules/.bin/vitest run ${AGENT_EVAL_DIRECTORY}/EVAL.test.ts`,
+          `vitest run ${workspace}/${AGENT_EVAL_DIRECTORY}/EVAL.test.ts`,
           workspace,
         );
         const scriptsResults = Object.fromEntries(
@@ -269,26 +270,33 @@ async function bootstrapSubject(
   archive: Uint8Array,
 ): Promise<void> {
   await sandbox.writeBinaryFile({ path: SOURCE_ARCHIVE_PATH, content: archive });
-  const commands = [
-    `mkdir -p ${SOURCE_ROOT}`,
-    `tar -xzf ${SOURCE_ARCHIVE_PATH} -C ${SOURCE_ROOT}`,
-    "corepack enable",
-    `cd ${SOURCE_ROOT}`,
-    "pnpm install --frozen-lockfile",
-    "pnpm --filter eve build",
-    "mkdir -p /tmp/eve-package",
-    "pnpm --dir packages/eve pack --pack-destination /tmp/eve-package",
-    `mv $(find /tmp/eve-package -name '*.tgz' -print -quit) ${EVE_PACKAGE_PATH}`,
-    `npm install --global --package-lock=false ${EVE_PACKAGE_PATH}`,
-    `cd ${shellQuote(workspace)}`,
-  ];
-  if (workspaceKind === "scaffolded") commands.push("AI_AGENT=benchmark eve init .");
-  commands.push(
-    `mkdir -p ${AGENT_EVAL_DIRECTORY}`,
-    `printf '{"private":true,"type":"module"}\\n' >${AGENT_EVAL_DIRECTORY}/package.json`,
-    `pnpm add --save-dev vitest@4.1.10 --dir ${AGENT_EVAL_DIRECTORY}`,
+  await run(
+    sandbox,
+    [
+      `rm -rf ${SOURCE_ROOT} && mkdir -p ${SOURCE_ROOT}`,
+      `tar -xzf ${SOURCE_ARCHIVE_PATH} -C ${SOURCE_ROOT}`,
+      `pnpm --dir ${SOURCE_ROOT} install --frozen-lockfile --offline`,
+      `pnpm --dir ${SOURCE_ROOT} --filter eve build`,
+      "mkdir -p /tmp/eve-package",
+      `pnpm --dir ${SOURCE_ROOT}/packages/eve pack --pack-destination /tmp/eve-package`,
+      `mv $(find /tmp/eve-package -name '*.tgz' -print -quit) ${EVE_PACKAGE_PATH}`,
+      `npm install --global --package-lock=false ${EVE_PACKAGE_PATH}`,
+    ].join(" && "),
   );
-  await run(sandbox, commands.join(" && "));
+  const artifactsRoot = `${workspace}/${AGENT_EVAL_DIRECTORY}`;
+  const workspaceCommands: string[] = [];
+  if (workspaceKind === "scaffolded") {
+    workspaceCommands.push(`cd ${shellQuote(workspace)} && AI_AGENT=benchmark eve init .`);
+  }
+  workspaceCommands.push(
+    `mkdir -p ${artifactsRoot}`,
+    `printf '{"private":true,"type":"module"}\\n' >${artifactsRoot}/package.json`,
+    "command -v vitest >/dev/null",
+  );
+  if (workspaceKind === "scaffolded") {
+    workspaceCommands.push(`test -f ${workspace}/package.json`);
+  }
+  await run(sandbox, workspaceCommands.join(" && "));
 }
 
 function setupContext(

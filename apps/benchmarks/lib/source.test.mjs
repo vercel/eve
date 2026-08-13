@@ -16,13 +16,20 @@ test("archives the working tree without changing the index", () => {
     rmSync(join(repository, "deleted.txt"));
     const statusBefore = git(repository, ["status", "--porcelain"]);
 
-    withExtracted(workingTreeSubject(repository).archive, (extracted) => {
+    const subject = workingTreeSubject(repository);
+    withExtracted(subject.archive, (extracted) => {
       assert.equal(readFileSync(join(extracted, "tracked.txt"), "utf8"), "changed\n");
       assert.equal(readFileSync(join(extracted, "new.txt"), "utf8"), "new\n");
       assert.equal(existsSync(join(extracted, "ignored.txt")), false);
       assert.equal(existsSync(join(extracted, "deleted.txt")), false);
     });
     assert.equal(git(repository, ["status", "--porcelain"]), statusBefore);
+    writeFileSync(join(repository, "tracked.txt"), "another source change\n");
+    const sourceChange = workingTreeSubject(repository);
+    assert.notEqual(sourceChange.digest, subject.digest);
+    assert.equal(sourceChange.dependencyDigest, subject.dependencyDigest);
+    writeFileSync(join(repository, "pnpm-lock.yaml"), "lockfileVersion: '9.1'\n");
+    assert.notEqual(workingTreeSubject(repository).dependencyDigest, subject.dependencyDigest);
   } finally {
     rmSync(repository, { recursive: true, force: true });
   }
@@ -48,6 +55,10 @@ function repositoryFixture() {
   git(repository, ["config", "user.name", "Test"]);
   git(repository, ["config", "user.email", "test@example.com"]);
   writeFileSync(join(repository, ".gitignore"), "ignored.txt\n");
+  writeFileSync(join(repository, ".npmrc"), "link-workspace-packages=true\n");
+  writeFileSync(join(repository, "package.json"), '{"private":true}\n');
+  writeFileSync(join(repository, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+  writeFileSync(join(repository, "pnpm-workspace.yaml"), "packages: []\n");
   writeFileSync(join(repository, "tracked.txt"), "committed\n");
   writeFileSync(join(repository, "deleted.txt"), "delete me\n");
   git(repository, ["add", "."]);

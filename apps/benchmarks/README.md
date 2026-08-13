@@ -33,8 +33,9 @@ pnpm benchmark author-000-imessage \
 ```
 
 The runner archives each subject locally and uploads it to the sandbox. Revisions and local-only
-commits do not need to be pushed. For one eval and one run, `--verbose` streams setup phases,
-assistant text, tool calls, grading, and build progress.
+commits do not need to be pushed. Dependency downloads are cached by lockfile, so source-only
+changes reuse the prepared pnpm store. For one eval and one run, `--verbose` streams setup
+phases, assistant text, tool calls, grading, and build progress.
 
 Results are written under `apps/benchmarks/results/`. Each run includes the transcript,
 grader output, summary, and copied project files. Vercel Sandbox and AI Gateway credentials are

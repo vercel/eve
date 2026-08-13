@@ -101,6 +101,7 @@ function writeExperiments(subjects, runs, verbose) {
         `export default authoringExperiment({\n` +
         `  archive: readFileSync(new URL(${JSON.stringify(`./${subject.label}.source.tar.gz`)}, import.meta.url)),\n` +
         `  digest: ${JSON.stringify(subject.digest)},\n` +
+        `  dependencyDigest: ${JSON.stringify(subject.dependencyDigest)},\n` +
         `  runs: ${runs},\n` +
         `  verbose: ${verbose},\n` +
         `});\n`,

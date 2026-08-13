@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,10 +39,30 @@ function archiveSubject(repositoryRoot, description, label, createArchive, detai
   const indexPath = join(temporaryDirectory, "index");
   try {
     const digest = createArchive(archivePath, { ...process.env, GIT_INDEX_FILE: indexPath });
-    return { label, description, archive: readFileSync(archivePath), digest, ...details };
+    const archive = readFileSync(archivePath);
+    return {
+      label,
+      description,
+      archive,
+      digest,
+      dependencyDigest: dependencyDigest(archive),
+      ...details,
+    };
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
+}
+
+function dependencyDigest(archive) {
+  const hash = createHash("sha256");
+  for (const path of [".npmrc", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]) {
+    const content = execFileSync("tar", ["-xOzf", "-", path], {
+      input: archive,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    hash.update(path).update("\0").update(content).update("\0");
+  }
+  return hash.digest("hex");
 }
 
 function git(cwd, args, env = process.env) {

@@ -7,6 +7,7 @@ import { AUTHORING_MODEL } from "./paths.js";
 export function authoringExperiment(options: {
   readonly archive: Uint8Array;
   readonly digest: string;
+  readonly dependencyDigest: string;
   readonly runs?: number;
   readonly verbose?: boolean;
 }): ExperimentConfig {
@@ -14,6 +15,7 @@ export function authoringExperiment(options: {
     name: `eve-authoring-harness-${options.digest.slice(0, 12)}`,
     archive: options.archive,
     digest: options.digest,
+    dependencyDigest: options.dependencyDigest,
   });
   registerAgent(agent);
   return {
