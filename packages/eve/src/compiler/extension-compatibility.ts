@@ -65,7 +65,9 @@ export const EXTENSION_CAPABILITY_VERSIONS = Object.fromEntries(
     contract.current,
   ]),
 ) as {
-  readonly [TCapability in ExtensionCapability]: (typeof EXTENSION_CAPABILITY_CONTRACTS)[TCapability]["current"];
+  readonly [
+    TCapability in ExtensionCapability
+  ]: (typeof EXTENSION_CAPABILITY_CONTRACTS)[TCapability]["current"];
 };
 
 /** Capability requirements stamped by one extension build. */

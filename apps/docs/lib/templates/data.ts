@@ -28,7 +28,6 @@ export const getTemplateEntries = cache(async (): Promise<TemplateEntry[]> => {
   return composeTemplateEntries(templateManifest, JSON.parse(contents) as GeneratedTemplatesInput);
 });
 
-export const getTemplateEntry = cache(
-  async (slug: string): Promise<TemplateEntry | undefined> =>
-    (await getTemplateEntries()).find((entry) => entry.slug === slug),
+export const getTemplateEntry = cache(async (slug: string): Promise<TemplateEntry | undefined> =>
+  (await getTemplateEntries()).find((entry) => entry.slug === slug),
 );

@@ -53,7 +53,9 @@ const MAX_TYPING_STATUS = 80;
 type ChatSdkAdapters = Record<string, Adapter>;
 type ChatSdkSendInput = string | UserContent | SendPayload;
 type MutableDeliveryOptions<TState> = {
-  -readonly [Key in keyof ChannelAddressDeliveryOptions<TState>]: ChannelAddressDeliveryOptions<TState>[Key];
+  -readonly [
+    Key in keyof ChannelAddressDeliveryOptions<TState>
+  ]: ChannelAddressDeliveryOptions<TState>[Key];
 };
 type EventData<T extends UnstampedMessageStreamEvent["type"]> =
   Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
