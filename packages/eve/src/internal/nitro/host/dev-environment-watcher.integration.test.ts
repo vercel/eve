@@ -43,6 +43,7 @@ describe("development environment reload transactions", () => {
     expect(process.env.EVE_WATCH_ENV_SHELL).toBe("from-parent");
   });
 
+<<<<<<< HEAD
   it("honors the persisted Gateway credential selection over available keys", async () => {
     const appRoot = await createEnvironmentApp();
     await writeFile(join(appRoot, ".env.local"), "AI_GATEWAY_API_KEY=from-file\n");
@@ -76,10 +77,16 @@ describe("development environment reload transactions", () => {
     const collectionRoot = await mkdtemp(join(tmpdir(), "eve-dev-env-collection-"));
     temporaryDirectories.push(collectionRoot);
     const appRoot = join(collectionRoot, "agents", "support");
+=======
+  it("loads, watches, fingerprints, and reloads workspace-root env", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-dev-env-workspace-"));
+    temporaryDirectories.push(workspaceRoot);
+    const appRoot = join(workspaceRoot, "agents", "support");
+>>>>>>> 6b44400be (refactor(eve): rename agent collections to workspaces)
     await mkdir(join(appRoot, "agent"), { recursive: true });
-    await writeFile(join(collectionRoot, "package.json"), '{"eve":{"collection":true}}\n');
+    await writeFile(join(workspaceRoot, "package.json"), '{"eve":{"agents":["agents/*"]}}\n');
     await writeFile(
-      join(collectionRoot, ".env.local"),
+      join(workspaceRoot, ".env.local"),
       "EVE_WATCH_ENV_ROOT_ONLY=from-root\nEVE_WATCH_ENV_SHARED=from-root\n",
     );
     await writeFile(join(appRoot, ".env.local"), "EVE_WATCH_ENV_SHARED=from-child\n");
@@ -88,13 +95,13 @@ describe("development environment reload transactions", () => {
 
     expect(process.env.EVE_WATCH_ENV_ROOT_ONLY).toBe("from-root");
     expect(process.env.EVE_WATCH_ENV_SHARED).toBe("from-root");
-    expect(getDevelopmentEnvironmentFilePaths(appRoot)).toEqual(environmentPaths(collectionRoot));
+    expect(getDevelopmentEnvironmentFilePaths(appRoot)).toEqual(environmentPaths(workspaceRoot));
     expect(readDevelopmentEnvironmentHostValues(appRoot)).toMatchObject({
       EVE_WATCH_ENV_ROOT_ONLY: "from-root",
       EVE_WATCH_ENV_SHARED: "from-root",
     });
 
-    await writeFile(join(collectionRoot, ".env.local"), "EVE_WATCH_ENV_ROOT_ONLY=updated\n");
+    await writeFile(join(workspaceRoot, ".env.local"), "EVE_WATCH_ENV_ROOT_ONLY=updated\n");
     stageDevelopmentEnvironmentFiles(appRoot).commit();
     expect(process.env.EVE_WATCH_ENV_ROOT_ONLY).toBe("updated");
     expect(process.env.EVE_WATCH_ENV_SHARED).toBeUndefined();

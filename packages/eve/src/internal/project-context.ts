@@ -2,22 +2,22 @@ import { basename, dirname, resolve } from "node:path";
 
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import {
-  resolveAgentCollection,
-  type AgentCollection,
-  type AgentCollectionMember,
-} from "#internal/agent-collection.js";
+  resolveAgentWorkspace,
+  type AgentWorkspace,
+  type AgentWorkspaceMember,
+} from "#internal/agent-workspace.js";
 
 export type EveProjectContext =
   | {
-      readonly collection: AgentCollection;
+      readonly workspace: AgentWorkspace;
       readonly environmentRoot: string;
-      readonly kind: "collection";
+      readonly kind: "workspace";
     }
   | {
-      readonly collection: AgentCollection;
+      readonly workspace: AgentWorkspace;
       readonly environmentRoot: string;
-      readonly kind: "collection-member";
-      readonly member: AgentCollectionMember;
+      readonly kind: "workspace-member";
+      readonly member: AgentWorkspaceMember;
     }
   | {
       readonly appRoot: string;
@@ -33,21 +33,21 @@ function standalone(appRoot: string): Extract<EveProjectContext, { kind: "standa
 export async function resolveNamedAgentProjectContext(
   appRoot: string,
   options: { readonly source?: ProjectSource } = {},
-): Promise<Extract<EveProjectContext, { kind: "collection-member" | "standalone" }> | undefined> {
+): Promise<Extract<EveProjectContext, { kind: "workspace-member" | "standalone" }> | undefined> {
   const resolvedAppRoot = resolve(appRoot);
   const agentsRoot = dirname(resolvedAppRoot);
   if (basename(agentsRoot) !== "agents") return undefined;
 
   const source = options.source ?? createDiskProjectSource();
-  const collectionRoot = dirname(agentsRoot);
-  const collection = await resolveAgentCollection(collectionRoot, { source });
-  const member = collection?.members.find((candidate) => candidate.appRoot === resolvedAppRoot);
-  return collection === undefined || member === undefined
+  const workspaceRoot = dirname(agentsRoot);
+  const workspace = await resolveAgentWorkspace(workspaceRoot, { source });
+  const member = workspace?.members.find((candidate) => candidate.appRoot === resolvedAppRoot);
+  return workspace === undefined || member === undefined
     ? undefined
     : {
-        collection,
-        environmentRoot: collection.root,
-        kind: "collection-member",
+        workspace,
+        environmentRoot: workspace.root,
+        kind: "workspace-member",
         member,
       };
 }
@@ -62,8 +62,8 @@ export async function resolveEveProjectContext(
   const namedAgent = await resolveNamedAgentProjectContext(resolvedAppRoot, { source });
   if (namedAgent !== undefined) return namedAgent;
 
-  const collection = await resolveAgentCollection(resolvedAppRoot, { source });
-  return collection === undefined
+  const workspace = await resolveAgentWorkspace(resolvedAppRoot, { source });
+  return workspace === undefined
     ? standalone(resolvedAppRoot)
-    : { collection, environmentRoot: collection.root, kind: "collection" };
+    : { workspace, environmentRoot: workspace.root, kind: "workspace" };
 }
