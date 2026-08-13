@@ -328,8 +328,8 @@ function enrichTelemetry(
         ? undefined
         : [bridgeIntegration, ...getRegisteredTelemetryIntegrations()],
     isEnabled: true,
-    recordInputs: settings?.recordInputs ?? true,
-    recordOutputs: settings?.recordOutputs ?? true,
+    recordInputs: settings?.recordInputs ?? false,
+    recordOutputs: settings?.recordOutputs ?? false,
   };
 }
 

@@ -70,8 +70,8 @@ describe("installInstrumentationRuntime", () => {
     expect(forceFlush).toHaveBeenCalledOnce();
     expect(providerFlush).toHaveBeenCalledOnce();
     expect(runtime.otelSettings).toEqual({
-      recordInputs: true,
-      recordOutputs: true,
+      recordInputs: false,
+      recordOutputs: false,
       traceChannelRequests: false,
     });
     expect(shutdown).toHaveBeenCalledOnce();

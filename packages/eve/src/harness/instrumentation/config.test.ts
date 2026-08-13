@@ -91,6 +91,20 @@ describe("instrumentation-config chunk-isolation regression", () => {
     });
   });
 
+  it("disables input and output recording by default", async () => {
+    const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
+    const { getInstrumentationRuntime } = await import("#harness/instrumentation/runtime.js");
+
+    await registerInstrumentationConfig({}, { agentName: "test-agent" });
+
+    expect(getInstrumentationRuntime()?.otelSettings).toEqual({
+      functionId: undefined,
+      recordInputs: false,
+      recordOutputs: false,
+      traceChannelRequests: false,
+    });
+  });
+
   it("awaits the setup callback with the resolved context", async () => {
     vi.resetModules();
     const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");

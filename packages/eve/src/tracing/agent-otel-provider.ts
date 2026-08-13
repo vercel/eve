@@ -85,8 +85,8 @@ export interface AgentOtelInstrumentation {
 export function createAgentOtelInstrumentation(
   input: AgentOtelInstrumentationInput,
 ): AgentOtelInstrumentation {
-  const recordInputs = input.recordInputs ?? true;
-  const recordOutputs = input.recordOutputs ?? true;
+  const recordInputs = input.recordInputs ?? false;
+  const recordOutputs = input.recordOutputs ?? false;
   const executionContexts = new WeakMap<InstrumentationAttemptScope, Map<string, Context>>();
   const attemptScopes = new Map<string, InstrumentationAttemptScope>();
   // A serverless turn runs inside one `turnStep` "use step" invocation. If

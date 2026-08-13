@@ -10409,8 +10409,8 @@ describe("createToolLoopHarness", () => {
       };
       expect(agentCall.telemetry).toMatchObject({
         integrations: [bridge],
-        recordInputs: true,
-        recordOutputs: true,
+        recordInputs: false,
+        recordOutputs: false,
       });
       expect(attemptCompleted).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({

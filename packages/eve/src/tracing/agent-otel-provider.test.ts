@@ -67,6 +67,8 @@ function createRuntime(
   const agentOtel = createAgentOtelInstrumentation({
     frameworkVersion: "test",
     idGenerator,
+    recordInputs: true,
+    recordOutputs: true,
     stateStore,
     tracer,
   });
@@ -1233,7 +1235,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(model.attributes["agent.input.messages.delta"]).toBeUndefined();
   });
 
-  it("captures nothing when content capture is off", async () => {
+  it("captures no content by default", async () => {
     const exporter = new InMemorySpanExporter();
     const idGenerator = new AgentSpanIdGenerator();
     const provider = new BasicTracerProvider({
@@ -1243,8 +1245,6 @@ describe("createAgentOtelInstrumentation", () => {
     const agentOtel = createAgentOtelInstrumentation({
       frameworkVersion: "test",
       idGenerator,
-      recordInputs: false,
-      recordOutputs: false,
       stateStore: new InMemoryAgentTraceStateStore(),
       tracer: provider.getTracer("eve.agent"),
     });
