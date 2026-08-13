@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { AgentWorkspace } from "#internal/agent-workspace.js";
@@ -40,6 +40,12 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
   const outputDirectory = join(workspace.root, ".vercel", "output");
   await rm(outputDirectory, { force: true, recursive: true });
   await mkdir(outputDirectory, { recursive: true });
+  await Promise.all(
+    assembled.rootDirectories.map(async (rootDirectory) => {
+      await mkdir(join(rootDirectory, ".vercel"), { recursive: true });
+      await symlink(outputDirectory, join(rootDirectory, ".vercel", "output"), "junction");
+    }),
+  );
   await writeFile(
     join(outputDirectory, "config.json"),
     `${JSON.stringify(
