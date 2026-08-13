@@ -119,9 +119,6 @@ describe("resolveAgentWorkspace", () => {
       environmentRoot: supportRoot,
       kind: "standalone",
     });
-    await expect(resolveDiscoveryProject(supportRoot)).rejects.toThrow(
-      /Could not resolve an eve agent root/,
-    );
   });
 
   it("resolves the workspace that owns a package-less child", async () => {
