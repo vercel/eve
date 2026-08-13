@@ -40,7 +40,11 @@ describe("otel", () => {
 describe("otelIntegration", () => {
   it("passes declared processors through untouched", () => {
     const first = processor();
-    const integration = otelIntegration({ spanProcessors: [first] });
+    const integration = otelIntegration({
+      recordInputs: true,
+      recordOutputs: true,
+      spanProcessors: [first],
+    });
 
     expect(isOtelIntegration(integration)).toBe(true);
     expect(integration.spanProcessors).toStrictEqual([first]);
@@ -49,6 +53,8 @@ describe("otelIntegration", () => {
   it("wraps an exporter in a batching processor, after any declared ones", () => {
     const first = processor();
     const integration = otelIntegration({
+      recordInputs: true,
+      recordOutputs: true,
       spanProcessors: [first],
       traceExporter: exporter(),
     });
@@ -57,15 +63,19 @@ describe("otelIntegration", () => {
     expect(integration.spanProcessors[0]).toBe(first);
   });
 
-  it("records everything unless told otherwise", () => {
-    expect(otelIntegration().content).toStrictEqual({ recordInputs: true, recordOutputs: true });
+  it("records no content unless explicitly enabled", () => {
+    expect(otelIntegration().content).toStrictEqual({ recordInputs: false, recordOutputs: false });
   });
 
   // An author's own processor is part of this destination, and the point of
   // declining is that nothing under it sees what was said.
   it("puts a declined policy in front of every processor, an author's included", () => {
     const first = processor();
-    const integration = otelIntegration({ recordOutputs: false, spanProcessors: [first] });
+    const integration = otelIntegration({
+      recordInputs: true,
+      recordOutputs: false,
+      spanProcessors: [first],
+    });
 
     expect(integration.content).toStrictEqual({ recordInputs: true, recordOutputs: false });
     expect(integration.spanProcessors[0]).not.toBe(first);
@@ -73,19 +83,19 @@ describe("otelIntegration", () => {
 });
 
 describe("agentRunsIntegration", () => {
-  it("uses Vercel's automatic processor by default", () => {
+  it("records no content by default", () => {
     const integration = agentRunsIntegration();
+
+    expect(integration.content).toStrictEqual({ recordInputs: false, recordOutputs: false });
+    expect(integration.spanProcessors).toHaveLength(1);
+    expect(integration.spanProcessors[0]).not.toBe("auto");
+  });
+
+  it("uses Vercel's automatic processor when all content is enabled", () => {
+    const integration = agentRunsIntegration({ recordInputs: true, recordOutputs: true });
 
     expect(integration.content).toStrictEqual({ recordInputs: true, recordOutputs: true });
     expect(integration.spanProcessors).toStrictEqual(["auto"]);
-  });
-
-  it("wraps the request-context transport when its content policy is narrowed", () => {
-    const integration = agentRunsIntegration({ recordInputs: false });
-
-    expect(integration.content).toStrictEqual({ recordInputs: false, recordOutputs: true });
-    expect(integration.spanProcessors).toHaveLength(1);
-    expect(integration.spanProcessors[0]).not.toBe("auto");
   });
 });
 
@@ -98,8 +108,12 @@ describe("collectOtelPipeline", () => {
   it("concatenates destinations in declaration order", () => {
     const [first, second, third] = [processor(), processor(), processor()];
     const collected = collectOtelPipeline([
-      otelIntegration({ spanProcessors: [first, second] }),
-      otelIntegration({ spanProcessors: [third] }),
+      otelIntegration({
+        recordInputs: true,
+        recordOutputs: true,
+        spanProcessors: [first, second],
+      }),
+      otelIntegration({ recordInputs: true, recordOutputs: true, spanProcessors: [third] }),
       otel(),
     ]);
 
@@ -113,8 +127,8 @@ describe("collectOtelPipeline", () => {
     expect(collected.declared).toBe(true);
     expect(collected.settings).toStrictEqual({
       functionId: undefined,
-      recordInputs: true,
-      recordOutputs: true,
+      recordInputs: false,
+      recordOutputs: false,
       traceChannelRequests: false,
     });
   });

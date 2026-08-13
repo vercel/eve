@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createLocalTracesProcessor } from "#tracing/local-traces.js";
+import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
 import { localTraces } from "#public/instrumentation/otel.js";
 
 vi.mock("#tracing/local-trace-span-processor.js", () => ({
@@ -29,11 +29,11 @@ function agentSpan(sessionId: string, traceId: string): unknown {
   };
 }
 
-describe("createLocalTracesProcessor", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
+describe("createLocalTracesProcessor", () => {
   it("reports whether the released session owned any traces", async () => {
     const spool = createLocalTracesProcessor({ appRoot: "/tmp/eve-local-traces-test" });
     spool.onStart(agentSpan("session-one", "a".repeat(32)), undefined);
@@ -61,5 +61,39 @@ describe("createLocalTracesProcessor", () => {
     expect(() => processor.onEnd(agentSpan("session-one", "a".repeat(32)))).not.toThrow();
     await expect(processor.forceFlush()).resolves.toBeUndefined();
     await expect(processor.shutdown()).resolves.toBeUndefined();
+  });
+});
+
+describe("resolveLocalTracesContent", () => {
+  it("records no content by default", () => {
+    expect(resolveLocalTracesContent()).toEqual({
+      recordInputs: false,
+      recordOutputs: false,
+    });
+  });
+
+  it("records content when explicitly enabled", () => {
+    expect(resolveLocalTracesContent({ recordInputs: true, recordOutputs: true })).toEqual({
+      recordInputs: true,
+      recordOutputs: true,
+    });
+  });
+
+  it("uses EVE_TRACES_CONTENT=on as the zero-config opt-in", () => {
+    vi.stubEnv("EVE_TRACES_CONTENT", "on");
+
+    expect(resolveLocalTracesContent()).toEqual({
+      recordInputs: true,
+      recordOutputs: true,
+    });
+  });
+
+  it("lets EVE_TRACES_CONTENT=off override explicit local capture", () => {
+    vi.stubEnv("EVE_TRACES_CONTENT", "off");
+
+    expect(resolveLocalTracesContent({ recordInputs: true, recordOutputs: true })).toEqual({
+      recordInputs: false,
+      recordOutputs: false,
+    });
   });
 });

@@ -34,8 +34,8 @@ export type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.j
 /**
  * Vercel Agent Runs, enabled by default in production.
  *
- * Export it from `agent/instrumentation/agent-runs.ts` to narrow content, or
- * export `disableInstrumentation()` from that file to turn it off.
+ * Export it from `agent/instrumentation/agent-runs.ts` to configure content
+ * capture, or export `disableInstrumentation()` from that file to turn it off.
  */
 export function agentRuns(options: ContentOptions = {}): OtelIntegration {
   return agentRunsIntegration(options);
@@ -48,8 +48,9 @@ export function agentRuns(options: ContentOptions = {}): OtelIntegration {
  * backend, or export `disableInstrumentation()` from that file to turn it off.
  * Omitting the file leaves eve's default in place.
  *
- * `EVE_TRACES_CONTENT=off` narrows this destination and no other, so declining
- * content locally leaves what a hosted backend receives alone.
+ * `EVE_TRACES_CONTENT=on` opts the default local spool into content capture.
+ * `off` overrides this destination and no other, so declining content locally
+ * leaves what a hosted backend receives alone.
  */
 export function localTraces(options: ContentOptions = {}): OtelIntegration {
   return otelIntegration({

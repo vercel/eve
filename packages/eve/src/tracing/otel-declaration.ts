@@ -61,9 +61,9 @@ export interface OtelOptions {
  * longer have to agree.
  */
 export interface ContentOptions {
-  /** Record model prompts and tool call inputs. Defaults to `true`. */
+  /** Record model prompts and tool call inputs. Defaults to `false`. */
   readonly recordInputs?: boolean;
-  /** Record model responses and tool call outputs. Defaults to `true`. */
+  /** Record model responses and tool call outputs. Defaults to `false`. */
   readonly recordOutputs?: boolean;
 }
 
@@ -119,8 +119,8 @@ export function otel(options: OtelOptions = {}): OtelDeclaration {
  */
 export function otelIntegration(options: OtelIntegrationOptions = {}): OtelIntegration {
   const content: ResolvedContentOptions = {
-    recordInputs: options.recordInputs !== false,
-    recordOutputs: options.recordOutputs !== false,
+    recordInputs: options.recordInputs === true,
+    recordOutputs: options.recordOutputs === true,
   };
   const declared = options.spanProcessors ?? [];
   const spanProcessors =
@@ -155,8 +155,8 @@ export function agentRunsIntegration(options: ContentOptions = {}): OtelIntegrat
 
 export function resolveContentOptions(options: ContentOptions): ResolvedContentOptions {
   return {
-    recordInputs: options.recordInputs !== false,
-    recordOutputs: options.recordOutputs !== false,
+    recordInputs: options.recordInputs === true,
+    recordOutputs: options.recordOutputs === true,
   };
 }
 

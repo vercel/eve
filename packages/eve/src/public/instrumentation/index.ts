@@ -149,13 +149,14 @@ export interface InstrumentationDefinition {
   readonly events?: InstrumentationEvents;
   /**
    * Whether to record full model inputs in telemetry spans. Defaults to
-   * `true` when `instrumentation.ts` is present. Set `false` for sensitive
-   * inputs or to reduce span payload size.
+   * `false`. Set `true` only when the destination is approved to receive
+   * input content.
    */
   readonly recordInputs?: boolean;
   /**
    * Whether to record full model outputs in telemetry spans. Defaults to
-   * `true` when `instrumentation.ts` is present.
+   * `false`. Set `true` only when the destination is approved to receive
+   * output content.
    */
   readonly recordOutputs?: boolean;
   /**
