@@ -1,5 +1,16 @@
 # eve
 
+## 0.36.0
+
+### Minor Changes
+
+- 2714386: `eve/sveltekit` now deploys the agent through Vercel's stable services model. On Vercel builds it generates an eve Build Output service and a `/eve/v1/*` service route instead of writing legacy `experimentalServices` to `vercel.json`. The `configureVercelJson` and `servicePrefix` plugin options and the `EVE_SVELTEKIT_SERVICE_PREFIX` export were removed; delete any generated `experimentalServices` block from `vercel.json`.
+
+### Patch Changes
+
+- 20a5201: Update eve's default agent model to `zai/glm-5.2`. New agents created with `eve init`, config-less agents, and the setup model picker now use GLM 5.2 instead of Claude Sonnet 5.
+- ee8943b: Recover cancelled responder-authorized approvals after replay so the pending tool call remains cancelled and cannot hang while waiting for a consumed response.
+
 ## 0.35.0
 
 ### Minor Changes
