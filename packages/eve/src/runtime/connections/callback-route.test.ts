@@ -112,6 +112,9 @@ describe("handleConnectionCallbackRequest", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
     const body = await response.text();
     expect(body).toContain("Authorization complete");
+    expect(body).toContain("You can close this tab and return to your app.");
+    expect(body).toContain('aria-labelledby="authorization-title"');
+    expect(body).toContain('class="icon" aria-hidden="true"');
 
     expect(resumeHookMock).toHaveBeenCalledTimes(1);
     const [token, payload] = resumeHookMock.mock.calls[0] ?? [];
