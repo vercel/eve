@@ -1,5 +1,6 @@
 export {
   eveDevArguments,
+  packageManagerInstallCommand,
   runPackageManagerInstall,
   runPnpmInstall,
   spawnPackageManager,

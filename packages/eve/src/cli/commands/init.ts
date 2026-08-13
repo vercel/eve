@@ -21,6 +21,7 @@ import { pathExists } from "#setup/path-exists.js";
 import { parseProjectName } from "#setup/project-name.js";
 import {
   eveDevArguments,
+  packageManagerInstallCommand,
   runPackageManagerInstall,
   spawnPackageManager,
 } from "#setup/primitives/index.js";
@@ -30,7 +31,10 @@ import { blockingCreateInPlaceEntries } from "#setup/scaffold/create-in-place.js
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { validateModelSlug } from "#setup/flows/model-source-change.js";
-import type { WorkspaceRootMutation } from "#setup/scaffold/workspace-root.js";
+import {
+  isPackageManagerWorkspaceMember,
+  type WorkspaceRootMutation,
+} from "#setup/scaffold/workspace-root.js";
 import {
   DEFAULT_EVE_PACKAGE_CONTRACT,
   type EvePackageContract,
@@ -63,6 +67,7 @@ export interface InitCommandDependencies {
   ensureChannel: typeof ensureChannel;
   isCodingAgentLaunch: typeof isCodingAgentLaunch;
   now: () => number;
+  packageManagerInstallCommand: typeof packageManagerInstallCommand;
   runPackageManagerInstall: typeof runPackageManagerInstall;
   scaffoldBaseProject: typeof scaffoldBaseProject;
   selectInitHandoff: typeof selectInitHandoff;
@@ -80,6 +85,7 @@ const defaultDependencies: InitCommandDependencies = {
   ensureChannel,
   isCodingAgentLaunch,
   now: () => performance.now(),
+  packageManagerInstallCommand,
   runPackageManagerInstall,
   scaffoldBaseProject,
   selectInitHandoff,
@@ -201,7 +207,9 @@ async function scaffoldProject(
   const parentPath = resolve(parentDirectory);
   const createInPlace = projectName === CURRENT_DIRECTORY_PROJECT_NAME;
   const projectPath = createInPlace ? parentPath : join(parentPath, projectName);
-  if (!createInPlace && (await pathExists(projectPath))) {
+  const populateExistingEmptyDirectory =
+    !createInPlace && (await pathExists(projectPath)) && (await readdir(projectPath)).length === 0;
+  if (!createInPlace && (await pathExists(projectPath)) && !populateExistingEmptyDirectory) {
     throw new Error(`Cannot create project because "${projectPath}" already exists.`);
   }
 
@@ -250,7 +258,7 @@ async function scaffoldProject(
     }
 
     if (stagingDirectory !== undefined) {
-      if (createInPlace) {
+      if (createInPlace || populateExistingEmptyDirectory) {
         await moveDirectoryContents(stagedProjectPath, projectPath);
       } else {
         await rename(stagedProjectPath, projectPath);
@@ -269,15 +277,19 @@ async function scaffoldProject(
 
 type PreparedInitProject =
   | {
+      failurePolicy: "preserve";
       kind: "added";
       nodeEngineOverride?: NodeEngineOverride;
       packageManager: PackageManagerKind;
       projectPath: string;
     }
   | {
+      failurePolicy: "clear" | "preserve" | "remove";
       kind: "created";
       packageManager: PackageManagerKind;
       projectPath: string;
+      retryCommand: string;
+      workspaceMember: boolean;
       workspaceRootMutations: WorkspaceRootMutation[];
     };
 
@@ -321,6 +333,34 @@ function installProgressDetail(
 const NPM_NOISE_LINE = /^\s*npm (?:silly|verbose|http|timing)\b/u;
 const INSTALL_OUTPUT_FALLBACK_LINES = 20;
 
+async function cleanupFreshInitTarget(
+  projectPath: string,
+  policy: "clear" | "remove",
+): Promise<boolean> {
+  try {
+    if (policy === "remove") {
+      await rm(projectPath, { recursive: true, force: true });
+    } else {
+      for (const entry of await readdir(projectPath)) {
+        await rm(join(projectPath, entry), { recursive: true, force: true });
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function workspaceFailureNote(workspaceMember: boolean): string {
+  return workspaceMember
+    ? "\n\nShared workspace files may have changed. Review your workspace changes before committing."
+    : "";
+}
+
+function initRetryCommand(target: string): string {
+  return `eve init ${/^[-\w./]+$/u.test(target) ? target : JSON.stringify(target)}`;
+}
+
 async function runInitSteps(input: {
   dependencies: InitCommandDependencies;
   logger: InitCliLogger;
@@ -334,15 +374,21 @@ async function runInitSteps(input: {
   let rawTarget = target ?? CURRENT_DIRECTORY_PROJECT_NAME;
   let currentDirectoryTarget = isCurrentDirectoryTarget(rawTarget);
   const parentPath = resolve(parentDirectory);
-  const existingDirectory = currentDirectoryTarget
+  const initialCurrentDirectoryEntries = currentDirectoryTarget ? await readdir(parentPath) : [];
+  let existingDirectory = currentDirectoryTarget
     ? (await pathExists(join(parentPath, "package.json")))
       ? parentPath
       : undefined
     : await resolveTargetDirectory(parentDirectory, rawTarget);
+  const explicitEmptyDirectory =
+    !currentDirectoryTarget &&
+    existingDirectory !== undefined &&
+    (await readdir(existingDirectory)).length === 0;
+  if (explicitEmptyDirectory) existingDirectory = undefined;
   const evePackage = resolveInitEvePackageOverride();
   let overwriteExisting = false;
   if (currentDirectoryTarget && existingDirectory === undefined) {
-    const blocking = blockingCreateInPlaceEntries(await readdir(parentPath));
+    const blocking = blockingCreateInPlaceEntries(initialCurrentDirectoryEntries);
     if (blocking.length > 0) {
       if (agentLaunched) {
         throw new Error(
@@ -375,19 +421,47 @@ async function runInitSteps(input: {
       const plannedProjectPath =
         projectName === CURRENT_DIRECTORY_PROJECT_NAME ? parentPath : join(parentPath, projectName);
       const packageManager = await resolveScaffoldPackageManager(plannedProjectPath, dependencies);
-      const scaffold = await scaffoldProject(
-        parentDirectory,
-        projectName,
-        packageManager,
-        options,
-        dependencies,
-        evePackage,
-        overwriteExisting,
-      );
+      const workspaceMember = isPackageManagerWorkspaceMember(packageManager, plannedProjectPath);
+      const retryCommand = initRetryCommand(projectName);
+      const failurePolicy = overwriteExisting
+        ? "preserve"
+        : explicitEmptyDirectory ||
+            (currentDirectoryTarget && initialCurrentDirectoryEntries.length === 0)
+          ? "clear"
+          : currentDirectoryTarget
+            ? "preserve"
+            : "remove";
+      let scaffold: Awaited<ReturnType<typeof scaffoldProject>>;
+      try {
+        scaffold = await scaffoldProject(
+          parentDirectory,
+          projectName,
+          packageManager,
+          options,
+          dependencies,
+          evePackage,
+          overwriteExisting,
+        );
+      } catch (error) {
+        if (failurePolicy !== "preserve") {
+          const cleaned = await cleanupFreshInitTarget(plannedProjectPath, failurePolicy);
+          const detail = error instanceof Error ? error.message : String(error);
+          const cleanup = cleaned
+            ? failurePolicy === "remove"
+              ? `eve removed the incomplete project at "${plannedProjectPath}".`
+              : `eve restored "${plannedProjectPath}" to an empty directory.`
+            : `eve could not completely clean "${plannedProjectPath}".`;
+          throw new Error(`${detail}\n\n${cleanup}${workspaceFailureNote(workspaceMember)}`);
+        }
+        throw error;
+      }
       project = {
+        failurePolicy,
         kind: "created",
         packageManager,
         projectPath: scaffold.projectPath,
+        retryCommand,
+        workspaceMember,
         workspaceRootMutations: scaffold.workspaceRootMutations,
       };
     } else {
@@ -400,11 +474,13 @@ async function runInitSteps(input: {
       project =
         addition.nodeEngineOverride === undefined
           ? {
+              failurePolicy: "preserve",
               kind: "added",
               packageManager: addition.packageManager,
               projectPath: existingDirectory,
             }
           : {
+              failurePolicy: "preserve",
               kind: "added",
               nodeEngineOverride: addition.nodeEngineOverride,
               packageManager: addition.packageManager,
@@ -414,8 +490,17 @@ async function runInitSteps(input: {
     const agentElapsedMs = dependencies.now() - agentStartedAt;
     initLog.debug(`${scaffoldPhase} done`, { ms: agentElapsedMs });
 
+    const installOptions = {
+      bypassMinimumReleaseAge: true,
+      progressDetails: process.stdout.isTTY === true && !debug,
+    } as const;
+    const installCommand = dependencies.packageManagerInstallCommand(
+      project.packageManager,
+      project.projectPath,
+      installOptions,
+    );
     progress.update("Installing dependencies", `${project.packageManager} install`);
-    initLog.debug(`installing dependencies with ${project.packageManager}`);
+    initLog.debug(`installing dependencies with ${project.packageManager}`, { installCommand });
     const installStartedAt = dependencies.now();
     const installFailureOutput: string[] = [];
     const recentInstallOutput: string[] = [];
@@ -425,8 +510,7 @@ async function runInitSteps(input: {
       {
         // The scaffold pins versions younger than typical release-age cooldown
         // windows; gating them would fail every fresh bootstrap.
-        bypassMinimumReleaseAge: true,
-        progressDetails: process.stdout.isTTY === true && !debug,
+        ...installOptions,
         onOutput: (line) => {
           if (line.text.trim() !== "") {
             recentInstallOutput.push(line.text);
@@ -450,7 +534,31 @@ async function runInitSteps(input: {
       const failureOutput =
         installFailureOutput.length > 0 ? installFailureOutput : recentInstallOutput;
       for (const line of failureOutput) logger.error(line);
-      throw new Error(`Failed to install dependencies in "${project.projectPath}".`);
+
+      if (project.failurePolicy !== "preserve") {
+        const cleaned = await cleanupFreshInitTarget(project.projectPath, project.failurePolicy);
+        if (cleaned) {
+          const cleanup =
+            project.failurePolicy === "remove"
+              ? `eve removed the incomplete project at "${project.projectPath}".`
+              : `eve restored "${project.projectPath}" to an empty directory.`;
+          const workspaceChanged =
+            project.workspaceMember || project.workspaceRootMutations.length > 0;
+          throw new Error(
+            `Failed to install dependencies.\n\n${cleanup}\n\nResolve the package-manager error above, then retry:\n  ${project.retryCommand}${workspaceFailureNote(workspaceChanged)}`,
+          );
+        }
+
+        const workspaceChanged =
+          project.workspaceMember || project.workspaceRootMutations.length > 0;
+        throw new Error(
+          `Failed to install dependencies, and eve could not completely clean "${project.projectPath}".\n\nContinue from the existing files:\n  ${installCommand}\n\nOr clean the target manually before rerunning eve init.${workspaceFailureNote(workspaceChanged)}`,
+        );
+      }
+
+      throw new Error(
+        `The eve agent was added, but dependency installation failed.\n\nResolve the package-manager error above, then run this command from "${project.projectPath}":\n  ${installCommand}\n\nDo not rerun eve init; the agent is already configured.`,
+      );
     }
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
