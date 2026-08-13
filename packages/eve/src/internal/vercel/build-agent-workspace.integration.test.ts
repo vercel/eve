@@ -8,14 +8,14 @@ vi.mock("#shared/resolve-eve-binary.js", () => ({
   resolveEveBinaryPath: (root: string) => join(root, "node_modules", "eve", "bin", "eve.js"),
 }));
 
-import { loadAgentCollection } from "#internal/agent-collection.js";
-import { buildAgentCollection } from "#internal/vercel/build-agent-collection.js";
+import { loadAgentWorkspace } from "#internal/agent-workspace.js";
+import { buildAgentWorkspace } from "#internal/vercel/build-agent-workspace.js";
 
-async function createCollection(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "eve-collection-build-"));
+async function createWorkspace(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "eve-workspace-build-"));
   await writeFile(
     join(root, "package.json"),
-    JSON.stringify({ eve: { collection: true }, packageManager: "pnpm@10.0.0", private: true }),
+    JSON.stringify({ eve: { agents: ["agents/*"] }, packageManager: "pnpm@10.0.0", private: true }),
   );
   await Promise.all([
     mkdir(join(root, "agents", "support", "agent"), { recursive: true }),
@@ -24,13 +24,13 @@ async function createCollection(): Promise<string> {
   return root;
 }
 
-describe("buildAgentCollection", () => {
+describe("buildAgentWorkspace", () => {
   it("emits peer services and canonical public routes", async () => {
-    const root = await createCollection();
-    const collection = await loadAgentCollection(root);
-    expect(collection).toBeDefined();
+    const root = await createWorkspace();
+    const workspace = await loadAgentWorkspace(root);
+    expect(workspace).toBeDefined();
 
-    const output = await buildAgentCollection(collection);
+    const output = await buildAgentWorkspace(workspace);
     const config = JSON.parse(await readFile(join(output, "config.json"), "utf8"));
 
     expect(config.routes).toEqual([
@@ -59,10 +59,10 @@ describe("buildAgentCollection", () => {
   });
 
   it("keeps digit-bearing public names while encoding the generated service name", async () => {
-    const root = await createCollection();
+    const root = await createWorkspace();
     await mkdir(join(root, "agents", "support2", "agent"), { recursive: true });
-    const collection = await loadAgentCollection(root);
-    const output = await buildAgentCollection(collection);
+    const workspace = await loadAgentWorkspace(root);
+    const output = await buildAgentWorkspace(workspace);
     const config = JSON.parse(await readFile(join(output, "config.json"), "utf8"));
     const supportServiceName = Object.keys(config.services).find((name) =>
       name.startsWith("eve-support-"),
@@ -76,9 +76,9 @@ describe("buildAgentCollection", () => {
   });
 
   it("refuses to assemble an authored graph", async () => {
-    const root = await createCollection();
+    const root = await createWorkspace();
     await writeFile(join(root, "vercel.json"), JSON.stringify({ services: {} }));
-    const collection = await loadAgentCollection(root);
-    await expect(buildAgentCollection(collection)).rejects.toThrow(/Run `vercel build`/);
+    const workspace = await loadAgentWorkspace(root);
+    await expect(buildAgentWorkspace(workspace)).rejects.toThrow(/Run `vercel build`/);
   });
 });

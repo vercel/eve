@@ -43,9 +43,9 @@ export async function runLinkCommand(
   options: VercelProjectCliOptions = {},
 ): Promise<void> {
   const projectContext = await resolveEveProjectContext(appRoot);
-  if (projectContext.kind === "collection-member") {
+  if (projectContext.kind === "workspace-member") {
     logger.error(
-      `This agent belongs to the collection at ${projectContext.collection.root}. Run \`eve link\` from the collection root.`,
+      `This agent belongs to the workspace at ${projectContext.workspace.root}. Run \`eve link\` from the workspace root.`,
     );
     process.exitCode = 1;
     return;

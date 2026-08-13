@@ -42,9 +42,9 @@ export async function runDeployCommand(
   options: VercelProjectCliOptions & { yes?: boolean } = {},
 ): Promise<void> {
   const projectContext = await resolveEveProjectContext(appRoot);
-  if (projectContext.kind === "collection-member") {
+  if (projectContext.kind === "workspace-member") {
     logger.error(
-      `This agent belongs to the collection at ${projectContext.collection.root}. Run \`eve deploy\` from the collection root to deploy every peer agent together.`,
+      `This agent belongs to the workspace at ${projectContext.workspace.root}. Run \`eve deploy\` from the workspace root to deploy every peer agent together.`,
     );
     process.exitCode = 1;
     return;

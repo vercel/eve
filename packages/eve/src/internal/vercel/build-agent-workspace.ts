@@ -1,10 +1,10 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { AgentCollection } from "#internal/agent-collection.js";
+import type { AgentWorkspace } from "#internal/agent-workspace.js";
 import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
-import { resolveAgentCollectionDeploymentMode } from "#internal/vercel/agent-collection-deployment.js";
+import { resolveAgentWorkspaceDeploymentMode } from "#internal/vercel/agent-workspace-deployment.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 
 const VERCEL_BUILD_OUTPUT_VERSION = 3;
@@ -15,15 +15,15 @@ function resolveMemberBuildCommand(appRoot: string): string {
   )} build`;
 }
 
-/** Emit the inferred Vercel Services project for a strict hostless collection. */
-export async function buildAgentCollection(collection: AgentCollection): Promise<string> {
-  if ((await resolveAgentCollectionDeploymentMode(collection)) === "authored") {
+/** Emit the inferred Vercel Services project for a strict hostless workspace. */
+export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<string> {
+  if ((await resolveAgentWorkspaceDeploymentMode(workspace)) === "authored") {
     throw new Error(
       "This project defines its Vercel service graph in vercel.json. Run `vercel build` to build the complete project, or run `eve build` from an individual agent directory.",
     );
   }
 
-  const agents = collection.members.map((member) => ({
+  const agents = workspace.members.map((member) => ({
     agent: {
       appRoot: member.appRoot,
       buildCommand: resolveMemberBuildCommand(member.appRoot),
@@ -31,13 +31,13 @@ export async function buildAgentCollection(collection: AgentCollection): Promise
       publicRoutePrefix: `/eve/agents/${member.name}`,
     },
     target: {
-      hostOutputDirectory: join(collection.root, ".vercel", "output"),
-      projectRoot: collection.root,
+      hostOutputDirectory: join(workspace.root, ".vercel", "output"),
+      projectRoot: workspace.root,
     },
   }));
   const assembled = assembleEveVercelServices({ agents });
 
-  const outputDirectory = join(collection.root, ".vercel", "output");
+  const outputDirectory = join(workspace.root, ".vercel", "output");
   await rm(outputDirectory, { force: true, recursive: true });
   await mkdir(outputDirectory, { recursive: true });
   await writeFile(

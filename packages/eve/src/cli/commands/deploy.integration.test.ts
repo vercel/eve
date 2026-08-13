@@ -24,12 +24,12 @@ class TestLogger implements DeployCliLogger {
   }
 }
 
-async function createCollectionProject(): Promise<string> {
-  const projectRoot = await mkdtemp(join(tmpdir(), "eve-deploy-collection-"));
+async function createWorkspaceProject(): Promise<string> {
+  const projectRoot = await mkdtemp(join(tmpdir(), "eve-deploy-workspace-"));
   await mkdir(join(projectRoot, "agents/support/agent"), { recursive: true });
   await writeFile(
     join(projectRoot, "package.json"),
-    JSON.stringify({ eve: { collection: true }, private: true }),
+    JSON.stringify({ eve: { agents: ["agents/*"] }, private: true }),
     "utf8",
   );
   return projectRoot;
@@ -89,8 +89,8 @@ describe("runDeployCommand", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("refuses to deploy one member of a collection", async () => {
-    const projectRoot = await createCollectionProject();
+  test("refuses to deploy one member of a workspace", async () => {
+    const projectRoot = await createWorkspaceProject();
     const logger = new TestLogger();
 
     await runDeployCommand(logger, join(projectRoot, "agents/support"), {
@@ -98,7 +98,7 @@ describe("runDeployCommand", () => {
       hasInteractiveTerminal: () => true,
     });
 
-    expect(logger.errors[0]).toContain("collection root");
+    expect(logger.errors[0]).toContain("workspace root");
     expect(process.exitCode).toBe(1);
   });
 

@@ -44,14 +44,14 @@ export function registerBuildCommand(input: {
       await loadDevelopmentEnvironmentFiles(input.applicationContext.root);
 
       const projectContext = await resolveEveProjectContext(input.appRoot);
-      if (projectContext.kind === "collection") {
+      if (projectContext.kind === "workspace") {
         if (options.profile !== undefined || options.skipSandboxPrewarm === true) {
           throw new Error(
-            "Collection builds do not support --profile or --skip-sandbox-prewarm. Run those options from an individual agent directory.",
+            "Workspace builds do not support --profile or --skip-sandbox-prewarm. Run those options from an individual agent directory.",
           );
         }
-        const { buildAgentCollection } = await import("#internal/vercel/build-agent-collection.js");
-        const outputDir = await buildAgentCollection(projectContext.collection);
+        const { buildAgentWorkspace } = await import("#internal/vercel/build-agent-workspace.js");
+        const outputDir = await buildAgentWorkspace(projectContext.workspace);
         input.logger.log(
           renderCliTaggedLine(theme, {
             message: `built output at ${outputDir}`,

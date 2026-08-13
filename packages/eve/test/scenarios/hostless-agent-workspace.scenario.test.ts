@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const vercelManifest = require("vercel/package.json") as { version: string };
 const scenarioApp = useScenarioApp();
 
-describe("hostless agent collection", () => {
+describe("hostless agent workspace", () => {
   it("assembles every direct child as a peer Vercel service", async () => {
     const app = await scenarioApp({
       files: {
@@ -23,7 +23,7 @@ describe("hostless agent collection", () => {
           {
             orgId: "team_eve_scenario",
             projectId: "prj_eve_collection_scenario",
-            projectName: "hostless-agent-collection",
+            projectName: "hostless-agent-workspace",
             settings: {
               buildCommand: "pnpm exec eve build",
               framework: null,
@@ -38,11 +38,11 @@ describe("hostless agent collection", () => {
       },
       dependencies: { vercel: vercelManifest.version },
       installDependencies: true,
-      name: "hostless-agent-collection",
+      name: "hostless-agent-workspace",
     });
     const packageJsonPath = join(app.appRoot, "package.json");
     const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
-    packageJson.eve = { collection: true };
+    packageJson.eve = { agents: ["agents/*"] };
     packageJson.scripts = { build: "eve build" };
     await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
 
