@@ -109,9 +109,10 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
     state.pending = true;
     state.resolved = undefined;
     const next = state.retired
-      ? Promise.resolve(state.hook).then(
-          (value): IteratorResult<SessionInboxPayload> => ({ done: false, value }),
-        )
+      ? Promise.resolve(state.hook).then((value): IteratorResult<SessionInboxPayload> => ({
+          done: false,
+          value,
+        }))
       : state.iterator.next();
     void next.then(
       (result) => {

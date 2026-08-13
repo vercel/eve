@@ -67,7 +67,8 @@ describe("discoverSubagents (memory)", () => {
         instructions: [
           {
             definition: {
-              markdown: "Research tasks thoroughly.",
+              content: "Research tasks thoroughly.",
+              role: "system",
             },
             sourceKind: "markdown",
             logicalPath: "instructions.md",
@@ -91,7 +92,7 @@ describe("discoverSubagents (memory)", () => {
             sourceId: "tools/search.js",
           },
         ],
-        version: 12,
+        version: 13,
       },
       rootPath: researcherRoot,
       sourceId: "subagents/researcher",
@@ -119,7 +120,8 @@ describe("discoverSubagents (memory)", () => {
         instructions: [
           {
             definition: {
-              markdown: "Review drafts for clarity.",
+              content: "Review drafts for clarity.",
+              role: "system",
             },
             sourceKind: "markdown",
             logicalPath: "instructions.md",
@@ -136,7 +138,7 @@ describe("discoverSubagents (memory)", () => {
           logicalPath: "agent.js",
           sourceId: "agent.js",
         },
-        version: 12,
+        version: 13,
       },
       rootPath: reviewerRoot,
       sourceId: "subagents/reviewer",
@@ -215,7 +217,8 @@ describe("discoverSubagents (memory)", () => {
     expect(result.manifest.subagents[0]?.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "Research carefully.",
+          content: "Research carefully.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",

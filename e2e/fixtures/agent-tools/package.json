@@ -13,9 +13,6 @@
   "dependencies": {
     "@eve-e2e/config": "workspace:*",
     "@eve-e2e/dynamic-import-dependency": "file:./fixtures/dynamic-import-dependency",
-    "@opentelemetry/core": "catalog:",
-    "@opentelemetry/sdk-trace-base": "catalog:",
-    "@vercel/otel": "catalog:",
     "@workflow/world-postgres": "catalog:",
     "eve": "workspace:*",
     "zod": "catalog:"

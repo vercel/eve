@@ -2,7 +2,10 @@ import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
 import type { GitHubApiOptions } from "#public/channels/github/api.js";
-import type { GitHubChannelCredentials } from "#public/channels/github/auth.js";
+import type {
+  GitHubBotNameResolver,
+  GitHubChannelCredentials,
+} from "#public/channels/github/auth.js";
 import { checkoutGitHubRepository } from "#public/channels/github/checkout.js";
 import {
   shouldDispatchGitHubComment,
@@ -50,20 +53,20 @@ export function defaultGitHubAuth(ctx: GitHubInboundContext): SessionAuthContext
 
 /** Options used by the built-in GitHub comment dispatch hook. */
 export interface GitHubDefaultDispatchOptions {
-  readonly botName?: string;
+  readonly botName?: GitHubBotNameResolver;
 }
 
 /** Default comment hook: dispatch only when the comment `@mention`s the bot. */
-export function defaultOnComment(
+export async function defaultOnComment(
   ctx: GitHubInboundContext,
   comment: GitHubComment,
   options: GitHubDefaultDispatchOptions,
-): GitHubInboundResult {
+): Promise<GitHubInboundResult> {
   if (
     !shouldDispatchGitHubComment({
       author: comment.author,
       body: comment.body,
-      botName: options.botName,
+      botName: await options.botName?.(),
     })
   ) {
     return null;
@@ -74,7 +77,7 @@ export function defaultOnComment(
 /** Options used by built-in GitHub event handlers. */
 export interface GitHubDefaultEventOptions {
   readonly api?: GitHubApiOptions;
-  readonly botName?: string;
+  readonly botName?: GitHubBotNameResolver;
   readonly credentials?: GitHubChannelCredentials;
   readonly progress?: GitHubProgressConfig;
 }
@@ -102,7 +105,7 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     async "input.requested"(event, channel, _ctx) {
       if (event.requests.length === 0) return;
       const sections = event.requests.map(renderInputRequest);
-      const replyInstruction = renderReplyInstruction(event.requests, options.botName);
+      const replyInstruction = renderReplyInstruction(event.requests, await options.botName?.());
       if (replyInstruction !== undefined) sections.push(replyInstruction);
       await postCommentChunks(channel, sections.join("\n\n"));
     },

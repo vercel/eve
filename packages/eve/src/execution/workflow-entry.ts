@@ -336,8 +336,8 @@ async function runDriverLoop(input: {
         expectedAttemptIds.size > 0 &&
         [...expectedAttemptIds].every((attemptId) => collectedAuthPayloads.has(attemptId))
       ) {
-        const payloads = [...expectedAttemptIds].map(
-          (attemptId) => collectedAuthPayloads.get(attemptId)!,
+        const payloads = [...expectedAttemptIds].map((attemptId) =>
+          collectedAuthPayloads.get(attemptId)!,
         );
         collectedAuthPayloads.clear();
         return { kind: "authorization-resume", payloads, sessionState };

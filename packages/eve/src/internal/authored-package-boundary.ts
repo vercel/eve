@@ -2,6 +2,8 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
 
+import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+
 export const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
 
 export const RESOLVE_EXTENSIONS = [
@@ -102,10 +104,12 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         source,
       });
       if (externalModule !== undefined) {
+        const resolvedId =
+          resolveExistingExternalFilePath(externalModule.resolvedId) ?? externalModule.resolvedId;
+
         return {
           external: true,
-          id:
-            resolveExistingExternalFilePath(externalModule.resolvedId) ?? externalModule.resolvedId,
+          id: normalizeEsmImportSpecifier(resolvedId),
         };
       }
 

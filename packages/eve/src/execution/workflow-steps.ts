@@ -3,7 +3,11 @@ import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.
 import type { DeliverHookPayload } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
-import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
+import {
+  dispatchDynamicInstructionEvent,
+  drainDynamicInstructionUserMessages,
+  prepareDynamicInstructionPreamble,
+} from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import {
@@ -436,19 +440,29 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       if (completedAuths) {
         let emissionState = getHarnessEmissionState(schemaSession.state);
         if (isHarnessBetweenTurns(schemaSession)) {
+          prepareDynamicInstructionPreamble(ctx, schemaSession.history);
+          let instructionMessages: readonly import("ai").ModelMessage[] = [];
           const traceContext = await prepareWorkflowPreambleTrace({
             ctx,
             emissionState,
             runtimeIdentity,
             session: schemaSession,
           });
-          emissionState = await emitTurnPreamble(
-            handleEvent,
-            {},
-            emissionState,
-            runtimeIdentity,
-            traceContext,
-          );
+          try {
+            emissionState = await emitTurnPreamble(
+              handleEvent,
+              {},
+              emissionState,
+              runtimeIdentity,
+              traceContext,
+            );
+          } finally {
+            instructionMessages = drainDynamicInstructionUserMessages(ctx);
+            schemaSession = {
+              ...schemaSession,
+              history: [...schemaSession.history, ...instructionMessages],
+            };
+          }
           schemaSession = setHarnessEmissionState(schemaSession, emissionState);
         }
         for (const { authorization, result } of completedAuths) {

@@ -131,7 +131,7 @@ function infoPayload(input: { readonly name: string }) {
     connections: [],
     diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
     hooks: [],
-    instructions: { dynamic: [], static: null },
+    instructions: { dynamic: [], static: [] },
     kind: "eve-agent-info",
     mode: "development",
     sandbox: null,
@@ -146,7 +146,7 @@ function infoPayload(input: { readonly name: string }) {
       framework: [],
       reserved: [],
     },
-    version: 1,
+    version: 2,
     workflow: { enabled: true, toolName: "workflow" },
     workspace: { resourceRoot: null, rootEntries: [] },
   };

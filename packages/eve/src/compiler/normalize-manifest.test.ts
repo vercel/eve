@@ -11,6 +11,7 @@ import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { collectModuleRefsForManifest } from "#compiler/module-map.js";
 import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
+import { defineInstructions } from "#public/definitions/instructions.js";
 import { experimental_workflow } from "#public/definitions/tool.js";
 import { webSearch } from "#public/tools/web-search.js";
 
@@ -176,6 +177,58 @@ describe("compileAgentManifest", () => {
 
     expect(compiled.webSearchProvider).toBe("exa");
     expect(compiled.tools).toEqual([]);
+  });
+
+  it("preserves ordered static instruction content, roles, and legacy definitions", async () => {
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      instructions: [
+        createModuleSourceRef({ logicalPath: "instructions/10-user.ts" }),
+        createModuleSourceRef({ logicalPath: "instructions/20-legacy.ts" }),
+      ],
+    });
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.loadModuleBackedDefinition
+      .mockResolvedValueOnce(defineInstructions({ content: "Account context.", role: "user" }))
+      .mockResolvedValueOnce(defineInstructions({ markdown: "Legacy system context." }));
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.instructions).toEqual([
+      expect.objectContaining({
+        content: "Account context.",
+        logicalPath: "instructions/10-user.ts",
+        role: "user",
+      }),
+      expect.objectContaining({
+        content: "Legacy system context.",
+        logicalPath: "instructions/20-legacy.ts",
+        role: "system",
+      }),
+    ]);
+  });
+
+  it("rejects unsupported dynamic instruction event keys", async () => {
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      instructions: [createModuleSourceRef({ logicalPath: "instructions/dynamic.ts" })],
+    });
+    mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    mocks.loadModuleBackedDefinition.mockResolvedValue(
+      defineDynamic({
+        events: {
+          "step.started": () => defineInstructions({ content: "Too late." }),
+        },
+      }),
+    );
+
+    await expect(compileAgentManifest(manifest)).rejects.toThrow(
+      'Unsupported event: "step.started"',
+    );
   });
 
   it("requires web search configuration to use the web_search filename", async () => {

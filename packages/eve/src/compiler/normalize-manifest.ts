@@ -190,7 +190,7 @@ async function compileAgentResources(
   const dynamicToolSlugs = new Set(dynamicTools.map((tool) => tool.slug));
   const connectionNames = new Set(connections.map((connection) => connection.connectionName));
   const skillNames = new Set(skills.map((skill) => skill.name));
-  const extensionInstructionFragments: string[] = [];
+  const extensionInstructions: CompiledInstructionsDefinition[] = [];
   for (const mount of [...manifest.resolvedExtensions].sort((left, right) =>
     left.namespace.localeCompare(right.namespace),
   )) {
@@ -227,25 +227,10 @@ async function compileAgentResources(
     hooks.push(...contributions.hooks);
     dynamicSkills.push(...contributions.dynamicSkills);
     dynamicInstructions.push(...contributions.dynamicInstructions);
-    extensionInstructionFragments.push(...contributions.instructionFragments);
+    extensionInstructions.push(...contributions.instructions);
   }
 
-  const composedMarkdown = [
-    ...staticInstructions.map((entry) => entry.markdown),
-    ...extensionInstructionFragments,
-  ];
-  const composedInstructions: CompiledInstructionsDefinition | undefined =
-    composedMarkdown.length === 0
-      ? undefined
-      : staticInstructions.length === 1 && extensionInstructionFragments.length === 0
-        ? staticInstructions[0]
-        : {
-            name: "instructions",
-            logicalPath: "instructions",
-            markdown: composedMarkdown.join("\n\n"),
-            sourceId: staticInstructions[0]?.sourceId ?? "instructions",
-            sourceKind: "module",
-          };
+  const instructions = [...staticInstructions, ...extensionInstructions];
 
   return createCompiledAgentResources({
     agentRoot: manifest.agentRoot,
@@ -275,7 +260,7 @@ async function compileAgentResources(
     schedules,
     dynamicInstructions,
     skills,
-    instructions: composedInstructions,
+    instructions,
     tools,
   });
 }

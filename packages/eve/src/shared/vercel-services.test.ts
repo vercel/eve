@@ -81,7 +81,11 @@ describe("mergeEveVercelConfig", () => {
     const merged = mergeEveVercelConfig(
       {
         services: {
-          agent: { framework: "eve", buildCommand: "pnpm build:agent", root: "agent" },
+          agent: {
+            framework: "eve",
+            buildCommand: "pnpm build:agent",
+            root: "agent",
+          },
           other: { framework: "hono" },
         },
       },

@@ -4,10 +4,11 @@
  */
 
 export {
+  defineDynamic,
   defineInstructions,
+  type DynamicInstructionsEvents,
+  type DynamicInstructionsResult,
   type InstructionsDefinition,
 } from "#public/definitions/instructions.js";
-
-export { defineDynamic } from "#public/definitions/tool.js";
 
 export type { DynamicResolveContext, DynamicSentinel } from "#shared/dynamic-tool-definition.js";

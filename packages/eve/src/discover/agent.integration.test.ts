@@ -89,7 +89,8 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "You are a precise assistant.",
+          content: "You are a precise assistant.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",
@@ -174,7 +175,8 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "You are a precise assistant.",
+          content: "You are a precise assistant.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "system.md",
@@ -226,7 +228,8 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "Preferred instructions.",
+          content: "Preferred instructions.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",
@@ -252,7 +255,8 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "Uppercase instructions.",
+          content: "Uppercase instructions.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",
@@ -475,7 +479,8 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "You are a precise assistant.",
+          content: "You are a precise assistant.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",
@@ -502,7 +507,8 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "You are a precise assistant.",
+          content: "You are a precise assistant.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",

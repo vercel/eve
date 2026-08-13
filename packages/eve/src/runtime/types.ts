@@ -49,13 +49,14 @@ export type ResolvedModuleSourceRef = Readonly<ModuleSourceRef>;
  * `instructions.{ts,...}`.
  *
  * Module-backed instructions sources are executed once at build time —
- * the resulting markdown is captured here. Runtime never re-evaluates
+ * the resulting content is captured here. Runtime never re-evaluates
  * the module.
  */
 export type ResolvedInstructionsDefinition = Readonly<
   SourceRef & {
+    content: string;
     name: string;
-    markdown: string;
+    role: "system" | "user";
   } & (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef)
 >;
 
@@ -437,7 +438,7 @@ export interface ResolvedAgent {
    * `instructions.{ts,...}`, or `undefined` when the agent does not
    * declare one.
    */
-  readonly instructions?: ResolvedInstructionsDefinition;
+  readonly instructions: readonly ResolvedInstructionsDefinition[];
   /**
    * Authored sandbox override for this agent, when one exists. `null`
    * means the agent uses the framework default sandbox unchanged.
