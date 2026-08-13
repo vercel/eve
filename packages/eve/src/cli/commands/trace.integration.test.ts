@@ -256,7 +256,7 @@ describe("eve traces", () => {
     expect(output.out[0]).toContain("Cost");
     expect(output.out[0]).toContain("$0.0031");
     expect(output.out[0]).toContain("agent.step [step 0, attempt 0]  70ms  ↑1.4K ↓213 $0.0031");
-    expect(output.out[0]).toContain("ai.toolCall  10ms  get_weather");
+    expect(output.out[0]).toContain("ai.toolCall  10ms");
     // Attributes and events stay behind --verbose.
     expect(output.out[0]).not.toContain("events:");
     expect(output.out[0]).not.toContain("agent.model.id:");
@@ -296,7 +296,7 @@ describe("eve traces", () => {
     expect(output.out[0]).toContain("├─ step.started  +0ms");
     expect(output.out[0]).toContain("└─ step.completed  +70ms");
     expect(output.out[0]).toContain("step.index: 0");
-    expect(output.out[0]).toContain("└─ ai.toolCall  10ms  get_weather ERROR");
+    expect(output.out[0]).toContain("└─ ai.toolCall  10ms ERROR");
     expect(output.out[0]).toContain("├─ status: ERROR — tool exploded");
     expect(output.out[0]).toContain("└─ gen_ai.tool.name: get_weather");
     expect(output.out[0]).toContain("Errors");

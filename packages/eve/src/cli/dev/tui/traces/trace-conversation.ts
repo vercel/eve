@@ -1,10 +1,8 @@
 /**
  * Conversation view for the `/traces` viewer: the same trace, re-told as a
  * flow of user messages, assistant replies, and tool calls instead of a
- * latency waterfall. Items are built from the span tree (turns in order,
- * subtrees in time order) with text pulled from the content attributes —
- * the user's message from the turn's first model prompt, replies and tool
- * calls from response/tool spans.
+ * latency waterfall. Durable delivery and action spans provide the user and
+ * tool cards directly; model response spans provide assistant cards.
  */
 
 import { formatElapsed } from "#cli/format-elapsed.js";
@@ -20,7 +18,7 @@ import { SURFACE_CLOSE } from "./trace-surfaces.js";
 
 export interface ConversationItem {
   readonly kind: "system" | "user" | "assistant" | "tool";
-  /** Detail-drawer source for this item (the turn span for users). */
+  /** Detail-drawer source for this item. */
   readonly span: LocalTraceSpan;
   /** Tool name for tool items. */
   readonly name?: string;
@@ -58,149 +56,140 @@ export interface ConversationSubagent {
 /** Max rendered lines for one collapsed card payload (args, result, or text). */
 const CARD_PAYLOAD_LINES = 3;
 
-/** Builds the conversation flow for a trace, one item per message/action. */
+/** Builds the conversation flow from eve's durable delivery, model, and action spans. */
 export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   const byId = new Map(trace.spans.map((span) => [span.spanId, span]));
-  const children = new Map<string, LocalTraceSpan[]>();
+  const subagents = new Map<string, ConversationSubagent>();
   for (const span of trace.spans) {
-    if (span.parentSpanId === undefined) continue;
-    const siblings = children.get(span.parentSpanId) ?? [];
-    siblings.push(span);
-    children.set(span.parentSpanId, siblings);
+    if (span.name !== "agent.turn") continue;
+    const turnId = stringAttribute(span, "agent.turn.id");
+    const subagent = turnSubagent(span);
+    if (turnId !== undefined && subagent !== undefined) subagents.set(turnId, subagent);
   }
-  for (const siblings of children.values()) siblings.sort(compareLocalTraceSpans);
-
-  // Turns are matched by name, not by root position: they parent to the
-  // `agent.session` window span when one exists (and to nothing on older
-  // spools), and a subagent child's turns sit beside the parent's in the
-  // same trace.
-  const turns = trace.spans.filter((span) => span.name === "agent.turn");
-  turns.sort(compareLocalTraceSpans);
-
-  // Cards order by when their span started, not turn by turn: a parent
-  // parks while its subagent runs and resumes afterwards, so the child's
-  // cards belong between the parent's dispatch step and its final reply.
-  // The system card pins to the front regardless.
   const entries: { readonly item: ConversationItem; readonly order: bigint }[] = [];
-  for (const root of turns) {
-    const subagent = turnSubagent(root);
-    const subtree: LocalTraceSpan[] = [];
-    const walk = (span: LocalTraceSpan): void => {
-      subtree.push(span);
-      for (const child of children.get(span.spanId) ?? []) walk(child);
-    };
-    walk(root);
-    subtree.sort(compareLocalTraceSpans);
+  const firstSystemSpan = [...trace.spans]
+    .sort(compareLocalTraceSpans)
+    .find((span) => isModelSpan(span) && typeof span.attributes["ai.prompt.system"] === "string");
+  const systemText = firstSystemSpan?.attributes["ai.prompt.system"];
+  if (firstSystemSpan !== undefined && typeof systemText === "string" && systemText.length > 0) {
+    entries.push({
+      item: {
+        kind: "system",
+        durationMs: 0,
+        error: false,
+        span: firstSystemSpan,
+        subagent: subagentFor(firstSystemSpan, subagents, byId),
+        text: systemText,
+      },
+      order: 0n,
+    });
+  }
 
-    if (entries.length === 0) {
-      const systemSpan = subtree.find(
-        (span) => isModelSpan(span) && typeof span.attributes["ai.prompt.system"] === "string",
-      );
-      const systemText = systemSpan?.attributes["ai.prompt.system"];
-      if (systemSpan !== undefined && typeof systemText === "string" && systemText.length > 0) {
-        entries.push({
-          item: {
-            kind: "system",
-            durationMs: 0,
-            error: false,
-            span: systemSpan,
-            subagent,
-            text: systemText,
-          },
-          order: 0n,
-        });
-      }
-    }
-    const userText = extractUserText(subtree.find(isModelSpan));
-    if (userText !== undefined) {
+  for (const span of trace.spans) {
+    const subagent = subagentFor(span, subagents, byId);
+    if (span.name === "agent.channel.delivery") {
+      const text = deliveryText(stringAttribute(span, "agent.channel.delivery.input"));
+      if (text === undefined) continue;
       entries.push({
         item: {
           kind: "user",
-          durationMs: 0,
-          error: false,
-          span: root,
+          durationMs: spanDurationMs(span),
+          error: span.statusCode === 2,
+          span,
           subagent,
-          text: userText,
+          text,
         },
-        order: root.startTimeNs,
+        order: span.startTimeNs,
       });
+      continue;
     }
-    for (const span of subtree) {
-      if (isModelSpan(span)) {
-        const text = stringAttribute(span, "ai.response.text");
-        const reasoning = stringAttribute(span, "ai.response.reasoning");
-        const hasUsage =
-          numberAttribute(span, "agent.usage.input_tokens") !== undefined ||
-          numberAttribute(span, "agent.usage.output_tokens") !== undefined;
-        const hasToolCalls = span.attributes["ai.response.tool_calls"] !== undefined;
-        const isEmpty =
-          (text === undefined || text.trim().length === 0) &&
-          (reasoning === undefined || reasoning.trim().length === 0) &&
-          !hasUsage &&
-          !hasToolCalls &&
-          span.statusCode !== 2;
-        if (isEmpty) continue;
-        entries.push({
-          item: {
-            kind: "assistant",
-            costUsd: stepCostUsd(span, byId),
-            durationMs: spanDurationMs(span),
-            error: span.statusCode === 2,
-            inputTokens: numberAttribute(span, "agent.usage.input_tokens"),
-            model: stringAttribute(span, "gen_ai.request.model"),
-            outputTokens: numberAttribute(span, "agent.usage.output_tokens"),
-            reasoning,
-            span,
-            subagent,
-            text,
-            toolCallNames: hasToolCalls
-              ? parseToolCallNames(stringAttribute(span, "ai.response.tool_calls"))
-              : undefined,
-          },
-          order: span.startTimeNs,
-        });
-        // Provider-executed tools (e.g. web_search) run inside the model
-        // call and never get an ai.toolCall span; their results only exist
-        // on the model span. Emit a card per result right after the
-        // assistant card (same order, stable sort keeps emission order).
-        for (const result of parseProviderToolResults(
-          stringAttribute(span, "ai.response.tool_results"),
-        )) {
-          entries.push({
-            item: {
-              kind: "tool",
-              args: result.args,
-              durationMs: 0,
-              error: result.error,
-              name: stripTerminalControls(result.name),
-              result: result.result,
-              span,
-              subagent,
-            },
-            order: span.startTimeNs,
-          });
-        }
-      } else if (span.name === "ai.toolCall") {
+    if (isModelSpan(span)) {
+      const text = stringAttribute(span, "ai.response.text");
+      const reasoning = stringAttribute(span, "ai.response.reasoning");
+      const hasUsage =
+        numberAttribute(span, "agent.usage.input_tokens") !== undefined ||
+        numberAttribute(span, "agent.usage.output_tokens") !== undefined;
+      const hasToolCalls = span.attributes["ai.response.tool_calls"] !== undefined;
+      const isEmpty =
+        (text === undefined || text.trim().length === 0) &&
+        (reasoning === undefined || reasoning.trim().length === 0) &&
+        !hasUsage &&
+        !hasToolCalls &&
+        span.statusCode !== 2;
+      if (isEmpty) continue;
+      entries.push({
+        item: {
+          kind: "assistant",
+          costUsd: stepCostUsd(span, byId),
+          durationMs: spanDurationMs(span),
+          error: span.statusCode === 2,
+          inputTokens: numberAttribute(span, "agent.usage.input_tokens"),
+          model: stringAttribute(span, "gen_ai.request.model"),
+          outputTokens: numberAttribute(span, "agent.usage.output_tokens"),
+          reasoning,
+          span,
+          subagent,
+          text,
+          toolCallNames: hasToolCalls
+            ? parseToolCallNames(stringAttribute(span, "ai.response.tool_calls"))
+            : undefined,
+        },
+        order: span.startTimeNs,
+      });
+      // Provider-executed tools (e.g. web_search) run inside the model
+      // call, so their results only exist on this response span.
+      for (const result of parseProviderToolResults(
+        stringAttribute(span, "ai.response.tool_results"),
+      )) {
         entries.push({
           item: {
             kind: "tool",
-            args: stringAttribute(span, "gen_ai.tool.call.arguments"),
-            durationMs: spanDurationMs(span),
-            error: span.statusCode === 2,
-            name: stripTerminalControls(stringAttribute(span, "gen_ai.tool.name") ?? "tool"),
-            result: unwrapJsonString(stringAttribute(span, "gen_ai.tool.call.result")),
+            args: result.args,
+            durationMs: 0,
+            error: result.error,
+            name: stripTerminalControls(result.name),
+            result: result.result,
             span,
             subagent,
           },
           order: span.startTimeNs,
         });
       }
+      continue;
+    }
+    if (span.name === "agent.action") {
+      entries.push({
+        item: {
+          kind: "tool",
+          args: stringAttribute(span, "gen_ai.tool.call.arguments"),
+          durationMs: spanDurationMs(span),
+          error: span.statusCode === 2,
+          name: stripTerminalControls(stringAttribute(span, "agent.action.name") ?? "action"),
+          result: unwrapJsonString(stringAttribute(span, "gen_ai.tool.call.result")),
+          span,
+          subagent,
+        },
+        order: span.startTimeNs,
+      });
     }
   }
-  // Stable, so equal timestamps keep their per-turn emission order.
   return entries
     .sort((left, right) => (left.order === right.order ? 0 : left.order < right.order ? -1 : 1))
     .map((entry) => entry.item);
+}
+
+function subagentFor(
+  span: LocalTraceSpan,
+  subagents: ReadonlyMap<string, ConversationSubagent>,
+  byId: ReadonlyMap<string, LocalTraceSpan>,
+): ConversationSubagent | undefined {
+  let current: LocalTraceSpan | undefined = span;
+  while (current !== undefined) {
+    const turnId = stringAttribute(current, "agent.turn.id");
+    if (turnId !== undefined) return subagents.get(turnId);
+    current = current.parentSpanId === undefined ? undefined : byId.get(current.parentSpanId);
+  }
+  return undefined;
 }
 
 /** Reads the dispatch lineage a subagent turn carries on its turn span. */
@@ -518,37 +507,18 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-/** The user's message for a turn = the last user message in its first prompt. */
-function extractUserText(firstModelSpan: LocalTraceSpan | undefined): string | undefined {
-  if (firstModelSpan === undefined) return undefined;
-  const raw = firstModelSpan.attributes["ai.prompt.messages"];
-  if (typeof raw !== "string") return undefined;
-  let messages: unknown;
+/** The channel delivery projection holds the original message without prompt history. */
+function deliveryText(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
   try {
-    messages = JSON.parse(raw);
-  } catch {
+    const input: unknown = JSON.parse(raw);
+    if (isRecord(input) && typeof input.message === "string") return input.message;
+    // Interaction-only deliveries have no user-facing text to render.
     return undefined;
+  } catch {
+    // Content capture uses JSON, but keep an unexpected scalar readable.
+    return raw;
   }
-  if (!Array.isArray(messages)) return undefined;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!isRecord(message) || message.role !== "user") continue;
-    const text = contentText(message.content).trim();
-    if (text.length > 0) return text;
-  }
-  return undefined;
-}
-
-function contentText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter(
-      (part): part is { text: string } =>
-        isRecord(part) && part.type === "text" && typeof part.text === "string",
-    )
-    .map((part) => part.text)
-    .join("\n");
 }
 
 /** Text tool results are stored JSON-encoded; unwrap them to plain text. */
