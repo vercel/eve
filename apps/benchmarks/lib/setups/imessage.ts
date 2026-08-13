@@ -6,7 +6,7 @@ const REGISTRY_PORT = 4173;
 const REGISTRY_URL = `http://127.0.0.1:${REGISTRY_PORT}`;
 
 export const imessageSetup: AuthoringSetup = {
-  id: "imessage-v1",
+  id: "imessage",
   ports: [REGISTRY_PORT],
   environment: { EVE_DEV_OFFICIAL_REGISTRY_URL: REGISTRY_URL },
   async onBootstrap({ run, artifactsRoot, write }) {

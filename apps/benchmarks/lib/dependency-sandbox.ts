@@ -51,7 +51,7 @@ function dependencySnapshot(
   digest: string,
   log: (message: string) => void,
 ): Promise<string> {
-  const name = `eve-benchmark-dependencies-v4-${digest.slice(0, 24)}`;
+  const name = `eve-benchmark-dependencies-${digest.slice(0, 24)}`;
   let snapshot = snapshots.get(name);
   if (snapshot !== undefined) return snapshot;
   snapshot = createDependencySnapshot(name, archive, log);
