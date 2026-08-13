@@ -183,21 +183,6 @@ function capturePackageManager(
   });
 }
 
-function quoteCommandArgument(value: string): string {
-  return /^[\w@%+=:,./-]+$/u.test(value) ? value : JSON.stringify(value);
-}
-
-/** Returns the canonical, copyable command used for a package-manager install. */
-export function packageManagerInstallCommand(
-  kind: PackageManagerKind,
-  projectRoot: string,
-  options: PackageManagerInstallOptions = {},
-): string {
-  const strategy = getPackageManagerStrategy(kind);
-  const args = strategy.prepareArguments(projectRoot, strategy.installArguments(options));
-  return [kind, ...args].map(quoteCommandArgument).join(" ");
-}
-
 /**
  * Installs project dependencies using the selected package-manager strategy.
  *

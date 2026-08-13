@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   eveDevArguments,
-  packageManagerInstallCommand,
   runPackageManagerInstall,
   runPnpmInstall,
   spawnPnpm,
@@ -140,26 +139,6 @@ describe("runPnpmInstall", () => {
       { stream: "stdout", text: "workspace parse failed" },
       { stream: "stderr", text: "pnpm list --depth -1 --json exited with code 1." },
     ]);
-  });
-});
-
-describe("packageManagerInstallCommand", () => {
-  test("formats the canonical install command with its actual options", () => {
-    expect(
-      packageManagerInstallCommand("pnpm", "/tmp/my agent", {
-        bypassMinimumReleaseAge: true,
-      }),
-    ).toBe(
-      'pnpm --dir "/tmp/my agent" install --no-frozen-lockfile --config.minimum-release-age=0',
-    );
-  });
-
-  test("omits progress-only flags from a copyable npm command", () => {
-    expect(
-      packageManagerInstallCommand("npm", "/tmp/app", {
-        bypassMinimumReleaseAge: true,
-      }),
-    ).toBe("npm install --min-release-age=0");
   });
 });
 

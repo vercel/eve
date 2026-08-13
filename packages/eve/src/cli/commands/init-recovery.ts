@@ -30,7 +30,3 @@ export function workspaceFailureNote(workspaceMember: boolean): string {
     ? "\n\nShared workspace files may have changed. Review your workspace changes before committing."
     : "";
 }
-
-export function initRetryCommand(target: string): string {
-  return `eve init ${/^[-\w./]+$/u.test(target) ? target : JSON.stringify(target)}`;
-}

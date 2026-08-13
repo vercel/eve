@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { detectPackageManager } from "#setup/package-manager.js";
-import { packageManagerInstallCommand } from "#setup/primitives/index.js";
 import {
   addAgentToProject,
   type AddAgentToProjectOptions,
@@ -98,7 +97,6 @@ function dependencies(
     // launched by a coding agent, and these tests assert the human path.
     isCodingAgentLaunch: vi.fn(async () => false),
     now: vi.fn(() => 0),
-    packageManagerInstallCommand,
     detectPackageManager,
     scaffoldBaseProject: (options: ScaffoldBaseProjectOptions) => {
       const merged = { ...BASE_VERSIONS, ...options };
@@ -440,6 +438,60 @@ describe("runInitCommand", () => {
     );
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(subdirectory);
   });
+
+  it("refuses a selected existing nonempty subdirectory without changing it", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-selected-existing-"));
+    await writeFile(join(projectPath, "notes.md"), "parent\n", "utf8");
+    const subdirectory = join(projectPath, "research-agent");
+    await mkdir(subdirectory);
+    await writeFile(join(subdirectory, "keep.txt"), "keep me\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.confirmInitInNonEmptyDirectory.mockResolvedValue({
+      kind: "subdirectory",
+      name: "research-agent",
+    });
+
+    await expect(runInitCommand(output, projectPath, undefined, {}, deps)).rejects.toThrow(
+      "no package.json",
+    );
+
+    await expect(readFile(join(subdirectory, "keep.txt"), "utf8")).resolves.toBe("keep me\n");
+    await expect(pathExists(join(subdirectory, "agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+  });
+
+  it.each(["empty", "git"] as const)(
+    "restores a selected existing %s subdirectory after install failure",
+    async (kind) => {
+      const projectPath = await mkdtemp(join(tmpdir(), "eve-init-selected-fresh-"));
+      await writeFile(join(projectPath, "notes.md"), "parent\n", "utf8");
+      const subdirectory = join(projectPath, "research-agent");
+      await mkdir(subdirectory);
+      if (kind === "git") {
+        await mkdir(join(subdirectory, ".git"));
+        await writeFile(join(subdirectory, ".git/HEAD"), "ref: refs/heads/main\n", "utf8");
+      }
+      const output = logger();
+      const deps = dependencies();
+      deps.confirmInitInNonEmptyDirectory.mockResolvedValue({
+        kind: "subdirectory",
+        name: "research-agent",
+      });
+      deps.runPackageManagerInstall.mockResolvedValue(false);
+
+      await expect(runInitCommand(output, projectPath, undefined, {}, deps)).rejects.toThrow(
+        "restored",
+      );
+
+      await expect(readdir(subdirectory)).resolves.toEqual(kind === "git" ? [".git"] : []);
+      if (kind === "git") {
+        await expect(readFile(join(subdirectory, ".git/HEAD"), "utf8")).resolves.toBe(
+          "ref: refs/heads/main\n",
+        );
+      }
+    },
+  );
 
   it("leaves a non-empty current directory unchanged when location selection is cancelled", async () => {
     const projectPath = await mkdtemp(join(tmpdir(), "eve-init-nonempty-cancel-"));
@@ -1288,9 +1340,7 @@ describe("runInitCommand", () => {
     deps.runPackageManagerInstall.mockResolvedValue(false);
 
     await expect(runInitCommand(output, projectRoot, ".", {}, deps)).rejects.toThrow(
-      deps.packageManagerInstallCommand("pnpm", projectRoot, {
-        bypassMinimumReleaseAge: true,
-      }),
+      `install dependencies with pnpm in "${projectRoot}"`,
     );
 
     await expect(readFile(join(projectRoot, "notes.md"), "utf8")).resolves.toBe("keep me\n");
@@ -1305,9 +1355,7 @@ describe("runInitCommand", () => {
     deps.runPackageManagerInstall.mockResolvedValue(false);
 
     await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
-      deps.packageManagerInstallCommand("pnpm", projectRoot, {
-        bypassMinimumReleaseAge: true,
-      }),
+      `install dependencies with pnpm in "${projectRoot}"`,
     );
 
     await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
