@@ -47,6 +47,23 @@ export interface SubagentRunInputBuild {
 }
 
 /**
+ * Runtime graph shape needed to answer sandbox-inheritance questions for
+ * one declared child node. Partial test bundles may omit the graph.
+ */
+export interface SubagentSandboxGraph {
+  readonly nodesByNodeId: ReadonlyMap<
+    string,
+    {
+      readonly sandboxRegistry: {
+        readonly sandbox: {
+          readonly definition: { readonly inheritsParent?: boolean };
+        } | null;
+      };
+    }
+  >;
+}
+
+/**
  * Builds the {@link RunInput} for one delegated subagent child run.
  */
 export function buildSubagentRunInput(input: {
@@ -68,6 +85,11 @@ export function buildSubagentRunInput(input: {
    */
   readonly fanoutSize?: number;
   readonly initiatorAuth: SessionAuthContext | null;
+  /**
+   * Runtime graph used to detect whether this declared child selected the
+   * dispatching parent's sandbox. Absence means no inheritance.
+   */
+  readonly graph?: SubagentSandboxGraph;
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
   readonly parentTraceContext?: SessionTraceContext;
@@ -120,9 +142,15 @@ export function buildSubagentRunInput(input: {
         parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
         parentSessionId: session.sessionId,
         subagentName: action.subagentName,
-        ...(action.subagentName === "agent" && session.sandboxState
-          ? { parentSandboxState: session.sandboxState, sandboxSessionId: session.sessionId }
-          : {}),
+        ...(input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition
+          .inheritsParent === true
+          ? {
+              ...(session.sandboxState ? { parentSandboxState: session.sandboxState } : {}),
+              sandboxSessionId: session.sessionId,
+            }
+          : action.subagentName === "agent" && session.sandboxState
+            ? { parentSandboxState: session.sandboxState, sandboxSessionId: session.sessionId }
+            : {}),
       },
     },
     auth,

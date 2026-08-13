@@ -62,6 +62,25 @@ describe("loadSkillFromSandbox", () => {
     await expect(loadSkillFromSandbox(sandbox.access, "research")).resolves.toBe("# Research\n");
   });
 
+  it("reads only from the active agent skill scope", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+      initialFiles: {
+        "/home/agent/.agents/skills/research/SKILL.md": "# Parent research\n",
+        "/agents/worker-00000000/.agents/skills/research/SKILL.md": "# Worker research\n",
+      },
+    });
+
+    await expect(
+      loadSkillFromSandbox(sandbox.access, "research", [], { home: "/agents/worker-00000000" }),
+    ).resolves.toBe("# Worker research\n");
+    await expect(loadSkillFromSandbox(sandbox.access, "research")).resolves.toBe(
+      "# Parent research\n",
+    );
+  });
+
   it("throws when the skill is missing", async () => {
     const sandbox = mockSandbox();
 
@@ -99,5 +118,26 @@ describe("createSandboxSkillHandle", () => {
     await expect(handle.file("references/catalog.yml").bytes()).resolves.toEqual(
       Buffer.from("entities: []\n"),
     );
+  });
+
+  it("keeps same-named parent and child package files isolated", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+      initialFiles: {
+        "/home/agent/.agents/skills/research/references/catalog.yml": "parent\n",
+        "/agents/worker-00000000/.agents/skills/research/references/catalog.yml": "worker\n",
+      },
+    });
+
+    await expect(
+      createSandboxSkillHandle(sandbox.access, "research", { home: "/agents/worker-00000000" })
+        .file("references/catalog.yml")
+        .text(),
+    ).resolves.toBe("worker\n");
+    await expect(
+      createSandboxSkillHandle(sandbox.access, "research").file("references/catalog.yml").text(),
+    ).resolves.toBe("parent\n");
   });
 });

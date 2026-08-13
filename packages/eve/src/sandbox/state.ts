@@ -24,13 +24,26 @@ export interface SandboxState {
 }
 
 /**
+ * Storage location for Eve-managed skill packages, bound to one agent
+ * home. Mirrors `SkillStoreLocation` in `#runtime/skills/store.js`
+ * without importing runtime-tier code into this leaf module.
+ */
+export interface SandboxSkillStoreLocation {
+  readonly home?: string;
+}
+
+/**
  * Lazy sandbox accessor bound to one step execution.
  *
  * Returned by `ensureSandboxAccess` and placed on the `AlsContext` (via
  * `SandboxKey`) so tools can call `ctx.getSandbox()`.
+ *
+ * Node-bound facts (the skill store location) ride on the access itself so
+ * harness-tier consumers never re-derive them from runtime-tier context.
  */
 export interface SandboxAccess {
   captureState(): Promise<SandboxState>;
   get(): Promise<SandboxSession | null>;
+  readonly skillStoreLocation?: SandboxSkillStoreLocation;
   stop(): Promise<void>;
 }

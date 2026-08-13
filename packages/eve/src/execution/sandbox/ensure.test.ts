@@ -346,6 +346,40 @@ describe("ensureSandboxAccess", () => {
     );
   });
 
+  it("derives an inherited sandbox from the parent owner identity", async () => {
+    const parentBackend = createBackend();
+    const childBackend = createBackend();
+    const registry = createTestRegistry({ inheritsParent: true }, childBackend);
+    const parentDefinition: ResolvedSandboxDefinition = {
+      backend: parentBackend,
+      logicalPath: "agent/sandbox.ts",
+      sourceHash: "parent-source-hash",
+      sourceId: "agent/sandbox",
+      sourceKind: "module",
+    };
+    const inheritedRegistry: RuntimeSandboxRegistry = {
+      sandbox: {
+        ...registry.sandbox,
+        inheritance: {
+          definition: parentDefinition,
+          inheritedWorkspaceResourceRoots: [],
+          nodeId: "__root__",
+          workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+        },
+      },
+    };
+
+    const access = await ensure({ registry: inheritedRegistry });
+    await access.get();
+
+    expect(childBackend.create).not.toHaveBeenCalled();
+    expect(parentBackend.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: expect.stringContaining("session_1-__root__"),
+      }),
+    );
+  });
+
   it("passes runtime tags to the sandbox backend", async () => {
     const backend = createBackend();
     const registry = createTestRegistry({}, backend);

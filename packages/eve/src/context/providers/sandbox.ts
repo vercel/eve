@@ -10,7 +10,11 @@ import {
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
-import { getActiveRuntimeNode } from "#context/node.js";
+import {
+  getActiveAgentHome,
+  getActiveRuntimeNode,
+  getActiveSkillStoreLocation,
+} from "#context/node.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 
 export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
@@ -24,8 +28,11 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
     const sessionId = ctx.require(SessionIdKey);
     const channel = ctx.get(ChannelKey);
     const adapterState = channel?.state as Record<string, unknown> | undefined;
-    const sandboxSessionId = (adapterState?.sandboxSessionId as string | undefined) ?? sessionId;
     const parentSandboxState = adapterState?.parentSandboxState as SandboxState | undefined;
+    const inheritsParent = registry.sandbox?.definition.inheritsParent === true;
+    const sandboxSessionId = inheritsParent
+      ? ((adapterState?.sandboxSessionId as string | undefined) ?? sessionId)
+      : sessionId;
 
     return {
       value: await ensureSandboxAccess({
@@ -34,12 +41,14 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
         registry,
         runOnSession: async (callback) => await contextStorage.run(ctx, callback),
         sessionId: sandboxSessionId,
-        state: session.sandboxState ?? parentSandboxState ?? null,
+        state: session.sandboxState ?? (inheritsParent ? parentSandboxState : undefined) ?? null,
         tags: {
           agent: resolveTagAgentName({ bundle, node }),
           channel: resolveTagChannelKind(channel),
           sessionId,
         },
+        agentHome: getActiveAgentHome(ctx),
+        skillStoreLocation: getActiveSkillStoreLocation(ctx),
       }),
     };
   },

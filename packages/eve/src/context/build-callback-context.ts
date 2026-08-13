@@ -47,7 +47,7 @@ export function buildCallbackContext(): SessionContext {
             "Call ctx.getSkill() only from authored runtime functions such as tools, hooks, and channel events.",
         );
       }
-      return createSandboxSkillHandle(access, identifier);
+      return createSandboxSkillHandle(access, identifier, access.skillStoreLocation ?? {});
     },
   };
 }

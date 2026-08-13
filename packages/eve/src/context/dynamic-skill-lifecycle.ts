@@ -5,12 +5,7 @@ import {
   isBrandedSkillEntry,
 } from "#shared/dynamic-tool-definition.js";
 import type { SkillPackageDefinition } from "#shared/skill-definition.js";
-import {
-  type MaterializableSkillPackage,
-  normalizeSkillPackage,
-  removeSkillPackageFromSandbox,
-  writeSkillPackageToSandbox,
-} from "#shared/skill-package.js";
+import { type MaterializableSkillPackage, normalizeSkillPackage } from "#shared/skill-package.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
@@ -23,7 +18,7 @@ import {
   SandboxKey,
 } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
-import { resolveSandboxSkillRoot } from "#shared/skill-paths.js";
+import { createSandboxSkillStore } from "#runtime/skills/store.js";
 
 const log = createLogger("dynamic-skills");
 
@@ -73,8 +68,8 @@ async function formatDynamicSkillAnnouncement(input: {
   readonly ctx: ContextContainer;
   readonly manifest: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>;
 }): Promise<string> {
-  const sandbox = await input.ctx.require(SandboxKey).get();
-  const skillRoot = sandbox === null ? undefined : await resolveSandboxSkillRoot({ sandbox });
+  const access = input.ctx.require(SandboxKey);
+  const skillRoot = createSandboxSkillStore(access, access.skillStoreLocation ?? {}).modelRoot();
   return formatAvailableSkillsSection(Object.values(input.manifest).flat(), { skillRoot }) ?? "";
 }
 
@@ -206,9 +201,11 @@ export async function dispatchDynamicSkillEvent(input: {
     }
   }
 
-  const sandbox = await ctx.require(SandboxKey).get();
+  const access = ctx.require(SandboxKey);
+  const sandbox = await access.get();
 
   if (sandbox !== null) {
+    const skillStore = createSandboxSkillStore(access, access.skillStoreLocation ?? {});
     const finalDynamicSkillNames = new Set(
       Object.values(newManifest)
         .flat()
@@ -225,12 +222,12 @@ export async function dispatchDynamicSkillEvent(input: {
     }
 
     for (const name of removedSkillNames) {
-      await removeSkillPackageFromSandbox({ name, sandbox });
+      await skillStore.remove(name);
     }
 
     for (const { skills } of updates) {
       for (const skill of skills) {
-        await writeSkillPackageToSandbox({ sandbox, skill });
+        await skillStore.write(skill);
       }
     }
   }

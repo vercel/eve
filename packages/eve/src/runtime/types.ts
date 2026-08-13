@@ -145,6 +145,7 @@ export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
    */
   readonly backend: SandboxBackend;
   readonly description?: string;
+  readonly inheritsParent?: boolean;
   readonly onSession?: (input: SandboxSessionContext) => Promise<void> | void;
 };
 

@@ -1,7 +1,6 @@
-import type { SandboxSession } from "#public/definitions/sandbox.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { SkillHandle } from "#execution/skills/types.js";
-import { resolveSandboxSkillReadPaths } from "#shared/skill-paths.js";
+import { createSandboxSkillStore, type SkillStoreLocation } from "#runtime/skills/store.js";
 
 const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 
@@ -38,32 +37,30 @@ export async function loadSkillFromSandbox(
   access: SandboxAccess,
   id: string,
   availableNames: readonly string[] = [],
+  location: SkillStoreLocation = {},
 ): Promise<string> {
   assertSafeSkillId(id);
-  const sandbox = await requireSandboxSession(access);
-  const paths = await resolveSandboxSkillReadPaths({
-    name: id,
-    relativePath: "SKILL.md",
-    sandbox,
-  });
-
-  for (const path of paths) {
-    const instructions = await sandbox.readTextFile({ path });
-    if (instructions !== null) {
-      return instructions.replace(FRONTMATTER_PATTERN, "");
-    }
+  const store = createSandboxSkillStore(access, location);
+  const instructions = await store.readText(id, "SKILL.md");
+  if (instructions !== null) {
+    return instructions.replace(FRONTMATTER_PATTERN, "");
   }
 
   const hint = availableNames.length > 0 ? ` Available skills: ${availableNames.join(", ")}.` : "";
-  throw new Error(`No skill named "${id}" at ${paths[0]}.${hint}`);
+  throw new Error(`No skill named "${id}" at ${await store.resolvedRoot()}/${id}/SKILL.md.${hint}`);
 }
 
 /**
  * Creates the public runtime skill handle. Existence is checked lazily by
  * each file read against the sandbox.
  */
-export function createSandboxSkillHandle(access: SandboxAccess, id: string): SkillHandle {
+export function createSandboxSkillHandle(
+  access: SandboxAccess,
+  id: string,
+  location: SkillStoreLocation = {},
+): SkillHandle {
   assertSafeSkillId(id);
+  const store = createSandboxSkillStore(access, location);
 
   return {
     name: id,
@@ -72,38 +69,14 @@ export function createSandboxSkillHandle(access: SandboxAccess, id: string): Ski
 
       return {
         async bytes(): Promise<Uint8Array> {
-          const sandbox = await requireSandboxSession(access);
-          const paths = await resolveSandboxSkillReadPaths({
-            name: id,
-            relativePath,
-            sandbox,
-          });
-
-          for (const path of paths) {
-            const content = await sandbox.readBinaryFile({ path });
-            if (content !== null) {
-              return content;
-            }
-          }
-
-          throw new Error(`Skill file not found: ${paths[0]}`);
+          const content = await store.readBytes(id, relativePath);
+          if (content !== null) return content;
+          throw new Error(`Skill file not found: ${store.modelRoot()}/${id}/${relativePath}`);
         },
         async text(): Promise<string> {
-          const sandbox = await requireSandboxSession(access);
-          const paths = await resolveSandboxSkillReadPaths({
-            name: id,
-            relativePath,
-            sandbox,
-          });
-
-          for (const path of paths) {
-            const content = await sandbox.readTextFile({ path });
-            if (content !== null) {
-              return content;
-            }
-          }
-
-          throw new Error(`Skill file not found: ${paths[0]}`);
+          const content = await store.readText(id, relativePath);
+          if (content !== null) return content;
+          throw new Error(`Skill file not found: ${store.modelRoot()}/${id}/${relativePath}`);
         },
       };
     },
@@ -121,12 +94,4 @@ function assertSafeSkillRelativePath(relativePath: string): void {
   ) {
     throw new Error("Expected skill file path to be a relative path inside the skill directory.");
   }
-}
-
-async function requireSandboxSession(access: SandboxAccess): Promise<SandboxSession> {
-  const sandbox = await access.get();
-  if (sandbox === null) {
-    throw new Error("The sandbox is not available in the current authored runtime context.");
-  }
-  return sandbox;
 }

@@ -27,6 +27,30 @@ export type {
   SandboxSessionContext,
 } from "#shared/sandbox-definition.js";
 
+/** Opaque reference to an ancestor's durable sandbox. */
+export interface SandboxAncestorReference {
+  readonly sandbox: SandboxParentValue;
+}
+
+/**
+ * Opaque value returned from a sandbox definition to select its parent's
+ * durable sandbox. It intentionally exposes no provider operations: authored
+ * code can only return it to eve.
+ */
+export interface SandboxParentValue {
+  readonly __eveSandboxParentValue: unique symbol;
+}
+
+/** Runtime ancestry passed to a parent-selecting sandbox definition. */
+export interface SandboxParentDefinitionContext {
+  readonly parent: SandboxAncestorReference | null;
+}
+
+/** A definition that selects the dispatching parent's exact sandbox. */
+export type SandboxParentDefinition = (
+  context: SandboxParentDefinitionContext,
+) => SandboxParentValue | Promise<SandboxParentValue>;
+
 /**
  * The shape passed to {@link defineSandbox}: a discriminated union over
  * whether a `bootstrap` hook is present. `backend` is optional here (it is
@@ -44,13 +68,16 @@ export type SandboxDefinition<BO = Record<string, never>, SO = Record<string, ne
  * when paired with a `workspace/` folder); subagents use
  * `subagents/<name>/sandbox.ts`.
  *
- * Returns the definition unchanged: this is an identity helper that only
- * attaches types. `backend` is optional and defaults to `defaultBackend()`
- * at runtime. The `BO`/`SO` generics type the options accepted by the
- * `use()` calls inside `bootstrap` and `onSession` respectively.
+ * The callback form can return `parent.sandbox` to select the dispatching
+ * parent's exact durable sandbox. It is intended for child-only definitions;
+ * throw when `parent` is `null`.
  */
+export function defineSandbox(definition: SandboxParentDefinition): SandboxParentDefinition;
 export function defineSandbox<BO = Record<string, never>, SO = Record<string, never>>(
   definition: SandboxDefinition<BO, SO>,
-): SandboxDefinition<BO, SO> {
+): SandboxDefinition<BO, SO>;
+export function defineSandbox<BO = Record<string, never>, SO = Record<string, never>>(
+  definition: SandboxDefinition<BO, SO> | SandboxParentDefinition,
+): SandboxDefinition<BO, SO> | SandboxParentDefinition {
   return definition;
 }

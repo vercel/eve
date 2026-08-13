@@ -11,7 +11,6 @@ import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-out
 
 const DEFAULT_GREP_LIMIT = 100;
 const MAX_GREP_LIMIT = 1000;
-const DEFAULT_PATH = "/workspace";
 
 // ---------------------------------------------------------------------------
 // Input / result shapes
@@ -51,7 +50,9 @@ export async function executeGrepOnSandbox(
   sandbox: SandboxSession,
   args: GrepInput,
 ): Promise<GrepResult> {
-  const effectivePath = args.path ?? DEFAULT_PATH;
+  // The session is already anchored at the active agent workspace, so the
+  // default search root is whatever "." resolves to on this session.
+  const effectivePath = args.path ?? sandbox.resolvePath(".");
 
   const resolvedPath = await resolveAbsoluteFilePath(sandbox, effectivePath);
   const normalizedPath = normalizeModelPath(resolvedPath);

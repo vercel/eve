@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
+import type { SkillStoreLocation } from "#runtime/skills/store.js";
 
 /**
  * Describes whether one sandbox needs a prewarmed template and, if so,
@@ -25,8 +28,21 @@ export type RuntimeSandboxTemplatePlan =
  */
 export function createRuntimeSandboxTemplatePlan(input: {
   readonly definition: ResolvedSandboxDefinition;
+  readonly inheritedWorkspaceResourceRoots?: readonly {
+    readonly resourceRoot: CompiledWorkspaceResourceRoot;
+    readonly skillStoreLocation: SkillStoreLocation;
+  }[];
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
 }): RuntimeSandboxTemplatePlan {
+  const workspaceResourceRoots = [
+    input.workspaceResourceRoot,
+    ...(input.inheritedWorkspaceResourceRoots ?? []).map((entry) => entry.resourceRoot),
+  ];
+  const contentHash = combineWorkspaceResourceContentHashes(
+    workspaceResourceRoots,
+    input.inheritedWorkspaceResourceRoots ?? [],
+  );
+
   if (input.definition.bootstrap !== undefined) {
     if (input.definition.sourceHash === undefined) {
       throw new Error(
@@ -35,7 +51,7 @@ export function createRuntimeSandboxTemplatePlan(input: {
     }
 
     return {
-      contentHash: input.workspaceResourceRoot.contentHash,
+      contentHash,
       kind: "bootstrap",
       revalidationKey: input.definition.revalidationKey,
       sourceHash: input.definition.sourceHash,
@@ -43,14 +59,30 @@ export function createRuntimeSandboxTemplatePlan(input: {
   }
 
   if (
-    input.workspaceResourceRoot.contentHash === undefined &&
-    input.workspaceResourceRoot.rootEntries.length === 0
+    contentHash === undefined &&
+    workspaceResourceRoots.every((root) => root.rootEntries.length === 0)
   ) {
     return { kind: "none" };
   }
 
   return {
-    contentHash: input.workspaceResourceRoot.contentHash,
+    contentHash,
     kind: "workspace-content",
   };
+}
+
+function combineWorkspaceResourceContentHashes(
+  roots: readonly CompiledWorkspaceResourceRoot[],
+  inherited: readonly {
+    readonly skillStoreLocation: SkillStoreLocation;
+  }[],
+): string | undefined {
+  const hashes = [
+    ...roots.flatMap((root) =>
+      root.contentHash === undefined ? [] : [`${root.logicalPath}:${root.contentHash}`],
+    ),
+    ...inherited.map(({ skillStoreLocation }) => `agent-home:${skillStoreLocation.home ?? "root"}`),
+  ];
+  if (hashes.length === 0) return undefined;
+  return createHash("sha256").update(hashes.sort().join("\0")).digest("hex");
 }

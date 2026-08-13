@@ -548,6 +548,7 @@ const compiledSandboxDefinitionSchema = z
      */
     backendName: z.string().optional(),
     description: z.string().optional(),
+    inheritsParent: z.boolean().optional(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
     revalidationKey: z.string().optional(),

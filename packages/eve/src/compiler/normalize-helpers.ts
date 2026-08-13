@@ -50,6 +50,13 @@ export async function loadModuleBackedDefinition(input: {
   );
   const exportValue = getAuthoredModuleExport(moduleNamespace, input.source);
 
+  // Sandbox callbacks receive runtime ancestry and must reach the sandbox
+  // compiler intact. Every other authored primitive keeps the historical
+  // zero-argument definition-factory materialization behavior.
+  if (input.kind === "sandbox" && typeof exportValue === "function") {
+    return exportValue;
+  }
+
   try {
     return await materializeAuthoredModuleExport(exportValue);
   } catch (error) {
