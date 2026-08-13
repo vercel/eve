@@ -7,6 +7,7 @@ vi.mock("#compiled/@vercel/oidc/index.js", () => ({
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/types.js";
 
+import { normalizeChannelDirectedRemote } from "#execution/channel-directed-remote.js";
 import { defineVercelBranchAgent } from "#public/agents/vercel.js";
 
 describe("defineVercelBranchAgent", () => {
@@ -33,6 +34,9 @@ describe("defineVercelBranchAgent", () => {
         authorization: "Bearer oidc-token",
         [VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER]: "oidc-token",
       },
+    });
+    await expect(normalizeChannelDirectedRemote(agent)).resolves.toMatchObject({
+      credentialsStepId: "eve:vercel-branch-agent//credentials",
     });
   });
 

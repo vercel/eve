@@ -32,14 +32,17 @@ export function defineVercelBranchAgent(input: VercelBranchAgentInput): RemoteAg
   const branch = rawBranch.trim();
   if (!branch) throw new Error("defineVercelBranchAgent requires a non-empty branch.");
 
-  return defineRemoteAgent({
-    ...remote,
-    auth: vercelDeploymentOidc(),
+  const agent = Object.assign(defineRemoteAgent(remote), { auth: vercelDeploymentOidc });
+  Object.defineProperty(agent, "__eveResolveRemoteAgentCredentials", {
+    value: vercelDeploymentOidc,
   });
+  return agent;
 }
 
-function vercelDeploymentOidc(): OutboundAuthFn {
-  return async () => {
+const VERCEL_BRANCH_AGENT_CREDENTIALS_STEP_ID = "eve:vercel-branch-agent//credentials";
+
+const vercelDeploymentOidc = Object.assign(
+  async () => {
     const token = await getVercelOidcToken();
     return {
       headers: {
@@ -47,5 +50,12 @@ function vercelDeploymentOidc(): OutboundAuthFn {
         [VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER]: token,
       },
     };
-  };
-}
+  },
+  { stepId: VERCEL_BRANCH_AGENT_CREDENTIALS_STEP_ID },
+) satisfies OutboundAuthFn & { readonly stepId: string };
+
+const stepRegistryKey = Symbol.for("@workflow/core//registeredSteps");
+const globalRegistry = globalThis as Record<symbol, Map<string, Function> | undefined>;
+const stepRegistry = globalRegistry[stepRegistryKey] ?? new Map<string, Function>();
+globalRegistry[stepRegistryKey] = stepRegistry;
+stepRegistry.set(VERCEL_BRANCH_AGENT_CREDENTIALS_STEP_ID, vercelDeploymentOidc);
