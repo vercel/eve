@@ -40,11 +40,14 @@ eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channe
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
 
-| Target                                    | What happens                                                                                             |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `eve init my-agent`                       | New agent project in `my-agent/`                                                                         |
-| `eve init .` (or an existing project dir) | Adds `agent/` plus missing `eve`, `ai`, and `zod` deps. Needs a `package.json` and no `agent/` files yet |
-| `eve init` with no target                 | Same as `eve init .`                                                                                     |
+| Target                                                                     | What happens                                                                                                                                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `eve init my-agent`                                                        | Creates an agent project in `my-agent/`                                                                                                                                  |
+| `eve init` or `eve init .` in an empty directory                           | Creates an agent project in the current directory                                                                                                                        |
+| `eve init` or `eve init .` in a non-empty directory without `package.json` | Asks whether to scaffold in the current directory or a named subdirectory. Using the current directory preserves unrelated files but overwrites files at generated paths |
+| `eve init .` in an existing project                                        | Adds `agent/` plus missing `eve`, `ai`, and `zod` dependencies. Requires `package.json` and no existing `agent/` files                                                   |
+
+Coding-agent launches and non-interactive terminals cannot answer the location prompt and fail before writing. Pass a new directory name, such as `eve init my-agent`, in those environments.
 
 After scaffolding, a human terminal usually continues into `eve dev`. If a coding-agent REPL is on `PATH`, the handoff menu can open it instead or exit without starting either process. Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
