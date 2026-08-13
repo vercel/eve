@@ -2,14 +2,14 @@
 
 This private workspace measures how coding agents author and modify eve projects. It uses
 [`@vercel/agent-eval`](https://github.com/vercel-labs/agent-eval) for coding-agent execution,
-Vercel Sandbox or local Docker isolation, hidden Vitest graders, transcripts, repeated runs,
-model matrices, and result reporting.
+Vercel Sandbox isolation, hidden Vitest graders, transcripts, repeated runs, model matrices, and
+result reporting.
 
 These evals are separate from `e2e/`. Runtime e2e suites exercise an already-authored agent
 over HTTP; authoring evals give a coding agent a disposable project and grade the resulting
 files, commands, validation, and any synthetic world events.
 
-## Cases and treatments
+## Cases
 
 Each directory under `evals/` contains:
 
@@ -45,10 +45,9 @@ The iMessage interaction omits the phone number from its first `send`, inspects 
 assistant turn, requires the agent to ask for the number, and replies in the same native session.
 The hidden grader verifies both the transcript and the structured non-interactive setup protocol.
 
-HarnessAgent's `bootstrapHash` and `onBootstrap` hooks build one reusable Vercel Sandbox snapshot
-for each subject repository, revision, starting point, and setup combination. Each benchmark
-attempt starts from an independent sandbox restored from that prepared project, then applies
-per-session setup and treatment-specific changes.
+HarnessAgent builds one reusable Vercel Sandbox snapshot for each subject revision, starting
+point, and setup combination. Compatible cases and repeated runs share the prepared checkout,
+eve build, project scaffold, and dependencies; each attempt runs in an independent fork.
 
 ## Subject revision
 
@@ -78,8 +77,8 @@ pnpm benchmark:authoring author-000-imessage --dry
 Normal runs always execute fresh samples; cached agent-eval results are not reused. These
 benchmarks do not run in CI or as part of `pnpm test`.
 
-To compare framework behavior before and after a change, hold the cases and treatments fixed and
-select two reachable subject revisions:
+To compare framework behavior before and after a change, hold the cases, guidance, model, and
+grading fixed and select two reachable subject revisions:
 
 ```sh
 pnpm benchmark:authoring author-000-imessage \
@@ -94,9 +93,7 @@ Agent-eval writes ignored local results under
 `summary.json` and per-run result, transcript, grader output, and copied project files. Use
 agent-eval's playground command to compare the two experiment columns.
 
-`@vercel/agent-eval` chooses Vercel Sandbox when credentials are available and can otherwise
-use local Docker. The configured coding agent uses Vercel AI Gateway, so an applicable Gateway
-credential is required.
+The suite uses Vercel Sandbox and Vercel AI Gateway, so applicable credentials are required.
 
 ## Adding a case
 
