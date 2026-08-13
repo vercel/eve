@@ -840,6 +840,31 @@ describe("ClientSession", () => {
     expect(session.state.streamIndex).toBe(3);
   });
 
+  it("honors an explicit idle reconnect limit for an active turn", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      return (init?.method ?? "GET") === "POST"
+        ? createAcceptedResponse()
+        : createStreamResponse([]);
+    });
+    const session = createSession();
+
+    vi.useFakeTimers();
+    try {
+      const eventTypes = await collectEventTypes(
+        await session.send("first", {
+          streamReconnectPolicy: {
+            streamIdleReconnectPolicy: { baseDelayMs: 10, maxAttempts: 2 },
+          },
+        }),
+      );
+      expect(eventTypes).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it("preserves the session cursor when a turn stream is aborted mid-flight", async () => {
     const encoder = new TextEncoder();
     const abortController = new AbortController();
