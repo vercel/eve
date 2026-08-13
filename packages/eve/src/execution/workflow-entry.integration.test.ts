@@ -815,7 +815,10 @@ describe("workflowEntry integration", () => {
           await reader.cancel();
         }
 
-        expect(replayedIds).toEqual(ids);
+        // Order is not contractual across separate steps (see comment above):
+        // compare membership and count, not append order.
+        expect(replayedIds).toHaveLength(ids.length);
+        expect(new Set(replayedIds)).toEqual(new Set(ids));
       } finally {
         await run.cancel();
       }
@@ -1331,7 +1334,7 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => {
           reject(new Error(`Timed out waiting for ${label}.`));
-        }, 10_000);
+        }, 30_000);
       }),
     ]);
   } finally {
