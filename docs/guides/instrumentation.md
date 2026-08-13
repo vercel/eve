@@ -7,6 +7,8 @@ description: "Trace an agent with OpenTelemetry in instrumentation.ts, read the 
 
 If you intend to export telemetry, review the exporter destination, data categories, and required legal approvals before enabling telemetry.
 
+An experimental alternative splits this file into a directory of providers, one per file, so that adding a destination does not mean taking responsibility for every other. See [Instrumentation Providers](./instrumentation-providers).
+
 ## Three observability surfaces
 
 eve observes an agent through three distinct surfaces. They do not all live in this file, and they write to different places:
@@ -182,7 +184,7 @@ Without an `instrumentation.ts`, `eve dev` records spans to disk — one trace p
 - [`/traces`](dev-tui#inspect-traces) in the dev TUI: a live viewer that replays the trace as a conversation.
 - [`eve traces`](../reference/cli#eve-traces): a span tree in the terminal, `eve traces ls` to list. Works after `eve dev` exits.
 
-Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing is recorded locally. For span attributes, retention, and the `EVE_TRACES*` variables, see [`eve traces`](../reference/cli#eve-traces).
+Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing is recorded locally. Under the experimental [provider layout](./instrumentation-providers#local-traces) the spool is a destination instead, so adding a backend beside it leaves it on. For span attributes, retention, and the `EVE_TRACES*` variables, see [`eve traces`](../reference/cli#eve-traces).
 
 ## Debugging
 
