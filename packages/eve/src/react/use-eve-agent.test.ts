@@ -142,6 +142,54 @@ describe("useEveAgent", () => {
     expect(seenHelpers.at(-1)).toBe(firstHelpers);
   });
 
+  it("stops an active turn stream when the component unmounts", async () => {
+    let streamSignal: AbortSignal | null | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createStartedMessageResponse("session_1", "http:session_1");
+      }
+
+      streamSignal = init?.signal;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamSignal?.addEventListener("abort", () => controller.error(createAbortError()));
+          },
+        }),
+      );
+    });
+
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+    let root: ReturnType<typeof create> | undefined;
+
+    function TestComponent() {
+      helpers = useEveAgent();
+      return null;
+    }
+
+    await act(async () => {
+      root = create(createElement(TestComponent));
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = helpers?.send("Hello");
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    });
+
+    expect(streamSignal?.aborted).toBe(false);
+
+    await act(async () => {
+      root?.unmount();
+    });
+
+    expect(streamSignal?.aborted).toBe(true);
+
+    await act(async () => {
+      await sendPromise;
+    });
+  });
+
   it("sends a message and projects streamed events with the default reducer", async () => {
     const events = [
       createMessageReceivedEvent({

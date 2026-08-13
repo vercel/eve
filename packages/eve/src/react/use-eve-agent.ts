@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 import {
   EveAgentStore,
@@ -167,6 +167,8 @@ export function useEveAgent<TData>(
     () => store.snapshot,
     () => store.snapshot,
   );
+
+  useEffect(() => () => store.stop(), [store]);
 
   const reset = useCallback(() => store.reset(), [store]);
   const send = useCallback(
