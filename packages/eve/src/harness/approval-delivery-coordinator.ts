@@ -16,6 +16,7 @@ import {
   settleAllowedCandidate,
   settleDirectApprovalResponse,
   type ActiveApprovalCandidate,
+  type ApprovalSettlementAuditRecord,
 } from "#harness/approval-candidates.js";
 import {
   clearPendingAuthorization,
@@ -118,13 +119,8 @@ export async function coordinateApprovalDelivery(input: {
   const pendingRequestIds = new Set(
     batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
   );
-  const allowedRequestIds = new Set(
-    audit.settlements
-      .filter(
-        (settlement) =>
-          settlement.outcome === "allowed" && pendingRequestIds.has(settlement.requestId),
-      )
-      .map((settlement) => settlement.requestId),
+  const pendingSettlements = audit.settlements.filter((settlement) =>
+    pendingRequestIds.has(settlement.requestId),
   );
   const settledRequestIds = new Set(audit.settlements.map((settlement) => settlement.requestId));
   const discardedDuplicate = hasResponseForRequest(input.stepInput, settledRequestIds);
@@ -133,7 +129,7 @@ export async function coordinateApprovalDelivery(input: {
     : input.stepInput;
   if (
     discardedDuplicate &&
-    allowedRequestIds.size === 0 &&
+    pendingSettlements.length === 0 &&
     !hasMeaningfulInput(deduplicatedInput)
   ) {
     return deliveryResult(session, deduplicatedInput, "park");
@@ -297,11 +293,11 @@ export async function coordinateApprovalDelivery(input: {
     const settlement = getApprovalAuditState(session.state).settlements.find(
       (entry) => entry.requestId === candidate.requestId,
     );
-    if (settlement?.outcome === "allowed") allowedRequestIds.add(candidate.requestId);
+    if (settlement !== undefined) pendingSettlements.push(settlement);
   }
 
-  const resumedStepInput = appendAllowedResponses(remainingStepInput, allowedRequestIds);
-  if (allowedRequestIds.size > 0) {
+  const resumedStepInput = appendSettledResponses(remainingStepInput, pendingSettlements);
+  if (pendingSettlements.length > 0) {
     return deliveryResult(session, resumedStepInput, "continue");
   }
   return didCommit
@@ -478,16 +474,19 @@ function hasMeaningfulInput(stepInput: StepInput | undefined): boolean {
   );
 }
 
-function appendAllowedResponses(
+function appendSettledResponses(
   stepInput: StepInput | undefined,
-  requestIds: ReadonlySet<string>,
+  settlements: readonly ApprovalSettlementAuditRecord[],
 ): StepInput | undefined {
-  if (requestIds.size === 0) return stepInput;
+  if (settlements.length === 0) return stepInput;
   return {
     ...stepInput,
     inputResponses: [
       ...(stepInput?.inputResponses ?? []),
-      ...[...requestIds].map((requestId) => ({ optionId: "approve", requestId })),
+      ...settlements.map((settlement) => ({
+        optionId: settlement.outcome === "allowed" ? "approve" : "cancel",
+        requestId: settlement.requestId,
+      })),
     ],
   };
 }

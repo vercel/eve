@@ -57,18 +57,16 @@ const syncedTemplates = await Promise.all(
 
     const [files, readme] = await Promise.all([
       Promise.all(
-        entry.files.map(
-          async (relativePath): Promise<TemplateFile> => ({
-            contents: await githubText(
-              rawContentsUrl(github, commit.sha, relativePath),
-              `Curation drift: "${relativePath}" is listed in the manifest for template ` +
-                `"${entry.slug}" but does not exist in ` +
-                `${github.owner}/${github.repo}@${commit.sha}`,
-            ),
-            language: languageForPath(relativePath),
-            relativePath,
-          }),
-        ),
+        entry.files.map(async (relativePath): Promise<TemplateFile> => ({
+          contents: await githubText(
+            rawContentsUrl(github, commit.sha, relativePath),
+            `Curation drift: "${relativePath}" is listed in the manifest for template ` +
+              `"${entry.slug}" but does not exist in ` +
+              `${github.owner}/${github.repo}@${commit.sha}`,
+          ),
+          language: languageForPath(relativePath),
+          relativePath,
+        })),
       ),
       githubText(
         rawContentsUrl(github, commit.sha, "README.md"),

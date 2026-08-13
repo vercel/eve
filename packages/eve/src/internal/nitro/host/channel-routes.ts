@@ -60,13 +60,11 @@ export function computeChannelRouteRegistrations(
 
   const activeFrameworkRoutes = getFrameworkChannelDefinitions()
     .filter((channel) => !authoredNames.has(channel.name) && !disabledNames.has(channel.name))
-    .map(
-      (channel): NitroChannelRouteRegistration => ({
-        method: channel.method,
-        route: channel.urlPath,
-        cors: channel.cors,
-      }),
-    );
+    .map((channel): NitroChannelRouteRegistration => ({
+      method: channel.method,
+      route: channel.urlPath,
+      cors: channel.cors,
+    }));
 
   // Concatenate framework defaults first, authored second. Each
   // (method, route) pair is registered exactly once.

@@ -23,8 +23,6 @@ pnpm --filter framework-sveltekit dev
 
 ## Deploy
 
-`vercel.json` declares two services: the SvelteKit app at `/` and eve behind
-the private `/_eve_internal/eve` service prefix, with rewrites exposing the
-public `/eve/v1/*` endpoints. See
-[the SvelteKit frontend docs](../../../docs/guides/frontend/sveltekit.mdx) for
-details.
+On Vercel builds the plugin generates the eve service and its routing in the
+Build Output config, so no `vercel.json` is required. See
+[the SvelteKit frontend docs](../../../docs/guides/frontend/sveltekit.mdx) for details.

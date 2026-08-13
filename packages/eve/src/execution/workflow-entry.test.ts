@@ -1653,12 +1653,10 @@ function createMockHook<T>(input: {
 }
 
 function createIteratorReturn(): () => Promise<IteratorResult<never>> {
-  return vi.fn(
-    async (): Promise<IteratorResult<never>> => ({
-      done: true,
-      value: undefined,
-    }),
-  );
+  return vi.fn(async (): Promise<IteratorResult<never>> => ({
+    done: true,
+    value: undefined,
+  }));
 }
 
 function nonTurnHookTokens(): string[] {

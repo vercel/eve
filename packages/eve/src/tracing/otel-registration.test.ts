@@ -109,7 +109,7 @@ describe("registerOtelPipeline", () => {
     ).toThrow();
 
     const processor = (
-      registerOTel.mock.calls.at(-1)?.[0] as {
+      registerOTel.mock.calls.at(-1)![0] as {
         spanProcessors: { onEnd(span: unknown): void }[];
       }
     ).spanProcessors[0]!;
@@ -136,7 +136,7 @@ describe("registerOtelPipeline", () => {
       }),
     ).toThrow();
     const processor = (
-      registerOTel.mock.calls.at(-1)?.[0] as {
+      registerOTel.mock.calls.at(-1)![0] as {
         spanProcessors: {
           onEnd(span: unknown): void;
           onStart(span: unknown, parentContext: unknown): void;

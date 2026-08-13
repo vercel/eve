@@ -19,7 +19,7 @@
 // * Only Added / Copied / Modified / Renamed index entries are considered.
 //   Deletes and typechanges are ignored.
 //
-// Intentionally zero runtime deps — invoked by `simple-git-hooks`.
+// Intentionally zero runtime deps — invoked by `.githooks/pre-commit`.
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";

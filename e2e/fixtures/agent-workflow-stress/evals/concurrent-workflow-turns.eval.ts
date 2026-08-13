@@ -14,6 +14,9 @@ export default defineEval({
     const firstTurns = await Promise.all(
       sessions.map((session, index) => session.send(markerFor(index, 1))),
     );
+    firstTurns.forEach((turn, index) => {
+      t.log(`workflow run id (${index + 1}/${SESSION_COUNT}): ${turn.sessionId}`);
+    });
     const secondTurns = await Promise.all(
       sessions.map((session, index) => session.send(markerFor(index, 2))),
     );
