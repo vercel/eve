@@ -3,7 +3,7 @@
   "models": [
     { "name": "openai-sol", "id": "openai/gpt-5.6-sol" },
     { "name": "anthropic-opus", "id": "anthropic/claude-opus-5" },
-    { "name": "zai-glm", "id": "zai/glm-5.2-fast" }
+    { "name": "zai-glm", "id": "zai/glm-5.2" }
   ],
   "worlds": [{ "name": "vercel" }, { "name": "postgres", "package": "@workflow/world-postgres" }]
 }

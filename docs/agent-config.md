@@ -22,7 +22,7 @@ project root with `eve set --model anthropic/claude-opus-4.8` or from the local
 dev TUI with `/model anthropic/claude-opus-4.8`.
 
 The root `agent.ts` can be omitted when no runtime config is needed. In that case, eve defaults
-to `zai/glm-5.2-fast`. GLM 5.2 Fast does not support image input; choose a
+to `zai/glm-5.2`. GLM 5.2 does not support image input; choose a
 vision-capable model or [route image inputs to Gemini
 Flash](./guides/dynamic-capabilities#route-image-inputs-to-a-vision-model).
 When `agent.ts` is present, `model` is required.

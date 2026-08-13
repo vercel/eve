@@ -46,7 +46,7 @@ export default defineAgent({
             ),
         );
 
-        return hasImage ? "google/gemini-3.5-flash" : "zai/glm-5.2-fast";
+        return hasImage ? "google/gemini-3.5-flash" : "zai/glm-5.2";
       },
     },
   }),
