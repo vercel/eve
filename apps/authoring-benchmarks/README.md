@@ -31,8 +31,8 @@ The HarnessAgent adapter owns only the shared authoring lifecycle: bootstrap the
 revision, create an isolated session, capture commands and transcripts, and grade the result.
 Each case's `interact` function owns every user turn, including the first, through a small
 `send(prompt)` helper. One-turn cases call it once; multi-turn cases keep the conversation in
-one place. Reusable setup objects can add bootstrap work, per-session work, ports, environment,
-or instructions on top of the selected starting point.
+one place. Reusable setup objects can add bootstrap work, per-session work, ports, or environment
+on top of the selected starting point.
 
 The initial iMessage case keeps real eve registry discovery, `eve add`, the registry setup
 protocol, package installation, and project validation. Only the external provider is

@@ -21,7 +21,6 @@ export interface AuthoringSetup {
   readonly id: string;
   readonly ports?: ReadonlyArray<number>;
   readonly environment?: Readonly<Record<string, string>>;
-  readonly instructions?: string;
   readonly onBootstrap?: (context: AuthoringSetupContext) => Promise<void>;
   readonly onSession?: (context: AuthoringSetupContext) => Promise<void>;
 }

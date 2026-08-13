@@ -17,9 +17,6 @@ import type {
 
 const WORKSPACE = "workspace";
 const HARNESS_BRIDGE_PORT = 4172;
-const INSTRUCTIONS =
-  "Work autonomously in the existing eve project. Use the installed, version-matched eve documentation and registry commands. Prefer non-interactive CLI commands intended for coding agents. Ask the user only for information that genuinely belongs to them.";
-
 export function createAuthoringAgent(subject: {
   readonly name: string;
   readonly repository: string;
@@ -100,9 +97,6 @@ export function createAuthoringAgent(subject: {
             );
           },
         },
-        instructions:
-          setups.findLast((setup) => setup.instructions !== undefined)?.instructions ??
-          INSTRUCTIONS,
         permissionMode: "allow-all",
       });
 
