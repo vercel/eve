@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import type { AuthoringSetup } from "../authoring-case.js";
 
 const REGISTRY_PORT = 4173;
@@ -7,9 +9,18 @@ export const imessageSetup: AuthoringSetup = {
   id: "imessage-v1",
   ports: [REGISTRY_PORT],
   environment: { EVE_DEV_OFFICIAL_REGISTRY_URL: REGISTRY_URL },
-  async onBootstrap({ run, sourceRoot, write }) {
-    await run(`pnpm add ${sourceRoot}/apps/authoring-benchmarks/lib/setups/mock-imessage-setup`);
-    await run("mkdir -p __authoring_eval__/registry/channel");
+  async onBootstrap({ run, artifactsRoot, write }) {
+    const setupRoot = `${artifactsRoot}/mock-imessage-setup`;
+    await Promise.all(
+      ["authoring-world.mjs", "cli.mjs", "package.json"].map((file) =>
+        write(
+          `${setupRoot}/${file}`,
+          readFileSync(new URL(`./mock-imessage-setup/${file}`, import.meta.url), "utf8"),
+        ),
+      ),
+    );
+    await run(`pnpm add ./${setupRoot}`);
+    await run(`mkdir -p ${artifactsRoot}/registry/channel`);
 
     const channel = {
       $schema: "https://ui.shadcn.com/schema/registry-item.json",
@@ -53,13 +64,13 @@ export const imessageSetup: AuthoringSetup = {
     };
 
     await Promise.all([
-      write("__authoring_eval__/registry/registry.json", JSON.stringify(registry)),
-      write("__authoring_eval__/registry/channel/photon-imessage.json", JSON.stringify(channel)),
+      write(`${artifactsRoot}/registry/registry.json`, JSON.stringify(registry)),
+      write(`${artifactsRoot}/registry/channel/photon-imessage.json`, JSON.stringify(channel)),
     ]);
   },
-  async onSession({ run, write }) {
+  async onSession({ run, artifactsRoot, write }) {
     await run(
-      "nohup python3 -m http.server 4173 --directory __authoring_eval__/registry >__authoring_eval__/registry.log 2>&1 </dev/null &",
+      `nohup python3 -m http.server ${REGISTRY_PORT} --directory ${artifactsRoot}/registry >${artifactsRoot}/registry.log 2>&1 </dev/null &`,
     );
     await write(
       ".claude/settings.json",

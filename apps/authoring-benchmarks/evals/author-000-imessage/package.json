@@ -1,8 +1,0 @@
-{
-  "name": "eve-authoring-imessage-eval-seed",
-  "private": true,
-  "type": "module",
-  "devDependencies": {
-    "vitest": "^4.0.0"
-  }
-}

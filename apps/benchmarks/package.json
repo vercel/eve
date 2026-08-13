@@ -1,10 +1,11 @@
 {
-  "name": "@eve-internal/authoring-benchmarks",
+  "name": "@eve-internal/benchmarks",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "benchmark": "node run.mjs",
+    "test": "node --test lib/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

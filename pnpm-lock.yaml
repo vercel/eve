@@ -138,7 +138,7 @@ importers:
         specifier: 'catalog:'
         version: 4.1.10(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(vite@8.1.5(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
 
-  apps/authoring-benchmarks:
+  apps/benchmarks:
     dependencies:
       '@ai-sdk/harness':
         specifier: 1.0.68

@@ -12,7 +12,7 @@
   ],
   "type": "module",
   "scripts": {
-    "benchmark:authoring": "pnpm --filter @eve-internal/authoring-benchmarks benchmark",
+    "benchmark": "pnpm --filter @eve-internal/benchmarks benchmark",
     "build": "turbo run build --filter='./packages/*'",
     "changeset": "changeset",
     "check:deps": "syncpack lint",

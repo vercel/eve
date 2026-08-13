@@ -12,25 +12,35 @@ import type {
   AuthoringCase,
   AuthoringSetup,
   AuthoringSetupContext,
-  AuthoringTranscriptEntry,
+  AuthoringTurn,
 } from "./authoring-case.js";
+import {
+  AGENT_EVAL_DIRECTORY,
+  AUTHORING_EVAL_DIRECTORY,
+  AUTHORING_EVAL_DIRECTORY_ENV,
+  AUTHORING_MODEL,
+  EVE_PACKAGE_PATH,
+  SOURCE_ARCHIVE_PATH,
+  SOURCE_ROOT,
+  WORKSPACE,
+} from "./paths.js";
+import type { AuthoringTranscriptEntry } from "./protocol.js";
 
-const WORKSPACE = "workspace";
 const HARNESS_BRIDGE_PORT = 4172;
 export function createAuthoringAgent(subject: {
   readonly name: string;
-  readonly repository: string;
-  readonly revision: string;
+  readonly archive: Uint8Array;
+  readonly digest: string;
 }): Agent {
   return {
     name: subject.name,
     displayName: "eve authoring harness",
     getApiKeyEnvVar: () => "AI_GATEWAY_API_KEY",
-    getDefaultModel: () => "claude-sonnet-4-6",
+    getDefaultModel: () => AUTHORING_MODEL,
     definition: {
       name: subject.name,
       displayName: "eve authoring harness",
-      defaultModel: "claude-sonnet-4-6",
+      defaultModel: AUTHORING_MODEL,
       o11yAgentName: "claude-code",
       runnerPath: "",
       getApiKeyEnvVar: () => "AI_GATEWAY_API_KEY",
@@ -39,6 +49,10 @@ export function createAuthoringAgent(subject: {
       authEnv: () => ({}),
     },
     async run(fixturePath, options): Promise<AgentRunResult> {
+      const verbose = options.agentOptions?.verbose === true;
+      const log = (message: string) => {
+        if (verbose) console.log(message);
+      };
       const authoringCase = await loadAuthoringCase(fixturePath);
       const setups = [authoringCase.startingPoint.setup, authoringCase.setup].filter(
         (setup): setup is AuthoringSetup => setup !== undefined,
@@ -48,7 +62,8 @@ export function createAuthoringAgent(subject: {
         ports: [HARNESS_BRIDGE_PORT, ...new Set(setups.flatMap((setup) => setup.ports ?? []))],
         timeout: 15 * 60_000,
         env: {
-          EVE_INIT_PACKAGE_SPEC: "/tmp/eve-package/eve.tgz",
+          EVE_INIT_PACKAGE_SPEC: EVE_PACKAGE_PATH,
+          [AUTHORING_EVAL_DIRECTORY_ENV]: AUTHORING_EVAL_DIRECTORY,
           ...Object.assign({}, ...setups.map((setup) => setup.environment ?? {})),
         },
         networkPolicy: "allow-all",
@@ -73,17 +88,19 @@ export function createAuthoringAgent(subject: {
           workDir: WORKSPACE,
           bootstrapHash: bootstrapHash(authoringCase, subject),
           onBootstrap: async ({ session: bootstrap, workDir }) => {
+            log("[setup] building the selected eve source");
             const networkSandbox = bootstrap as HarnessV1NetworkSandboxSession;
             await bootstrapSubject(
               networkSandbox,
               workDir,
               authoringCase.startingPoint.workspace,
-              subject,
+              subject.archive,
             );
             const context = setupContext(networkSandbox, workDir);
             for (const setup of setups) await setup.onBootstrap?.(context);
           },
           onSession: async ({ session: current, sessionWorkDir }) => {
+            log("[setup] preparing the benchmark session");
             activeSandbox = current as HarnessV1NetworkSandboxSession;
             workspace = sessionWorkDir;
             const context = setupContext(activeSandbox, workspace);
@@ -92,7 +109,7 @@ export function createAuthoringAgent(subject: {
               await context.run("rm -f AGENTS.md CLAUDE.md");
             }
             await context.write(
-              "__agent_eval__/results.json",
+              `${AGENT_EVAL_DIRECTORY}/results.json`,
               JSON.stringify({ o11y: { shellCommands: [] } }),
             );
           },
@@ -113,12 +130,15 @@ export function createAuthoringAgent(subject: {
           transcript,
           send: async (prompt) => {
             transcript.push({ role: "user", content: prompt });
-            const result = await agent.generate({
-              session: session!,
-              prompt,
-              timeout: options.timeout,
-              abortSignal: options.signal,
-            });
+            if (verbose) console.log(`[user] ${prompt}`);
+            const result = verbose
+              ? await streamTurn(agent, session!, prompt, options.timeout, options.signal)
+              : await agent.generate({
+                  session: session!,
+                  prompt,
+                  timeout: options.timeout,
+                  abortSignal: options.signal,
+                });
             transcript.push({ role: "assistant", content: result.text });
             commands.push(...shellCommands(result.toolCalls));
             return { text: result.text, toolCalls: result.toolCalls };
@@ -126,25 +146,43 @@ export function createAuthoringAgent(subject: {
         });
 
         const context = setupContext(activeSandbox, workspace);
-        if (authoringCase.startingPoint.workspace === "empty") {
-          await context.run("pnpm add --save-dev vitest@4.1.10");
-        }
         await context.write(
-          "__agent_eval__/results.json",
-          JSON.stringify({
-            o11y: { shellCommands: commands.map((command) => ({ command, success: true })) },
-          }),
+          `${AGENT_EVAL_DIRECTORY}/results.json`,
+          JSON.stringify({ o11y: { shellCommands: commands.map((command) => ({ command })) } }),
         );
-        await context.write("__agent_eval__/harness-transcript.json", JSON.stringify(transcript));
+        await context.write(
+          `${AGENT_EVAL_DIRECTORY}/harness-transcript.json`,
+          JSON.stringify(transcript),
+        );
         await Promise.all([
-          context.write("EVAL.test.ts", readFileSync(`${fixturePath}/EVAL.ts`, "utf8")),
-          context.write("grader.ts", readFileSync(new URL("./grader.ts", import.meta.url), "utf8")),
+          context.write(
+            `${AGENT_EVAL_DIRECTORY}/EVAL.test.ts`,
+            readFileSync(`${fixturePath}/EVAL.ts`, "utf8"),
+          ),
+          context.write(
+            `${AGENT_EVAL_DIRECTORY}/grader.ts`,
+            readFileSync(new URL("./grader.ts", import.meta.url), "utf8"),
+          ),
+          context.write(
+            `${AGENT_EVAL_DIRECTORY}/paths.ts`,
+            readFileSync(new URL("./paths.ts", import.meta.url), "utf8"),
+          ),
+          context.write(
+            `${AGENT_EVAL_DIRECTORY}/protocol.ts`,
+            readFileSync(new URL("./protocol.ts", import.meta.url), "utf8"),
+          ),
         ]);
 
-        const test = await resultOf(activeSandbox, "vitest run EVAL.test.ts", workspace);
+        log("[grade] running deterministic assertions");
+        const test = await resultOf(
+          activeSandbox,
+          `${AGENT_EVAL_DIRECTORY}/node_modules/.bin/vitest run ${AGENT_EVAL_DIRECTORY}/EVAL.test.ts`,
+          workspace,
+        );
         const scriptsResults = Object.fromEntries(
           await Promise.all(
             (options.scripts ?? []).map(async (script) => {
+              log(`[${script}] running`);
               const result = await resultOf(
                 activeSandbox!,
                 `npm run ${shellQuote(script)}`,
@@ -158,6 +196,7 @@ export function createAuthoringAgent(subject: {
           ),
         );
         const scriptsPassed = Object.values(scriptsResults).every((result) => result.success);
+        log(`[result] ${test.exitCode === 0 && scriptsPassed ? "passed" : "failed"}`);
         return {
           success: test.exitCode === 0 && scriptsPassed,
           output: transcript.at(-1)?.content ?? "",
@@ -171,7 +210,7 @@ export function createAuthoringAgent(subject: {
       } catch (error) {
         if (activeSandbox !== undefined && workspace !== undefined) {
           await setupContext(activeSandbox, workspace)
-            .write("__agent_eval__/harness-transcript.json", JSON.stringify(transcript))
+            .write(`${AGENT_EVAL_DIRECTORY}/harness-transcript.json`, JSON.stringify(transcript))
             .catch(() => undefined);
         }
         return {
@@ -189,29 +228,66 @@ export function createAuthoringAgent(subject: {
   };
 }
 
+async function streamTurn(
+  agent: HarnessAgent,
+  session: HarnessAgentSession,
+  prompt: string,
+  timeout: number,
+  abortSignal?: AbortSignal,
+): Promise<AuthoringTurn> {
+  const result = await agent.stream({ session, prompt, timeout, abortSignal });
+  let lineOpen = false;
+  for await (const part of result.fullStream) {
+    if (part.type === "text-delta") {
+      if (!lineOpen) {
+        process.stdout.write("[assistant] ");
+        lineOpen = true;
+      }
+      process.stdout.write(part.text);
+    } else if (part.type === "tool-call") {
+      if (lineOpen) process.stdout.write("\n");
+      lineOpen = false;
+      console.log(`[tool] ${formatToolCall(part.toolName, part.input)}`);
+    }
+  }
+  if (lineOpen) process.stdout.write("\n");
+  return { text: await result.text, toolCalls: await result.toolCalls };
+}
+
+function formatToolCall(name: string, input: unknown): string {
+  if (typeof input === "object" && input !== null) {
+    const command = (input as { command?: unknown }).command;
+    if (typeof command === "string") return command;
+  }
+  return `${name} ${JSON.stringify(input)}`;
+}
+
 async function bootstrapSubject(
   sandbox: HarnessV1NetworkSandboxSession,
   workspace: string,
   workspaceKind: "scaffolded" | "empty",
-  subject: { readonly repository: string; readonly revision: string },
+  archive: Uint8Array,
 ): Promise<void> {
+  await sandbox.writeBinaryFile({ path: SOURCE_ARCHIVE_PATH, content: archive });
   const commands = [
-    `git clone --filter=blob:none --no-checkout ${shellQuote(subject.repository)} /tmp/eve-source`,
-    `git -C /tmp/eve-source fetch --depth 1 origin ${shellQuote(subject.revision)}`,
-    "git -C /tmp/eve-source checkout --detach FETCH_HEAD",
+    `mkdir -p ${SOURCE_ROOT}`,
+    `tar -xzf ${SOURCE_ARCHIVE_PATH} -C ${SOURCE_ROOT}`,
     "corepack enable",
-    "cd /tmp/eve-source",
+    `cd ${SOURCE_ROOT}`,
     "pnpm install --frozen-lockfile",
     "pnpm --filter eve build",
     "mkdir -p /tmp/eve-package",
     "pnpm --dir packages/eve pack --pack-destination /tmp/eve-package",
-    "mv $(find /tmp/eve-package -name '*.tgz' -print -quit) /tmp/eve-package/eve.tgz",
-    "npm install --global --package-lock=false /tmp/eve-package/eve.tgz vitest@4.1.10",
+    `mv $(find /tmp/eve-package -name '*.tgz' -print -quit) ${EVE_PACKAGE_PATH}`,
+    `npm install --global --package-lock=false ${EVE_PACKAGE_PATH}`,
     `cd ${shellQuote(workspace)}`,
   ];
-  if (workspaceKind === "scaffolded") {
-    commands.push("AI_AGENT=benchmark eve init .", "pnpm add --save-dev vitest@4.1.10");
-  }
+  if (workspaceKind === "scaffolded") commands.push("AI_AGENT=benchmark eve init .");
+  commands.push(
+    `mkdir -p ${AGENT_EVAL_DIRECTORY}`,
+    `printf '{"private":true,"type":"module"}\\n' >${AGENT_EVAL_DIRECTORY}/package.json`,
+    `pnpm add --save-dev vitest@4.1.10 --dir ${AGENT_EVAL_DIRECTORY}`,
+  );
   await run(sandbox, commands.join(" && "));
 }
 
@@ -222,7 +298,7 @@ function setupContext(
   return {
     sandbox,
     workspace,
-    sourceRoot: "/tmp/eve-source",
+    artifactsRoot: AUTHORING_EVAL_DIRECTORY,
     run: async (command, workingDirectory = workspace) => {
       await run(sandbox, command, workingDirectory);
     },
@@ -243,15 +319,12 @@ function shellCommands(toolCalls: ReadonlyArray<{ input: unknown }>): string[] {
   });
 }
 
-function bootstrapHash(
-  authoringCase: AuthoringCase,
-  subject: { readonly repository: string; readonly revision: string },
-): string {
+function bootstrapHash(authoringCase: AuthoringCase, subject: { readonly digest: string }): string {
   const setupIds = [authoringCase.startingPoint.setup, authoringCase.setup]
     .filter((setup): setup is AuthoringSetup => setup !== undefined)
     .map((setup) => setup.id)
     .join("-");
-  return `eve-authoring-${subject.repository}-${subject.revision}-${authoringCase.startingPoint.id}-${setupIds}`;
+  return `eve-authoring-${subject.digest}-${authoringCase.startingPoint.id}-${setupIds}`;
 }
 
 const bootstrapCoordination = globalThis as typeof globalThis & {

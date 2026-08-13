@@ -1,5 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 
+import { AGENT_EVAL_DIRECTORY, SOURCE_ROOT, WORLD_EVENTS_PATH } from "./paths.js";
+import type { AuthoringTranscriptEntry, AuthoringWorldEvent } from "./protocol.js";
+
 interface AgentEvalResults {
   readonly o11y?: {
     readonly shellCommands?: ReadonlyArray<{
@@ -10,24 +13,21 @@ interface AgentEvalResults {
   };
 }
 
-export interface AuthoringTranscriptEntry {
-  readonly role: "user" | "assistant";
-  readonly content: string;
-}
-
-export interface AuthoringWorldEvent {
-  readonly type: string;
-  readonly data?: Record<string, unknown>;
-}
-
 export interface AuthoringEvalResult {
   readonly commands: ReadonlyArray<string>;
   readonly transcript: ReadonlyArray<AuthoringTranscriptEntry>;
   readonly worldEvents: ReadonlyArray<AuthoringWorldEvent>;
 }
 
-const AGENT_EVAL_DIRECTORY = "__agent_eval__";
-const AUTHORING_EVAL_DIRECTORY = "__authoring_eval__";
+export function subjectDefaultAgentModel(): string {
+  const source = readFileSync(
+    `${SOURCE_ROOT}/packages/eve/src/shared/default-agent-model.ts`,
+    "utf8",
+  );
+  const model = source.match(/DEFAULT_AGENT_MODEL_ID\s*=\s*["']([^"']+)["']/u)?.[1];
+  if (model === undefined) throw new Error("Could not read the subject's default agent model.");
+  return model;
+}
 
 export function authoringEval(): AuthoringEvalResult {
   const results = readJson<AgentEvalResults>(`${AGENT_EVAL_DIRECTORY}/results.json`);
@@ -36,7 +36,7 @@ export function authoringEval(): AuthoringEvalResult {
     transcript: readJson<ReadonlyArray<AuthoringTranscriptEntry>>(
       `${AGENT_EVAL_DIRECTORY}/harness-transcript.json`,
     ),
-    worldEvents: readJsonLines(`${AUTHORING_EVAL_DIRECTORY}/world-events.jsonl`),
+    worldEvents: readJsonLines(WORLD_EVENTS_PATH),
   };
 }
 

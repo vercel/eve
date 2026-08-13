@@ -1,7 +1,8 @@
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 
-const ROOT = process.env.EVE_AUTHORING_EVAL_DIRECTORY ?? "__authoring_eval__";
+const ROOT = process.env.EVE_AUTHORING_EVAL_DIRECTORY;
+if (ROOT === undefined) throw new Error("EVE_AUTHORING_EVAL_DIRECTORY is required.");
 
 export function authoringStatePath(name) {
   return join(ROOT, `${name}.json`);

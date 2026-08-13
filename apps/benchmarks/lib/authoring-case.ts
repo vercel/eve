@@ -1,10 +1,13 @@
 import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import type { HarnessAgentSession } from "@ai-sdk/harness/agent";
 
+import { AUTHORING_EVAL_DIRECTORY } from "./paths.js";
+import type { AuthoringTranscriptEntry } from "./protocol.js";
+
 export interface AuthoringSetupContext {
   readonly sandbox: HarnessV1NetworkSandboxSession;
   readonly workspace: string;
-  readonly sourceRoot: string;
+  readonly artifactsRoot: typeof AUTHORING_EVAL_DIRECTORY;
   run(command: string, workingDirectory?: string): Promise<void>;
   write(path: string, content: string): Promise<void>;
 }
@@ -34,11 +37,6 @@ export interface AuthoringInteractionContext {
   readonly session: HarnessAgentSession;
   readonly transcript: ReadonlyArray<AuthoringTranscriptEntry>;
   send(prompt: string): Promise<AuthoringTurn>;
-}
-
-export interface AuthoringTranscriptEntry {
-  readonly role: "user" | "assistant";
-  readonly content: string;
 }
 
 export interface AuthoringCase {
