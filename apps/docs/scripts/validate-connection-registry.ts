@@ -49,6 +49,7 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   notion: "mcp.notion.com",
   datadog: "mcp.datadoghq.com",
   honeycomb: "mcp.honeycomb.io",
+  context: "mcp.context.dev",
   natural: "mcp.natural.com",
 };
 

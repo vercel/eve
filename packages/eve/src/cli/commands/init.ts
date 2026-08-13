@@ -36,11 +36,8 @@ import {
   type EvePackageContract,
 } from "#setup/scaffold/create/project.js";
 
-import {
-  initAgentDevHandoff,
-  initAgentInstructions,
-  initAgentReplPrompt,
-} from "./agent-instructions.js";
+import { initAgentDevHandoff, initAgentReplPrompt } from "./agent-instructions.js";
+import { confirmInitInNonEmptyDirectory } from "./init-confirm.js";
 import { tryInitializeGit, type GitInitResult } from "./init-git.js";
 import { selectInitHandoff, spawnCodingAgentRepl, type InitHandoff } from "./init-repl.js";
 
@@ -60,6 +57,7 @@ export interface InitCommandOptions {
 
 export interface InitCommandDependencies {
   addAgentToProject: typeof addAgentToProject;
+  confirmInitInNonEmptyDirectory: typeof confirmInitInNonEmptyDirectory;
   detectInvokingPackageManager: typeof detectInvokingPackageManager;
   detectPackageManager: typeof detectPackageManager;
   ensureChannel: typeof ensureChannel;
@@ -76,6 +74,7 @@ export interface InitCommandDependencies {
 
 const defaultDependencies: InitCommandDependencies = {
   addAgentToProject,
+  confirmInitInNonEmptyDirectory,
   detectInvokingPackageManager,
   detectPackageManager,
   ensureChannel,
@@ -107,20 +106,6 @@ async function resolveTargetDirectory(
 
 function isCurrentDirectoryTarget(target: string): boolean {
   return /^\.(?:[/\\]+\.?)*$/u.test(target.trim());
-}
-
-async function assertCanScaffoldInPlace(targetRoot: string): Promise<void> {
-  const entries = await readdir(targetRoot);
-  const blocking = blockingCreateInPlaceEntries(entries);
-  if (blocking.length === 0) {
-    return;
-  }
-
-  const visible = blocking.slice(0, 5).join(", ");
-  const suffix = blocking.length > 5 ? `, and ${blocking.length - 5} more` : "";
-  throw new Error(
-    `Cannot create project in current directory because it is not empty. Found: ${visible}${suffix}. Use an empty directory.`,
-  );
 }
 
 async function moveDirectoryContents(sourceRoot: string, targetRoot: string): Promise<void> {
@@ -211,30 +196,37 @@ async function scaffoldProject(
   options: InitCommandOptions,
   dependencies: InitCommandDependencies,
   evePackage: EvePackageContract | undefined,
+  overwriteExisting: boolean,
 ): Promise<{ projectPath: string; workspaceRootMutations: WorkspaceRootMutation[] }> {
   const parentPath = resolve(parentDirectory);
   const createInPlace = projectName === CURRENT_DIRECTORY_PROJECT_NAME;
   const projectPath = createInPlace ? parentPath : join(parentPath, projectName);
-  if (createInPlace) {
-    await assertCanScaffoldInPlace(projectPath);
-  } else if (await pathExists(projectPath)) {
+  if (!createInPlace && (await pathExists(projectPath))) {
     throw new Error(`Cannot create project because "${projectPath}" already exists.`);
   }
 
-  const stagingDirectory = await mkdtemp(join(parentPath, ".eve-init-"));
+  const stagingDirectory =
+    createInPlace && overwriteExisting ? undefined : await mkdtemp(join(parentPath, ".eve-init-"));
   const workspaceRootMutations: WorkspaceRootMutation[] = [];
   try {
+    const scaffoldDirectory = stagingDirectory ?? projectPath;
     if (options.model !== undefined) {
-      const rejection = await dependencies.validateModelSlug(stagingDirectory, options.model);
+      const rejection = await dependencies.validateModelSlug(scaffoldDirectory, options.model);
       if (rejection !== null) throw new Error(rejection);
     }
-    const stagedProjectName = createInPlace ? basename(projectPath) : projectName;
+    const stagedProjectName =
+      stagingDirectory === undefined
+        ? CURRENT_DIRECTORY_PROJECT_NAME
+        : createInPlace
+          ? basename(projectPath)
+          : projectName;
     const scaffoldOptions = {
       projectName: stagedProjectName,
       model: options.model ?? DEFAULT_AGENT_MODEL_ID,
       reasoning: options.reasoning,
       evePackage,
-      targetDirectory: stagingDirectory,
+      targetDirectory: scaffoldDirectory,
+      overwriteExisting,
       workspaceProbeDirectory: projectPath,
       packageManager,
       onWorkspaceRootMutation: (mutation: WorkspaceRootMutation) => {
@@ -248,6 +240,7 @@ async function scaffoldProject(
         projectRoot: stagedProjectPath,
         kind: "web",
         packageManager,
+        force: overwriteExisting,
         workspaceProbeDirectory: projectPath,
         configureVercelServices: false,
         onWorkspaceRootMutation: (mutation: WorkspaceRootMutation) => {
@@ -256,17 +249,21 @@ async function scaffoldProject(
       });
     }
 
-    if (createInPlace) {
-      await moveDirectoryContents(stagedProjectPath, projectPath);
-    } else {
-      await rename(stagedProjectPath, projectPath);
+    if (stagingDirectory !== undefined) {
+      if (createInPlace) {
+        await moveDirectoryContents(stagedProjectPath, projectPath);
+      } else {
+        await rename(stagedProjectPath, projectPath);
+      }
     }
     return {
       projectPath,
       workspaceRootMutations: uniqueWorkspaceRootMutations(workspaceRootMutations),
     };
   } finally {
-    await rm(stagingDirectory, { recursive: true, force: true });
+    if (stagingDirectory !== undefined) {
+      await rm(stagingDirectory, { recursive: true, force: true });
+    }
   }
 }
 
@@ -333,20 +330,38 @@ async function runInitSteps(input: {
 }): Promise<InitResult> {
   const { dependencies, logger, options, parentDirectory, target } = input;
   const debug = isLogLevelEnabled("debug");
+  const agentLaunched = await dependencies.isCodingAgentLaunch();
+  let rawTarget = target ?? CURRENT_DIRECTORY_PROJECT_NAME;
+  let currentDirectoryTarget = isCurrentDirectoryTarget(rawTarget);
+  const parentPath = resolve(parentDirectory);
+  const existingDirectory = currentDirectoryTarget
+    ? (await pathExists(join(parentPath, "package.json")))
+      ? parentPath
+      : undefined
+    : await resolveTargetDirectory(parentDirectory, rawTarget);
+  const evePackage = resolveInitEvePackageOverride();
+  let overwriteExisting = false;
+  if (currentDirectoryTarget && existingDirectory === undefined) {
+    const blocking = blockingCreateInPlaceEntries(await readdir(parentPath));
+    if (blocking.length > 0) {
+      if (agentLaunched) {
+        throw new Error(
+          "Coding-agent launches cannot choose where to initialize a non-empty current directory. Pass a new directory name, for example: eve init my-agent.",
+        );
+      }
+      const selection = await dependencies.confirmInitInNonEmptyDirectory(blocking);
+      if (selection.kind === "current-directory") {
+        overwriteExisting = true;
+      } else {
+        rawTarget = selection.name;
+        currentDirectoryTarget = false;
+      }
+    }
+  }
+
   const progress = startCliLiveRow(logger);
   progress.update("Preparing project");
-
   try {
-    const agentLaunched = await dependencies.isCodingAgentLaunch();
-    const rawTarget = target ?? CURRENT_DIRECTORY_PROJECT_NAME;
-    const currentDirectoryTarget = isCurrentDirectoryTarget(rawTarget);
-    const existingDirectory = currentDirectoryTarget
-      ? (await pathExists(join(resolve(parentDirectory), "package.json")))
-        ? resolve(parentDirectory)
-        : undefined
-      : await resolveTargetDirectory(parentDirectory, rawTarget);
-    const evePackage = resolveInitEvePackageOverride();
-
     const scaffoldPhase = existingDirectory === undefined ? "creating agent" : "adding agent";
     progress.update(existingDirectory === undefined ? "Creating agent" : "Adding agent");
     initLog.debug(scaffoldPhase);
@@ -367,6 +382,7 @@ async function runInitSteps(input: {
         options,
         dependencies,
         evePackage,
+        overwriteExisting,
       );
       project = {
         kind: "created",
@@ -458,14 +474,13 @@ async function runInitSteps(input: {
 
 /**
  * Creates a new eve agent (`target` is a project name), or adds one to an
- * existing project (`target` is a directory), without prompts or external
- * provisioning.
+ * existing project (`target` is a directory), without external provisioning.
+ * A fresh in-place scaffold asks whether to use the current directory or a new
+ * subdirectory when the current directory is not empty. Coding-agent launches
+ * must pass an explicit subdirectory instead.
  *
  * Runs launched by a coding agent get the dev command printed instead of
  * spawned after scaffolding, since the dev TUI would wedge the launching agent.
- * A coding agent that omits the target entirely gets the setup guide printed and
- * nothing scaffolded, since a bare `eve init` means it has not yet chosen what to
- * build.
  *
  * For extension packages, use `eve extension init` instead.
  */
@@ -476,16 +491,13 @@ export async function runInitCommand(
   options: InitCommandOptions,
   dependencies: InitCommandDependencies = defaultDependencies,
 ): Promise<void> {
-  // A coding agent that runs `eve init` with no target has not decided what to
-  // build yet. Hand it the setup guide (collect intent, then re-run with an
-  // explicit target) rather than silently scaffolding the current directory. A
-  // human, or an explicit `.`/`<name>`, still scaffolds.
-  if (target === undefined && (await dependencies.isCodingAgentLaunch())) {
-    logger.log(initAgentInstructions());
-    return;
+  let result: InitResult;
+  try {
+    result = await runInitSteps({ dependencies, logger, options, parentDirectory, target });
+  } catch (error) {
+    if (error instanceof WizardCancelledError) return;
+    throw error;
   }
-
-  const result = await runInitSteps({ dependencies, logger, options, parentDirectory, target });
 
   if (result.kind === "created") {
     logger.log(

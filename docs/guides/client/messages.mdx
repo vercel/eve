@@ -96,7 +96,9 @@ await response.result();
 
 The stream confirms the turn with `message.received`. Its `data.message` remains the flattened
 summary for compatibility, and `data.parts` contains structured text and file metadata for clients
-that render attachments. File parts never include raw bytes or internal sandbox paths.
+that render attachments. File parts never include raw bytes or internal sandbox paths. See [Inbound
+attachments](../../sandbox#inbound-attachments) for how eve stages byte-backed files in the session
+sandbox and prepares them for each model call.
 
 ## Answer human input requests
 

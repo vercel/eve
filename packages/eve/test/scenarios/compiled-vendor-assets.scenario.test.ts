@@ -9,7 +9,11 @@ const EVE_PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
 const VENDOR_WARNING_LOG_PATH = join(EVE_PACKAGE_ROOT, "scripts", "vendor-warning-log.mjs");
 const require = createRequire(import.meta.url);
-const VERCEL_SANDBOX_DIST_ROOT = join(
+const VERCEL_SANDBOX_DRIVES_DIST_ROOT = join(
+  dirname(require.resolve("@vercel/sandbox-drives/package.json")),
+  "dist",
+);
+const VERCEL_SANDBOX_STABLE_DIST_ROOT = join(
   dirname(require.resolve("@vercel/sandbox/package.json")),
   "dist",
 );
@@ -183,9 +187,9 @@ describe("compiled vendor assets", () => {
     expect(vercelWorld).toContain("createWorld");
   });
 
-  it("copies the complete @vercel/sandbox declaration tree from the installed package", async () => {
+  it("copies the complete Drives-capable @vercel/sandbox declaration tree", async () => {
     const [upstreamEntries, vendoredEntries] = await Promise.all([
-      readdir(VERCEL_SANDBOX_DIST_ROOT, { recursive: true }),
+      readdir(VERCEL_SANDBOX_DRIVES_DIST_ROOT, { recursive: true }),
       readdir(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox"), { recursive: true }),
     ]);
     const upstreamDeclarations = upstreamEntries.filter((entry) => entry.endsWith(".d.ts")).sort();
@@ -197,7 +201,7 @@ describe("compiled vendor assets", () => {
     expect(vendoredDeclarations).toEqual(upstreamDeclarations);
 
     const [upstreamIndex, vendoredIndex, vendoredSandbox, vendoredBaseClient] = await Promise.all([
-      readFile(join(VERCEL_SANDBOX_DIST_ROOT, "index.d.ts"), "utf8"),
+      readFile(join(VERCEL_SANDBOX_DRIVES_DIST_ROOT, "index.d.ts"), "utf8"),
       readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/index.d.ts"), "utf8"),
       readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/sandbox.d.ts"), "utf8"),
       readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/api-client/base-client.d.ts"), "utf8"),
@@ -207,6 +211,24 @@ describe("compiled vendor assets", () => {
     expect(vendoredSandbox).toContain('from "./_workflow-serde.js"');
     expect(vendoredBaseClient).toContain('from "../_async-retry.js"');
     expect(vendoredBaseClient).toContain('import "#compiled/zod/index.js"');
+  });
+
+  it("copies stable @vercel/sandbox declarations without a second runtime bundle", async () => {
+    const [upstreamEntries, vendoredEntries] = await Promise.all([
+      readdir(VERCEL_SANDBOX_STABLE_DIST_ROOT, { recursive: true }),
+      readdir(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-stable"), { recursive: true }),
+    ]);
+    const generatedStubNames = new Set(["_async-retry.d.ts", "_workflow-serde.d.ts"]);
+    const upstreamDeclarations = upstreamEntries.filter((entry) => entry.endsWith(".d.ts")).sort();
+    const vendoredDeclarations = vendoredEntries
+      .filter((entry) => entry.endsWith(".d.ts") && !generatedStubNames.has(entry))
+      .sort();
+
+    expect(vendoredDeclarations).toEqual(upstreamDeclarations);
+    expect(vendoredEntries.filter((entry) => entry.endsWith(".js"))).toEqual(["index.js"]);
+    await expect(
+      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-stable/index.js"), "utf8"),
+    ).resolves.toBe("export {};\n");
   });
 
   it("copies AI SDK declarations from the installed packages without authored stubs", async () => {

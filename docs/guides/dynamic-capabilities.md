@@ -21,6 +21,44 @@ resolver first selects a model, eve normalizes the selection and resolves any
 omitted context-window metadata from the AI Gateway catalog. Dynamic tools,
 skills, instructions, and subagents may return `null` to omit a capability.
 
+### Route image inputs to a vision model
+
+Use `step.started` when model choice depends on the current messages. This
+keeps GLM for text and switches to Gemini Flash when user history contains an
+image:
+
+```ts title="agent/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineAgent({
+  model: defineDynamic({
+    events: {
+      "step.started": (_event, ctx) => {
+        const hasImage = ctx.messages.some(
+          (message) =>
+            message.role === "user" &&
+            Array.isArray(message.content) &&
+            message.content.some(
+              (part) =>
+                part.type === "image" ||
+                (part.type === "file" &&
+                  (part.mediaType === "image" || part.mediaType.startsWith("image/"))),
+            ),
+        );
+
+        return hasImage ? "google/gemini-3.5-flash" : "zai/glm-5.2";
+      },
+    },
+  }),
+});
+```
+
+eve stages byte-backed `file` parts under `/workspace/attachments` before
+`step.started`, but keeps their media type in `ctx.messages`. When an image
+reaches the provider, vision models can process it and non-vision models reject
+it. eve does not reroute automatically. See [Inbound
+attachments](../sandbox#inbound-attachments).
+
 ## Dynamic subagents
 
 Wrap a declared subagent's own `agent.ts` in `defineDynamic` when its

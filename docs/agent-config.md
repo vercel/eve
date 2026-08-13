@@ -22,7 +22,10 @@ project root with `eve set --model anthropic/claude-opus-4.8` or from the local
 dev TUI with `/model anthropic/claude-opus-4.8`.
 
 The root `agent.ts` can be omitted when no runtime config is needed. In that case, eve defaults
-to `anthropic/claude-sonnet-5`. When `agent.ts` is present, `model` is required.
+to `zai/glm-5.2`. GLM 5.2 does not support image input; choose a
+vision-capable model or [route image inputs to Gemini
+Flash](./guides/dynamic-capabilities#route-image-inputs-to-a-vision-model).
+When `agent.ts` is present, `model` is required.
 
 `model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
 

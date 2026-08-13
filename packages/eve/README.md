@@ -133,6 +133,7 @@ project or deploy the agent.
 
 CLI commands:
 
+- `eve` (including `npx eve`) — initialize the current directory, or start development in an eve project
 - `eve init <name>` — create a new agent
 - `eve info` — discovery results and compiled artifacts
 - `eve build` — compile `.eve/` and build the host output

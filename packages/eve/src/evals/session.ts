@@ -169,6 +169,14 @@ export class EvalSessionDriver implements EveEvalSession {
     return await (await this.#start({ ...options, inputResponses: responses })).result();
   }
 
+  async startRespond(
+    responses: readonly InputResponse[],
+    options: SendTurnOptions = {},
+  ): Promise<EveEvalLiveTurn> {
+    if (responses.length === 0) throw new Error("startRespond() requires input responses.");
+    return await this.#start({ ...options, inputResponses: responses });
+  }
+
   async respondAll(optionId: string): Promise<EveEvalTurn> {
     const requests = this.#pendingInputRequests;
     if (requests.length === 0) {

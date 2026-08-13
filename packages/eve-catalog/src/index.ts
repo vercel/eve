@@ -478,6 +478,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "context",
+    name: "context.dev",
+    kind: "connection",
+    tagline: "search, scrape, extract, and monitor live web data.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "context.dev: search the live web, scrape and crawl sites, extract structured data, parse files, retrieve brand intelligence, monitor changes, and run batch jobs.",
+      mcp: { url: "https://mcp.context.dev/mcp" },
+    },
+  },
+  {
     slug: "egnyte",
     name: "Egnyte",
     kind: "connection",

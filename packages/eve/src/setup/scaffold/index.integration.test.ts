@@ -325,6 +325,7 @@ describe("ensureChannel", () => {
     const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
     expect(channelSource).toContain("auth.api.getSession");
     expect(channelSource).toContain('authenticator: "better-auth:vercel"');
+    expect(channelSource).not.toContain('issuer: "https://vercel.com"');
     expect(channelSource).toContain("vercelOidc()");
     expect(channelSource).toContain("localDev()");
     expect(channelSource).not.toContain("placeholderAuth");

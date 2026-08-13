@@ -62,6 +62,7 @@ interface CliLogger {
 
 interface CliRuntimeDependencies {
   isCodingAgentLaunch(): Promise<boolean>;
+  isEveProject(appRoot: string): Promise<boolean>;
   isActiveDevelopmentServerForApp(input: {
     readonly appRoot: string;
     readonly serverUrl: string;
@@ -134,6 +135,10 @@ async function loadStartHost(): Promise<CliRuntimeDependencies["startHost"]> {
   return (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
 }
 
+async function loadIsEveProject(): Promise<CliRuntimeDependencies["isEveProject"]> {
+  return (await import("#setup/scaffold/index.js")).isEveProject;
+}
+
 const loadIsActiveDevelopmentServerForApp = async () =>
   (await import("#internal/nitro/host.js")).isActiveDevelopmentServerForApp;
 
@@ -145,8 +150,11 @@ function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Command {
-  const appRoot = resolveApplicationRoot();
+function createCliProgram(
+  logger: CliLogger,
+  runtime: CliRuntimeOverrides,
+  appRoot: string,
+): Command {
   const packageVersion = resolveInstalledPackageInfo().version;
   const program = new Command();
   const theme = createCliTheme();
@@ -632,8 +640,13 @@ export async function runCli(
   logger: CliLogger = console,
   runtime: CliRuntimeOverrides = {},
 ): Promise<void> {
-  const program = createCliProgram(logger, runtime);
-  const input = argv.length === 0 ? ["dev"] : argv;
+  const appRoot = resolveApplicationRoot();
+  const program = createCliProgram(logger, runtime, appRoot);
+  let input = argv;
+  if (input.length === 0) {
+    const detectEveProject = runtime.isEveProject ?? (await loadIsEveProject());
+    input = [(await detectEveProject(appRoot)) ? "dev" : "init"];
+  }
 
   try {
     await program.parseAsync(input, {

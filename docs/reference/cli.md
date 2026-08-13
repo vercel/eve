@@ -3,12 +3,13 @@ title: "CLI"
 description: "Reference for every eve CLI command: init, set, info, build, start, dev, logs, trace, link, deploy, eval, channels, and extension."
 ---
 
-The `eve` binary (`bin: eve`) runs from your app root, and every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve dev`.
+The `eve` binary (`bin: eve`) runs from your app root. Every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
 
 ## Commands
 
 | Command                       | Description                                                                                                                        |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `eve`                         | Initialize the current directory, or start development when it is already an eve project                                           |
 | `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                         |
 | `eve info`                    | Print the resolved application, including static instructions and discovered capabilities, routes, artifact paths, and diagnostics |
 | `eve build`                   | Compile `.eve/` artifacts and build the host output; prints the output directory                                                   |
@@ -40,19 +41,22 @@ eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channe
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
 
-| Target                                    | What happens                                                                                                                                             |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eve init my-agent`                       | New agent project in `my-agent/`                                                                                                                         |
-| `eve init .` (or an existing project dir) | Adds `agent/` plus missing `eve`, `ai`, and `zod` deps. Needs a `package.json` and no `agent/` files yet                                                 |
-| `eve init` with no target                 | Same as `eve init .`, except coding agents (Claude Code, Cursor, and similar) get a setup guide instead of scaffolding — they have not chosen a name yet |
+| Target                                                                     | What happens                                                                                                                                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `eve init my-agent`                                                        | Creates an agent project in `my-agent/`                                                                                                                                  |
+| `eve init` or `eve init .` in an empty directory                           | Creates an agent project in the current directory                                                                                                                        |
+| `eve init` or `eve init .` in a non-empty directory without `package.json` | Asks whether to scaffold in the current directory or a named subdirectory. Using the current directory preserves unrelated files but overwrites files at generated paths |
+| `eve init .` in an existing project                                        | Adds `agent/` plus missing `eve`, `ai`, and `zod` dependencies. Requires `package.json` and no existing `agent/` files                                                   |
+
+Coding-agent launches and non-interactive terminals cannot answer the location prompt and fail before writing. Pass a new directory name, such as `eve init my-agent`, in those environments.
 
 After scaffolding, a human terminal usually continues into `eve dev`. If a coding-agent REPL is on `PATH`, the handoff menu can open it instead or exit without starting either process. Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                   | Type   | Default                     | Description                                                                                                              |
-| ---------------------- | ------ | --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`      | string | `anthropic/claude-sonnet-5` | Set the root agent's AI Gateway model ID.                                                                                |
-| `--reasoning <effort>` | enum   | provider default            | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--channel-web-nextjs` | flag   | off                         | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
+| Flag                   | Type   | Default          | Description                                                                                                              |
+| ---------------------- | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `--model <model>`      | string | `zai/glm-5.2`    | Set the root agent's AI Gateway model ID.                                                                                |
+| `--reasoning <effort>` | enum   | provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
+| `--channel-web-nextjs` | flag   | off              | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
 
 ## `eve extension`
 
