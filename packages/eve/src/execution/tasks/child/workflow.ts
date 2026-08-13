@@ -99,6 +99,17 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         next.value.kind === "subagent-authorization-event"
           ? { ...next.value, kind: "authorization-event" }
           : next.value;
+      // Approval lifecycle events (`approval.candidate`/`approval.settled`)
+      // are intra-child responder bookkeeping, not task blockers: only
+      // `authorization.required`/`authorization.completed` may block or
+      // unblock a task. Forwarding them would mint bogus `answered`
+      // commands and race the terminal wake.
+      if (
+        payload.kind === "authorization-event" &&
+        (payload.event.type === "approval.candidate" || payload.event.type === "approval.settled")
+      ) {
+        continue;
+      }
       const isReadinessCommand =
         payload.kind === "task-command" && payload.command.kind === "ready";
       const isRejectedDispatch =

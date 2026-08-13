@@ -352,7 +352,7 @@ describe("taskRunWorkflow", () => {
     );
   });
 
-  it("drops stale authorization events and still wakes on terminal settlement", async () => {
+  it("ignores approval lifecycle events and still wakes on terminal settlement", async () => {
     mockCommandHook([
       { command: { kind: "ready" }, kind: "task-command" },
       {
