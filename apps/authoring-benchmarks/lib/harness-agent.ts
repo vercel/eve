@@ -17,19 +17,21 @@ import type {
 
 const WORKSPACE = "workspace";
 const HARNESS_BRIDGE_PORT = 4172;
-const SUBJECT_REVISION = requiredEnvironmentVariable("EVE_BENCHMARK_REVISION");
-const SUBJECT_REPOSITORY = requiredEnvironmentVariable("EVE_BENCHMARK_REPOSITORY");
 const INSTRUCTIONS =
   "Work autonomously in the existing eve project. Use the installed, version-matched eve documentation and registry commands. Prefer non-interactive CLI commands intended for coding agents. Ask the user only for information that genuinely belongs to them.";
 
-export function createAuthoringAgent(): Agent {
+export function createAuthoringAgent(subject: {
+  readonly name: string;
+  readonly repository: string;
+  readonly revision: string;
+}): Agent {
   return {
-    name: "eve-authoring-harness",
+    name: subject.name,
     displayName: "eve authoring harness",
     getApiKeyEnvVar: () => "AI_GATEWAY_API_KEY",
     getDefaultModel: () => "claude-sonnet-4-6",
     definition: {
-      name: "eve-authoring-harness",
+      name: subject.name,
       displayName: "eve authoring harness",
       defaultModel: "claude-sonnet-4-6",
       o11yAgentName: "claude-code",
@@ -72,10 +74,15 @@ export function createAuthoringAgent(): Agent {
         sandbox,
         sandboxConfig: {
           workDir: WORKSPACE,
-          bootstrapHash: bootstrapHash(authoringCase),
+          bootstrapHash: bootstrapHash(authoringCase, subject),
           onBootstrap: async ({ session: bootstrap, workDir }) => {
             const networkSandbox = bootstrap as HarnessV1NetworkSandboxSession;
-            await bootstrapSubject(networkSandbox, workDir, authoringCase.startingPoint.workspace);
+            await bootstrapSubject(
+              networkSandbox,
+              workDir,
+              authoringCase.startingPoint.workspace,
+              subject,
+            );
             const context = setupContext(networkSandbox, workDir);
             for (const setup of setups) await setup.onBootstrap?.(context);
           },
@@ -100,7 +107,7 @@ export function createAuthoringAgent(): Agent {
       });
 
       try {
-        session = await withBootstrapInitialization(bootstrapHash(authoringCase), () =>
+        session = await withBootstrapInitialization(bootstrapHash(authoringCase, subject), () =>
           agent.createSession({ abortSignal: options.signal }),
         );
         if (activeSandbox === undefined || workspace === undefined) {
@@ -192,10 +199,11 @@ async function bootstrapSubject(
   sandbox: HarnessV1NetworkSandboxSession,
   workspace: string,
   workspaceKind: "scaffolded" | "empty",
+  subject: { readonly repository: string; readonly revision: string },
 ): Promise<void> {
   const commands = [
-    `git clone --filter=blob:none --no-checkout ${shellQuote(SUBJECT_REPOSITORY)} /tmp/eve-source`,
-    `git -C /tmp/eve-source fetch --depth 1 origin ${shellQuote(SUBJECT_REVISION)}`,
+    `git clone --filter=blob:none --no-checkout ${shellQuote(subject.repository)} /tmp/eve-source`,
+    `git -C /tmp/eve-source fetch --depth 1 origin ${shellQuote(subject.revision)}`,
     "git -C /tmp/eve-source checkout --detach FETCH_HEAD",
     "corepack enable",
     "cd /tmp/eve-source",
@@ -241,12 +249,15 @@ function shellCommands(toolCalls: ReadonlyArray<{ input: unknown }>): string[] {
   });
 }
 
-function bootstrapHash(authoringCase: AuthoringCase): string {
+function bootstrapHash(
+  authoringCase: AuthoringCase,
+  subject: { readonly repository: string; readonly revision: string },
+): string {
   const setupIds = [authoringCase.startingPoint.setup, authoringCase.setup]
     .filter((setup): setup is AuthoringSetup => setup !== undefined)
     .map((setup) => setup.id)
     .join("-");
-  return `eve-authoring-${SUBJECT_REPOSITORY}-${SUBJECT_REVISION}-${authoringCase.startingPoint.id}-${setupIds}`;
+  return `eve-authoring-${subject.repository}-${subject.revision}-${authoringCase.startingPoint.id}-${setupIds}`;
 }
 
 const bootstrapCoordination = globalThis as typeof globalThis & {
@@ -317,12 +328,6 @@ async function run(
   if (result.exitCode !== 0) {
     throw new Error(`${command} failed (${result.exitCode}):\n${result.stdout}\n${result.stderr}`);
   }
-}
-
-function requiredEnvironmentVariable(name: string): string {
-  const value = process.env[name];
-  if (value === undefined) throw new Error(`The authoring benchmark runner must provide ${name}.`);
-  return value;
 }
 
 function shellQuote(value: string): string {

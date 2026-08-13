@@ -23,9 +23,9 @@ A case starts from a shared primitive such as `simpleProject` (the selected revi
 lets cases reuse an exact starting point rather than maintain an approximation of generated
 source, package policy, or coding-agent instructions.
 
-Experiment files under `experiments/` define treatments independently from cases. The
-initial pair compares a baseline that removes the scaffolded coding-agent guidance with the
-unaltered `eve init` project, including its version-matched `AGENTS.md` and `CLAUDE.md`.
+The runner generates gitignored experiment files for each invocation. Every subject revision
+uses the real authoring experience: the unaltered `eve init` project, including its
+version-matched `AGENTS.md` and `CLAUDE.md`.
 
 The HarnessAgent adapter owns only the shared authoring lifecycle: bootstrap the selected eve
 revision, create an isolated session, capture commands and transcripts, and grade the result.
@@ -71,18 +71,28 @@ a published package or mutable branch reference.
 ```sh
 pnpm benchmark:authoring author-000-imessage
 pnpm benchmark:authoring --all
-pnpm benchmark:authoring --dry
-pnpm benchmark:authoring author-000-imessage --force
+pnpm benchmark:authoring author-000-imessage --runs 3
+pnpm benchmark:authoring author-000-imessage --dry
 ```
 
-These benchmarks do not run in CI or as part of `pnpm test`; they run only when invoked with
-`pnpm benchmark:authoring`. Passing a case name runs that case, while no name or `--all` runs
-every case. Each invocation runs both the `baseline` and `agents-md` treatments.
+Normal runs always execute fresh samples; cached agent-eval results are not reused. These
+benchmarks do not run in CI or as part of `pnpm test`.
 
+To compare framework behavior before and after a change, hold the cases and treatments fixed and
+select two reachable subject revisions:
+
+```sh
+pnpm benchmark:authoring author-000-imessage \
+  --base origin/main \
+  --head HEAD \
+  --runs 3
+```
+
+This runs the `base` and `head` subjects with identical cases, guidance, model, and grading.
 Agent-eval writes ignored local results under
-`apps/authoring-benchmarks/results/<treatment>/<timestamp>/<case>/`. Each case directory contains
+`apps/authoring-benchmarks/results/<subject>/<timestamp>/<case>/`. Each case directory contains
 `summary.json` and per-run result, transcript, grader output, and copied project files. Use
-agent-eval's playground command to inspect or compare results.
+agent-eval's playground command to compare the two experiment columns.
 
 `@vercel/agent-eval` chooses Vercel Sandbox when credentials are available and can otherwise
 use local Docker. The configured coding agent uses Vercel AI Gateway, so an applicable Gateway

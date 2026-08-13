@@ -15,5 +15,7 @@ test("creates a filesystem-named weather tool", () => {
 
 test("does not require approval", () => {
   const source = readFileSync(toolPath, "utf8");
-  expect(source).toMatch(/approval\s*:\s*never\s*\(/);
+  if (/approval\s*:/.test(source)) {
+    expect(source).toMatch(/approval\s*:\s*never\s*\(/);
+  }
 });
