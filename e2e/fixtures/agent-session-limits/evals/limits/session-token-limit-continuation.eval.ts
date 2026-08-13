@@ -4,14 +4,18 @@ import { equals } from "eve/evals/expect";
 /**
  * Session token limits over HTTP: a conversation session that crosses its
  * input budget parks on the deterministic `session_limit_continuation`
- * prompt instead of failing. Approving grants a fresh budget window and
- * processes the queued message; declining cancels the in-flight turn
+ * prompt instead of failing. Continue grants a fresh budget window and
+ * processes the queued message; Stop cancels the in-flight turn
  * (`turn.cancelled` → `session.waiting`) and keeps the session resumable —
  * a user decision, not an error and not a session end.
  */
 export default defineEval({
   tags: ["real-model"],
-  description: "Session token limit parks on a continuation prompt; approve resumes, stop cancels.",
+  metadata: {
+    transitions: ["owner.limit.response.settle-continue", "owner.limit.response.settle-stop"],
+  },
+  description:
+    "Session token limit parks on a continuation prompt; Continue resumes, Stop cancels.",
   async test(t) {
     // The 1-token budget lets this first call finish (limits are checked
     // before the next call) but leaves the session over its input limit.

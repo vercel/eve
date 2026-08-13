@@ -7,6 +7,7 @@ import { defineEval } from "eve/evals";
  */
 export default defineEval({
   tags: ["real-model"],
+  metadata: { transition: "owner.question.response.settle-answer" },
   description: "HITL smoke: ask-question select parks and resumes with the chosen option.",
   async test(t) {
     await t.send(

@@ -13,6 +13,7 @@ const GUARDED_ECHO_OPENAI_TOKEN = "guarded-echo-openai-ok-R2D7";
  * `No tool output found for function call call_<id>`.
  */
 export default defineEval({
+  metadata: { transition: "owner.approval.response.settle-allow" },
   tags: ["real-model"],
   description: "HITL regression (#236): approve-resume executes and replays on OpenAI Responses.",
   async test(t) {

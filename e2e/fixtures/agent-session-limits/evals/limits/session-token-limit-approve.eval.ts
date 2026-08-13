@@ -1,16 +1,27 @@
 import { defineEval } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
+import { exactDismissal, exactOrder, gateLifecycle, traceRequest } from "./lifecycle";
+
 /**
- * Approving a session token-limit continuation over HTTP while messages queue
- * behind an active model turn.
+ * Deliveries admitted while a turn is active preserve arrival order. Once
+ * the turn parks on a Limit prompt, each queued message supersedes the
+ * current generation without reaching the model.
  */
 export default defineEval({
   tags: ["real-model"],
+  metadata: {
+    transitions: [
+      "scheduler.delivery.admit-arrival-order",
+      "owner.limit.message.supersede",
+      "owner.limit.response.settle-continue",
+    ],
+  },
   description:
-    "Messages sent during an active turn produce one limit prompt, and approve resets the budget.",
+    "Buffered active-turn deliveries are admitted in order; each supersedes the current Limit generation.",
   timeoutMs: 90_000,
   async test(t) {
+    gateLifecycle(t);
     const active = await t.start(
       'Call the `hold-open` tool exactly once with marker "limit-race". Wait for its result, then reply with exactly "approved".',
     );
@@ -40,6 +51,7 @@ export default defineEval({
       optionIds: ["continue", "stop"],
       toolName: "session_limit_continuation",
     });
+    const firstTrace = traceRequest(prompted.events, request);
 
     const activeState = t.state;
     if (activeState === undefined) {
@@ -50,42 +62,63 @@ export default defineEval({
     });
     const queuedA = await queuedSession.result();
     queuedA.event("message.received", { count: 1 });
-    queuedA.notEvent("input.requested");
-    queuedA.eventsSatisfy("delivers message A while preserving the pending prompt", (events) => {
-      const received = events.find((event) => event.type === "message.received");
-      return received !== undefined && received.data.message.includes("Queued message A");
+    const second = queuedSession.session.requireInputRequest({
+      optionIds: ["continue", "stop"],
+      toolName: "session_limit_continuation",
     });
     const queuedState = queuedSession.session.state;
     if (queuedState === undefined) {
       throw new Error("The attached eval session did not expose client state.");
     }
+    const secondTrace = traceRequest(queuedA.events, second);
+    queuedA.eventsSatisfy(
+      "message A supersedes generation one before generation two opens",
+      (events) =>
+        exactDismissal(events, firstTrace, "superseded") &&
+        exactOrder(events, [
+          { type: "input.dismissed", match: (data) => data.requestId === request.requestId },
+          { type: "input.requested" },
+        ]),
+    );
+    queuedA.notEvent("message.completed");
     const queuedBSession = t.target.watchTurn(active.sessionId, {
       startIndex: queuedState.streamIndex,
     });
     const queuedB = await queuedBSession.result();
     queuedB.event("message.received", { count: 1 });
-    queuedB.notEvent("input.requested");
-    queuedB.eventsSatisfy("delivers message B while preserving the pending prompt", (events) => {
-      const received = events.find((event) => event.type === "message.received");
-      return received !== undefined && received.data.message.includes("Queued message B");
+    const third = queuedBSession.session.requireInputRequest({
+      optionIds: ["continue", "stop"],
+      toolName: "session_limit_continuation",
     });
-    t.check(
-      [...prompted.events, ...queuedA.events, ...queuedB.events].filter(
-        (event) => event.type === "input.requested",
-      ).length,
-      equals(1),
+    const thirdTrace = traceRequest(queuedB.events, third);
+    queuedB.eventsSatisfy(
+      "message B supersedes generation two before generation three opens",
+      (events) =>
+        exactDismissal(events, secondTrace, "superseded") &&
+        exactOrder(events, [
+          { type: "input.dismissed", match: (data) => data.requestId === second.requestId },
+          { type: "input.requested" },
+        ]),
     );
+    queuedB.notEvent("message.completed");
+    t.check(new Set([request.requestId, second.requestId, third.requestId]).size, equals(3));
 
     const resumed = await queuedBSession.session.respond([
       {
         optionId: "continue",
-        requestId: request.requestId,
+        requestId: thirdTrace.requestId,
       },
     ]);
     resumed.expectOk();
     resumed.event("step.started");
     resumed.notEvent("input.requested");
     resumed.messageIncludes("approved");
+    resumed.eventsSatisfy("superseding messages are not replayed", (events) =>
+      events.every(
+        (event) =>
+          event.type !== "message.received" || !event.data.message.includes("Queued message"),
+      ),
+    );
     t.check(resumed.sessionId, equals(active.sessionId));
     t.check(queuedBSession.session.sessionId, equals(active.sessionId));
 
@@ -106,7 +139,7 @@ export default defineEval({
     t.check(
       nextRequest.requestId,
       satisfies(
-        (requestId: string) => requestId !== request.requestId,
+        (requestId: string) => requestId !== third.requestId,
         "the next token window creates a distinct continuation request",
       ),
     );

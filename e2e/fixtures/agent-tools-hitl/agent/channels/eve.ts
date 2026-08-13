@@ -2,22 +2,37 @@ import type { AuthFn } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
 import type { SessionAuthContext } from "eve/context";
 
+const PRINCIPAL_A_AUTHORIZATION = "Bearer e2e-hitl-principal-a";
+const PRINCIPAL_B_AUTHORIZATION = "Bearer e2e-hitl-principal-b";
+
+function principal(principalId: string, authenticator = "e2e-hitl-bearer"): SessionAuthContext {
+  return {
+    attributes: {},
+    authenticator,
+    issuer: "e2e",
+    principalId,
+    principalType: "user",
+    subject: principalId,
+  };
+}
+
+const authenticateA: AuthFn<Request> = (request) =>
+  request.headers.get("authorization") === PRINCIPAL_A_AUTHORIZATION
+    ? principal("e2e-hitl-a")
+    : null;
+
+const authenticateB: AuthFn<Request> = (request) =>
+  request.headers.get("authorization") === PRINCIPAL_B_AUTHORIZATION
+    ? principal("e2e-hitl-b")
+    : null;
+
 /**
- * Authored eve channel for the interactive-authorization evals. Interactive
- * authorizations are always `principalType: "user"`, and the eval driver is
- * otherwise anonymous (`local-dev` on the local world), which fails principal
- * resolution before a challenge can open. Every caller maps to one fixed end
- * user (fixture-only; do not pattern production channels off this).
+ * Interactive authorizations require a user principal. Existing anonymous
+ * fixture callers map to one deterministic end user; explicit A/B bearer
+ * credentials take precedence for multiplayer transition coverage.
  */
-const authenticateDefaultUser: AuthFn<Request> = (): SessionAuthContext => ({
-  attributes: {},
-  authenticator: "e2e-fixture",
-  issuer: "e2e",
-  principalId: "e2e-user",
-  principalType: "user",
-  subject: "e2e-user",
-});
+const authenticateDefaultUser: AuthFn<Request> = () => principal("e2e-user", "e2e-fixture");
 
 export default eveChannel({
-  auth: [authenticateDefaultUser],
+  auth: [authenticateA, authenticateB, authenticateDefaultUser],
 });

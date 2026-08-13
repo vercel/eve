@@ -15,6 +15,7 @@ const TOOL_NAME = "dynamic_guarded_echo";
  */
 export default defineEval({
   tags: ["real-model"],
+  metadata: { transition: "owner.approval.response.settle-allow" },
   description: "HITL regression (#533): a resolved approval park replays on the next turn.",
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with note "replay-probe".`);
