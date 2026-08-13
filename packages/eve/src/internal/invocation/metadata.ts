@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 
-import type { SessionAuthContext } from "#channel/types.js";
+import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import {
-  buildInvocationAttributes,
   INVOCATION_OWNER_ATTRIBUTE,
   INVOCATION_TOKEN_ATTRIBUTE,
 } from "#internal/invocation/attributes.js";
 
-export { buildInvocationAttributes, INVOCATION_OWNER_ATTRIBUTE, INVOCATION_TOKEN_ATTRIBUTE };
+export { INVOCATION_OWNER_ATTRIBUTE, INVOCATION_TOKEN_ATTRIBUTE };
+
+export type ExternalInvocationMetadata = NonNullable<RunInput["externalInvocation"]>;
 
 /** Batch-scoped request id exposed to MCP clients for one durable pending-input event. */
 export function invocationInputRequestId(pendingBatchId: string, requestId: string): string {
@@ -29,4 +30,13 @@ export function invocationOwnerKey(auth: SessionAuthContext | null): string {
           auth.subject ?? "",
         ];
   return createHash("sha256").update(JSON.stringify(identity), "utf8").digest("hex");
+}
+
+export function buildInvocationAttributes(
+  metadata: ExternalInvocationMetadata,
+): Readonly<Record<string, string>> {
+  return {
+    [INVOCATION_OWNER_ATTRIBUTE]: metadata.ownerKey,
+    [INVOCATION_TOKEN_ATTRIBUTE]: metadata.continuationToken,
+  };
 }
