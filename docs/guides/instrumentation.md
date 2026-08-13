@@ -186,7 +186,7 @@ Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing 
 
 ## Debugging
 
-`eve info` is the fastest way to see what eve actually picked up: the active tools, skills, subagents, schedules, routes, and discovery diagnostics. eve also writes inspectable artifacts under `.eve/`, kept even when discovery hits errors:
+`eve info` is the fastest way to see what eve actually picked up: ordered static instructions with their roles, plus the active tools, skills, subagents, schedules, routes, and discovery diagnostics. Dynamic instruction results exist only at runtime and are not part of this static inspection. eve also writes inspectable artifacts under `.eve/`, kept even when discovery hits errors:
 
 | Artifact                        | Tells you                                   |
 | ------------------------------- | ------------------------------------------- |

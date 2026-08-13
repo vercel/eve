@@ -2,6 +2,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 
 import { createLogger, logError } from "#internal/logging.js";
+import type { GitHubBotNameResolver } from "#public/channels/github/auth.js";
 import { buildGitHubBinding } from "#public/channels/github/binding.js";
 import {
   extractGitHubCommentTrigger,
@@ -51,21 +52,20 @@ type GitHubTurnEvent =
 
 /** Dispatches a bot-directed issue or PR timeline comment into the runtime. */
 export async function dispatchIssueComment(input: {
-  readonly botName: string | undefined;
+  readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubIssueCommentEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onComment"]>;
   readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
-  if (
-    isIgnoredInboundComment(input.event.comment.body, input.event.comment.author, input.botName)
-  ) {
+  const botName = await input.botName();
+  if (isIgnoredInboundComment(input.event.comment.body, input.event.comment.author, botName)) {
     return;
   }
   const ctx = buildInboundContext(input.config, input.event);
   await dispatchCommentTurn({
     body: input.event.comment.body,
-    botName: input.botName,
+    botName,
     commentUrl: input.event.comment.htmlUrl,
     event: input.event,
     handlerResult: () => input.handler(ctx, toGitHubComment(input.event.comment)),
@@ -77,21 +77,20 @@ export async function dispatchIssueComment(input: {
 
 /** Dispatches a bot-directed inline pull-request review comment. */
 export async function dispatchPullRequestReviewComment(input: {
-  readonly botName: string | undefined;
+  readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubPullRequestReviewCommentEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onComment"]>;
   readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
-  if (
-    isIgnoredInboundComment(input.event.comment.body, input.event.comment.author, input.botName)
-  ) {
+  const botName = await input.botName();
+  if (isIgnoredInboundComment(input.event.comment.body, input.event.comment.author, botName)) {
     return;
   }
   const ctx = buildInboundContext(input.config, input.event);
   await dispatchCommentTurn({
     body: input.event.comment.body,
-    botName: input.botName,
+    botName,
     commentUrl: input.event.comment.htmlUrl,
     event: input.event,
     handlerResult: () => input.handler(ctx, toGitHubComment(input.event.comment)),

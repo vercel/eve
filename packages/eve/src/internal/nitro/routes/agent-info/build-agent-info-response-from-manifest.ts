@@ -167,14 +167,12 @@ export function buildAgentInfoResponseFromManifest(
       dynamic: manifest.dynamicInstructions.map((resolver) =>
         renderDynamicResolver(resolver, { origin: "authored" }),
       ),
-      static:
-        manifest.instructions === undefined
-          ? null
-          : {
-              ...toSource(manifest.instructions),
-              markdown: manifest.instructions.markdown,
-              name: manifest.instructions.name,
-            },
+      static: manifest.instructions.map((instructions) => ({
+        ...toSource(instructions),
+        content: instructions.content,
+        name: instructions.name,
+        role: instructions.role,
+      })),
     },
     kind: "eve-agent-info",
     mode: input.mode,
@@ -222,7 +220,7 @@ export function buildAgentInfoResponseFromManifest(
       framework: frameworkToolInfo.framework,
       reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
     },
-    version: 1,
+    version: 2,
     workflow: {
       enabled: manifest.workflowTool !== undefined,
       toolName: WORKFLOW_TOOL_NAME,

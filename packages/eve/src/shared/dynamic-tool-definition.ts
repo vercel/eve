@@ -28,9 +28,8 @@ export const ALLOWED_DYNAMIC_TOOL_EVENTS: ReadonlySet<string> = new Set<DynamicT
 
 /**
  * Instructions and skills are restricted to session/turn boundaries.
- * They feed the system prompt, the most cache-sensitive position in the
- * wire format; keeping them stable across steps within a turn maximizes
- * cache hits.
+ * Keeping their resolved context stable within a turn avoids changing the
+ * model input between tool-loop steps.
  */
 export const ALLOWED_DYNAMIC_INSTRUCTION_EVENTS: ReadonlySet<string> =
   new Set<DynamicToolEventName>(["session.started", "turn.started"]);
@@ -41,7 +40,7 @@ export const ALLOWED_DYNAMIC_SKILL_EVENTS: ReadonlySet<string> = new Set<Dynamic
 ]);
 
 /**
- * Context passed to a dynamic resolver's event handler (tools and skills).
+ * Context passed to a dynamic resolver's event handler.
  *
  * Exposes read-only session identity, auth, and channel metadata. State
  * is not exposed here; resolvers read it through `defineState` handles or

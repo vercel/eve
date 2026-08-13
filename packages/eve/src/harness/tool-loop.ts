@@ -37,7 +37,11 @@ import {
   ParentTraceContextKey,
   SessionCallbackKey,
 } from "#context/keys.js";
-import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
+import {
+  buildDynamicInstructionMessages,
+  drainDynamicInstructionUserMessages,
+  prepareDynamicInstructionPreamble,
+} from "#context/dynamic-instruction-lifecycle.js";
 import {
   getActiveDynamicModelSelection,
   isDynamicModelSelectionError,
@@ -968,6 +972,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         pending.deferredMessage === true &&
         hasStepInput(input)
       ) {
+        if (store !== undefined) {
+          prepareDynamicInstructionPreamble(store, parkedSession.history);
+        }
+        let instructionMessages: ModelMessage[] = [];
         try {
           const traceContext = await preparePreambleTrace();
           emissionState = await emitTurnPreamble(
@@ -978,6 +986,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             traceContext,
           );
         } catch (error) {
+          instructionMessages =
+            store === undefined ? [] : drainDynamicInstructionUserMessages(store);
+          parkedSession = {
+            ...parkedSession,
+            history: [...parkedSession.history, ...instructionMessages],
+          };
+          session = parkedSession;
           if (!isDynamicModelSelectionError(error)) throw error;
           return failModelSelection(error, {
             sessionStarted: true,
@@ -986,6 +1001,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             turnId: `turn_${emissionState.sequence}`,
           });
         }
+        instructionMessages = store === undefined ? [] : drainDynamicInstructionUserMessages(store);
+        parkedSession = {
+          ...parkedSession,
+          history: [...parkedSession.history, ...instructionMessages],
+        };
         emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
         return {
           next: null,
@@ -1036,7 +1056,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Turn preamble ------------------------------------------------------
 
+    let instructionMessages: ModelMessage[] = [];
     if (emit && hasStepInput(input)) {
+      if (store !== undefined) {
+        prepareDynamicInstructionPreamble(store, pending.session.history);
+      }
       try {
         const traceContext = await preparePreambleTrace();
         emissionState = await emitTurnPreamble(
@@ -1047,6 +1071,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           traceContext,
         );
       } catch (error) {
+        instructionMessages = store === undefined ? [] : drainDynamicInstructionUserMessages(store);
+        session = {
+          ...pending.session,
+          history: [...pending.session.history, ...instructionMessages],
+        };
         if (!isDynamicModelSelectionError(error)) throw error;
         return failModelSelection(error, {
           sessionStarted: true,
@@ -1055,15 +1084,26 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           turnId: `turn_${emissionState.sequence}`,
         });
       }
-      session = setHarnessEmissionState(session, emissionState);
+      instructionMessages = store === undefined ? [] : drainDynamicInstructionUserMessages(store);
 
       if (turnSpan) {
         turnSpan.setAttribute("eve.turn.id", emissionState.turnId);
       }
     }
 
-    session = pending.session;
-    let messages: ModelMessage[] = pending.messages;
+    const historyLength = pending.session.history.length;
+    session = setHarnessEmissionState(
+      {
+        ...pending.session,
+        history: [...pending.session.history, ...instructionMessages],
+      },
+      emissionState,
+    );
+    let messages: ModelMessage[] = [
+      ...pending.messages.slice(0, historyLength),
+      ...instructionMessages,
+      ...pending.messages.slice(historyLength),
+    ];
 
     // A resolved session-limit continuation prompt grants a fresh token
     // budget or ends the session; see session-limit-enforcement.

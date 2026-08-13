@@ -19,7 +19,7 @@ function contributions(
     dynamicSkills: [],
     dynamicInstructions: [],
     connections: [],
-    instructionFragments: [],
+    instructions: [],
     ...overrides,
   };
 }
@@ -56,17 +56,20 @@ describe("mergeContributions", () => {
   it("concatenates unnamed contributions from both sets", () => {
     const primary = contributions({
       hooks: [{ slug: "crm__before" }] as never,
-      instructionFragments: ["override fragment"],
+      instructions: [{ content: "override", role: "system" }] as never,
     });
     const secondary = contributions({
       hooks: [{ slug: "crm__after" }] as never,
-      instructionFragments: ["extension fragment"],
+      instructions: [{ content: "extension", role: "user" }] as never,
     });
 
     const merged = mergeContributions(primary, secondary);
 
     expect(merged.hooks).toEqual([{ slug: "crm__before" }, { slug: "crm__after" }]);
-    expect(merged.instructionFragments).toEqual(["override fragment", "extension fragment"]);
+    expect(merged.instructions).toEqual([
+      { content: "override", role: "system" },
+      { content: "extension", role: "user" },
+    ]);
   });
 });
 

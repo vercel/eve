@@ -1,16 +1,21 @@
-import { INSTRUCTIONS_BRAND } from "#shared/dynamic-tool-definition.js";
+import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import {
+  DYNAMIC_SENTINEL_KIND,
+  INSTRUCTIONS_BRAND,
+  type DynamicResolveContext,
+  type DynamicSentinel,
+} from "#shared/dynamic-tool-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { PublicInstructionsDefinition } from "#shared/instructions-definition.js";
 
 export type InstructionsDefinition = Readonly<PublicInstructionsDefinition>;
 
 /**
- * Defines an instructions prompt in TypeScript from a `{ markdown }`
- * definition.
+ * Defines instructions in TypeScript from a `{ content, role? }`
+ * definition. Omitted `role` defaults to `"system"`.
  *
  * Use it to return instructions from a `defineDynamic` resolver in
- * `agent/instructions/`; the returned markdown lowers to a single
- * `{ role: "system" }` message. For a fixed prompt with no resolver,
+ * `agent/instructions/`. For a fixed prompt with no resolver,
  * author `instructions.md` instead. The result is branded so the dynamic
  * instruction lifecycle can validate that a resolver return came through
  * this helper.
@@ -20,4 +25,27 @@ export function defineInstructions<TInstructions extends InstructionsDefinition>
 ): TInstructions {
   Object.assign(definition, { [INSTRUCTIONS_BRAND]: true });
   return definition;
+}
+
+export type DynamicInstructionsResult = InstructionsDefinition | null;
+
+export type DynamicInstructionsEvents = {
+  readonly [K in "session.started" | "turn.started"]?: (
+    event: unknown,
+    ctx: DynamicResolveContext,
+  ) => DynamicInstructionsResult | Promise<DynamicInstructionsResult>;
+};
+
+/**
+ * Defines a runtime instructions resolver for session and turn boundaries.
+ */
+export function defineDynamic<const TEvents extends DynamicInstructionsEvents>(definition: {
+  readonly events: ExactDefinition<TEvents, DynamicInstructionsEvents>;
+}): DynamicSentinel<DynamicInstructionsResult> {
+  const sentinel = {
+    kind: DYNAMIC_SENTINEL_KIND,
+    events: definition.events,
+  } as DynamicSentinel<DynamicInstructionsResult>;
+  stampDefinitionKey(sentinel, `dynamic-instructions:${Object.keys(definition.events).join(",")}`);
+  return sentinel;
 }

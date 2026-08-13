@@ -11,6 +11,7 @@ import {
 } from "#compiler/normalize-helpers.js";
 import {
   assertResolverOnlyDynamicSentinel,
+  ALLOWED_DYNAMIC_INSTRUCTION_EVENTS,
   isDynamicSentinel,
   type DynamicToolEventName,
 } from "#shared/dynamic-tool-definition.js";
@@ -35,7 +36,7 @@ export type CompiledInstructionsEntry =
  * by the runtime.
  *
  * Module-backed static instructions sources execute once at build time —
- * the resulting markdown is captured into the compiled manifest. There is
+ * the resulting content is captured into the compiled manifest. There is
  * no per-session re-evaluation at runtime.
  *
  * Module-backed dynamic instructions (exporting `defineDynamic`) are
@@ -57,7 +58,8 @@ export async function compileInstructionsEntry(
       definition: {
         name: stripLogicalPathExtension(source.logicalPath),
         logicalPath: source.logicalPath,
-        markdown: definition.markdown,
+        content: definition.content,
+        role: definition.role,
         sourceId: source.sourceId,
         sourceKind: source.sourceKind,
       },
@@ -76,11 +78,20 @@ export async function compileInstructionsEntry(
       exportValue,
       `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
     );
+    const eventNames = Object.keys(exportValue.events);
+    const unsupportedEvent = eventNames.find(
+      (eventName) => !ALLOWED_DYNAMIC_INSTRUCTION_EVENTS.has(eventName),
+    );
+    if (unsupportedEvent !== undefined) {
+      throw new Error(
+        `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to use only "session.started" or "turn.started" events. Unsupported event: "${unsupportedEvent}".`,
+      );
+    }
     const slug = stripLogicalPathExtension(source.logicalPath).replace(/^instructions\//, "");
     return {
       kind: "dynamic-instructions",
       definition: {
-        eventNames: Object.keys(exportValue.events) as DynamicToolEventName[],
+        eventNames: eventNames as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
         slug,
@@ -100,7 +111,8 @@ export async function compileInstructionsEntry(
     definition: {
       name: stripLogicalPathExtension(source.logicalPath),
       logicalPath: source.logicalPath,
-      markdown: definition.markdown,
+      content: definition.content,
+      role: definition.role,
       sourceId: source.sourceId,
       sourceKind: source.sourceKind,
     },

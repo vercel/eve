@@ -5,7 +5,6 @@ import type {
 } from "#public/definitions/agent.js";
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
-import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import {
   expectFunction,
   expectObjectRecord,
@@ -357,11 +356,33 @@ function normalizeAgentCompactionDefinition(
 export function normalizeInstructionsDefinition(
   value: unknown,
   message: string,
-): InstructionsDefinition & { readonly markdown: string } {
+): { readonly content: string; readonly role: "system" | "user" } {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["markdown"], message);
+  expectOnlyKnownKeys(record, ["content", "markdown", "role"], message);
+
+  const hasContent = Object.hasOwn(record, "content");
+  const hasMarkdown = Object.hasOwn(record, "markdown");
+  if (hasContent === hasMarkdown) {
+    throw new Error(`${message} Provide exactly one of "content" or "markdown".`);
+  }
+
+  if (hasMarkdown) {
+    if (Object.hasOwn(record, "role")) {
+      throw new Error(`${message} The deprecated "markdown" shape does not support "role".`);
+    }
+    return {
+      content: expectString(record.markdown, message),
+      role: "system",
+    };
+  }
+
+  const role = record.role === undefined ? "system" : expectString(record.role, message);
+  if (role !== "system" && role !== "user") {
+    throw new Error(`${message} Expected "role" to be one of: system, user.`);
+  }
   return {
-    markdown: expectString(record.markdown, message),
+    content: expectString(record.content, message),
+    role,
   };
 }
 
