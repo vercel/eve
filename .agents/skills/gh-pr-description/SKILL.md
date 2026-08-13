@@ -112,7 +112,7 @@ the compiler now treats missing optional directories as empty.
 ### Validation
 
 Reproduced the crash with the weather fixture and confirmed the fix with
-regression coverage, unit tests, and type checking.
+focused regression coverage.
 
 ### Checklist
 
@@ -135,8 +135,10 @@ Covers the regression without broad fixture changes.
 
 Under validation, write one short prose description, not a bullet list of
 commands. For a bug fix, say what was reproduced and how the fix was
-confirmed. For a feature, say how coverage demonstrates the new behavior. Note
-limitations honestly and do not claim checks that only CI will run.
+confirmed. For a feature, say how coverage demonstrates the new behavior. Do
+not mention routine formatting, linting, type checking, or other baseline
+checks; CI coverage is assumed. Note limitations honestly and do not claim
+checks that only CI will run.
 
 Preserve the checklist and check only verified items. If tests, docs, or a
 changeset are not applicable, say so in one short line at most.
