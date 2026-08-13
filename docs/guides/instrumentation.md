@@ -1,5 +1,5 @@
 ---
-title: "instrumentation.ts"
+title: "Observability"
 description: "Trace an agent with OpenTelemetry in instrumentation.ts, read the workflow run tags eve emits, and debug discovery with eve info and the common-failures table."
 ---
 
@@ -57,6 +57,28 @@ For sensitive, regulated, or production data, set `recordInputs` and `recordOutp
 You are responsible for ensuring any observability or eval provider is approved for the data exported to it.
 
 The third configurable surface, [runtime context events](#runtime-context), attaches per-model-call values to these spans.
+
+## Channel delivery traces
+
+Instrumentation providers receive `channel.delivery.started` followed by
+`channel.delivery.completed`, `channel.delivery.cancelled`, or
+`channel.delivery.failed` for every inbound channel operation. The lifecycle
+covers durable processing through the terminal state of the resulting turn, not
+messages an adapter sends back to Slack, Telegram, Twilio, or another platform.
+Several deliveries can coalesce into one turn while retaining separate lifecycle
+pairs, and an adapter can consume a delivery without starting a turn.
+
+Each operation has a framework-owned `deliveryId` distinct from its optional
+platform request ID. Metadata-only providers receive identity, channel, session,
+and outcome fields. Content providers additionally receive only eve's known
+message, context, input-response, and output-schema fields; adapter-specific
+payload fields are never projected.
+
+The built-in OpenTelemetry provider maps each pair to an
+`agent.channel.delivery` consumer span under the durable session window. When
+`traceChannelRequests: true` creates an inbound HTTP server span, the delivery
+span links to it with `eve.link.type=channel.request` rather than using the
+short-lived request span as its parent.
 
 ## Runtime context
 
@@ -157,7 +179,7 @@ Note: By default, telemetry records full message history and model outputs You m
 
 Without an `instrumentation.ts`, `eve dev` records spans to disk — one trace per session, with turns, model steps, and tool calls. Read them two ways:
 
-- [`/traces`](dev-tui#inspect-traces) in the dev TUI: a live viewer that replays the trace as a conversation.
+- [`/traces`](dev-tui#logs-and-traces) in the dev TUI: a live viewer that replays the trace as a conversation.
 - [`eve traces`](../reference/cli#eve-traces): a span tree in the terminal, `eve traces ls` to list. Works after `eve dev` exits.
 
 Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing is recorded locally. For span attributes, retention, and the `EVE_TRACES*` variables, see [`eve traces`](../reference/cli#eve-traces).
@@ -177,13 +199,13 @@ When `eve build` fails on discovery errors, the CLI prints the full diagnostics 
 
 ### Common failures
 
-| Symptom                                       | Likely cause and fix                                                                                                                                                                                                                                                        |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tool not discovered (the model never sees it) | Run `eve info`. Confirm the file is in the right slot (`agent/tools/<name>.ts`) and default-exports `defineTool(...)`, and check `.eve/diagnostics.json` for shape errors. `schedules/` are root-only.                                                                      |
-| Model won't call a tool it should             | Tighten the tool `description` and `inputSchema`; put procedural guidance in a [skill](../skills), not the description. Confirm it's in the active set with `eve info`.                                                                                                     |
-| Stuck on `session.waiting`                    | The turn is parked for input. Answer the pending approval or question, or POST a follow-up to `/eve/v1/session/:sessionId`.                                                                                                                                                 |
-| 401 on production routes                      | Expected: auth fails closed. Replace `placeholderAuth()` with your route policy. Use `vercelOidc()` only for Vercel-issued tokens; otherwise configure `httpBasic()`, JWT/OIDC helpers, or a custom `AuthFn`. See [Auth and route protection](./auth-and-route-protection). |
-| Build fails with discovery errors             | Read the printed diagnostics and `.eve/diagnostics.json`; confirm the root-vs-subagent boundary is valid and secrets come from env vars.                                                                                                                                    |
+| Symptom                                       | Likely cause and fix                                                                                                                                                                                                                                             |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool not discovered (the model never sees it) | Run `eve info`. Confirm the file is in the right slot (`agent/tools/<name>.ts`) and default-exports `defineTool(...)`, and check `.eve/diagnostics.json` for shape errors. `schedules/` are root-only.                                                           |
+| Model won't call a tool it should             | Tighten the tool `description` and `inputSchema`; put procedural guidance in a [skill](../skills), not the description. Confirm it's in the active set with `eve info`.                                                                                          |
+| Stuck on `session.waiting`                    | The turn is parked for input. Answer the pending approval or question, or POST a follow-up to `/eve/v1/session/:sessionId`.                                                                                                                                      |
+| 401 on production routes                      | Expected: auth fails closed. Replace `placeholderAuth()` with your route policy. Use `vercelOidc()` only for Vercel-issued tokens; otherwise configure `httpBasic()`, JWT/OIDC helpers, or a custom `AuthFn`. See [Authentication](./auth-and-route-protection). |
+| Build fails with discovery errors             | Read the printed diagnostics and `.eve/diagnostics.json`; confirm the root-vs-subagent boundary is valid and secrets come from env vars.                                                                                                                         |
 
 ## What to read next
 

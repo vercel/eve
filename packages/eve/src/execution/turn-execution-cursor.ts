@@ -23,6 +23,7 @@ type TurnTerminalAction =
       readonly usageDelta?: TokenUsage;
     }
   | {
+      readonly authorizationAttemptIds?: readonly string[];
       readonly authorizationNames?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";

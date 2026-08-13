@@ -20,6 +20,7 @@ afterEach(async () => {
 
 interface HostVariant {
   readonly channels?: CompiledAgentManifest["channels"];
+  readonly instrumentationSlot?: string;
   readonly instrumentationSource?: string;
   readonly schedules?: CompiledAgentManifest["schedules"];
   readonly workflowWorld?: "local" | "vercel";
@@ -55,7 +56,15 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
     appRoot,
     compiledArtifacts: {
       bootstrapPath: join(appRoot, "bootstrap.mjs"),
-      instrumentationSourcePath,
+      ...(instrumentationSourcePath === undefined
+        ? {}
+        : {
+            instrumentationLayout:
+              variant.instrumentationSlot === undefined
+                ? ({ kind: "file" } as const)
+                : ({ kind: "directory", slots: [variant.instrumentationSlot] } as const),
+            instrumentationSourcePaths: [instrumentationSourcePath],
+          }),
       workflowWorldPluginPath: join(appRoot, "workflow-world.mjs"),
     },
     compileResult: { manifest } as PreparedDevelopmentApplicationHost["compileResult"],
@@ -79,6 +88,18 @@ describe("computeDevelopmentHostFingerprint", () => {
     );
 
     expect(changed).not.toBe(base);
+  });
+
+  it("treats provider slot names as structural", async () => {
+    const source = "export default {}\n";
+    const first = await computeDevelopmentHostFingerprint(
+      await createHost({ instrumentationSlot: "a", instrumentationSource: source }),
+    );
+    const renamed = await computeDevelopmentHostFingerprint(
+      await createHost({ instrumentationSlot: "b", instrumentationSource: source }),
+    );
+
+    expect(renamed).not.toBe(first);
   });
 
   it("treats channel route topology as structural", async () => {

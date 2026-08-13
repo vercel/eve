@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z as z3 } from "zod/v3";
 import { z } from "#compiled/zod/index.js";
 
 import {
@@ -31,6 +32,27 @@ describe("normalizeToolDefinition", () => {
     }
     expect(entry.definition.description).toBe("Echoes the input back to the caller.");
     expect(typeof entry.definition.execute).toBe("function");
+  });
+
+  it("normalizes a tool with a Zod 3 input schema", () => {
+    const tool = defineTool({
+      description: "Gets weather for a city.",
+      inputSchema: z3.object({ city: z3.string() }),
+      execute(input) {
+        return input.city;
+      },
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    expect(entry.kind).toBe("tool");
+    if (entry.kind !== "tool") throw new Error("expected tool kind");
+    expect(entry.definition.inputSchema).toEqual({
+      additionalProperties: false,
+      properties: { city: { type: "string" } },
+      required: ["city"],
+      type: "object",
+    });
   });
 
   it("returns a disabled entry for a disableTool sentinel", () => {
@@ -158,6 +180,20 @@ describe("normalizeToolDefinition", () => {
     expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
   });
 
+  it("accepts explicit request and response approval policies", () => {
+    const tool = defineTool({
+      approval: {
+        request: () => "user-approval",
+        response: () => ({ status: "allowed" }),
+      },
+      description: "Uses response authorization.",
+      execute: () => null,
+      inputSchema: z.object({ city: z.string() }),
+    });
+
+    expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
   it("accepts generic approval helpers on schema-typed tools", () => {
     const tool = defineTool({
       description: "Uses a reusable approval helper.",
@@ -240,15 +276,17 @@ describe("normalizeToolDefinition", () => {
   });
 
   it("rejects a defineDynamic tool export carrying a fallback", () => {
-    const dynamicTools = defineDynamic({
+    const dynamicTools = {
+      ...defineDynamic({
+        events: {
+          "session.started": async () => ({}),
+        },
+      }),
       fallback: "not-supported-here",
-      events: {
-        "session.started": async () => ({}),
-      },
-    });
+    } as never;
 
     expect(() => normalizeToolDefinition(dynamicTools, FAILURE_MESSAGE)).toThrow(
-      '"fallback" is only supported on a dynamic agent model',
+      "Unknown key(s): fallback",
     );
   });
 

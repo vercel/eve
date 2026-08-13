@@ -1,5 +1,5 @@
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -175,6 +175,8 @@ export interface LinearChannelConfig {
   /** Max allowed webhook timestamp skew in milliseconds. Defaults to 60 seconds. */
   readonly maxSkewMs?: number;
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
 
   /** Inbound Agent Session hook. Defaults to dispatching `created` and `prompted` events. */
   onAgentSession?(
@@ -208,6 +210,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
     LinearInstrumentationMetadata
   >({
     kindHint: "linear",
+    turnPolicy: config.turnPolicy,
     state: initialLinearState(),
     metadata(state): LinearInstrumentationMetadata {
       return {

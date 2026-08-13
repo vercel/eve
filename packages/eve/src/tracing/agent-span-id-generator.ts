@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * Id generator shared by `registerOTel` and the agent OTel provider. A span
  * whose lifetime crosses durable worker boundaries (`agent.turn`) is emitted
@@ -10,6 +12,12 @@ export class AgentSpanIdGenerator {
   /** Reserves a span id for a span emitted later via {@link withSpanId}. */
   allocateSpanId(): string {
     return randomHexId(16);
+  }
+
+  /** Derives one span id for a replay-stable instrumentation event. */
+  deriveSpanId(key: string): string {
+    const spanId = createHash("sha256").update(key).digest("hex").slice(0, 16);
+    return /^0+$/u.test(spanId) ? "0000000000000001" : spanId;
   }
 
   generateSpanId(): string {

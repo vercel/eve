@@ -265,6 +265,70 @@ async function expectCancelResponse(
 }
 
 describe("turn cancellation integration", () => {
+  it("buffers a default steering message before replacing the active turn", async () => {
+    const fixture = createWaitToolRuntime("turn-steer-message");
+    const rawToken = "turn-steer-message";
+    const continuationToken = `http:${rawToken}`;
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+    const address = createChannelAddress({
+      adapter: { kind: "http" },
+      channelName: "http",
+      continuationToken: rawToken,
+      runtime: workflowRuntime,
+    });
+
+    await fixture.runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        await waitForHookByToken(continuationToken);
+        await fixture.toolStarted;
+
+        await expect(
+          address.send("replacement after steer", { auth: null }),
+        ).resolves.toMatchObject({ id: run.runId });
+
+        const cancelledTurn = await stream.nextTurn();
+        expect(
+          containsEventSequence(cancelledTurn, [
+            "turn.started",
+            "turn.cancelled",
+            "session.waiting",
+          ]),
+        ).toBe(true);
+        expect(fixture.toolAborts()).toBe(1);
+
+        const replacementTurn = await stream.nextTurn();
+        expect(filterEventsByType(replacementTurn, "turn.started")).toHaveLength(1);
+        expect(filterEventsByType(replacementTurn, "turn.cancelled")).toHaveLength(0);
+        expectNoFailureEvents(replacementTurn);
+        expect(
+          replacementTurn.some(
+            (event) =>
+              event.type === "message.received" &&
+              typeof event.data.message === "string" &&
+              event.data.message.includes("replacement after steer"),
+          ),
+        ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
   it("cancels a turn mid-tool and accepts the next message normally", async () => {
     const fixture = createWaitToolRuntime("turn-cancel-tool");
     const continuationToken = "http:turn-cancel-tool";

@@ -16,7 +16,10 @@ async function createAgentInfoPayload(input: NitroArtifactsConfig) {
 
   return buildAgentInfoResponseFromManifest(data, {
     mode: input.kind,
-    gatewayCredentials: await resolveGatewayCredentialPresence(data.manifest.config.model.routing),
+    gatewayCredentials:
+      data.manifest.config.dynamicModel === undefined
+        ? await resolveGatewayCredentialPresence(data.manifest.config.model.routing)
+        : { apiKey: false, oidc: false },
   });
 }
 

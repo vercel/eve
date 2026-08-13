@@ -6,6 +6,7 @@ import type {
   ChannelResolveSession,
   ChannelSource,
 } from "#channel/channel-operations.js";
+import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { CardElement } from "#compiled/chat/index.js";
@@ -175,6 +176,12 @@ type SlackSessionFailedHandler = (
  * step boundaries. Anything written here must round-trip through
  * `JSON.stringify` / `JSON.parse`.
  */
+export interface SlackPendingApprovalCard {
+  readonly messageBlocks: readonly unknown[];
+  readonly messageTs: string;
+  readonly userId?: string;
+}
+
 export interface SlackChannelState {
   /** Slack channel id seeded by the inbound mention. */
   channelId: string | null;
@@ -212,6 +219,9 @@ export interface SlackChannelState {
    * resolution outcome.
    */
   pendingAuthMessageTs?: Record<string, string>;
+  pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
+  pendingApprovalCandidateUsers?: Record<string, string>;
+  approvalResponderUsers?: Record<string, string>;
 }
 
 /**
@@ -437,6 +447,8 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
  * context and exposes the ID as `data.sessionId`.
  */
 export interface SlackChannelEvents {
+  readonly "approval.candidate"?: SlackEventHandler<"approval.candidate">;
+  readonly "approval.settled"?: SlackEventHandler<"approval.settled">;
   readonly "turn.started"?: SlackEventHandler<"turn.started">;
   readonly "actions.requested"?: SlackEventHandler<"actions.requested">;
   readonly "action.partial"?: SlackEventHandler<"action.partial">;
@@ -638,10 +650,27 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
   const authorizationRequiredOverride = config.events?.["authorization.required"];
+  const candidateHandler =
+    config.events?.["approval.candidate"] ?? defaultEvents["approval.candidate"]!;
   const turnStartedHandler = config.events?.["turn.started"] ?? defaultEvents["turn.started"]!;
   const mergedEvents: SlackChannelInternalEvents = {
     ...defaultEvents,
     ...config.events,
+    async "approval.candidate"(data, channel, ctx) {
+      const responderUserId = channel.state.approvalResponderUsers?.[data.responderPrincipalId];
+      if (data.outcome === "pending" && responderUserId !== undefined) {
+        channel.state.pendingApprovalCandidateUsers = {
+          ...channel.state.pendingApprovalCandidateUsers,
+          [data.candidateId]: responderUserId,
+        };
+      }
+      await candidateHandler(data, channel, ctx);
+      if (data.outcome !== "pending") {
+        const users = { ...channel.state.pendingApprovalCandidateUsers };
+        delete users[data.candidateId];
+        channel.state.pendingApprovalCandidateUsers = users;
+      }
+    },
     async "turn.started"(data, channel, ctx) {
       const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
       if (triggeringUserId !== undefined) {
@@ -676,6 +705,9 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       lastReasoningTypingAtMs: null,
       lastReasoningTypingStatus: null,
       pendingAuthMessageTs: {},
+      pendingApprovalCards: {},
+      pendingApprovalCandidateUsers: {},
+      approvalResponderUsers: {},
     },
     fetchFile: slackFetchFile,
     metadata(state): SlackInstrumentationMetadata {
@@ -689,6 +721,21 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
     context(state, session) {
       return rebuildSlackContext(state, session, config.credentials);
+    },
+
+    deliver(payload, channel) {
+      const cards = payload.pendingApprovalCards;
+      if (typeof cards === "object" && cards !== null) {
+        channel.state.pendingApprovalCards = { ...channel.state.pendingApprovalCards, ...cards };
+      }
+      const responders = payload.approvalResponderUsers;
+      if (typeof responders === "object" && responders !== null) {
+        channel.state.approvalResponderUsers = {
+          ...channel.state.approvalResponderUsers,
+          ...responders,
+        };
+      }
+      return defaultDeliverResult(payload);
     },
 
     routes: [

@@ -71,6 +71,7 @@ describe("load_skill executor", () => {
     const access = {
       captureState: vi.fn(async () => ({ initialized: false, session: null })),
       get,
+      stop: vi.fn(async () => {}),
     };
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, access);

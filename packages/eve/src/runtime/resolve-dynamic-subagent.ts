@@ -8,12 +8,9 @@ import {
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedDynamicSubagentDefinition } from "#runtime/types.js";
 import { toErrorMessage } from "#shared/errors.js";
-import type { ModuleSourceRef } from "#shared/source-ref.js";
-
-type DynamicSubagentSource = ModuleSourceRef & CompiledDynamicSubagentDefinition;
 
 export async function resolveDynamicSubagentDefinition(input: {
-  readonly definition: DynamicSubagentSource;
+  readonly definition: CompiledDynamicSubagentDefinition;
   readonly moduleMap: CompiledModuleMap;
   readonly nodeId: string;
 }): Promise<ResolvedDynamicSubagentDefinition> {
@@ -41,7 +38,7 @@ export async function resolveDynamicSubagentDefinition(input: {
 }
 
 export function normalizeResolvedDynamicSubagentDefinition(
-  definition: DynamicSubagentSource,
+  definition: CompiledDynamicSubagentDefinition,
   value: unknown,
 ): ResolvedDynamicSubagentDefinition {
   const message = `Expected the dynamic subagent export "${definition.exportName ?? "default"}" from "${definition.logicalPath}" to provide defineDynamic({ events }).`;

@@ -90,6 +90,7 @@ const AGENT_INFO: AgentInfoResult = {
     appRoot: "/tmp/weather-agent",
     model: {
       id: "gpt-5",
+      routing: { kind: "gateway", target: "openai" },
     },
     name: "Weather Agent",
   },
@@ -379,6 +380,7 @@ describe("EveTUIRunner agent header", () => {
         ...AGENT_INFO.agent,
         model: {
           id: "anthropic/claude-sonnet-5",
+          routing: { kind: "gateway", target: "anthropic" },
         },
       },
     };
@@ -430,6 +432,7 @@ describe("EveTUIRunner agent header", () => {
         ...AGENT_INFO.agent,
         model: {
           id: "anthropic/claude-sonnet-5",
+          routing: { kind: "gateway", target: "anthropic" },
         },
       },
     };
@@ -1104,6 +1107,7 @@ describe("EveTUIRunner initial input", () => {
     expect(session.send).toHaveBeenCalledTimes(1);
     expect(session.send).toHaveBeenNthCalledWith(1, "edited and sent", {
       signal: expect.any(AbortSignal),
+      turnPolicy: "queue",
     });
   });
 });
@@ -1128,7 +1132,7 @@ describe("EveTUIRunner native continuation state", () => {
                 kind: "tool-approval",
                 options: [
                   { id: "approve", label: "Approve" },
-                  { id: "deny", label: "Deny" },
+                  { id: "cancel", label: "Cancel" },
                 ],
                 prompt: "Approve get_weather?",
                 requestId: "request-1",
@@ -1169,6 +1173,7 @@ describe("EveTUIRunner native continuation state", () => {
     expect(session.send).toHaveBeenCalledTimes(1);
     expect(session.send).toHaveBeenNthCalledWith(1, "approve this", {
       signal: expect.any(AbortSignal),
+      turnPolicy: "queue",
     });
     expect(session.respond).toHaveBeenCalledWith(
       [{ requestId: "request-1", optionId: "approve" }],
@@ -2636,9 +2641,9 @@ describe("EveTUIRunner boot setup detection", () => {
     agent: {
       ...AGENT_INFO.agent,
       model: {
-        ...AGENT_INFO.agent.model,
-        routing: { kind: "gateway", target: "openai" },
-        endpoint: { kind: "gateway", connected: false },
+        id: "gpt-5",
+        routing: { kind: "gateway" as const, target: "openai" },
+        endpoint: { kind: "gateway" as const, connected: false as const },
       },
     },
   };
@@ -3090,7 +3095,11 @@ describe("EveTUIRunner mid-turn message queue", () => {
 
     expect(session.send).toHaveBeenCalledTimes(2);
     expect(session.send).toHaveBeenNthCalledWith(1, "hello", expect.any(Object));
-    expect(session.send).toHaveBeenNthCalledWith(2, "queued follow-up", expect.any(Object));
+    expect(session.send).toHaveBeenNthCalledWith(
+      2,
+      "queued follow-up",
+      expect.objectContaining({ turnPolicy: "queue" }),
+    );
     // The drained prompt bypasses the interactive prompt read entirely.
     expect(renderer.readPrompt).toHaveBeenCalledTimes(2);
   });

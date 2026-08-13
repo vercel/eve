@@ -1,21 +1,37 @@
 "use client";
 
-import { SiGithub } from "@icons-pack/react-simple-icons";
 import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { analyticsEvents } from "@/lib/analytics/events";
 
 interface TemplateActionsProps {
+  demoHref?: string;
   setupPrompt: string;
   sourceHref: string;
   template: string;
 }
 
-export const TemplateActions = ({ setupPrompt, sourceHref, template }: TemplateActionsProps) => {
+export const TemplateActions = ({
+  demoHref,
+  setupPrompt,
+  sourceHref,
+  template,
+}: TemplateActionsProps) => {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const secondaryAction = demoHref
+    ? {
+        event: analyticsEvents.templateDemoOpened,
+        href: demoHref,
+        label: "View Demo",
+      }
+    : {
+        event: analyticsEvents.templateSourceOpened,
+        href: sourceHref,
+        label: "View Source",
+      };
 
   useEffect(
     () => () => {
@@ -63,13 +79,13 @@ export const TemplateActions = ({ setupPrompt, sourceHref, template }: TemplateA
         variant="outline"
       >
         <a
-          href={sourceHref}
-          onClick={() => track(analyticsEvents.templateSourceOpened, { template })}
+          href={secondaryAction.href}
+          onClick={() => track(secondaryAction.event, { template })}
           rel="noopener noreferrer"
           target="_blank"
         >
-          <SiGithub aria-hidden="true" className="size-4" />
-          View GitHub
+          <ExternalLinkIcon aria-hidden="true" className="size-4" />
+          {secondaryAction.label}
         </a>
       </Button>
       <span aria-live="polite" className="sr-only">

@@ -100,6 +100,7 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
             <p className="max-w-[520px] text-copy-16 text-gray-900">{entry.description}</p>
             <div className="mt-6">
               <TemplateActions
+                demoHref={entry.demoHref}
                 setupPrompt={entry.setupPrompt}
                 sourceHref={entry.sourceHref}
                 template={entry.slug}
@@ -115,10 +116,46 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
           <FileViewer files={highlightedFiles} />
         </section>
 
-        <section aria-label="README" className="mt-16">
-          <div className="max-w-[760px]">
+        <section
+          aria-label="Template documentation"
+          className="mt-16 grid gap-10 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12"
+        >
+          <div>
             <TemplateReadme readme={entry.readme} sourceRevisionHref={entry.sourceRevisionHref} />
           </div>
+          <aside className="order-first lg:order-none" aria-labelledby="github-heading">
+            <h2 className="m-0 text-heading-24 text-gray-1000" id="github-heading">
+              GitHub
+            </h2>
+            <dl className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-1">
+              <div>
+                <dt className="font-medium text-gray-1000 text-label-14">Owner</dt>
+                <dd className="mt-2 text-copy-14">
+                  <a
+                    className="rounded-sm font-medium text-gray-900 underline decoration-gray-400 underline-offset-4 outline-none transition-colors hover:text-gray-1000 hover:decoration-gray-1000 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
+                    href={`https://github.com/${entry.githubOwner}`}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    {entry.githubOwner}
+                  </a>
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-1000 text-label-14">Repository</dt>
+                <dd className="mt-2 text-copy-14">
+                  <a
+                    className="break-words rounded-sm font-medium text-gray-900 underline decoration-gray-400 underline-offset-4 outline-none transition-colors hover:text-gray-1000 hover:decoration-gray-1000 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
+                    href={entry.sourceRevisionHref}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    {entry.githubRepo}
+                  </a>
+                </dd>
+              </div>
+            </dl>
+          </aside>
         </section>
       </main>
     </>

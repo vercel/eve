@@ -1,14 +1,4 @@
-/**
- * Starts or continues every pending runtime action for the parked parent
- * session.
- *
- * The batch is classified into a dispatch plan first (reject / resume /
- * start), then each entry dispatches and emits one
- * parent `subagent.called` control-plane event through a single tail.
- * Every start commits an agent handle (`starting`) before its side effect
- * and confirms it (`running`) once the child reports coordinates, so the
- * returned snapshot-bearing state owns every child it may have created.
- */
+/** Starts or continues pending actions, committing ownership before side effects. */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
@@ -39,7 +29,10 @@ import {
   prepareAgentStart,
   rejectAgentEffect,
 } from "#harness/handles/transitions.js";
-import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import {
+  getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
+} from "#harness/runtime-actions.js";
 import {
   createSubagentCalledEvent,
   encodeMessageStreamEvent,
@@ -73,10 +66,11 @@ import { buildSubagentRunInput, type SubagentInputSource } from "#execution/suba
 import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
+import * as traceState from "#tracing/agent-trace-context-store.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -137,15 +131,20 @@ export async function dispatchRuntimeActionsStep(input: {
     return { results: [], sessionState: input.sessionState };
   }
 
+  const parentTurnId = batch.event.turnId || activeTurnId(input.sessionState.emissionState);
+  const batchEvent = { ...batch.event, turnId: parentTurnId };
+
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: effectiveAgent.turnAgent,
+  const session = setPendingRuntimeActionBatch({
+    ...batch,
+    event: batchEvent,
+    session: hydrateDurableSession({
+      compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
+      durable: durableSession,
+      turnAgent: effectiveAgent.turnAgent,
+    }),
   });
   const adapter = ctx.require(ChannelKey);
   const auth = ctx.get(AuthKey) ?? null;
@@ -154,24 +153,19 @@ export async function dispatchRuntimeActionsStep(input: {
   const initiatorAuth = ctx.get(InitiatorAuthKey) ?? null;
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
-  // Read here, not in the child: trace state is scoped to one session's
-  // context, so this is the last place the parent's window is visible.
-  const parentTraceContext = readSessionTraceContext(input.serializedContext, session.sessionId);
+  // This is the last place the parent's session-scoped trace state is visible.
+  const sessionTraceContext = traceState.readSessionTraceContext(
+    input.serializedContext,
+    session.sessionId,
+  );
   const persistentSessions =
-    bundle.resolvedAgent.config.experimental?.subagentPersistentSessions === true;
-  // A corrupt handle store throws; surface that before anything dispatches.
-  // A mid-loop throw after a sibling started would durably replay the whole
-  // batch and re-dispatch that sibling.
+    bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
+  // Fail before dispatch; replaying after a sibling starts would duplicate it.
   getAgentHandleStore(durableSession.state);
   const plan = planDispatch({ actions: batch.actions, bundle, ctx, session });
-  // Acquired only once preflight can no longer throw, so a planning failure
-  // never leaks the writer lock.
   const writer = input.parentWritable.getWriter();
-  // Split the parent's remaining token quota across the batch's freshly
-  // started local subagents, the children that actually receive an enforced
-  // cap. Continuations already run under their own budget, and remote agents
-  // run on their own deployment under their own limits, so neither dilutes
-  // the local shares.
+  // Only fresh local starts share the remaining quota; continuations and
+  // remote agents already enforce their own budgets.
   const fanoutSize = plan.filter(
     (entry) => entry.kind === "start" && entry.target.kind === "local",
   ).length;
@@ -199,13 +193,13 @@ export async function dispatchRuntimeActionsStep(input: {
             }),
             currentSession: nextSession,
             parentToken: input.parentContinuationToken ?? session.continuationToken,
-            parentTurnId: batch.event.turnId,
+            parentTurnId,
           });
           break;
         case "start":
           outcome = await startSubagent({
             auth,
-            batchEvent: batch.event,
+            batchEvent,
             bundle,
             callbackBaseUrl: input.callbackBaseUrl,
             capabilities,
@@ -214,7 +208,13 @@ export async function dispatchRuntimeActionsStep(input: {
             fanoutSize,
             initiatorAuth,
             parentContinuationToken: input.parentContinuationToken,
-            parentTraceContext,
+            parentTraceContext:
+              traceState.readActionTraceContext(
+                input.serializedContext,
+                session.sessionId,
+                batch.event.turnId,
+                entry.target.action.callId,
+              ) ?? sessionTraceContext,
             persistentSessions,
             session,
             target: entry.target,
@@ -240,10 +240,10 @@ export async function dispatchRuntimeActionsStep(input: {
             name: outcome.name,
             remote:
               outcome.address.kind === "agent/remote" ? { url: outcome.address.url } : undefined,
-            sequence: batch.event.sequence,
+            sequence: batchEvent.sequence,
             sessionId: session.sessionId,
             toolName: outcome.toolName,
-            turnId: batch.event.turnId,
+            turnId: parentTurnId,
             workflowId: workflowEntryReference.workflowId,
           }),
           adapterCtx,
@@ -262,7 +262,7 @@ export async function dispatchRuntimeActionsStep(input: {
   }
 
   const nextState =
-    nextSession === session
+    nextSession === session && batch.event.turnId === parentTurnId
       ? input.sessionState
       : createDurableSessionState({ session: nextSession });
 
@@ -467,6 +467,7 @@ async function startSubagent(input: {
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
+        parentTraceContext: input.parentTraceContext,
         persistentSessions: input.persistentSessions,
         session: input.session,
       });
@@ -592,6 +593,7 @@ async function startRemoteSubagent(input: {
   readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
+  readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
   readonly session: RuntimeSession;
 }): Promise<DispatchOutcome> {
@@ -645,6 +647,7 @@ async function startRemoteSubagent(input: {
       callbackBaseUrl,
       callbackToken: input.parentContinuationToken,
       initiatorAuth: input.initiatorAuth,
+      parentTraceContext: input.parentTraceContext,
       persistentSessions: input.persistentSessions,
       remote: resolvedRemote,
       session: input.session,

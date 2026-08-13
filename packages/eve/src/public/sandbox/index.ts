@@ -15,6 +15,7 @@ export {
   type SandboxRevalidationKeyFn,
   type SandboxRunOptions,
   type SandboxSession,
+  type RuntimeSandboxSession,
   type SandboxSpawnOptions,
   type SandboxSessionContext,
   type SandboxSessionUseFn,

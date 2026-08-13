@@ -1,4 +1,4 @@
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { channelEntries } from "@eve/catalog";
@@ -87,18 +87,20 @@ const targetSlugsByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-resend": "resend",
 };
 
+const nonStreamingCatalogSlugs = new Set(["chat-sdk-sendblue"]);
+
 const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
 const items = registry.items.filter((item) => item.name.startsWith("channel/"));
-const galleryEntries = channelEntries().filter((entry) => entry.surfaces.gallery);
-const expectedSlugs = galleryEntries.map(
+const registryEntries = channelEntries().filter((entry) => entry.surfaces.registry);
+const expectedSlugs = registryEntries.map(
   (entry) => registrySlugsByCatalogSlug[entry.slug] ?? entry.slug,
 );
 const actualSlugs = items.map((item) => item.name.slice("channel/".length));
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
-    `Channel registry entries do not match the gallery.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
+    `Channel registry entries do not match the catalog.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
   );
 }
 
@@ -124,7 +126,7 @@ for (const [index, item] of items.entries()) {
     );
   }
 
-  const entry = galleryEntries[index];
+  const entry = registryEntries[index];
   if (entry === undefined) throw new Error(`Unexpected channel registry item "${item.name}".`);
   const registrySlug = expectedSlugs[index];
 
@@ -160,7 +162,10 @@ for (const [index, item] of items.entries()) {
       `Registry item "${item.name}" must write ${expectedPath} to ${expectedTarget}.`,
     );
   }
-  await access(join(docsRoot, expectedPath));
+  const source = await readFile(join(docsRoot, expectedPath), "utf8");
+  if (nonStreamingCatalogSlugs.has(entry.slug) && !source.includes("streaming: false")) {
+    throw new Error(`Registry item "${item.name}" must disable unsupported streaming edits.`);
+  }
 
   const adapterDependency = adapterDependenciesByCatalogSlug[entry.slug];
   if (entry.slug.startsWith("chat-sdk-") && adapterDependency === undefined) {

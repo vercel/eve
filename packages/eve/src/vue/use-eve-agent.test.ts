@@ -318,7 +318,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     });
 
     const sendPromise = store.send({
-      inputResponses: [{ optionId: "deny", requestId: "approval_1" }],
+      inputResponses: [{ optionId: "cancel", requestId: "approval_1" }],
     });
     await Promise.resolve();
 

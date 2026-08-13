@@ -1,5 +1,5 @@
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
@@ -127,9 +127,9 @@ type GitHubSessionFailedHandler = (
 /**
  * Event handlers for `githubChannel({ events })`. The channel installs built-in
  * handlers for `turn.started` (eyes reaction plus repo checkout),
- * `message.completed` (posts the reply), and `session.failed`/`turn.failed`
- * (posts an error comment). A handler supplied here replaces the built-in for
- * that key rather than running alongside it.
+ * `message.completed` (posts the reply), `input.requested` (posts the prompt),
+ * and `session.failed`/`turn.failed` (posts an error comment). A handler supplied
+ * here replaces the built-in for that key rather than running alongside it.
  */
 export interface GitHubChannelEvents {
   readonly "action.partial"?: GitHubEventHandler<"action.partial">;
@@ -158,6 +158,8 @@ export interface GitHubChannelConfig {
   readonly progress?: GitHubProgressConfig;
   readonly pullRequestContext?: GitHubPullRequestContextConfig;
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
 
   /**
    * Invoked for every `@mention` of the bot in an issue/PR timeline comment or
@@ -223,6 +225,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
   const mergedEvents: GitHubChannelEvents = {
     ...createDefaultEvents({
       api: config.api,
+      botName,
       credentials: config.credentials,
       progress: config.progress,
     }),
@@ -231,6 +234,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
 
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
     kindHint: "github",
+    turnPolicy: config.turnPolicy,
     state: initialGitHubState(),
 
     context(state, session) {

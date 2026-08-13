@@ -142,13 +142,6 @@ export type DynamicEvents<TResult = unknown> = {
   ) => TResult | Promise<TResult>;
 };
 
-export type DynamicEventsWithFallback<TResult = unknown> = {
-  readonly [K in DynamicToolEventName]?: (
-    event: unknown,
-    ctx: DynamicResolveContext,
-  ) => Exclude<TResult, undefined> | Promise<Exclude<TResult, undefined>>;
-};
-
 /**
  * Marker discriminator for a `defineDynamic({ events })` export.
  */
@@ -156,21 +149,21 @@ export const DYNAMIC_SENTINEL_KIND = "eve:dynamic" as const;
 
 /**
  * Return value of `defineDynamic`: the runtime shape of a dynamic export,
- * stamped with a sentinel kind the compiler/normalizer detects. `TFallback`
- * is used by dynamic agent models.
+ * stamped with a sentinel kind the compiler/normalizer detects.
  */
-export type DynamicSentinel<TResult = unknown, TFallback = never> = {
+export type DynamicSentinel<TResult = unknown> = {
   readonly kind: typeof DYNAMIC_SENTINEL_KIND;
   readonly events: DynamicEvents<TResult>;
-} & ([TFallback] extends [never] ? object : { readonly fallback: TFallback });
+};
 
-export function rejectDynamicSentinelFallback(sentinel: DynamicSentinel, message: string): void {
-  if (!("fallback" in sentinel)) {
-    return;
+export function assertResolverOnlyDynamicSentinel(
+  sentinel: DynamicSentinel,
+  message: string,
+): void {
+  const unknownKeys = Object.keys(sentinel).filter((key) => key !== "events" && key !== "kind");
+  if (unknownKeys.length > 0) {
+    throw new Error(`${message} Unknown key(s): ${unknownKeys.join(", ")}.`);
   }
-  throw new Error(
-    `${message} "fallback" is only supported on a dynamic agent model. For dynamic tools, skills, instructions, and subagents, return null when the capability should be omitted.`,
-  );
 }
 
 export function isDynamicSentinel(value: unknown): value is DynamicSentinel {

@@ -60,6 +60,7 @@ describe("sandboxProvider", () => {
     vi.mocked(ensureSandboxAccess).mockResolvedValue({
       captureState: vi.fn().mockResolvedValue({ initialized: false, session: null }),
       get: vi.fn().mockResolvedValue(null),
+      stop: vi.fn().mockResolvedValue(undefined),
     });
   });
 

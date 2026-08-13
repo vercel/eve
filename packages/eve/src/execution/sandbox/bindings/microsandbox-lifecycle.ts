@@ -308,6 +308,10 @@ function createHandle(
         sessionKey: sandbox.id,
       };
     },
+    async stop() {
+      await sandbox.stop();
+      onShutdown?.();
+    },
     async shutdown() {
       onShutdown?.();
       await sandbox.shutdown();

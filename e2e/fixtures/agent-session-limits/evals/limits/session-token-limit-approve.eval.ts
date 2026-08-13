@@ -20,7 +20,7 @@ export default defineEval({
       const response = await t.target.fetch(
         `/eve/v1/session/${encodeURIComponent(active.sessionId)}`,
         {
-          body: JSON.stringify({ message }),
+          body: JSON.stringify({ message, turnPolicy: "queue" }),
           headers: { "content-type": "application/json" },
           method: "POST",
         },

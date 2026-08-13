@@ -1,5 +1,5 @@
 ---
-title: "Multi-tenant memory"
+title: "Multi-Tenant Memory"
 description: "Compose dynamic instructions, authenticated session context, and ordinary tools into tenant-scoped long-term memory."
 ---
 

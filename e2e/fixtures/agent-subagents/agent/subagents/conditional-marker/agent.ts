@@ -11,6 +11,7 @@ export default defineDynamic({
         model: mockMode
           ? "eve-mock/dynamic-subagent"
           : e2eSubagentConfig({ mock: "DYNAMIC_SUBAGENT_ENABLED" }).model,
+        modelContextWindowTokens: 1_000_000,
       }),
   },
 });

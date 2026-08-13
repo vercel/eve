@@ -10,8 +10,8 @@ import {
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
 import {
+  assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
-  rejectDynamicSentinelFallback,
   type DynamicToolEventName,
 } from "#shared/dynamic-tool-definition.js";
 
@@ -72,7 +72,7 @@ export async function compileInstructionsEntry(
   });
 
   if (isDynamicSentinel(exportValue)) {
-    rejectDynamicSentinelFallback(
+    assertResolverOnlyDynamicSentinel(
       exportValue,
       `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
     );

@@ -171,9 +171,12 @@ export function deployProject(
       // Vercel projects may still need the CLI to skip deployment-setting
       // confirmation before the deployments API accepts the first production
       // deploy.
-      const deployArgs = input.headless
-        ? ["deploy", "--prod", "--yes", "--non-interactive"]
-        : ["deploy", "--prod", "--yes"];
+      const deployArgs = [
+        "deploy",
+        "--prod",
+        "--yes",
+        ...(input.headless ? ["--non-interactive"] : []),
+      ];
       const success = await withPhase(log, "Deploying the agent to Vercel production...", () =>
         deps.runVercel(deployArgs, {
           cwd: projectPath,
@@ -189,7 +192,7 @@ export function deployProject(
         // transient until a warning/error settles it) so the build failure is
         // visible instead of just the exit code.
         log.error(
-          "`vercel deploy --prod` failed. The deploy output above shows the cause; fix it, then run `vercel deploy --prod` to retry.",
+          "`vercel deploy --prod` failed. The deploy output above shows the cause; fix it, then retry.",
         );
         throw new Error("Deployment failed after channel setup.");
       }

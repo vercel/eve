@@ -1005,7 +1005,7 @@ export class EveTUIRunner {
                 const response = await this.#renderer.readToolApproval(request, { title });
                 responses.push({
                   requestId: request.approvalId,
-                  optionId: response.approved ? "approve" : "deny",
+                  optionId: response.approved ? "approve" : "cancel",
                 });
                 this.#pendingInputRequests.delete(request.approvalId);
               }
@@ -1263,7 +1263,10 @@ export class EveTUIRunner {
       } else {
         response =
           sendInput.inputResponses === undefined
-            ? await this.#session.send(sendInput.message!, { signal: sendInput.signal })
+            ? await this.#session.send(sendInput.message!, {
+                signal: sendInput.signal,
+                turnPolicy: "queue",
+              })
             : await this.#session.respond(sendInput.inputResponses, { signal: sendInput.signal });
       }
     } catch (error) {

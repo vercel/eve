@@ -1,5 +1,84 @@
 # eve
 
+## 0.34.0
+
+### Minor Changes
+
+- 11908eb: Tools and connections can now define optional `request` and `response` approval policies, while preserving the existing function shorthand. Response policies can authenticate the responder and return a tagged allow or rejection decision, and authorization token results can expose a stable provider subject.
+
+### Patch Changes
+
+- 82c1314: Instrumentation providers can observe durable inbound channel deliveries from processing start through the resulting turn terminal. OpenTelemetry destinations receive consumer spans under the session window, with traced HTTP requests represented as links rather than parents.
+- 29313be: Reconstruct durable `agent.action` spans when runtime actions settle, including across worker replacement, and record each action's exact caller-accepted duration, kind, outcome, stable error code, and subagent usage. Remote eve sessions join the caller action trace through W3C `traceparent`; older receivers may ignore the header. Human approval waits appear as durable `agent.approval` child spans, while chat spans use standard self-contained model input and output attributes.
+- 749581b: Instrumentation lifecycle events now use eve-owned payloads and flat event names, including `step.attempt.*` and durable `input.requested`/`input.resolved` boundaries, instead of AI SDK callback types and paired hooks. Existing spans and attributes are unchanged.
+- 7770fba: Add an experimental Buzz ACP compatibility adapter that publishes threaded and top-level responses through the local Buzz CLI, prevents duplicate replies, and defaults to Buzz's owner-only author gate. Shared service agents must explicitly opt in to letting multiple accepted Buzz senders use the same eve authentication and connections.
+- 3eba855: Post GitHub human-in-the-loop prompts by default so users can see and answer pending input requests in the issue or pull request thread.
+- f06633b: Give every instrumentation lifecycle event a replay-stable `idempotencyKey` derived from durable eve identity, allowing providers to upsert one record across retries and worker replays.
+- c90a459: Add the experimental `agent/instrumentation/` provider layout with durable lifecycle handlers, including user input boundaries and action settlement-time, outcome, error-code, and usage metadata, final setup context, reserved OpenTelemetry destinations, and coordinated flush and shutdown. OpenTelemetry singleton settings and destinations are exposed through `eve/instrumentation/otel`, and eve's AI SDK bridge composes with registered integrations.
+- d304544: OpenTelemetry destinations can independently decline input or output content. Redaction covers span attributes, exception and custom events, and status messages without mutating spans shared with other destinations; `EVE_TRACES_CONTENT=off` now narrows only local traces.
+- 084f8f1: eve now assembles its local OpenTelemetry runtime from declarative singleton settings and ordered destinations. The local trace spool is an ordinary span processor, and tracer-provider ownership, flushing, and shutdown are managed centrally without changing recorded spans.
+- 3b43b3d: Instrumentation providers can choose metadata-only or content-bearing events. eve builds sensitive projections only when requested and keeps prompts, responses, tool payloads, exceptions, and opaque provider metadata away from metadata-only providers.
+- 1528fda: Add durable operation-scoped state to instrumentation handlers, isolated by provider and automatically released at terminal boundaries. Bound each handler and persist start-handler abandonment so a stalled provider cannot block the bus or later receive a mismatched terminal.
+- 760c14a: Allow canary builds to scaffold projects pinned to their exact package artifact URL.
+- 4138e64: Publish durable lifecycle events for runtime actions and user input requests, including approval decisions that resume in another worker. Action terminals expose caller-accepted settlement time, exact outcome, stable error code, and subagent usage even when settlement crosses workers. Framework skill loads are also preserved in eval tool-call facts.
+
+## 0.33.3
+
+### Patch Changes
+
+- 22975d3: Keep GitHub comment text separate from channel metadata so option replies can resume pending input requests.
+
+## 0.33.2
+
+### Patch Changes
+
+- 89255bd: Update `@workflow/core` to `5.0.0-beta.41` to pick up event log corruption fixes.
+
+## 0.33.1
+
+### Patch Changes
+
+- 7dd64d3: Messages no longer wait behind pending tool approvals: a follow-up message now runs as an ordinary turn while the approval stays open and answerable, and a later structured answer still resolves the original tool call. Pending HITL batches are stored as an ordered collection, so a turn that runs while an approval is open can raise its own requests without overwriting it; multiple approval answers delivered together resume safely in order. Sessions wedged by the old deferral release the held message on their next delivery.
+- b1ce580: Add an opt-in Sign in with Vercel authentication variant for programmatically scaffolded Web Chat apps.
+- 7dd64d3: Keep task runs parked when unrelated messages arrive while tool approvals remain open, and resolve later text approval responses before replaying deferred messages. Invalid persisted input request kinds now fail closed.
+- e402672: Keep follow-up subagent dispatches in the active parent turn when a resumed runtime-action batch has lost its turn ID, preventing the session from failing while persisting the child handle.
+- 8d6afc3: Scope Vercel CLI authentication checks to an existing linked team project, preventing an unrelated default CLI scope from blocking integration setup.
+
+## 0.33.0
+
+### Minor Changes
+
+- ccaa596: Dynamic models and subagents now resolve without compiled fallbacks or placeholder configs. `defineDynamic` accepts only `events`; dynamic model handlers must return a concrete selection, while runtime model metadata is normalized and cached when the selection becomes active.
+- 2dd193b: Channel message sends now use `turnPolicy: "steer"` by default, so accepted messages replace active turns through cancellation-backed steering without a separate cancel request. Set `turnPolicy: "queue"` on a channel or individual send to preserve the previous wait-for-completion behavior.
+
+### Patch Changes
+
+- 672c054: Add `eve set` with `--model` and `--reasoning` options for changing an existing agent's model settings, and add the same model settings to `eve init` for scaffolding.
+- 1ee27be: Interactive setup now offers an explicit exit after `eve init` and runs Vercel login and project linking in place whenever Vercel-backed integration setup or deployment needs them.
+
+## 0.32.0
+
+### Minor Changes
+
+- 1702f91: Tool approval responses now use `cancel` instead of `deny`, while retaining `approve` for the positive response, aligning the public protocol with the user-facing flow-control semantics.
+- cbe7105: Allow authored hooks, tools, and channel callbacks to stop their active sandbox through `ctx.getSandbox().stop()`. Every built-in backend preserves the durable session for a later callback, and custom sandbox backend handles must now implement `stop()`.
+
+### Patch Changes
+
+- ea530ec: Update `eve add` to better support agent-based invocation of guided setup flows. Interactive setup links a Vercel project when needed; after each deployable setup, `/add` offers to add more by default, deploy to production, or finish.
+- a29cc8e: Update the bundled AI SDK to 7.0.58 and the `@ai-sdk/*` providers to their latest minors.
+- 39c76ca: AI Gateway models now use Exa by default for the built-in `web_search` tool. Agents can continue to select Parallel explicitly with `webSearch({ provider: "parallel" })`.
+- 261af74: Photon setup now shows an existing project's dedicated number when available, rather than allocating and showing a shared fallback number.
+- 55b5cc7: Teach newly scaffolded coding agents to discover integrations and follow the structured `eve add --headless` setup flow through completion.
+- 91cca9a: Slack now posts tool input previews separately from approval controls so large inputs no longer inflate button callbacks and approvals remain responsive.
+- 50f2d96: Conversation sessions no longer stall while an interactive authorization challenge is open: ordinary messages run as normal turns, while tasks defer unrelated input until their blocked authorization completes. Callbacks are bound to the exact challenge attempt and initiating connection principal, remain live across parked activity, and start a valid callback turn after the authorization park closes its boundary. Session timeouts are also honored during an open challenge, and `client.fetch` preserves query strings embedded in the request path.
+- 7449917: Stop completed and cancelled todo lists from being re-injected as user messages after compaction. Lists that still contain active work continue to be preserved in full.
+- 63a76f0: Local traces now record `agent.turn` with the turn's real duration instead of a zero-duration marker, and the separate `agent.turn.terminal` marker span is gone — terminal and transition events land on the turn span itself. `agent.session` window roots remain zero-duration markers because an idle session never closes.
+- a159596: Export telemetry for every step of multi-step turns when an OpenTelemetry consumer groups spans by completed local segments.
+- e1080e0: Reject HTML sign-in pages returned by Slack private file downloads and explain how to restore attachment access.
+- 52000dd: Build tool input schemas authored with Zod 3 instead of crashing during JSON Schema conversion.
+- f06e12e: Add a structured `eve add --non-interactive` flow with stable setup answers, component selection, and resumable setup blockers for coding agents.
+
 ## 0.31.3
 
 ### Patch Changes
@@ -166,7 +245,7 @@
 ### Patch Changes
 
 - 22bfa02: Add guided Photon setup through `eve add channel/photon-imessage`, including project creation, phone registration, Vercel Connect or portable credentials, and channel scaffolding.
-- 0c0de19: Add an opt-in experimental steering policy to Chat SDK sends that cancels an active turn before delivering its replacement message.
+- 0c0de19: Add an opt-in steering policy to Chat SDK sends that cancels an active turn before delivering its replacement message.
 - b00a79d: Add `photonIMessageChannel`, a first-class Photon iMessage channel with lazy credentials, Vercel OIDC webhook verification, and automatic eve session routing.
 - 495e93b: Resolve leading `$HOME` paths in the built-in `read_file`, `write_file`, `glob`, and `grep` tools so agents can directly access packaged skill references advertised in their prompt.
 - bf01952: Local trace spans now capture model and tool payloads: the system prompt, prompt messages, and response text/reasoning/tool calls on model spans, and call arguments/results on tool spans, each capped at 32 KB with provider transport metadata stripped. Set `EVE_TRACES_CONTENT=off` to keep payloads out of the spool.

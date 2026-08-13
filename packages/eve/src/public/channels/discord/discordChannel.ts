@@ -1,7 +1,7 @@
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
@@ -151,6 +151,8 @@ export interface DiscordChannelConfig {
   readonly credentials?: DiscordChannelCredentials;
   /** Override the default interaction route path (`/eve/v1/discord`). */
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
 
   /** Inbound command hook. Defaults to user-scoped Discord auth and dispatch. Return `{ auth }` to dispatch, or `null` to acknowledge without running the agent. */
   onCommand?(
@@ -219,6 +221,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     DiscordInstrumentationMetadata
   >({
     kindHint: "discord",
+    turnPolicy: config.turnPolicy,
     state: initialDiscordState(),
     metadata: (state) => ({ channelId: state.channelId, guildId: state.guildId }),
 

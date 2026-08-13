@@ -34,8 +34,10 @@ import {
   parseDisplayMode,
   parseLogsMode,
   parsePortOption,
+  parseReasoningOption,
   parseStatsMode,
 } from "#cli/option-parsers.js";
+import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
 import {
   resumeDevelopmentRuntimeArtifacts,
@@ -220,11 +222,22 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
+    .option("--model <model>", "Set the agent model (provider/model-id)")
+    .option(
+      "--reasoning <effort>",
+      "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
+      parseReasoningOption,
+    )
     .option("-y, --yes", "Accepted for compatibility; has no effect")
     .action(
       async (
         target: string | undefined,
-        options: { channelWebNextjs?: boolean; yes?: boolean },
+        options: {
+          channelWebNextjs?: boolean;
+          model?: string;
+          reasoning?: AgentReasoningDefinition;
+          yes?: boolean;
+        },
       ) => {
         if (options.yes) {
           logger.error("warning: --yes has no effect for eve init.");
@@ -233,9 +246,25 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         const { runInitCommand } = await import("#cli/commands/init.js");
         await runInitCommand(logger, appRoot, target, {
           channelWebNextjs: options.channelWebNextjs,
+          model: options.model,
+          reasoning: options.reasoning,
         });
       },
     );
+
+  program
+    .command("set")
+    .description("Change root agent model settings.")
+    .option("--model <model>", "Set the agent model (provider/model-id)")
+    .option(
+      "--reasoning <effort>",
+      "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
+      parseReasoningOption,
+    )
+    .action(async (options: { model?: string; reasoning?: AgentReasoningDefinition }) => {
+      const { runSetCommand } = await import("#cli/commands/set.js");
+      await runSetCommand(logger, appRoot, options);
+    });
 
   registerProjectCommands({ program, logger, appRoot });
 

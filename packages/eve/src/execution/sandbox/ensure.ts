@@ -180,6 +180,13 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       const handle = await getHandle();
       return handle?.session ?? null;
     },
+    async stop(): Promise<void> {
+      const handle = await getHandle();
+      if (handle === null) {
+        throw new Error("The sandbox is not available in the current authored runtime context.");
+      }
+      await handle.stop();
+    },
   };
 }
 

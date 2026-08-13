@@ -1,5 +1,6 @@
 {
   "title": "Channels",
+  "defaultOpen": false,
   "pages": [
     "overview",
     "eve",

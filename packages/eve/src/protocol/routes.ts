@@ -87,9 +87,9 @@ export function createEveDevDispatchSchedulePath(scheduleId: string): string {
  * Stable framework-owned route pattern for receiving inbound IdP redirects
  * during in-turn interactive connection authorization.
  *
- * `:name` is the connection name; `:token` is the workflow hook token minted
- * by the workflow body so the route handler can resume the suspended turn
- * via `resumeHook(token, payload)`.
+ * `:name` is the connection name, `:attemptId` identifies the exact challenge,
+ * and `:token` is the workflow hook token minted by the workflow body so the
+ * route handler can resume the suspended turn via `resumeHook(token, payload)`.
  *
  * The route is unauthenticated by design: an OAuth IdP follows this URL
  * via a 3xx redirect from the user's browser with no eve credentials
@@ -97,7 +97,10 @@ export function createEveDevDispatchSchedulePath(scheduleId: string): string {
  * resume; anyone who has it can deliver the callback payload, which is
  * exactly what the IdP needs to do.
  */
-export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:token`;
+export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:attemptId/:token`;
+
+/** Callback shape minted by deployments before authorization attempt IDs. */
+export const EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:token`;
 
 /**
  * Stable framework-owned route pattern for terminal session callbacks.
@@ -139,7 +142,7 @@ export function createEveSessionStreamRoutePath(sessionId: string): string {
 
 /**
  * Creates the stable framework-owned connection callback route path for
- * one (`name`, `token`) pair.
+ * one (`name`, `attemptId`, `token`) tuple.
  *
  * The workflow body builds this path against {@link EVE_ROUTE_PREFIX} when
  * minting the redirect URL it hands to the IdP via `startAuthorization`.
@@ -147,8 +150,12 @@ export function createEveSessionStreamRoutePath(sessionId: string): string {
  * pattern and forwards the projected request payload into
  * `resumeHook(token, payload)`.
  */
-export function createEveConnectionCallbackRoutePath(name: string, token: string): string {
-  return `${EVE_ROUTE_PREFIX}/connections/${encodeURIComponent(name)}/callback/${encodeURIComponent(token)}`;
+export function createEveConnectionCallbackRoutePath(
+  name: string,
+  attemptId: string,
+  token: string,
+): string {
+  return `${EVE_ROUTE_PREFIX}/connections/${encodeURIComponent(name)}/callback/${encodeURIComponent(attemptId)}/${encodeURIComponent(token)}`;
 }
 
 /**

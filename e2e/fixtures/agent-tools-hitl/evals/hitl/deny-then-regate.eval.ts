@@ -12,7 +12,7 @@ export default defineEval({
     await t.send('Call the guarded-echo tool with note "denied-call".');
     const request = t.requireInputRequest({ toolName: "guarded-echo" });
 
-    const denied = await t.respondAll("deny");
+    const denied = await t.respondAll("cancel");
     denied.expectOk();
     denied.event("action.result", {
       data: {

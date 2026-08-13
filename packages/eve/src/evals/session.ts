@@ -11,7 +11,11 @@ import type {
   SendTurnOptions,
   SendTurnPayload,
 } from "#client/types.js";
-import type { MessageStreamEvent, TurnFailureStreamEvent } from "#protocol/message.js";
+import type {
+  MessageStreamEvent,
+  RuntimeTraceContext,
+  TurnFailureStreamEvent,
+} from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
@@ -59,23 +63,39 @@ export class EveEvalTurnFailedError extends Error {
 
 export interface EvalSessionDriver extends EveEvalAssertions, EveEvalOutputAssertions {}
 
+export interface EvalSessionStartedEvent {
+  readonly primary: boolean;
+  readonly sessionId: string;
+  readonly startedAt: string;
+  readonly traceContext: RuntimeTraceContext;
+}
+
 export class EvalSessionDriver implements EveEvalSession {
   readonly #client: Client;
   #session: ClientSession | undefined;
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
   readonly #events: MessageStreamEvent[] = [];
+  readonly #primary: boolean;
+  readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
+  readonly #traceContexts: RuntimeTraceContext[] = [];
+  readonly #traceKeys = new Set<string>();
   #lastTurn: EvalTurn | undefined;
+  #sessionStartReported = false;
   #pendingInputRequests: readonly InputRequest[] = [];
 
   constructor(input: {
     readonly client: Client;
     readonly collector: AssertionCollector;
+    readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
+    readonly primary: boolean;
     readonly session?: ClientSession;
     readonly signal?: AbortSignal;
   }) {
     this.#client = input.client;
     this.#collector = input.collector;
+    this.#onSessionStart = input.onSessionStart;
+    this.#primary = input.primary;
     this.#session = input.session;
     this.#signal = input.signal;
     Object.assign(
@@ -170,11 +190,11 @@ export class EvalSessionDriver implements EveEvalSession {
     message: SendTurnInput["message"],
     options: SendTurnOptions = {},
   ): Promise<EveEvalTurn> {
-    return await (await this.#start({ ...options, message })).result();
+    return await (await this.#start({ turnPolicy: "queue", ...options, message })).result();
   }
 
   async start(message: string, options: SendTurnOptions = {}): Promise<EveEvalLiveTurn> {
-    return await this.#start({ ...options, message });
+    return await this.#start({ turnPolicy: "queue", ...options, message });
   }
 
   async #start(input: SendTurnPayload): Promise<EveEvalLiveTurn> {
@@ -199,6 +219,7 @@ export class EvalSessionDriver implements EveEvalSession {
     }
     return new EvalLiveTurn({
       events: response,
+      observe: (event) => this.#observeEvent(response.sessionId, event),
       record: (events) => this.#recordObservedTurn(response.sessionId, events),
       session: this,
       sessionId: response.sessionId,
@@ -231,21 +252,43 @@ export class EvalSessionDriver implements EveEvalSession {
         signal: this.#signal,
         startIndex: options?.startIndex,
       }),
+      observe: (event) => this.#observeEvent(sessionId, event),
       record: (events) => this.#recordObservedTurn(sessionId, events),
       session: this,
       sessionId,
     });
   }
 
-  snapshot(primary: boolean): EveEvalSessionResult {
+  snapshot(): EveEvalSessionResult {
     const sessionId = this.sessionId;
     return {
       derived: deriveRunFacts(this.#events, { sessionId }),
       events: [...this.#events],
-      primary,
+      primary: this.#primary,
       sessionId,
       state: this.#session?.state,
+      traceContexts: [...this.#traceContexts],
     };
+  }
+
+  #observeEvent(sessionId: string, event: MessageStreamEvent): void {
+    if (event.type !== "session.started" && event.type !== "turn.started") return;
+    const traceContext = event.data.trace;
+    if (traceContext === undefined) return;
+
+    const key = `${traceContext.traceId}:${traceContext.spanId}`;
+    if (this.#traceKeys.has(key)) return;
+    this.#traceKeys.add(key);
+    this.#traceContexts.push(traceContext);
+
+    if (this.#sessionStartReported) return;
+    this.#sessionStartReported = true;
+    this.#onSessionStart?.({
+      primary: this.#primary,
+      sessionId,
+      startedAt: event.meta.at,
+      traceContext,
+    });
   }
 
   #recordTurn(input: {
@@ -320,13 +363,14 @@ class EvalLiveTurn implements EveEvalLiveTurn {
 
   constructor(input: {
     readonly events: AsyncIterable<MessageStreamEvent>;
+    readonly observe: (event: MessageStreamEvent) => void;
     readonly record: (events: readonly MessageStreamEvent[]) => EveEvalTurn;
     readonly session: EveEvalSession;
     readonly sessionId: string;
   }) {
     this.session = input.session;
     this.sessionId = input.sessionId;
-    this.#completion = this.#consume(input.events, input.record);
+    this.#completion = this.#consume(input.events, input.observe, input.record);
     void this.#completion.catch(() => {});
   }
 
@@ -366,12 +410,14 @@ class EvalLiveTurn implements EveEvalLiveTurn {
 
   async #consume(
     source: AsyncIterable<MessageStreamEvent>,
+    observe: (event: MessageStreamEvent) => void,
     record: (events: readonly MessageStreamEvent[]) => EveEvalTurn,
   ): Promise<EveEvalTurn> {
     try {
       let sawBoundary = false;
       for await (const event of source) {
         this.#events.push(event);
+        observe(event);
         this.#resolveWaiters(event);
 
         if (isTurnFailureEvent(event)) {
@@ -504,26 +550,29 @@ export class EvalSessionManager {
   readonly #client: Client;
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
+  readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
   readonly #sessions: EvalSessionDriver[] = [];
   #primary: EvalSessionDriver | undefined;
 
   constructor(input: {
     readonly client: Client;
     readonly collector?: AssertionCollector;
+    readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
     readonly signal?: AbortSignal;
   }) {
     this.#client = input.client;
     this.#collector = input.collector ?? new AssertionCollector();
+    this.#onSessionStart = input.onSessionStart;
     this.#signal = input.signal;
   }
 
   get primary(): EvalSessionDriver {
-    this.#primary ??= this.#createSession();
+    this.#primary ??= this.#createSession(true);
     return this.#primary;
   }
 
   newSession(): EvalSessionDriver {
-    return this.#createSession();
+    return this.#createSession(false);
   }
 
   async attachSession(
@@ -540,7 +589,7 @@ export class EvalSessionManager {
   }
 
   snapshots(): readonly EveEvalSessionResult[] {
-    return this.#sessions.map((session) => session.snapshot(session === this.#primary));
+    return this.#sessions.map((session) => session.snapshot());
   }
 
   lastTurnSession(): EvalSessionDriver | undefined {
@@ -555,10 +604,12 @@ export class EvalSessionManager {
     return this.#sessions.length > 0;
   }
 
-  #createSession(): EvalSessionDriver {
+  #createSession(primary: boolean): EvalSessionDriver {
     const session = new EvalSessionDriver({
       client: this.#client,
       collector: this.#collector,
+      onSessionStart: this.#onSessionStart,
+      primary,
       signal: this.#signal,
     });
     this.#sessions.push(session);
@@ -572,6 +623,8 @@ export class EvalSessionManager {
     const session = new EvalSessionDriver({
       client: this.#client,
       collector: this.#collector,
+      onSessionStart: this.#onSessionStart,
+      primary: false,
       session: this.#client.sessions.attach(sessionId, {
         streamIndex: options?.startIndex ?? 0,
       }),

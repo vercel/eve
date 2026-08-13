@@ -137,7 +137,7 @@ describe("getTodoCompactionMessage", () => {
     return contextStorage.run(ctx, () => getTodoCompactionMessage());
   }
 
-  it("returns a summary message for a non-empty list", () => {
+  it("returns the full summary when the list contains active work", () => {
     const message = callHook({
       items: [
         { content: "Fix bug", priority: "high", status: "completed" },
@@ -152,6 +152,17 @@ describe("getTodoCompactionMessage", () => {
     expect(text).toContain("[x] [high] Fix bug");
     expect(text).toContain("[ ] [medium] Write tests");
     expect(text).toContain("[-] [low] Cancelled task");
+  });
+
+  it("returns undefined when every item is terminal", () => {
+    expect(
+      callHook({
+        items: [
+          { content: "Fix bug", priority: "high", status: "completed" },
+          { content: "Skip docs", priority: "low", status: "cancelled" },
+        ],
+      }),
+    ).toBeUndefined();
   });
 
   it("returns undefined for an empty list", () => {

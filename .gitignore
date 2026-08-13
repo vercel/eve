@@ -26,6 +26,8 @@ test-results/
 packages/eve/docs/
 packages/eve/LICENSE
 packages/eve/NOTICE
+packages/eve-buzz-acp-adapter/LICENSE
+packages/eve-buzz-acp-adapter/NOTICE
 
 # Logs
 *.log

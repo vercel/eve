@@ -242,6 +242,7 @@ type SetupFlowState = {
   title: string;
   indicator: SetupFlowIndicatorState;
   lines: FlowPanelLine[];
+  summary?: { headline: string; facts: readonly { label: string; value: string }[] };
   status?: SetupFlowStatusState;
   /** Latest subprocess output line; replaced per write, never persisted. */
   preview?: string;
@@ -581,6 +582,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     readChoice: (options) => this.#readSetupChoice(options),
     setStatus: (text) => this.#setFlowStatus(text),
     renderLine: (text, tone) => this.#renderFlowLine(text, tone),
+    replaceContent: (content) => this.#replaceFlowContent(content),
     renderOutput: (text) => this.#renderFlowOutput(text),
     withInheritedStdio: (task) => this.#withInheritedStdio(task),
     withExclusiveTerminal: (task) => this.#withInheritedStdio(task),
@@ -1806,7 +1808,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             line.tone === "success" || line.tone === "warning" || line.tone === "error",
         )
         .map((line) => ({ tone: line.tone, text: line.text }));
-      notices = [...(opts.notices ?? []), ...outcomes];
+      notices = opts.notices ?? outcomes;
       flow.taskListLineStart = flow.lines.length;
       flow.hideLinesWhileQuestion = true;
     }
@@ -2579,6 +2581,28 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     this.#start();
     this.#pushBlock({ kind: "flow", title: tone, body: content, live: false });
+    this.#paint();
+  }
+
+  #replaceFlowContent(content?: {
+    headline: string;
+    facts: readonly { label: string; value: string }[];
+  }): void {
+    const flow = this.#setupFlow;
+    if (flow === undefined) return;
+    flow.lines = [];
+    flow.outputBuffer = [];
+    flow.preview = undefined;
+    flow.summary =
+      content === undefined
+        ? undefined
+        : {
+            headline: stripTerminalControls(content.headline),
+            facts: content.facts.map((fact) => ({
+              label: stripTerminalControls(fact.label),
+              value: stripTerminalControls(fact.value),
+            })),
+          };
     this.#paint();
   }
 
@@ -3897,7 +3921,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       const state: Parameters<typeof renderFlowPanel>[0] = {
         title: flow.title,
-        lines: flow.hideLinesWhileQuestion === true ? [] : flow.lines,
+        lines:
+          flow.summary === undefined
+            ? flow.hideLinesWhileQuestion === true
+              ? []
+              : flow.lines
+            : [
+                { text: flow.summary.headline, tone: "success" },
+                ...flow.summary.facts.map((fact) => ({
+                  text: `${fact.label}: ${fact.value}`,
+                  tone: "info" as const,
+                })),
+              ],
         content,
       };
       rows.push(...renderFlowPanel(state, this.#theme, width));

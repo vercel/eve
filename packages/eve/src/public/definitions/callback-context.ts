@@ -1,5 +1,5 @@
 import type { SkillHandle } from "#execution/skills/types.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
+import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
 import type { SessionAuth, SessionParent, SessionTurn } from "#context/keys.js";
 
 export type { SessionAuth, SessionParent, SessionTurn };
@@ -27,7 +27,7 @@ export interface SessionContext {
    * Resolves the session's sandbox. Throws when no sandbox is available
    * in the current authored runtime context.
    */
-  getSandbox(): Promise<SandboxSession>;
+  getSandbox(): Promise<RuntimeSandboxSession>;
 
   /**
    * Returns a {@link SkillHandle} for the named authored skill.

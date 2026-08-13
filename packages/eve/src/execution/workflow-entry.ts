@@ -1,4 +1,4 @@
-import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
+import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,
@@ -22,7 +22,7 @@ import {
 } from "#execution/delegated-parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
-import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
+import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
@@ -31,7 +31,6 @@ import { createSessionStep } from "#execution/create-session-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
-import { disposeHook } from "#execution/hook-ownership.js";
 import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
@@ -183,6 +182,17 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       capabilities,
       driverWritable,
       initialInput: {
+        deliveryMetadata:
+          input.serializedContext["eve.channelDelivery"] === undefined
+            ? undefined
+            : [
+                {
+                  ...(input.serializedContext["eve.channelDelivery"] as NonNullable<
+                    RunInput["delivery"]
+                  >),
+                  payloadIndex: 0,
+                },
+              ],
         kind: "deliver",
         payloads: [
           {
@@ -291,13 +301,79 @@ async function runDriverLoop(input: {
   readonly sessionState: DurableSessionState;
   readonly sessionTimeoutDeadline?: Date;
 }): Promise<DriverLoopOutcome> {
-  // Per-session auth hook. Created before any turns so it exists
-  // when authorization.required events trigger OAuth callbacks.
-  // getHookUrl() builds callback URLs with this token.
-  const authHook = createHook<HookPayload>({
-    token: `${input.sessionState.sessionId}:auth`,
-  });
-  const authIterator: AsyncIterator<HookPayload> = authHook[Symbol.asyncIterator]();
+  // One payload per exact authorization attempt accumulates across
+  // intervening turns. Replaced attempts are pruned at each park.
+  const collectedAuthPayloads = new Map<string, DeliverPayload>();
+  /**
+   * Waits for the next parked-session activity. While an authorization
+   * challenge is open (`expected > 0`), callback reads surface through the
+   * same single FIFO wait as ordinary session activity — one arrival order,
+   * which keeps the wait deterministic under workflow replay — and keep
+   * surfacing across wait iterations that produce no parent turn (no-op
+   * cancels, fully-routed descendant deliveries). Callbacks accumulate
+   * across intervening turns; once every expected challenge has reported
+   * (or the hook closed), the collected payloads resume the challenge.
+   */
+  const nextParkedActivity = async (park: {
+    readonly expectedAttemptIds: readonly string[];
+    readonly sessionState: DurableSessionState;
+  }): Promise<
+    | {
+        readonly kind: "authorization-resume";
+        readonly payloads: DeliverPayload[];
+        readonly sessionState: DurableSessionState;
+      }
+    | Exclude<NextTurnInstruction, { kind: "authorization" }>
+  > => {
+    let sessionState = park.sessionState;
+    const expectedAttemptIds = new Set(park.expectedAttemptIds);
+    for (const attemptId of collectedAuthPayloads.keys()) {
+      if (!expectedAttemptIds.has(attemptId)) collectedAuthPayloads.delete(attemptId);
+    }
+
+    while (true) {
+      if (
+        expectedAttemptIds.size > 0 &&
+        [...expectedAttemptIds].every((attemptId) => collectedAuthPayloads.has(attemptId))
+      ) {
+        const payloads = [...expectedAttemptIds].map(
+          (attemptId) => collectedAuthPayloads.get(attemptId)!,
+        );
+        collectedAuthPayloads.clear();
+        return { kind: "authorization-resume", payloads, sessionState };
+      }
+
+      const next = await nextTurnDelivery({
+        awaitAuthorizationCallbacks: expectedAttemptIds.size > 0,
+        bufferedDeliveries,
+        bufferedSessionControls,
+        commandInbox,
+        deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,
+        driverWritable: input.driverWritable,
+        sessionState,
+      });
+      sessionState = next.sessionState;
+      if (next.kind !== "authorization") return next;
+
+      for (const payload of next.payloads) {
+        const callback = payload["authorizationCallback"] as
+          | { readonly attemptId?: unknown }
+          | undefined;
+        if (
+          typeof callback?.attemptId === "string" &&
+          expectedAttemptIds.has(callback.attemptId) &&
+          !collectedAuthPayloads.has(callback.attemptId)
+        ) {
+          collectedAuthPayloads.set(callback.attemptId, payload);
+        }
+      }
+      if (next.closed) {
+        const payloads = [...collectedAuthPayloads.values()];
+        collectedAuthPayloads.clear();
+        return { kind: "authorization-resume", payloads, sessionState };
+      }
+    }
+  };
   // Fast descendant resumes can start the next turn before the prior
   // control hook disposal is persisted by the Workflow SDK, so each
   // turn needs its own session-scoped token.
@@ -310,6 +386,12 @@ async function runDriverLoop(input: {
   const commandInbox = createSessionCommandInbox();
   const stableCommandToken = sessionCommandHookToken(input.sessionState.sessionId);
   await commandInbox.claimStable(stableCommandToken);
+  // Per-session authorization-callback hook. Claimed before any turns so it
+  // exists when authorization.required events trigger OAuth callbacks;
+  // getHookUrl() builds callback URLs with this token (see authHookToken —
+  // inlined here because the workflow driver body cannot import the
+  // harness module).
+  await commandInbox.claimAuthorization(`${input.sessionState.sessionId}:auth`);
   const sessionTimeout =
     input.sessionTimeoutDeadline === undefined
       ? undefined
@@ -394,30 +476,6 @@ async function runDriverLoop(input: {
         await commandInbox.rekeyContinuation(action.sessionState.continuationToken);
       }
 
-      if (action.authorizationNames && action.authorizationNames.length > 0) {
-        const expected = action.authorizationNames.length;
-        const allPayloads: DeliverPayload[] = [];
-
-        while (allPayloads.length < expected) {
-          const next = await authIterator.next();
-          if (next.done) break;
-          if (next.value.kind === "deliver") {
-            allPayloads.push(...next.value.payloads);
-          }
-        }
-
-        action = await runTurn({
-          delivery: {
-            kind: "deliver",
-            payloads: allPayloads,
-          },
-          serializedContext: action.serializedContext,
-          sessionState: action.sessionState,
-        });
-        input.crashCleanupState.lastSessionState = action.sessionState;
-        continue;
-      }
-
       // `settled` rides the typed park arm exclusively; `run-step` preserves
       // the full StepResult so no state-key fallback exists anymore.
       const settled = action.settled;
@@ -433,13 +491,28 @@ async function runDriverLoop(input: {
         input.crashCleanupState.caller = undefined;
       }
 
-      const next = await nextTurnDelivery({
-        bufferedDeliveries,
-        bufferedSessionControls,
-        commandInbox,
-        driverWritable: input.driverWritable,
+      // An open authorization challenge must not wedge the session:
+      // ordinary deliveries keep starting normal turns while the challenge
+      // waits for its callback, and the callback surfaces through the same
+      // parked wait as everything else. The pending challenge survives
+      // intervening turns because every park re-derives
+      // `authorizationNames` from durable session state.
+      const next = await nextParkedActivity({
+        expectedAttemptIds: action.authorizationAttemptIds ?? [],
         sessionState: action.sessionState,
       });
+      action = { ...action, sessionState: next.sessionState };
+      input.crashCleanupState.lastSessionState = action.sessionState;
+
+      if (next.kind === "authorization-resume") {
+        action = await runTurn({
+          delivery: { kind: "deliver", payloads: next.payloads },
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
+        input.crashCleanupState.lastSessionState = action.sessionState;
+        continue;
+      }
 
       if (next.kind === "expired") {
         return {
@@ -497,10 +570,8 @@ async function runDriverLoop(input: {
       }
       action = await runTurn({
         delivery: {
-          auth: next.deliver.auth,
+          ...next.remainder,
           kind: "deliver",
-          payloads: [next.remainder],
-          requestId: next.deliver.requestId,
         },
         serializedContext: action.serializedContext,
         sessionState: action.sessionState,
@@ -511,10 +582,6 @@ async function runDriverLoop(input: {
     await disposeSettledTurnControl?.();
     await sessionTimeout?.dispose();
     await commandInbox.dispose();
-    // Dispose without closing the iterator: a session cancelled while
-    // awaiting authorization can leave a durable read in flight, and an
-    // async iterator only honors `return()` after that read settles.
-    await disposeHook(authHook);
   }
 }
 

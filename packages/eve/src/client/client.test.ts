@@ -12,7 +12,7 @@ const AGENT_INFO: AgentInfoResult = {
   agent: {
     agentRoot: "/tmp/weather-agent/agent",
     appRoot: "/tmp/weather-agent",
-    model: { id: "openai/gpt-5.5" },
+    model: { id: "openai/gpt-5.5", routing: { kind: "gateway", target: "openai" } },
     name: "Weather Agent",
   },
   capabilities: { devRoutes: true },
@@ -244,7 +244,12 @@ describe("Client request policy", () => {
   it("rejects an incomplete agent info payload", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
-        agent: { model: { id: "openai/gpt-5.5" } },
+        agent: {
+          model: {
+            id: "openai/gpt-5.5",
+            routing: { kind: "gateway", target: "openai" },
+          },
+        },
         diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
         kind: "eve-agent-info",
         version: 1,
@@ -258,7 +263,12 @@ describe("Client request policy", () => {
   it("names the offending fields when the agent info payload is incomplete", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
-        agent: { model: { id: "openai/gpt-5.5" } },
+        agent: {
+          model: {
+            id: "openai/gpt-5.5",
+            routing: { kind: "gateway", target: "openai" },
+          },
+        },
         diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
         kind: "eve-agent-info",
         version: 1,

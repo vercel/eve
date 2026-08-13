@@ -1,4 +1,8 @@
 import type { ContextAccessor } from "#context/key.js";
+import {
+  createChannelDeliveryMetadata,
+  type ChannelDeliverySource,
+} from "#channel/delivery-metadata.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 import type {
@@ -10,8 +14,10 @@ import type {
   SessionAuthContext,
   SessionCallback,
   SessionSendCommandResult,
+  TurnPolicy,
   TurnCaller,
 } from "#channel/types.js";
+import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
@@ -53,7 +59,7 @@ interface SessionDeliveryOptions {
 }
 
 /** Options for sending a message through a fixed session handle. */
-export type SessionSendOptions = SessionDeliveryOptions;
+export type SessionSendOptions = SessionDeliveryOptions & { readonly turnPolicy?: TurnPolicy };
 
 /** Options for answering pending input requests through a fixed session handle. */
 export type SessionRespondOptions = SessionDeliveryOptions;
@@ -77,11 +83,12 @@ export interface SessionHandle {
 export function createSession(
   id: string,
   runtime: Runtime,
-  metadata: { readonly requestId?: string } = {},
+  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
 ): Session {
   return {
     id,
     async send(message, options) {
+      const delivery = createDelivery(metadata);
       const caller = sessionCallbackToTurnCaller(options.callback);
       const payload: {
         context?: readonly string[];
@@ -92,9 +99,11 @@ export function createSession(
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
         auth: options.auth,
+        delivery,
         kind: "send" as const,
         payload,
         requestId: metadata.requestId,
+        turnPolicy: options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY,
       };
       return await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
@@ -106,6 +115,7 @@ export function createSession(
         throw new Error("respond() requires at least one input response.");
       }
       const caller = sessionCallbackToTurnCaller(options.callback);
+      const delivery = createDelivery(metadata);
       const payload: {
         context?: readonly string[];
         inputResponses: readonly InputResponse[];
@@ -115,6 +125,7 @@ export function createSession(
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
         auth: options.auth,
+        delivery,
         kind: "send" as const,
         payload,
         requestId: metadata.requestId,
@@ -154,9 +165,17 @@ export function createSession(
 /** Builds an I/O-free factory for fixed session-ID handles. */
 export function createAttachSessionFn(
   runtime: Runtime,
-  metadata: { readonly requestId?: string } = {},
+  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
 ): (sessionId: string) => Session {
   return (sessionId) => createSession(sessionId, runtime, metadata);
+}
+
+function createDelivery(
+  metadata: Partial<ChannelDeliverySource>,
+): ReturnType<typeof createChannelDeliveryMetadata> | undefined {
+  return metadata.channelKind !== undefined && metadata.channelName !== undefined
+    ? createChannelDeliveryMetadata(metadata as ChannelDeliverySource)
+    : undefined;
 }
 
 /**

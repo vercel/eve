@@ -8,7 +8,7 @@ import {
 } from "#channel/channel-operations.js";
 import { normalizeSendInput } from "#channel/send-input.js";
 import type { SendPayload } from "#channel/routes.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
@@ -142,11 +142,9 @@ export interface ChatSdkSendOptions {
   readonly title?: string;
   /**
    * Controls how this input interacts with an active eve turn on the same
-   * thread. Defaults to `"queue"`. `"experimental-steer"` requests
-   * cancellation of the active turn before sending this input as its
-   * replacement.
+   * thread. Defaults to `"steer"`.
    */
-  readonly turnPolicy?: "queue" | "experimental-steer";
+  readonly turnPolicy?: TurnPolicy;
   /**
    * Required when `thread` is a string that does not include the Chat SDK
    * adapter prefix. Prefer passing the `Thread` object from the Chat SDK handler
@@ -175,6 +173,8 @@ export interface ChatSdkChannelConfig<
    * settings.
    */
   readonly routes?: Partial<Record<Extract<keyof TAdapters, string>, string>>;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
   /** Extra Chat SDK webhook options. eve owns `waitUntil`. */
   readonly webhook?: Omit<WebhookOptions, "waitUntil">;
   /** Optional eve event handlers. Supplied handlers replace built-in defaults. */
@@ -286,6 +286,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     ChatSdkInstrumentationMetadata
   >({
     kindHint: "chat-sdk",
+    turnPolicy: config.turnPolicy,
     state: initialState(),
     metadata: metadataFromState,
     context(state) {
@@ -565,15 +566,9 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   if (options.callback !== undefined) deliveryOptions.callback = options.callback;
   if (options.mode !== undefined) deliveryOptions.mode = options.mode;
   if (options.title !== undefined) deliveryOptions.title = options.title;
+  if (options.turnPolicy !== undefined) deliveryOptions.turnPolicy = options.turnPolicy;
   const source = active.from(thread.id) as InternalChannelSource<ChatSdkChannelState>;
-  if (options.turnPolicy === "experimental-steer" && hasMessageInput(input)) {
-    await source.cancel();
-  }
   return source[INTERNAL_CHANNEL_DELIVER](payload, deliveryOptions);
-}
-
-function hasMessageInput(input: ChatSdkSendInput): boolean {
-  return typeof input === "string" || Array.isArray(input) || input.message !== undefined;
 }
 
 function initialState(): ChatSdkChannelState {

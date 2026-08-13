@@ -5,6 +5,7 @@ import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatc
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import {
+  getPendingRuntimeActionBatch,
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
@@ -153,16 +154,43 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       nodeId: "subagents/research",
     });
     const writes: Uint8Array[] = [];
+    const traceId = "1".repeat(32);
+    const actionSpanId = "3".repeat(16);
 
     const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(writes),
-      serializedContext: {},
+      serializedContext: {
+        "eve.harness.agentTrace": {
+          actions: {
+            "action-1": {
+              attemptIndex: 0,
+              callId: "call-1",
+              kind: "subagent-call",
+              name: "research",
+              parent: { spanId: "2".repeat(16), traceFlags: 1, traceId },
+              rootSessionId: "parent-session",
+              sessionId: "parent-session",
+              spanId: actionSpanId,
+              startTimeMs: 1_700_000_000_000,
+              stepIndex: 0,
+              turnId: "turn-1",
+            },
+          },
+          sessions: {},
+          turns: {},
+        },
+      },
       sessionState: BASE_STATE,
     });
 
     expect(result.results).toEqual([]);
     expect(mocks.createSession).toHaveBeenCalledTimes(1);
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentTraceContext: { isRemote: false, spanId: actionSpanId, traceFlags: 1, traceId },
+      }),
+    );
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [
         {
@@ -187,6 +215,65 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       ],
     });
     expect(writes).toHaveLength(1);
+  });
+
+  it("uses the active session turn when pending batch metadata has an empty turn id", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "local",
+    });
+    installContext(session, {
+      definition: { description: "Research", kind: "subagent" },
+      nodeId: "subagents/research",
+    });
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(getAgentHandleStore(resultState)).toMatchObject({
+      handles: [
+        {
+          operation: {
+            parentTurnId: "turn_3",
+          },
+        },
+      ],
+    });
+  });
+
+  it("persists the active turn when dispatch leaves agent handles unchanged", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "remote",
+    });
+    installContext(session, {
+      definition: REMOTE_REGISTRY_DEFINITION,
+      nodeId: "remote/research",
+    });
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getAgentHandleStore(resultState)).toBeUndefined();
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(mocks.createDurableSessionState).toHaveBeenCalledTimes(1);
   });
 
   it("rejects the prepared handle when the local start fails", async () => {
@@ -217,6 +304,8 @@ describe("dispatchRuntimeActionsStep child starts", () => {
 
   it("owns a remote child with its confirmed remote address", async () => {
     const session = createStartSession({ kind: "remote" });
+    const traceId = "4".repeat(32);
+    const actionSpanId = "5".repeat(16);
     installContext(session, {
       definition: REMOTE_REGISTRY_DEFINITION,
       nodeId: "remote/research",
@@ -226,11 +315,36 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       callbackBaseUrl: "https://caller.example.com",
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(),
-      serializedContext: {},
+      serializedContext: {
+        "eve.harness.agentTrace": {
+          actions: {
+            "action-1": {
+              attemptIndex: 0,
+              callId: "call-1",
+              kind: "remote-agent-call",
+              name: "research",
+              parent: { spanId: "2".repeat(16), traceFlags: 1, traceId },
+              rootSessionId: "parent-session",
+              sessionId: "parent-session",
+              spanId: actionSpanId,
+              startTimeMs: 1_700_000_000_000,
+              stepIndex: 0,
+              turnId: "turn-1",
+            },
+          },
+          sessions: {},
+          turns: {},
+        },
+      },
       sessionState: BASE_STATE,
     });
 
     expect(result.results).toEqual([]);
+    expect(mocks.startRemoteAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentTraceContext: { isRemote: false, spanId: actionSpanId, traceFlags: 1, traceId },
+      }),
+    );
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [
         expect.objectContaining({
@@ -687,7 +801,14 @@ function createBaseSession(handle?: AgentHandle): HarnessSession {
     : { ...base, state: { [AGENT_HANDLES_STATE_KEY]: { handles: [handle] } } };
 }
 
-function createStartSession(input: { readonly kind: "local" | "remote" }): HarnessSession {
+function createStartSession(input: {
+  readonly event?: {
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  };
+  readonly kind: "local" | "remote";
+}): HarnessSession {
   return setPendingRuntimeActionBatch({
     actions: [
       input.kind === "local"
@@ -710,7 +831,7 @@ function createStartSession(input: { readonly kind: "local" | "remote" }): Harne
             remoteAgentName: "research",
           },
     ],
-    event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+    event: input.event ?? { sequence: 1, stepIndex: 2, turnId: "turn-1" },
     responseMessages: [],
     session: createBaseSession(),
   });

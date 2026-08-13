@@ -44,6 +44,8 @@ const DEVELOPMENT_ENV_KEYS = [
   "EVE_DEV_LOCAL_ONLY",
   "EVE_DEV_SHARED",
   "EVE_DEV_SHELL_ONLY",
+  "EVE_EVALUATION",
+  "EVE_EVALUATION_RUN_ID",
 ] as const;
 
 async function createEnvironmentFixture(): Promise<string> {
@@ -192,6 +194,8 @@ describe("eve eval environment loading", () => {
 
     expect(close).toHaveBeenCalledTimes(1);
     expect(handle.shutdown).toHaveBeenCalledTimes(1);
+    expect(process.env.EVE_EVALUATION).toBe("1");
+    expect(process.env.EVE_EVALUATION_RUN_ID).toMatch(/^[0-9a-f-]{36}$/u);
     expect(exit).toHaveBeenCalledWith(0);
   });
 

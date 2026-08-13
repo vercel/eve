@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { CompiledAgentManifest } from "./manifest.js";
-import { COMPILED_AGENT_MANIFEST_VERSION, ROOT_COMPILED_AGENT_NODE_ID } from "./manifest.js";
+import {
+  COMPILED_AGENT_MANIFEST_VERSION,
+  createCompiledAgentResources,
+  ROOT_COMPILED_AGENT_NODE_ID,
+} from "./manifest.js";
 import { collectModuleRefsForManifest, createCompiledModuleMapSource } from "./module-map.js";
 
 function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
@@ -74,6 +78,41 @@ describe("createCompiledModuleMapSource", () => {
       '"G:/projects/eve/apps/fixtures/kitchen-sink-fixture/agent/tools/echo.ts"',
     );
     expect(source).toContain(`"${ROOT_COMPILED_AGENT_NODE_ID}"`);
+  });
+
+  it("imports a dynamic subagent config resolver relative to the child agent root", () => {
+    const manifest: CompiledAgentManifest = {
+      ...createManifestWithTool("/agent"),
+      subagents: [
+        {
+          agent: createCompiledAgentResources({
+            agentRoot: "/agent/subagents/researcher",
+            appRoot: "/agent",
+          }),
+          configResolver: {
+            eventNames: ["turn.started"],
+            logicalPath: "agent.ts",
+            sourceId: "agent.ts",
+            sourceKind: "module",
+          },
+          entryPath: "/agent/subagents/researcher/agent.ts",
+          logicalPath: "subagents/researcher",
+          name: "researcher",
+          nodeId: "subagents/researcher",
+          rootPath: "/agent/subagents/researcher",
+          sourceId: "subagents/researcher",
+          sourceKind: "module",
+        },
+      ],
+    };
+
+    const source = createCompiledModuleMapSource({
+      manifest,
+      moduleMapPath: "/agent/.eve/compile/module-map.mjs",
+    });
+
+    expect(source).toContain('from "../../subagents/researcher/agent.ts";');
+    expect(source).not.toContain("subagents/researcher/subagents/researcher");
   });
 });
 

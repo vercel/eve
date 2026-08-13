@@ -38,7 +38,7 @@ import {
   SiZapier,
   SiZomato,
 } from "@icons-pack/react-simple-icons";
-import type { ComponentProps } from "react";
+import { type ComponentProps, useId } from "react";
 
 type LogoProps = ComponentProps<"svg">;
 
@@ -59,6 +59,27 @@ export const webLogo = (props: LogoProps) => (
     />
   </svg>
 );
+
+export const BuzzLogo = (props: LogoProps) => {
+  const maskId = useId();
+
+  return (
+    <svg fill="none" viewBox="0 0 466 309" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <defs>
+        <mask id={maskId}>
+          <circle cx="91.7" cy="154.5" fill="white" r="91.7" />
+          <circle cx="374.3" cy="154.5" fill="white" r="91.7" />
+          <rect fill="white" height="309" rx="34" width="210" x="128" />
+          <ellipse cx="193.3" cy="84.4" fill="black" rx="27" ry="27" />
+          <ellipse cx="276" cy="84.4" fill="black" rx="27" ry="27" />
+          <rect fill="black" height="38.3" rx="5" width="136.9" x="166.3" y="157.2" />
+          <rect fill="black" height="37.6" rx="5" width="136.2" x="166.9" y="235.1" />
+        </mask>
+      </defs>
+      <rect fill="currentColor" height="309" mask={`url(#${maskId})`} width="466" />
+    </svg>
+  );
+};
 
 export const browserUseLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" {...props}>
@@ -176,6 +197,21 @@ export const linearLogo = (props: LogoProps) => (
 export const notionLogo = (props: LogoProps) => <SiNotion {...props} />;
 
 export const upstashLogo = (props: LogoProps) => <SiUpstash color="default" {...props} />;
+
+export const arcanaLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <circle cx="12" cy="12" r="3" fill="#1A1C1A" />
+    <circle cx="5" cy="7" r="2" fill="#1A1C1A" />
+    <circle cx="19" cy="7" r="2" fill="#69BE8B" />
+    <circle cx="6" cy="18" r="2" fill="#69BE8B" />
+    <circle cx="18" cy="18" r="2" fill="#1A1C1A" />
+    <path
+      d="m6.7 7.8 3.4 2.7m7.2-2.7-3.4 2.7m-6.5 6 3-2.7m4.2 0 3 2.7"
+      stroke="#1A1C1A"
+      strokeWidth="1.5"
+    />
+  </svg>
+);
 
 export const hindsightLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 186 139" xmlns="http://www.w3.org/2000/svg" {...props}>
@@ -637,6 +673,7 @@ export const raindropLogo = (props: LogoProps) => (
 export const logos = {
   eve: eveLogo,
   web: webLogo,
+  buzz: BuzzLogo,
   "browser-use": browserUseLogo,
   github: githubLogo,
   slack: slackLogo,
@@ -655,6 +692,7 @@ export const logos = {
   raindrop: raindropLogo,
   kernel: kernelLogo,
   upstash: upstashLogo,
+  arcana: arcanaLogo,
   hindsight: hindsightLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,

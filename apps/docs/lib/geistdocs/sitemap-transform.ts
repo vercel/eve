@@ -14,9 +14,9 @@ const SITEMAP_ENTRY_PATTERN = /^(\s*)- \[([^\]]+)\]\(([^)]+)\) \| (.+)$/gm;
 const machineTypeFor = (url: string): string | undefined => {
   if (
     url === "/docs/getting-started" ||
-    url === "/docs/installation" ||
     url === "/docs/install-integrations" ||
     url.startsWith("/docs/guides/") ||
+    url.startsWith("/docs/protocols/") ||
     url.startsWith("/docs/tutorial/")
   ) {
     return "How-to";

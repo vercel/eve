@@ -356,6 +356,42 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
 On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`host\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
     configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend/overview), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), and [SvelteKit](/docs/guides/frontend/sveltekit).`,
   },
+  buzz: {
+    logo: "buzz",
+    docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-buzz-acp-adapter#readme",
+    badge: "ACP",
+    keywords: ["chat", "messaging", "desktop", "acp", "nostr", "agents"],
+    install: `Install [Buzz Desktop](https://buzz.xyz), then install eve's compatibility adapter globally:
+
+\`\`\`bash
+npm install --global @eve/buzz-acp-adapter
+\`\`\`
+
+The adapter must be installed globally because Buzz uses it whenever it interfaces with eve.`,
+    quickStart: `From an eve application directory, run the interactive installer:
+
+\`\`\`bash
+eve-buzz-acp-adapter install
+\`\`\`
+
+You can also provide a local application or deployed URL explicitly:
+
+\`\`\`bash
+eve-buzz-acp-adapter install ./path/to/eve-app
+eve-buzz-acp-adapter install https://agent.example.com
+\`\`\`
+
+The installer registers **eve** as a custom harness with Buzz.`,
+    configure: `Reopen Buzz, then create or edit an agent:
+
+1. Enter an **Agent name** and, optionally, **Agent instructions** for Buzz-specific behavior.
+2. Under **AI configuration**, choose **Customize for this agent**.
+3. Set **Agent harness** to **eve**. Buzz currently requires a **Model** value but does not prefill one for custom harnesses.
+4. Open **Advanced**. Leave **Who can talk to this agent** on its default owner-only selection. For a local application, set **Parallelism** to \`1\` and add any credentials that the application does not already load from an env file, such as \`AI_GATEWAY_API_KEY\`.
+5. Save the agent and start it.
+
+Accepted senders share one eve identity and its capabilities.`,
+  },
   "chat-sdk-gchat": {
     logo: "googlechat",
     docsHref: "/docs/channels/chat-sdk",
@@ -650,6 +686,7 @@ export const { bot, channel, send } = chatSdkChannel({
     sendblue: createSendblueAdapter(),
   },
   state: createMemoryState(),
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
@@ -1403,6 +1440,64 @@ export default githubExtension({
 \`\`\`
 
 For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
+  },
+  arcana: {
+    logo: "arcana",
+    docsHref: "https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "mcp",
+      "semantic search",
+      "entity graph",
+      "timeline",
+      "brain notes",
+      "Kybernesis",
+    ],
+    install: `Install Kybernesis Arcana for eve:
+
+\`\`\`bash
+eve add extension/arcana
+\`\`\`
+
+This installs \`@kybernesis/arcana\` and writes an extension mount. The package requires Node.js 24 or later.`,
+    quickStart: `Create an Arcana workspace and workspace-scoped API key, then add both values to the agent's environment:
+
+\`\`\`bash title=".env.local"
+ARCANA_API_KEY=kb_your_api_key_here
+ARCANA_WORKSPACE=your-workspace
+\`\`\`
+
+The registry creates this mount:
+
+\`\`\`ts title="agent/extensions/arcana.ts"
+import arcana from "@kybernesis/arcana";
+
+export default arcana({
+  apiKey: process.env.ARCANA_API_KEY!,
+  workspace: process.env.ARCANA_WORKSPACE!,
+});
+\`\`\`
+
+The filename supplies the \`arcana\` namespace. The extension adds an MCP memory connection, recall, remember, and brain-note skills, and instructions that tell the model to search the workspace before it claims not to know something.`,
+    configure: `An Arcana key is scoped to a workspace. Keep the key in a sensitive environment variable and use a separate workspace and key when people or tenants must not share memory. The model can choose what to store and retrieve, but it cannot choose the configured key or default workspace.
+
+You can select a workspace per session with \`resolveWorkspace\`. Derive it only from verified session context, and only return workspaces that the configured key can access:
+
+\`\`\`ts title="agent/extensions/arcana.ts"
+import arcana from "@kybernesis/arcana";
+
+export default arcana({
+  apiKey: process.env.ARCANA_API_KEY!,
+  workspace: process.env.ARCANA_WORKSPACE!,
+  resolveWorkspace: (ctx) =>
+    ctx.session.auth.current?.attributes.surface === "dm"
+      ? process.env.ARCANA_DM_WORKSPACE
+      : undefined,
+});
+\`\`\`
+
+Arcana stores memories, embeddings, timeline entries, and brain notes in the selected workspace. The shipped instructions tell the model not to store passwords, access tokens, payment data, private keys, or one-time codes; add approval rules to memory-write tools when you need an enforced control. See the [Arcana package documentation](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme) for the full configuration and tool reference.`,
   },
   hindsight: {
     logo: "hindsight",

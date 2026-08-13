@@ -511,6 +511,23 @@ describe("discoverAgent (memory)", () => {
     ]);
   });
 
+  it("recognizes the instrumentation provider directory", async () => {
+    const project = buildMemoryAgentProject({
+      agentDirectories: ["instrumentation"],
+      agentFiles: {
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+  });
+
   it("rejects authored tool filenames that violate the tool-name charset", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {

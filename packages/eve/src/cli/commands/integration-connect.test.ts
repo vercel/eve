@@ -1,8 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { WizardCancelledError } from "#setup/step.js";
 
-import { runIntegrationConnect } from "./integration-connect.js";
+import { runIntegrationConnect, runIntegrationConnectCommand } from "./integration-connect.js";
+
+const { isEveProject } = vi.hoisted(() => ({ isEveProject: vi.fn(async () => true) }));
+
+vi.mock("#setup/scaffold/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#setup/scaffold/index.js")>()),
+  isEveProject,
+}));
 
 const PROJECT = { orgId: "team_1", projectId: "prj_1" };
 
@@ -10,8 +18,8 @@ function dependencies(overrides: Record<string, unknown> = {}) {
   const fake = createFakePrompter();
   return {
     createPrompter: () => fake.prompter,
+    ensureVercelProject: vi.fn(async () => PROJECT),
     readProjectLink: vi.fn(async () => PROJECT),
-    runLinkFlow: vi.fn(async () => ({ kind: "done" as const })),
     setupConnectionConnector: vi.fn(async () => ({
       kind: "existing" as const,
       connectorUid: "linear/real",
@@ -51,8 +59,7 @@ describe("runIntegrationConnect", () => {
   });
 
   it("links an unlinked project before connector setup", async () => {
-    const readProjectLink = vi.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce(PROJECT);
-    const deps = dependencies({ readProjectLink });
+    const deps = dependencies({ readProjectLink: vi.fn(async () => undefined) });
 
     await runIntegrationConnect({
       appRoot: "/project",
@@ -61,9 +68,89 @@ describe("runIntegrationConnect", () => {
       dependencies: deps,
     });
 
-    expect(deps.runLinkFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ appRoot: "/project", projectSelection: "create-or-link" }),
+    expect(deps.ensureVercelProject).toHaveBeenCalledWith(
+      expect.objectContaining({ appRoot: "/project" }),
     );
+  });
+
+  it("requires a linked project without starting interactive resolution", async () => {
+    const deps = dependencies({ readProjectLink: vi.fn(async () => undefined) });
+
+    await expect(
+      runIntegrationConnect({
+        appRoot: "/project",
+        slug: "linear",
+        service: "mcp.linear.app",
+        options: { nonInteractive: true },
+        dependencies: deps,
+      }),
+    ).rejects.toMatchObject({
+      prerequisite: expect.objectContaining({ code: "vercel-project-link", command: "eve link" }),
+    });
+    expect(deps.ensureVercelProject).not.toHaveBeenCalled();
+    expect(deps.setupConnectionConnector).not.toHaveBeenCalled();
+  });
+
+  it("keeps a cancelled project link as a clean setup cancellation", async () => {
+    const deps = dependencies({
+      readProjectLink: vi.fn(async () => undefined),
+      ensureVercelProject: vi.fn(async () => {
+        throw new WizardCancelledError();
+      }),
+    });
+
+    await expect(
+      runIntegrationConnect({
+        appRoot: "/project",
+        slug: "linear",
+        service: "mcp.linear.app",
+        dependencies: deps,
+      }),
+    ).resolves.toBeUndefined();
+    expect(deps.setupConnectionConnector).not.toHaveBeenCalled();
+  });
+
+  it("emits a structured linked-project prerequisite non-interactively", async () => {
+    const output = {
+      errors: [] as string[],
+      log: vi.fn(),
+      error: vi.fn((message) => output.errors.push(message)),
+    };
+    const deps = dependencies({ readProjectLink: vi.fn(async () => undefined) });
+
+    await runIntegrationConnectCommand(
+      output,
+      "/project",
+      "linear",
+      "mcp.linear.app",
+      undefined,
+      { nonInteractive: true },
+      deps,
+    );
+
+    expect(JSON.parse(output.errors[0]!)).toMatchObject({
+      type: "blocked",
+      status: "prerequisite_required",
+      prerequisite: { code: "vercel-project-link", command: "eve link" },
+    });
+    expect(process.exitCode).toBe(2);
+  });
+
+  it("does not create an interactive prompter for a non-interactive command", async () => {
+    const createPrompter = vi.fn(() => createFakePrompter().prompter);
+    const deps = dependencies({ createPrompter });
+
+    await runIntegrationConnectCommand(
+      { log: vi.fn(), error: vi.fn() },
+      "/project",
+      "linear",
+      "mcp.linear.app",
+      undefined,
+      { nonInteractive: true },
+      deps,
+    );
+
+    expect(createPrompter).not.toHaveBeenCalled();
   });
 
   it("cleans up a newly-created connector when the installed file cannot be patched", async () => {

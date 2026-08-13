@@ -24,6 +24,36 @@ const modelEndpoint = z.union([
   z.object({ kind: z.literal("gateway"), connected: z.literal(false) }),
 ]);
 
+const agentModelBaseFields = {
+  contextWindowTokens: z.number().optional(),
+  providerOptions: z.unknown().optional(),
+  // An unrecognized future effort level degrades to absent, not a parse failure.
+  reasoning: z
+    .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
+    .optional()
+    .catch(undefined),
+  source: source.optional(),
+};
+
+const agentModel = z.union([
+  z
+    .object({
+      ...agentModelBaseFields,
+      id: z.string(),
+      routing: modelRouting,
+      endpoint: modelEndpoint.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...agentModelBaseFields,
+      endpoint: z.never().optional(),
+      id: z.never().optional(),
+      routing: z.object({ kind: z.literal("dynamic") }).strict(),
+    })
+    .strict(),
+]);
+
 const tool = entry.extend({
   description: z.string(),
   hasAuth: z.boolean(),
@@ -125,19 +155,7 @@ export const AgentInfoResultSchema = z.object({
     appRoot: z.string(),
     configSource: source.optional(),
     description: z.string().optional(),
-    model: z.object({
-      contextWindowTokens: z.number().optional(),
-      id: z.string(),
-      providerOptions: z.unknown().optional(),
-      // An unrecognized future effort level degrades to absent, not a parse failure.
-      reasoning: z
-        .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
-        .optional()
-        .catch(undefined),
-      source: source.optional(),
-      routing: modelRouting.optional(),
-      endpoint: modelEndpoint.optional(),
-    }),
+    model: agentModel,
     name: z.string(),
     outputSchema: z.unknown().optional(),
   }),

@@ -1,5 +1,7 @@
 import { InvalidArgumentError, type Command } from "#compiled/commander/index.js";
 
+import { parseSetupAnswer } from "./setup-answers.js";
+
 interface RegistryCommandLogger {
   error(message: string): void;
   log(message: string): void;
@@ -36,14 +38,33 @@ export function registerRegistryCommands(input: {
     .option("-o, --overwrite", "Overwrite existing files.")
     .option("--skip-install", "Run the item's setup flow without installing it.")
     .option("--skip-setup", "Skip the item's setup flow.")
+    .option(
+      "--non-interactive",
+      "Run without interactive prompts, instead emit structured NDJSON when further input is required",
+    )
+    .option(
+      "--answer <key=value>",
+      "Answer a setup question with JSON; requires --non-interactive; repeat for multiple answers.",
+      parseSetupAnswer,
+    )
     .option("-y, --yes", "Run setup and accept its recommended defaults.")
     .action(
       async (
         item: string,
-        options: { skipInstall?: boolean; overwrite?: boolean; skipSetup?: boolean; yes?: boolean },
+        options: {
+          skipInstall?: boolean;
+          overwrite?: boolean;
+          skipSetup?: boolean;
+          nonInteractive?: boolean;
+          answer?: Record<string, unknown>;
+          yes?: boolean;
+        },
       ) => {
+        if (options.answer !== undefined && !options.nonInteractive) {
+          throw new InvalidArgumentError("--answer requires --non-interactive.");
+        }
         const { runAddCommand } = await import("./registry.js");
-        await runAddCommand(logger, appRoot, item, options);
+        await runAddCommand(logger, appRoot, item, { ...options, answers: options.answer });
       },
     );
 
@@ -89,9 +110,10 @@ export function registerRegistryCommands(input: {
 
   registry
     .command("view <item>")
-    .description("Print one registry item as JSON.")
-    .action(async (item: string) => {
+    .description("Inspect one registry item.")
+    .option("--json", "Output the raw registry item as JSON.")
+    .action(async (item: string, options: { json?: boolean }) => {
       const { runRegistryViewCommand } = await import("./registry.js");
-      await runRegistryViewCommand(logger, appRoot, item);
+      await runRegistryViewCommand(logger, appRoot, item, options);
     });
 }

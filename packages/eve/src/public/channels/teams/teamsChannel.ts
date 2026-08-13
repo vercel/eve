@@ -1,7 +1,7 @@
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
@@ -195,6 +195,8 @@ export interface TeamsChannelConfig {
   readonly files?: TeamsFilesConfig;
   /** Override the default webhook route path (`/eve/v1/teams`). */
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
 
   /** Inbound message hook. Defaults to user-scoped auth and mention-gated dispatch outside personal chats. */
   onMessage?(
@@ -283,6 +285,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
     TeamsInstrumentationMetadata
   >({
     kindHint: "teams",
+    turnPolicy: config.turnPolicy,
     state: initialTeamsState(),
     fetchFile: createTeamsFetchFile(filesPolicy),
     metadata: (state) => ({

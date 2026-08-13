@@ -5,33 +5,42 @@ import {
   setupConnectionConnector,
   type SetupConnectionConnectorOptions,
 } from "#setup/connection-connector.js";
-import { runLinkFlow, type LinkFlowDeps } from "#setup/flows/link.js";
+import {
+  ensureVercelProject,
+  type EnsureVercelProjectDeps,
+} from "#setup/flows/ensure-vercel-project.js";
+import { createHeadlessPrompter } from "#setup/headless.js";
+import { SetupPrerequisiteRequired } from "#setup/integrations/shared/prerequisite.js";
+import { resolveIntegrationVercelProject } from "#setup/integrations/shared/vercel-project.js";
 import { readProjectLink } from "#setup/project-resolution.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { createRegistrySetupClient } from "#setup/registry-setup-client.js";
 import { isEveProject } from "#setup/scaffold/index.js";
 import { updateConnectionConnectorUid } from "#setup/scaffold/update/update-connection-connector.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import type { RegistryCommandLogger } from "./registry.js";
+import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 
 export interface IntegrationConnectOptions {
+  nonInteractive?: boolean;
   signal?: AbortSignal;
 }
 
 export interface IntegrationConnectDependencies {
   createPrompter?: () => Prompter;
+  ensureVercelProject: typeof ensureVercelProject;
+  ensureVercelProjectDeps?: Partial<EnsureVercelProjectDeps>;
   readProjectLink: typeof readProjectLink;
-  runLinkFlow: typeof runLinkFlow;
-  linkFlowDeps?: Partial<LinkFlowDeps>;
   setupConnectionConnector: typeof setupConnectionConnector;
   cleanupCreatedConnectionConnector: typeof cleanupCreatedConnectionConnector;
   updateConnectionConnectorUid: typeof updateConnectionConnectorUid;
 }
 
 const defaultDependencies: IntegrationConnectDependencies = {
+  ensureVercelProject,
   readProjectLink,
-  runLinkFlow,
   setupConnectionConnector,
   cleanupCreatedConnectionConnector,
   updateConnectionConnectorUid,
@@ -47,24 +56,37 @@ export async function runIntegrationConnect(input: {
   dependencies?: Partial<IntegrationConnectDependencies>;
 }): Promise<void> {
   const dependencies = { ...defaultDependencies, ...input.dependencies };
-  const prompter = dependencies.createPrompter?.() ?? createPrompter();
+  const nonInteractive = input.options?.nonInteractive === true;
+  const prompter =
+    dependencies.createPrompter?.() ??
+    (nonInteractive ? createHeadlessPrompter(() => {}) : createPrompter());
   const signal = input.options?.signal;
   prompter.intro(`Set up ${input.slug}`);
 
   let project = await dependencies.readProjectLink(input.appRoot);
   if (project === undefined) {
-    const link = await dependencies.runLinkFlow({
-      appRoot: input.appRoot,
-      prompter,
-      signal,
-      projectSelection: "create-or-link",
-      teamSelectMessage: () =>
-        `You need to link to a project to use ${input.slug} through Vercel Connect.\n\nSelect your team`,
-      deps: dependencies.linkFlowDeps,
-    });
-    if (link.kind === "cancelled") return;
-    project = await dependencies.readProjectLink(input.appRoot);
-    if (project === undefined) throw new Error("Project link was not found after linking.");
+    if (nonInteractive) {
+      project = await resolveIntegrationVercelProject({
+        appRoot: input.appRoot,
+        integration: input.slug,
+        signal,
+        deps: { readProjectLink: dependencies.readProjectLink },
+      });
+    } else {
+      try {
+        project = await dependencies.ensureVercelProject({
+          appRoot: input.appRoot,
+          prompter,
+          signal,
+          teamSelectMessage: () =>
+            `You need to link to a project to use ${input.slug} through Vercel Connect.\n\nSelect your team`,
+          deps: dependencies.ensureVercelProjectDeps,
+        });
+      } catch (error) {
+        if (error instanceof WizardCancelledError) return;
+        throw error;
+      }
+    }
   }
 
   const connectorOptions: SetupConnectionConnectorOptions = {
@@ -120,12 +142,28 @@ export async function runIntegrationConnectCommand(
       dependencies: {
         ...dependencies,
         createPrompter: () =>
-          client?.prompter ?? dependencies.createPrompter?.() ?? createPrompter(),
+          client?.prompter ??
+          (options.nonInteractive
+            ? createHeadlessPrompter(() => {})
+            : (dependencies.createPrompter?.() ?? createPrompter())),
       },
     });
     client?.complete();
   } catch (error) {
     client?.fail(error);
+    if (client !== undefined) return;
+    if (options.nonInteractive && error instanceof SetupPrerequisiteRequired) {
+      logger.error(
+        serializeHeadlessSetupEvent({
+          version: 1,
+          type: "blocked",
+          status: "prerequisite_required",
+          prerequisite: error.prerequisite,
+        }),
+      );
+      process.exitCode = 2;
+      return;
+    }
     logger.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }

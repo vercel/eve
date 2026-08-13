@@ -61,6 +61,7 @@ export default defineEval({
     initial.notEvent("session.failed");
 
     const liveClear = t.target.watchTurn(sessionId, { startIndex: initial.events.length });
+    await new Promise((resolve) => setTimeout(resolve, 250));
     const clearedResponse = await postJson<ClearResponse>(
       t.target,
       `/threads/${threadId}/clear`,
@@ -81,6 +82,10 @@ export default defineEval({
     cleared.notEvent("turn.failed");
     cleared.notEvent("session.failed");
 
+    const followUpTurn = t.target.watchTurn(sessionId, {
+      startIndex: initial.events.length + cleared.events.length,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 250));
     const resumed = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
       message: "Reply with exactly CLEAR-FOLLOW-UP-OK.",
     });
@@ -92,11 +97,7 @@ export default defineEval({
       ),
     );
 
-    const followUp = await t.target
-      .watchTurn(sessionId, {
-        startIndex: initial.events.length + cleared.events.length,
-      })
-      .result();
+    const followUp = await followUpTurn.result();
     followUp.notEvent("turn.failed");
     followUp.notEvent("session.failed");
     followUp.messageIncludes(/CLEAR-FOLLOW-UP-OK/i);

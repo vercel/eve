@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import type { NodeEngineOverride } from "../../node-engine.js";
+import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { patchPackageJson, type PackageJsonPatch } from "../update/package-json.js";
 import { resolveVersionToken } from "../version-tokens.js";
@@ -24,6 +25,7 @@ import {
 export interface AddAgentToProjectOptions {
   projectRoot: string;
   model: string;
+  reasoning?: AgentReasoningDefinition;
   /**
    * The host project's package manager, which owns any manager-specific
    * generated project configuration. Defaults to pnpm.
@@ -85,7 +87,7 @@ export async function addAgentToProject(
     );
   }
 
-  const files = agentTemplateFiles(options.model);
+  const files = agentTemplateFiles(options.model, options.reasoning);
   const conflicts: string[] = [];
   for (const relativePath of Object.keys(files)) {
     if (await pathExists(join(options.projectRoot, relativePath))) {

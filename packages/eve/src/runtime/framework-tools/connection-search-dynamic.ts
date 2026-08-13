@@ -6,7 +6,7 @@ import {
   type AuthorizationChallenge,
   type AuthorizationSignal,
   consumeAuthorizationResult,
-  getHookUrl,
+  createAuthorizationAttempt,
   requestAuthorization,
 } from "#harness/authorization.js";
 import {
@@ -158,7 +158,7 @@ async function completePendingAuthorizations(
     if (!result) continue;
     const auth = await resolveInteractiveAuth(registry, conn.connectionName);
     if (!auth) continue;
-    const principal = resolveConnectionPrincipal(conn.connectionName, auth);
+    const principal = result.principal ?? resolveConnectionPrincipal(conn.connectionName, auth);
     const token = await (
       auth as InteractiveAuthorizationDefinition<JsonValue>
     ).completeAuthorization({
@@ -228,12 +228,12 @@ async function executeConnectionSearch(
 
         const auth = await resolveInteractiveAuth(registry, conn.connectionName);
         if (auth) {
-          const hookUrl = getHookUrl(conn.connectionName);
-          if (hookUrl) {
+          const attempt = createAuthorizationAttempt(conn.connectionName);
+          if (attempt) {
             const principal = resolveConnectionPrincipal(conn.connectionName, auth);
             const callbackUrl = resolveAuthorizationCallbackUrl({
               authorization: auth,
-              callbackUrl: hookUrl,
+              callbackUrl: attempt.hookUrl,
             });
             try {
               const { challenge, resume } = await auth.startAuthorization({
@@ -242,9 +242,11 @@ async function executeConnectionSearch(
                 principal,
               });
               authChallenges.push({
+                attemptId: attempt.attemptId,
                 name: conn.connectionName,
                 challenge: stampChallengeDisplayName(challenge, auth),
                 hookUrl: callbackUrl,
+                principal,
                 resume,
               });
             } catch (startErr) {
@@ -453,7 +455,9 @@ const connectionSearchDynamicDefinition = defineDynamic({
               if (authResult) {
                 justCompletedAuth = true;
                 const ctx = loadContext();
-                const principal = resolveConnectionPrincipal(connectionName, interactiveAuth);
+                const principal =
+                  authResult.principal ??
+                  resolveConnectionPrincipal(connectionName, interactiveAuth);
                 const token = await interactiveAuth.completeAuthorization({
                   callbackUrl: authResult.hookUrl,
                   connection: { url: conn?.url ?? "" },
@@ -486,13 +490,13 @@ const connectionSearchDynamicDefinition = defineDynamic({
                 });
               }
 
-              const hookUrl = getHookUrl(connectionName);
-              if (!hookUrl) throw err;
+              const attempt = createAuthorizationAttempt(connectionName);
+              if (!attempt) throw err;
 
               const principal = resolveConnectionPrincipal(connectionName, interactiveAuth);
               const callbackUrl = resolveAuthorizationCallbackUrl({
                 authorization: interactiveAuth,
-                callbackUrl: hookUrl,
+                callbackUrl: attempt.hookUrl,
               });
               const { challenge, resume } = await interactiveAuth.startAuthorization({
                 callbackUrl,
@@ -502,9 +506,11 @@ const connectionSearchDynamicDefinition = defineDynamic({
 
               return requestAuthorization([
                 {
+                  attemptId: attempt.attemptId,
                   name: connectionName,
                   challenge: stampChallengeDisplayName(challenge, interactiveAuth),
                   hookUrl: callbackUrl,
+                  principal,
                   resume,
                 },
               ]);

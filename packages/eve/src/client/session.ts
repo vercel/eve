@@ -292,6 +292,9 @@ function createMessageBody(
   if (input.inputResponses !== undefined && input.inputResponses.length > 0) {
     body.inputResponses = input.inputResponses;
   }
+  if (!requireMessage && input.message !== undefined && input.turnPolicy !== undefined) {
+    body.turnPolicy = input.turnPolicy;
+  }
   if (input.clientContext !== undefined) body.clientContext = input.clientContext;
   const outputSchema = serializeOutputSchema(input.outputSchema);
   if (outputSchema !== undefined) body.outputSchema = outputSchema;

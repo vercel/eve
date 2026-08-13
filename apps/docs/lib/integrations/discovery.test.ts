@@ -32,6 +32,24 @@ describe("integration discovery", () => {
     expect(markdown).toContain("eve add channel/slack");
   });
 
+  it("renders Buzz as an ACP channel with explicit authorization guidance", () => {
+    const buzz = getIntegration("buzz");
+    expect(buzz).toBeDefined();
+
+    const markdown = integrationMarkdown(buzz!);
+    expect(markdown).toContain("npm install --global @eve/buzz-acp-adapter");
+    expect(markdown).toContain("eve-buzz-acp-adapter install");
+    expect(markdown).toContain("Customize for this agent");
+    expect(markdown).toContain("Agent harness** to **eve");
+    expect(markdown).toContain("does not prefill one for custom harnesses");
+    expect(markdown).toContain("Who can talk to this agent");
+    expect(markdown).toContain("AI_GATEWAY_API_KEY");
+    expect(markdown).toContain("Parallelism** to `1`");
+    expect(markdown).toContain("Accepted senders share one eve identity");
+    expect(markdown).toContain("## Configure");
+    expect(integrationSearchText(buzz!)).toContain("acp");
+  });
+
   it("renders the Web Chat setup for every host framework it documents", () => {
     const web = getIntegration("eve");
     expect(web).toBeDefined();
@@ -78,6 +96,18 @@ describe("integration discovery", () => {
     expect(markdown).toContain("agentkit__recall_memory");
     expect(markdown).toContain("chatHistory: true");
     expect(integrationSearchText(agentkit!)).toContain("long-term memory");
+  });
+
+  it("renders the Kybernesis Arcana memory extension setup", () => {
+    const arcana = getIntegration("arcana");
+    expect(arcana).toBeDefined();
+
+    const markdown = integrationMarkdown(arcana!);
+    expect(markdown).toContain("eve add extension/arcana");
+    expect(markdown).toContain('import arcana from "@kybernesis/arcana"');
+    expect(markdown).toContain("ARCANA_API_KEY");
+    expect(markdown).toContain("ARCANA_WORKSPACE");
+    expect(integrationSearchText(arcana!)).toContain("long-term memory");
   });
 
   it("renders the Hindsight memory extension setup", () => {

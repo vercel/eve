@@ -15,27 +15,25 @@ import {
 } from "../workspace-root.js";
 import { getSupportedModuleBaseName, matchesSupportedModuleBaseName } from "./module-files.js";
 import { patchPackageJson, type PackageJsonPatch } from "./package-json.js";
+import { CURRENT_DIRECTORY_PROJECT_NAME, resolveEvePackageContract } from "../create/project.js";
 import {
-  CURRENT_DIRECTORY_PROJECT_NAME,
-  DEFAULT_EVE_PACKAGE_CONTRACT,
-  resolveEvePackageContract,
-  type EvePackageContract,
-} from "../create/project.js";
-import { WEB_APP_TEMPLATE_FILES, WEB_APP_TEMPLATE_PACKAGE_JSON } from "../create/web-template.js";
+  WEB_APP_SIGN_IN_WITH_VERCEL_TEMPLATE_FILES,
+  WEB_APP_TEMPLATE_FILES,
+  WEB_APP_TEMPLATE_PACKAGE_JSON,
+} from "../create/web-template.js";
+import {
+  resolveWebPackageVersions,
+  type WebAuthentication,
+  type WebPackageVersions,
+} from "./web-options.js";
+
+export type { WebAuthentication, WebPackageVersions } from "./web-options.js";
 
 export const SLACK_CHANNEL_DEFAULT_ROUTE = "/eve/v1/slack";
 export const DEFAULT_SLACK_CONNECTOR_SLUG = "my-agent";
 
 const DEFAULT_CONNECT_PACKAGE_VERSION = "__VERCEL_CONNECT_VERSION__";
-const DEFAULT_AI_PACKAGE_VERSION = "__AI_SDK_VERSION__";
-const DEFAULT_NEXT_PACKAGE_VERSION = "__NEXT_VERSION__";
-const DEFAULT_REACT_PACKAGE_VERSION = "__REACT_VERSION__";
-const DEFAULT_REACT_DOM_PACKAGE_VERSION = "__REACT_DOM_VERSION__";
-const DEFAULT_STREAMDOWN_PACKAGE_VERSION = "__STREAMDOWN_VERSION__";
-const DEFAULT_ZOD_PACKAGE_VERSION = "__ZOD_VERSION__";
 const NEXT_TYPESCRIPT_PACKAGE_VERSION = "6.0.3";
-const DEFAULT_TYPES_REACT_PACKAGE_VERSION = "__TYPES_REACT_VERSION__";
-const DEFAULT_TYPES_REACT_DOM_PACKAGE_VERSION = "__TYPES_REACT_DOM_VERSION__";
 const CONNECT_PACKAGE_NAME = "@vercel/connect";
 const NEXT_PACKAGE_NAME = "next";
 const PACKAGE_DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
@@ -242,24 +240,6 @@ async function ensurePackageDependency(
   ];
 }
 
-function resolveWebPackageVersions(
-  input: WebPackageVersions | undefined,
-): Required<WebPackageVersions> {
-  return {
-    evePackage: input?.evePackage ?? DEFAULT_EVE_PACKAGE_CONTRACT,
-    aiPackageVersion: input?.aiPackageVersion ?? DEFAULT_AI_PACKAGE_VERSION,
-    nextPackageVersion: input?.nextPackageVersion ?? DEFAULT_NEXT_PACKAGE_VERSION,
-    reactPackageVersion: input?.reactPackageVersion ?? DEFAULT_REACT_PACKAGE_VERSION,
-    reactDomPackageVersion: input?.reactDomPackageVersion ?? DEFAULT_REACT_DOM_PACKAGE_VERSION,
-    streamdownPackageVersion: input?.streamdownPackageVersion ?? DEFAULT_STREAMDOWN_PACKAGE_VERSION,
-    zodPackageVersion: input?.zodPackageVersion ?? DEFAULT_ZOD_PACKAGE_VERSION,
-    typesReactPackageVersion:
-      input?.typesReactPackageVersion ?? DEFAULT_TYPES_REACT_PACKAGE_VERSION,
-    typesReactDomPackageVersion:
-      input?.typesReactDomPackageVersion ?? DEFAULT_TYPES_REACT_DOM_PACKAGE_VERSION,
-  };
-}
-
 function formatEveDependencySpecifier(versionOrSpecifier: string): string {
   return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z-.]+)?$/.test(versionOrSpecifier)
     ? `^${versionOrSpecifier}`
@@ -273,6 +253,7 @@ async function patchWebPackageJson(
   options: Required<WebPackageVersions>,
   onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>,
   includeDependencies = true,
+  authentication?: WebAuthentication,
 ): Promise<{
   mutations: PackageJsonMutation[];
   nodeEngineOverride?: NodeEngineOverride;
@@ -294,6 +275,14 @@ async function patchWebPackageJson(
     "react-dom": resolveVersionToken("reactDomPackageVersion", options.reactDomPackageVersion),
     streamdown: resolveVersionToken("streamdownPackageVersion", options.streamdownPackageVersion),
     zod: resolveVersionToken("zodPackageVersion", options.zodPackageVersion),
+    ...(authentication === "sign-in-with-vercel"
+      ? {
+          "better-auth": resolveVersionToken(
+            "betterAuthPackageVersion",
+            options.betterAuthPackageVersion,
+          ),
+        }
+      : {}),
   } satisfies Record<string, string>;
   const devDependencies = {
     ...WEB_APP_TEMPLATE_PACKAGE_JSON.devDependencies,
@@ -467,23 +456,13 @@ export interface EnsureChannelOptions {
   slackCredentials?: "vercel-connect" | "environment";
   connectPackageVersion?: string;
   webPackageVersions?: WebPackageVersions;
+  /** Authentication integration generated for Web Chat. Omit to keep the fail-closed placeholder. */
+  webAuthentication?: WebAuthentication;
   /** When false, Web Chat leaves Vercel Services config unwritten for preview-only scaffolds. */
   configureVercelServices?: boolean;
   onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
   /** Dependencies are already owned and installed by a registry item. */
   skipDependencyMutation?: boolean;
-}
-
-export interface WebPackageVersions {
-  evePackage?: EvePackageContract;
-  aiPackageVersion?: string;
-  nextPackageVersion?: string;
-  reactPackageVersion?: string;
-  reactDomPackageVersion?: string;
-  streamdownPackageVersion?: string;
-  zodPackageVersion?: string;
-  typesReactPackageVersion?: string;
-  typesReactDomPackageVersion?: string;
 }
 
 export async function ensureChannel(options: EnsureChannelOptions): Promise<ChannelMutationResult> {
@@ -512,7 +491,10 @@ async function ensureWebChannel(
     };
   }
 
-  const webPackageVersions = resolveWebPackageVersions(options.webPackageVersions);
+  const webPackageVersions = resolveWebPackageVersions(
+    options.webPackageVersions,
+    options.webAuthentication,
+  );
   const packageManager = options.packageManager ?? "pnpm";
   const workspaceProbeRoot = resolve(options.workspaceProbeDirectory ?? options.projectRoot);
   const packageJsonPatch = await patchWebPackageJson(
@@ -522,6 +504,7 @@ async function ensureWebChannel(
     webPackageVersions,
     options.onWorkspaceRootMutation,
     !options.skipDependencyMutation,
+    options.webAuthentication,
   );
   const filesWritten: string[] = [];
   const filesOverwritten: string[] = [];
@@ -550,7 +533,13 @@ async function ensureWebChannel(
   filesSkipped.push(...packageManagerConfiguration.filesSkipped);
 
   if (!options.skipDependencyMutation) {
-    for (const [relPath, content] of Object.entries(WEB_APP_TEMPLATE_FILES)) {
+    const templateFiles = {
+      ...WEB_APP_TEMPLATE_FILES,
+      ...(options.webAuthentication === "sign-in-with-vercel"
+        ? WEB_APP_SIGN_IN_WITH_VERCEL_TEMPLATE_FILES
+        : {}),
+    };
+    for (const [relPath, content] of Object.entries(templateFiles)) {
       const filePath = join(options.projectRoot, relPath);
       if (relPath === WEB_CHANNEL_PATH && !options.force && (await pathExists(filePath))) {
         filesSkipped.push(filePath);

@@ -22,7 +22,7 @@ describe("renderTelegramInputRequest", () => {
         kind: "question",
         options: [
           { id: "approve", label: "Approve" },
-          { id: "deny", label: "Deny" },
+          { id: "cancel", label: "Cancel" },
         ],
         prompt: "Approve?",
         requestId: "very-long-request-id-that-would-not-fit-comfortably-in-callback-data",
@@ -34,7 +34,7 @@ describe("renderTelegramInputRequest", () => {
       inline_keyboard: [
         [
           { callback_data: "eve:0", text: "Approve" },
-          { callback_data: "eve:1", text: "Deny" },
+          { callback_data: "eve:1", text: "Cancel" },
         ],
       ],
     });

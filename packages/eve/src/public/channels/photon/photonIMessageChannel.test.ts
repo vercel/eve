@@ -34,7 +34,7 @@ describe("photonIMessageChannel", () => {
     vi.clearAllMocks();
   });
 
-  it("cancels the active eve turn before steering a direct message into its thread", async () => {
+  it("inherits the shared steering default for a direct message", async () => {
     photonIMessageChannel({
       credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
     });
@@ -53,7 +53,7 @@ describe("photonIMessageChannel", () => {
 
     expect(send).toHaveBeenCalledWith(
       { context: [], message: "Steer this response" },
-      { auth: null, thread, turnPolicy: "experimental-steer" },
+      { auth: null, thread },
     );
   });
 
@@ -99,7 +99,7 @@ describe("photonIMessageChannel", () => {
 
     expect(send).toHaveBeenCalledWith(
       { context: [], message: "Hello group" },
-      { auth: null, thread, turnPolicy: "experimental-steer" },
+      { auth: null, thread },
     );
   });
 });

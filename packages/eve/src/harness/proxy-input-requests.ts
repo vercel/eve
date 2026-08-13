@@ -12,8 +12,15 @@ const PROXY_INPUT_REQUEST_KINDS = {
 
 /** Routing and control metadata for one descendant-owned input request. */
 export interface ProxyInputRequest {
+  /** Batch semantics are optional so sessions written before this field remain routable. */
+  readonly batch?: ProxyInputRequestBatch;
   readonly childContinuationToken: string;
   readonly kind: InputRequestKind;
+}
+
+export interface ProxyInputRequestBatch {
+  readonly approvalRequestIds: readonly string[];
+  readonly requestIds: readonly string[];
 }
 
 /** `requestId → route` map stored on the parent session. */
@@ -41,22 +48,16 @@ export function hasProxyInputRequests(state: SessionStateMap | undefined): boole
 }
 
 /**
- * Replaces prior entries for `forChildContinuationToken` with the
- * provided ones. A child raising a fresh batch overwrites its prior
- * batch — the parent never keeps stale request metadata.
+ * Merges the provided routes into the parent session by request ID. Existing
+ * routes with different IDs stay independently answerable; re-recording the
+ * same request ID replaces only that route, making durable retries idempotent.
  */
 export function upsertProxyInputRequests(input: {
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
   readonly forChildContinuationToken: string;
   readonly session: HarnessSession;
 }): HarnessSession {
-  const next: Record<string, ProxyInputRequest> = {};
-
-  for (const [requestId, route] of Object.entries(readMap(input.session.state))) {
-    if (route.childContinuationToken !== input.forChildContinuationToken) {
-      next[requestId] = route;
-    }
-  }
+  const next = { ...readMap(input.session.state) };
 
   for (const [requestId, route] of input.entries) {
     next[requestId] = route;
@@ -92,6 +93,25 @@ export function clearProxyInputRequestsForChild(
   return writeMap(session, next);
 }
 
+/** Removes only the request IDs whose responses were successfully forwarded. */
+export function retireProxyInputRequests<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  requestIds: readonly string[],
+): T {
+  const current = readMap(session.state);
+  const next = { ...current };
+  let changed = false;
+
+  for (const requestId of requestIds) {
+    if (Object.hasOwn(next, requestId)) {
+      delete next[requestId];
+      changed = true;
+    }
+  }
+
+  return changed ? writeMap(session, next) : session;
+}
+
 /**
  * Removes every proxy entry. Called when a cancelled turn orphans its
  * descendants so stale HITL responses no longer route to them.
@@ -110,11 +130,19 @@ export function clearAllProxyInputRequests(session: HarnessSession): HarnessSess
 export function toProxyInputRequestEntries(
   payload: SubagentInputRequestHookPayload,
 ): readonly (readonly [requestId: string, route: ProxyInputRequest])[] {
+  const batch: ProxyInputRequestBatch = {
+    approvalRequestIds: payload.event.requests.flatMap((request) =>
+      request.kind === "tool-approval" ? [request.requestId] : [],
+    ),
+    requestIds: payload.event.requests.map((request) => request.requestId),
+  };
+
   return payload.event.requests.map(
     (request) =>
       [
         request.requestId,
         {
+          batch,
           childContinuationToken: payload.childContinuationToken,
           kind: request.kind,
         },
@@ -131,7 +159,7 @@ function readMap(state: SessionStateMap | undefined): ProxyInputRequestMap {
 
   const result: Record<string, ProxyInputRequest> = {};
   for (const [key, value] of Object.entries(raw)) {
-    const request = parseProxyInputRequest(value);
+    const request = parseProxyInputRequest(value, key);
     if (request !== undefined) {
       result[key] = request;
     }
@@ -139,10 +167,10 @@ function readMap(state: SessionStateMap | undefined): ProxyInputRequestMap {
   return result;
 }
 
-function writeMap(
-  session: HarnessSession,
+function writeMap<T extends { readonly state?: SessionStateMap }>(
+  session: T,
   entries: Record<string, ProxyInputRequest>,
-): HarnessSession {
+): T {
   const state = { ...session.state };
 
   if (Object.keys(entries).length === 0) {
@@ -157,7 +185,7 @@ function writeMap(
   return { ...session, state };
 }
 
-function parseProxyInputRequest(value: unknown): ProxyInputRequest | undefined {
+function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRequest | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
@@ -167,10 +195,41 @@ function parseProxyInputRequest(value: unknown): ProxyInputRequest | undefined {
   if (typeof value.childContinuationToken !== "string" || !isInputRequestKind(value.kind)) {
     return undefined;
   }
-  return {
+  const request = {
     childContinuationToken: value.childContinuationToken,
     kind: value.kind,
   };
+  const batch = "batch" in value ? parseProxyInputRequestBatch(value.batch) : undefined;
+  return batch === undefined || !batch.requestIds.includes(requestId)
+    ? request
+    : { ...request, batch };
+}
+
+function parseProxyInputRequestBatch(value: unknown): ProxyInputRequestBatch | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  if (!("approvalRequestIds" in value) || !("requestIds" in value)) {
+    return undefined;
+  }
+  if (!isStringArray(value.approvalRequestIds) || !isStringArray(value.requestIds)) {
+    return undefined;
+  }
+  const requestIds = new Set(value.requestIds);
+  if (
+    requestIds.size !== value.requestIds.length ||
+    value.approvalRequestIds.some((requestId) => !requestIds.has(requestId))
+  ) {
+    return undefined;
+  }
+  return {
+    approvalRequestIds: value.approvalRequestIds,
+    requestIds: value.requestIds,
+  };
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 function isInputRequestKind(value: unknown): value is InputRequestKind {

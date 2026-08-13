@@ -409,6 +409,19 @@ describe("ClientSession", () => {
     });
   });
 
+  it("serializes turnPolicy with a fixed-session message", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
+    const session = createSession();
+
+    await session.send("Wait your turn", { turnPolicy: "queue" });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      message: "Wait your turn",
+      turnPolicy: "queue",
+    });
+  });
+
   it("serializes clientContext when continuing a session", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession({

@@ -13,11 +13,14 @@ export interface TemplateFile {
 
 export interface TemplateEntry {
   category: TemplateCategory;
+  demoHref?: string;
   description: string;
   files: TemplateFile[];
   integrations: TemplateIntegration[];
   model: string;
   readme: string;
+  githubOwner: string;
+  githubRepo: string;
   slug: string;
   source: TemplateSource;
   sourceHref: string;
@@ -95,6 +98,8 @@ export const composeTemplateEntries = (
     return {
       ...curated,
       files,
+      githubOwner: entry.github.owner,
+      githubRepo: entry.github.repo,
       readme: data.readme,
       sourceRevision: data.sourceRevision,
       sourceRevisionHref,

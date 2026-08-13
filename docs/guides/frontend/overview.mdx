@@ -14,7 +14,15 @@ A browser UI is a client of the agent's HTTP routes (the [eve channel](../../cha
 
 The per-framework pages below walk through the wiring step by step: [Next.js](./nextjs), [Nuxt](./nuxt), and [SvelteKit](./sveltekit).
 
-For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [TypeScript SDK](../client/overview) directly.
+For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [Client SDK](../client/overview) directly.
+
+## Authenticate browser requests
+
+A same-origin framework integration sends your application cookies with every eve request. For bearer tokens or another non-cookie scheme, pass `auth` or `headers` to `useEveAgent`.
+
+The default eve channel fails closed. Without an authored `agent/channels/eve.ts`, production browser traffic receives `401` from the default `[vercelOidc(), localDev(), placeholderAuth()]` policy. Add the channel file with an `AuthFn` that verifies your application session or token.
+
+For a public demo, use `none()` from `eve/channels/auth` to admit anonymous requests explicitly. Do not use `none()` for an agent that handles private or production data. See [Authentication](../auth-and-route-protection) for application-session examples, token verifiers, and the default policy.
 
 ## Basic chat (React)
 
@@ -75,7 +83,9 @@ export function Chat() {
 
 Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
 
-`data.messages` are `EveMessage[]` following the AI SDK `UIMessage` convention, so they drop straight into any AI SDK UI primitive that accepts a `UIMessage[]`. Parts include user text, user file attachments, assistant text, reasoning, tool calls, tool results, input requests, and connection authorization prompts.
+`data.messages` are eve-owned `EveMessage[]`. Common text, reasoning, file, and dynamic-tool parts follow the [AI SDK `UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) rendering convention, but the types are not interchangeable. eve also exposes authorization and HITL metadata, and a file part's URL can be absent. Adapt those parts before passing messages to an API typed as `UIMessage[]`.
+
+When the root agent delegates, its stream emits `subagent.called` with the child's `childSessionId`, then `subagent.completed` when the child returns. Detailed child progress lives on the child session's stream instead of being flattened into the root `data.messages`. Use the lower-level [TypeScript client](../client/overview#sessions) to attach to that ID when your UI needs live subagent activity. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
 
 ## Sending and streaming
 
@@ -111,20 +121,41 @@ received attachment as a `file` part on the user message. The part includes `med
 
 ## Human-in-the-loop prompts
 
-Tools opt into approval with `approval`, and the model can also ask a question with `ask_question` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `respond()`:
+Tools opt into approval with `approval`, and the model can also ask a question with `ask_question` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part at `part.toolMetadata?.eve?.inputRequest`. Scan every message because an unrelated turn can add newer messages while an approval stays open, then answer through the same session with `respond()`:
 
 ```tsx
-const request = agent.data.messages
-  .at(-1)
-  ?.parts.find((part) => part.type === "dynamic-tool" && part.toolMetadata?.eve?.inputRequest)
-  ?.toolMetadata?.eve?.inputRequest;
+const pendingRequests = agent.data.messages
+  .flatMap((message) => message.parts)
+  .flatMap((part) => {
+    if (part.type !== "dynamic-tool" || part.state !== "approval-requested") return [];
+    const request = part.toolMetadata?.eve?.inputRequest;
+    return request ? [request] : [];
+  });
 
-if (request) {
-  await agent.respond([{ requestId: request.requestId, optionId: "approve" }]);
-}
+return pendingRequests.map((request) => (
+  <fieldset key={request.requestId}>
+    <legend>
+      {request.kind === "tool-approval"
+        ? "Approval required"
+        : request.kind === "question"
+          ? "Question"
+          : "Session limit"}
+    </legend>
+    <p>{request.prompt}</p>
+    {request.options?.map((option) => (
+      <button
+        key={option.id}
+        onClick={() => void agent.respond([{ requestId: request.requestId, optionId: option.id }])}
+        type="button"
+      >
+        {option.label}
+      </button>
+    ))}
+  </fieldset>
+));
 ```
 
-`request.prompt` and `request.options` give you what you need to render the approve and deny UI. The default reducer marks the part as responded immediately, then updates it again once eve streams the resumed result.
+For a question with `allowFreeform`, render a text input and send `{ requestId, text }`. The default reducer marks each matching part as responded immediately. Approved tools update again when eve streams their result.
 
 ## Authorization prompts
 
@@ -181,11 +212,12 @@ const agent = useEveAgent({
 
 ## Lifecycle callbacks
 
-On top of `onSessionChange`, the hook takes a few per-turn callbacks:
+The hook accepts these lifecycle callbacks:
 
 - `onEvent(event)`: fires for each eve stream event as it arrives.
 - `onError(error)`: fires with the last `Error` when a turn fails.
 - `onFinish(snapshot)`: fires with the final `{ data, status, session, ... }` snapshot once a turn settles.
+- `onSessionChange(session)`: fires when the session cursor advances. Persist it to resume across reloads.
 
 ```tsx
 const agent = useEveAgent({
@@ -297,5 +329,5 @@ const support = useEveAgent({ agent: "support" });
 
 - [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the event stream and session cursor
 - [Channels](../../channels/overview): the HTTP routes the hook talks to
-- [TypeScript SDK](../client/overview): the lower-level client underneath the frontend hooks
+- [Client SDK](../client/overview): the lower-level client underneath the frontend hooks
 - [Next.js](./nextjs): step-by-step setup for wiring eve into a Next.js app

@@ -179,9 +179,17 @@ export function createSlackFetchFile(input: {
     if (!response.ok) {
       throw new Error(`Slack file fetch returned HTTP ${response.status} for ${url}.`);
     }
+    const mediaType = response.headers.get("content-type") ?? undefined;
+    const normalizedMediaType = mediaType?.split(";", 1)[0]?.trim().toLowerCase();
+    if (normalizedMediaType === "text/html") {
+      throw new Error(
+        `Slack file fetch returned an HTML sign-in page instead of file bytes for ${url}. ` +
+          "The bot token may be missing the files:read scope. Add the scope, reinstall the Slack app, and retry.",
+      );
+    }
     return {
       bytes: Buffer.from(await response.arrayBuffer()),
-      mediaType: response.headers.get("content-type") ?? undefined,
+      mediaType,
     };
   };
 }

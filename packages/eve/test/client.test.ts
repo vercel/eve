@@ -235,6 +235,7 @@ describe("Client.info", () => {
         appRoot: "/tmp/weather-agent",
         model: {
           id: "gpt-5",
+          routing: { kind: "gateway", target: "openai" },
         },
         name: "Weather Agent",
       },

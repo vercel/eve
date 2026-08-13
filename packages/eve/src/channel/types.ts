@@ -1,6 +1,6 @@
 import type { UserContent } from "ai";
 
-import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
@@ -85,6 +85,20 @@ export interface SessionTraceContext {
   readonly traceId: string;
 }
 
+/** Framework-owned identity for one inbound channel operation. */
+export interface ChannelDeliveryMetadata {
+  readonly channelKind: string;
+  readonly channelName: string;
+  readonly deliveryId: string;
+  readonly requestId?: string;
+  readonly requestTraceContext?: SessionTraceContext;
+}
+
+/** Associates delivery metadata with one payload in a durable envelope. */
+export interface ChannelDeliveryMetadataEntry extends ChannelDeliveryMetadata {
+  readonly payloadIndex: number;
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -146,6 +160,12 @@ export interface DeliverPayload {
   readonly [key: string]: unknown;
 }
 
+/** Controls how a channel message interacts with an active turn. */
+export type TurnPolicy = "steer" | "queue";
+
+/** Default policy for message sends produced by current channel surfaces. */
+export const DEFAULT_TURN_POLICY: TurnPolicy = "steer";
+
 /** One command accepted by a durable session inbox. */
 export type SessionCommand =
   | {
@@ -153,7 +173,9 @@ export type SessionCommand =
       readonly caller?: TurnCaller;
       readonly kind: "send";
       readonly payload: DeliverPayload;
+      readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
+      readonly turnPolicy?: TurnPolicy;
     }
   | { readonly kind: "cancel"; readonly turnId?: string }
   | { readonly kind: "compact" }
@@ -204,10 +226,13 @@ export interface DeliverHookPayload {
   readonly auth?: SessionAuthContext | null;
   /** Delegated caller waiting for this turn's settled result. */
   readonly caller?: TurnCaller;
+  /** Additive durable metadata. Absent on envelopes written by older deployments. */
+  readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
   /** Inbound channel request id used only for workflow attributes. */
   readonly requestId?: string;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
+  readonly turnPolicy?: TurnPolicy;
 }
 
 /** Internal deadline signal sent through the stable session command inbox. */
@@ -266,10 +291,16 @@ export interface SubagentInputRequestHookPayload {
   readonly subagentName: string;
 }
 
-/** Authorization lifecycle event forwarded from a delegated child. */
+/** Responder-specific lifecycle event forwarded from a delegated child. */
 export type SubagentAuthorizationEvent = Extract<
   UnstampedMessageStreamEvent,
-  { type: "authorization.required" | "authorization.completed" }
+  {
+    type:
+      | "approval.candidate"
+      | "approval.settled"
+      | "authorization.required"
+      | "authorization.completed";
+  }
 >;
 
 /**
@@ -362,6 +393,8 @@ export interface RunInput {
    */
   readonly channelName?: string;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  /** Inbound channel operation that created this session. */
+  readonly delivery?: ChannelDeliveryMetadata;
   /**
    * Authenticated caller principal for this session. `null` means the
    * request was accepted with no credentials.

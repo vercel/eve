@@ -1,5 +1,5 @@
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { RouteHandler } from "#channel/routes.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -210,6 +210,8 @@ export interface TwilioChannelConfig {
    * mounts `/messages`, `/voice`, and `/voice/transcription` below it.
    */
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
   /**
    * Public URL Twilio used for signing. Set this when proxies or local
    * tunnels make `request.url` differ from the configured webhook URL.
@@ -296,6 +298,7 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
     TwilioInstrumentationMetadata
   >({
     kindHint: "twilio",
+    turnPolicy: config.turnPolicy,
     state: {
       from: null as string | null,
       to: null as string | null,

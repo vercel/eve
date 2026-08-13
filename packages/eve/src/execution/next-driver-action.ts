@@ -36,6 +36,7 @@ export type NextDriverAction =
       readonly kind: "park";
       readonly sessionState: DurableSessionState;
       readonly serializedContext: Record<string, unknown>;
+      readonly authorizationAttemptIds?: readonly string[];
       readonly authorizationNames?: readonly string[];
       /**
        * Set when the parked turn was cancelled: the driver runs

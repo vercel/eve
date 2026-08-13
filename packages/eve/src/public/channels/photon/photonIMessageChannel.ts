@@ -1,4 +1,4 @@
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { vercelOidc } from "#public/channels/auth.js";
 import {
   chatSdkChannel,
@@ -47,6 +47,8 @@ export interface PhotonIMessageChannelConfig {
   ) => PhotonInboundResultOrPromise;
   /** Override the default webhook route (`/eve/v1/photon`). */
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
   readonly userName?: string;
   /** Photon webhook signing secret. Falls back to `IMESSAGE_WEBHOOK_SECRET`. */
@@ -88,6 +90,7 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
     routes: { imessage: config.route ?? "/eve/v1/photon" },
     state: createMemoryState(),
     streaming: false,
+    turnPolicy: config.turnPolicy,
     userName: config.userName ?? "eve",
   });
   const onMessage = config.onMessage ?? defaultOnMessage;
@@ -122,7 +125,7 @@ async function dispatchMessage(
       context: [...(result.context ?? [])],
       message: content,
     },
-    { auth: result.auth, thread, turnPolicy: "experimental-steer" },
+    { auth: result.auth, thread },
   );
 }
 

@@ -1,7 +1,11 @@
 import type { LanguageModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import type { RuntimeIdentity, MessageStreamEvent } from "#protocol/message.js";
+import type {
+  RuntimeIdentity,
+  RuntimeTraceContext,
+  MessageStreamEvent,
+} from "#protocol/message.js";
 import type {
   CancelSessionResult,
   ClientSessionState,
@@ -91,6 +95,14 @@ export interface EveEvalSessionResult {
   readonly primary: boolean;
   readonly sessionId?: string;
   readonly state: ClientSessionState | undefined;
+  /** Distinct trace contexts observed for this session, in stream order. */
+  readonly traceContexts: readonly RuntimeTraceContext[];
+}
+
+/** Trace context attributed to one session involved in an eval. */
+export interface EveEvalTraceContext extends RuntimeTraceContext {
+  readonly primary: boolean;
+  readonly sessionId: string;
 }
 
 /**
@@ -124,6 +136,8 @@ export interface EveEvalTaskResult {
    * Present when the eve server populates the event with its runtime metadata.
    */
   readonly runtimeIdentity?: RuntimeIdentity;
+  /** Distinct trace contexts observed across every captured session. */
+  readonly traceContexts: readonly EveEvalTraceContext[];
 }
 
 // ---------------------------------------------------------------------------

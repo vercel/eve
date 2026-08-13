@@ -340,6 +340,17 @@ export function createRuntimeActionRequestFromToolCall(input: {
 }): RuntimeActionRequest {
   const definition = input.tools.get(input.toolCall.toolName);
 
+  if (definition?.frameworkAction === "load-skill") {
+    return {
+      callId: input.toolCall.toolCallId,
+      input: resolveToolCallInputObject(input.toolCall.input, {
+        callId: input.toolCall.toolCallId,
+        toolName: input.toolCall.toolName,
+      }),
+      kind: "load-skill",
+    };
+  }
+
   if (definition?.runtimeAction?.kind === "subagent-call") {
     return {
       callId: input.toolCall.toolCallId,

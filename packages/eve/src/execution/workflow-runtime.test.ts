@@ -275,6 +275,16 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
 describe("createWorkflowRuntime#createSession", () => {
   const adapter: ChannelAdapter = { kind: "http" };
 
+  function createTestTurnAgent() {
+    return {
+      id: "test-agent",
+      instructions: [],
+      model: { id: "openai/gpt-5.5" },
+      tools: [],
+      workspaceSpec: { rootEntries: [] },
+    } as const;
+  }
+
   function buildRuntime(compiledArtifactsSource: RuntimeCompiledArtifactsSource) {
     return createWorkflowRuntime({ compiledArtifactsSource });
   }
@@ -290,6 +300,7 @@ describe("createWorkflowRuntime#createSession", () => {
           limits: sessionTimeoutMs === undefined ? undefined : { sessionTimeoutMs },
         },
       },
+      turnAgent: createTestTurnAgent(),
     } as never);
     getHookByTokenMock.mockResolvedValue({ runId: "driver-run" });
     getRunMock.mockReturnValue({
@@ -453,6 +464,7 @@ describe("createWorkflowRuntime#createSession", () => {
       compiledArtifactsSource,
       nodeId: "researcher",
       resolvedAgent: { config: {} },
+      turnAgent: createTestTurnAgent(),
     } as never);
     startMock.mockResolvedValue({ runId: "subagent-run" });
     getHookByTokenMock.mockResolvedValue({ runId: "subagent-run" });
@@ -562,6 +574,7 @@ describe("createWorkflowRuntime#createSession", () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       compiledArtifactsSource,
       resolvedAgent: { config: {} },
+      turnAgent: createTestTurnAgent(),
     } as never);
     const bytes = new TextEncoder().encode('{"type":"test.event"}\n');
     const getReadable = vi.fn(

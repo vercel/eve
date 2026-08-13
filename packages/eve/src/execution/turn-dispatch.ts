@@ -1,8 +1,8 @@
 import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#channel/types.js";
+import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
-import { dispatchTurnStep } from "#execution/workflow-steps.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import type { RunMode } from "#shared/run-mode.js";
 

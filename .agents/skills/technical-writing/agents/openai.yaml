@@ -1,0 +1,4 @@
+interface:
+  display_name: "Technical writing"
+  short_description: "Write accurate, clear, task-focused eve docs"
+  default_prompt: "Use $technical-writing to write or improve eve documentation, verify every technical claim, and keep the prose direct and natural."

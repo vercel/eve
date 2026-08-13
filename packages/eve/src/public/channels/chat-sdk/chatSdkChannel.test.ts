@@ -220,7 +220,7 @@ describe("chatSdkChannel", () => {
     });
   });
 
-  it("cancels the active turn before an experimental steering send", async () => {
+  it("carries a steering send on the shared delivery", async () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
@@ -232,7 +232,7 @@ describe("chatSdkChannel", () => {
       await bridge.send(message.text, {
         auth: AUTH,
         thread,
-        turnPolicy: "experimental-steer",
+        turnPolicy: "steer",
       });
     });
 
@@ -241,7 +241,7 @@ describe("chatSdkChannel", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(cancel).toHaveBeenCalledWith({ continuationToken: THREAD_ID });
+    expect(cancel).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith(THREAD_ID, {
       auth: AUTH,
       message: "@bot correction",
@@ -251,11 +251,11 @@ describe("chatSdkChannel", () => {
           id: THREAD_ID,
         }),
       },
+      turnPolicy: "steer",
     });
-    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]!);
   });
 
-  it("does not cancel for an experimental steering response without a message", async () => {
+  it("does not cancel for a steering response without a message", async () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
@@ -266,7 +266,7 @@ describe("chatSdkChannel", () => {
     bridge.bot.onNewMention(async (thread: Thread) => {
       await bridge.send(
         { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
-        { thread, turnPolicy: "experimental-steer" },
+        { thread, turnPolicy: "steer" },
       );
     });
 
@@ -552,7 +552,7 @@ describe("chatSdkChannel", () => {
             display: "confirmation",
             options: [
               { id: "approve", label: "Approve", style: "primary" },
-              { id: "deny", label: "Deny", style: "danger" },
+              { id: "cancel", label: "Cancel", style: "danger" },
             ],
             prompt: "Deploy?",
             requestId: "request-1",
@@ -579,11 +579,11 @@ describe("chatSdkChannel", () => {
               value: "approve",
             },
             {
-              id: "eve_input:request-1:deny",
-              label: "Deny",
+              id: "eve_input:request-1:cancel",
+              label: "Cancel",
               style: "danger",
               type: "button",
-              value: "deny",
+              value: "cancel",
             },
           ],
           type: "actions",

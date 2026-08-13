@@ -16,6 +16,17 @@ const target = createEvalTargetHandle({
   url: "https://eve.test",
 });
 
+const TRACE_A = {
+  spanId: "0123456789abcdef",
+  traceFlags: 1,
+  traceId: "0123456789abcdef0123456789abcdef",
+};
+const TRACE_B = {
+  spanId: "fedcba9876543210",
+  traceFlags: 1,
+  traceId: "fedcba9876543210fedcba9876543210",
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -99,7 +110,7 @@ describe("executeTask", () => {
         const request = t.requireInputRequest({
           display: "confirmation",
           input: { command: "pwd" },
-          optionIds: ["approve", "deny"],
+          optionIds: ["approve", "cancel"],
           prompt: /Approve/,
           toolName: "bash",
         });
@@ -121,6 +132,48 @@ describe("executeTask", () => {
       {
         inputResponses: [{ optionId: "approve", requestId: "approval_1" }],
       },
+    ]);
+  });
+
+  it("collects every session trace and reports the first one live", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [turnStarted("turn_1", TRACE_A), turnCompleted("turn_1"), sessionWaiting()],
+      },
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_2", TRACE_B),
+          messageCompleted("done", "turn_2"),
+          turnCompleted("turn_2"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+    const onSessionStart = vi.fn();
+
+    const { result } = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("first");
+        await t.send("second");
+      }, "trace-contexts"),
+      onSessionStart,
+    });
+
+    expect(onSessionStart).toHaveBeenCalledExactlyOnceWith({
+      primary: true,
+      sessionId: "session_1",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      traceContext: TRACE_A,
+    });
+    expect(result.sessions?.[0]?.traceContexts).toEqual([TRACE_A, TRACE_B]);
+    expect(result.traceContexts).toEqual([
+      { ...TRACE_A, primary: true, sessionId: "session_1" },
+      { ...TRACE_B, primary: true, sessionId: "session_1" },
     ]);
   });
 
@@ -426,6 +479,7 @@ describe("executeTask", () => {
     expect(server.cancels).toEqual(["parent-session"]);
     expect(server.posts[1]?.body).toEqual({
       message: "continue child",
+      turnPolicy: "queue",
     });
     expect(outcome.result.sessions?.map((session) => session.sessionId)).toEqual([
       "parent-session",
@@ -548,6 +602,7 @@ describe("executeTask", () => {
     expect(new URL(server.posts[0]!.url).pathname).toBe("/eve/v1/session/channel-session");
     expect(server.posts[0]?.body).toEqual({
       message: "continue please",
+      turnPolicy: "queue",
     });
     expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
   });
@@ -697,8 +752,11 @@ function streamResponse(events: readonly UnstampedMessageStreamEvent[]): Respons
   );
 }
 
-function turnStarted(turnId: string): UnstampedMessageStreamEvent {
-  return { data: { sequence: 0, turnId }, type: "turn.started" };
+function turnStarted(
+  turnId: string,
+  trace?: { readonly spanId: string; readonly traceFlags: number; readonly traceId: string },
+): UnstampedMessageStreamEvent {
+  return { data: { sequence: 0, trace, turnId }, type: "turn.started" };
 }
 
 function turnCompleted(turnId: string): UnstampedMessageStreamEvent {
@@ -738,7 +796,7 @@ function inputRequested(
           kind: "tool-approval",
           options: [
             { id: "approve", label: "Approve" },
-            { id: "deny", label: "Deny" },
+            { id: "cancel", label: "Cancel" },
           ],
           prompt: "Approve?",
           requestId,

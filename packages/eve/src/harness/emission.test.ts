@@ -2,6 +2,7 @@ import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  emitTurnPreamble,
   emitStreamContent,
   getHarnessEmissionState,
   type HarnessEmissionState,
@@ -123,6 +124,32 @@ describe("setHarnessEmissionState", () => {
     const retrieved = getHarnessEmissionState(session.state);
 
     expect(retrieved).toEqual(state);
+  });
+});
+
+describe("emitTurnPreamble", () => {
+  it("attaches one trace context to the session and turn start events", async () => {
+    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
+    const trace = {
+      spanId: "0123456789abcdef",
+      traceFlags: 1,
+      traceId: "0123456789abcdef0123456789abcdef",
+    };
+
+    await emitTurnPreamble(
+      async (event) => {
+        events.push(event);
+      },
+      { message: "hello" },
+      { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
+      undefined,
+      trace,
+    );
+
+    expect(events.slice(0, 2)).toEqual([
+      { data: { trace }, type: "session.started" },
+      { data: { sequence: 0, trace, turnId: "turn_0" }, type: "turn.started" },
+    ]);
   });
 });
 

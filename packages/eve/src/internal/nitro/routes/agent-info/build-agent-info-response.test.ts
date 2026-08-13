@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFrameworkToolInfo } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
+import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import {
+  buildAgentInfoResponse,
+  buildFrameworkToolInfo,
+} from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
+import { resolveAgent } from "#runtime/resolve-agent.js";
 
 describe("buildFrameworkToolInfo", () => {
   it("reports the built-in agent action as active and available by default", () => {
@@ -54,6 +59,37 @@ describe("buildFrameworkToolInfo", () => {
     expect(info.framework.find((tool) => tool.name === "agent")).toMatchObject({
       replacedByAuthoredTool: true,
       status: "replaced",
+    });
+  });
+});
+
+describe("buildAgentInfoResponse", () => {
+  it("preserves direct-provider routing from the compiled manifest", async () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        compaction: {},
+        model: {
+          id: "openai/gpt-5",
+          routing: { kind: "external", provider: "openai" },
+        },
+        name: "direct-model-agent",
+      },
+    });
+    const agent = await resolveAgent({
+      manifest,
+      moduleMap: { nodes: { __root__: { modules: {} } } },
+    });
+
+    const response = buildAgentInfoResponse(
+      { agent, manifest, schedules: [] },
+      { mode: "development" },
+    );
+
+    expect(response.agent.model).toMatchObject({
+      id: "openai/gpt-5",
+      routing: { kind: "external", provider: "openai" },
     });
   });
 });

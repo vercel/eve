@@ -1,5 +1,18 @@
 const SAFE_ABSOLUTE_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
 
+interface MarkdownNode {
+  type?: unknown;
+  url?: unknown;
+  children?: unknown;
+}
+
+export const createResolveReadmeLinksPlugin =
+  (sourceRevisionHref: string) =>
+  () =>
+  (tree: unknown): void => {
+    resolveMarkdownLinks(tree, sourceRevisionHref);
+  };
+
 export const resolveReadmeHref = (
   href: string | undefined,
   sourceRevisionHref: string,
@@ -70,6 +83,22 @@ const getGitHubBases = (
     directory: url.toString(),
     repository: new URL(`/${owner}/${repo}/tree/${revision}`, url.origin).toString(),
   };
+};
+
+const resolveMarkdownLinks = (value: unknown, sourceRevisionHref: string): void => {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const node = value as MarkdownNode;
+  if (node.type === "link" && typeof node.url === "string") {
+    node.url = resolveReadmeHref(node.url, sourceRevisionHref);
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      resolveMarkdownLinks(child, sourceRevisionHref);
+    }
+  }
 };
 
 const stripAsciiControlCharacters = (value: string): string => {

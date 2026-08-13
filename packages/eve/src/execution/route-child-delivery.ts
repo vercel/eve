@@ -1,7 +1,9 @@
-import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
-import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { routeProxiedDeliverStep, type RoutedDeliverResult } from "#execution/workflow-steps.js";
+import {
+  routeProxiedDeliverStep,
+  type RoutedDeliverResult,
+} from "#execution/route-proxied-deliver-step.js";
 
 /**
  * Coalesces inbound deliver payloads and routes any descendant-bound input
@@ -14,20 +16,17 @@ import { routeProxiedDeliverStep, type RoutedDeliverResult } from "#execution/wo
  * re-export plain helpers into a workflow body).
  */
 export async function routeDeliverToChildren(input: {
-  readonly auth?: SessionAuthContext | null;
+  readonly delivery: DeliverHookPayload;
   readonly parentWritable: WritableStream<Uint8Array>;
-  readonly payloads: readonly DeliverPayload[];
   readonly sessionState: DurableSessionState;
 }): Promise<RoutedDeliverResult> {
-  const payload = coalesceDeliverPayloads(input.payloads);
   if (!input.sessionState.hasProxyInputRequests) {
-    return { kind: "continue", remainder: payload };
+    return { kind: "continue", remainder: input.delivery, sessionState: input.sessionState };
   }
 
   return await routeProxiedDeliverStep({
-    auth: input.auth,
+    delivery: input.delivery,
     parentWritable: input.parentWritable,
-    payload,
     sessionState: input.sessionState,
   });
 }

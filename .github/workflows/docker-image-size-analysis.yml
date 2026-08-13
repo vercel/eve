@@ -81,6 +81,17 @@ jobs:
           size_bytes="$(docker image inspect eve-docker-size:current --format '{{.Size}}')"
           echo "size_bytes=$size_bytes" >> "$GITHUB_OUTPUT"
 
+      - name: Verify sandbox user workspace and sudo permissions
+        run: |
+          docker run --rm eve-docker-size:current bash -lc '
+            set -euo pipefail
+            test "$(id -un)" = vercel-sandbox
+            test "$(stat -c %U /workspace)" = vercel-sandbox
+            git init --quiet /workspace
+            git -C /workspace remote add origin https://github.com/vercel/eve.git
+            sudo -n true
+          '
+
       - name: Generate Docker image size report
         env:
           BASELINE_LABEL: ${{ steps.baseline.outputs.label }}
