@@ -4,14 +4,14 @@ import { isAbsolute, resolve } from "node:path";
 import { addImports, defineNuxtModule, extendRouteRules } from "@nuxt/kit";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
-
-import { EVE_BASE_URL_ENV, resolveSharedEveDevServer } from "./dev-server.js";
-import { joinRoutePrefix, normalizeOrigin, resolveProductionTarget } from "./routing.js";
 import {
   ensureEveVercelServicesConfig,
   mergeEveVercelConfig,
-  type NitroVercelBuildConfig,
-} from "./vercel-services.js";
+  type VercelBuildConfig,
+} from "#shared/vercel-services.js";
+
+import { EVE_BASE_URL_ENV, resolveSharedEveDevServer } from "./dev-server.js";
+import { joinRoutePrefix, normalizeOrigin, resolveProductionTarget } from "./routing.js";
 
 /**
  * Options for the eve Nuxt module.
@@ -47,7 +47,7 @@ function resolveApplicationRoot(nuxtRoot: string, appPath: string | undefined): 
  */
 interface NitroVercelConfigHost {
   vercel?: {
-    config?: NitroVercelBuildConfig;
+    config?: VercelBuildConfig;
     [key: string]: unknown;
   };
 }
@@ -117,7 +117,8 @@ export default defineNuxtModule<EveNuxtModuleOptions>({
       const configured = await ensureEveVercelServicesConfig({
         appRoot,
         eveBuildCommand: options.eveBuildCommand,
-        nuxtRoot,
+        frameworkName: "Nuxt",
+        hostRoot: nuxtRoot,
       });
 
       if (configured.mode === "generated") {
