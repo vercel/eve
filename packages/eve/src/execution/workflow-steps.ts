@@ -323,6 +323,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ...derivePendingState(rekeyed),
       serializedContext: nextSerializedContext,
       sessionState: nextState,
+      tasksEnabled,
     };
   }
 
@@ -616,6 +617,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           isError: stepResult.settledTurn.isError,
           usage: delta,
         },
+        tasksEnabled,
       };
     }
 
@@ -625,6 +627,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ...sleepTransition,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
+      tasksEnabled,
     };
   }
 
