@@ -95,6 +95,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
   let offered: Promise<IteratorResult<SessionInboxPayload>> | null = null;
   let offeredRead: HookRead | undefined;
   let wake: (() => void) | undefined;
+
   const enqueue = (read: HookRead): void => {
     ready.push(read);
     ready.sort((left, right) => left.order - right.order);

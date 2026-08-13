@@ -369,6 +369,32 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startOptions.attributes["$eve.title"]).toBe("ship it");
   });
 
+  it("adds external invocation ownership to the workflow attributes", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      adapter,
+      auth: null,
+      externalInvocation: {
+        continuationToken: "invocation:token",
+        ownerKey: "owner-key",
+      },
+      input: { message: "hello" },
+      mode: "task",
+    });
+
+    const [, , startOptions] = startMock.mock.calls[0]!;
+    expect(startOptions.attributes).toEqual({
+      "$eve.invocation_owner": "owner-key",
+      "$eve.invocation_token": "invocation:token",
+      "$eve.title": "hello",
+      "$eve.trigger": "http",
+      "$eve.type": "session",
+    });
+  });
+
   it("passes the configured session timeout to the durable workflow", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource, 86_400_000);

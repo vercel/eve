@@ -47,8 +47,8 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
+import { buildInvocationAttributes } from "#internal/invocation/attributes.js";
 import { walkCauseChain } from "#shared/errors.js";
-import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
@@ -146,7 +146,7 @@ export function createWorkflowRuntime(config: {
       if (sessionTimeoutMs !== undefined) {
         workflowInput.sessionTimeoutMs = sessionTimeoutMs;
       }
-      const sessionAttributes =
+      const attributes =
         parentLineage.sessionId === undefined
           ? buildSessionAttributes({
               inputMessage: input.title ?? input.input.message,
@@ -160,12 +160,9 @@ export function createWorkflowRuntime(config: {
               rootSessionId: parentLineage.rootSessionId ?? parentLineage.sessionId,
               serializedContext,
             });
-      const attributes = {
-        ...sessionAttributes,
-        ...(input.externalInvocation === undefined
-          ? {}
-          : buildInvocationAttributes(input.externalInvocation)),
-      };
+      if (input.externalInvocation !== undefined) {
+        Object.assign(attributes, buildInvocationAttributes(input.externalInvocation));
+      }
 
       let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
       try {
