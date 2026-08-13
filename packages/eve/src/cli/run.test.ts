@@ -182,6 +182,64 @@ describe("CLI command registration", () => {
   });
 });
 
+describe("bare eve command", () => {
+  it("runs init in the current directory when no eve project is detected", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const isEveProject = vi.fn(async () => false);
+    runInitCommand.mockClear();
+
+    await runCli([], logger, { isEveProject });
+
+    expect(isEveProject).toHaveBeenCalledWith(resolve(process.cwd()));
+    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), undefined, {
+      channelWebNextjs: undefined,
+      model: undefined,
+      reasoning: undefined,
+    });
+  });
+
+  it("runs dev when an eve project is detected", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const isEveProject = vi.fn(async () => true);
+    const close = vi.fn(async () => {});
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close,
+    }));
+    const runDevelopmentTui = vi.fn(async () => {});
+    runInitCommand.mockClear();
+
+    await withInteractiveTerminal(() =>
+      runCli([], logger, { isEveProject, runDevelopmentTui, startHost }),
+    );
+
+    expect(isEveProject).toHaveBeenCalledWith(resolve(process.cwd()));
+    expect(startHost).toHaveBeenCalledWith(resolve(process.cwd()), {
+      existing: "attach-if-unconfigured",
+      host: undefined,
+      onBootProgress: expect.any(Function),
+      output: undefined,
+      port: undefined,
+    });
+    expect(runDevelopmentTui).toHaveBeenCalledOnce();
+    expect(runInitCommand).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("does not inspect the project when a command is explicit", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const isEveProject = vi.fn(async () => false);
+
+    await runCli(["init"], logger, { isEveProject });
+
+    expect(isEveProject).not.toHaveBeenCalled();
+  });
+});
+
 describe("eve init compatibility flags", () => {
   it("lists the supported init options", async () => {
     const output: string[] = [];

@@ -3,12 +3,13 @@ title: "CLI"
 description: "Reference for every eve CLI command: init, set, info, build, start, dev, logs, trace, link, deploy, eval, channels, and extension."
 ---
 
-The `eve` binary (`bin: eve`) runs from your app root, and every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve dev`.
+The `eve` binary (`bin: eve`) runs from your app root. Every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
 
 ## Commands
 
 | Command                       | Description                                                                                                                        |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `eve`                         | Initialize the current directory, or start development when it is already an eve project                                           |
 | `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                         |
 | `eve info`                    | Print the resolved application, including static instructions and discovered capabilities, routes, artifact paths, and diagnostics |
 | `eve build`                   | Compile `.eve/` artifacts and build the host output; prints the output directory                                                   |
