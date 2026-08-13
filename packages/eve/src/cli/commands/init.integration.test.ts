@@ -1047,7 +1047,7 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
-  it("hands a coding agent the setup guide when it omits the target", async () => {
+  it("scaffolds the current directory for a coding agent that omits the target", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-bare-"));
     const output = logger();
     const deps = dependencies();
@@ -1055,15 +1055,19 @@ describe("runInitCommand", () => {
 
     await runInitCommand(output, parentDirectory, undefined, {}, deps);
 
-    // A bare `eve init` from an agent means it has not chosen what to build, so
-    // we print the guide and touch nothing — no scaffold, install, Git, or dev.
-    await expect(pathExists(join(parentDirectory, "agent"))).resolves.toBe(false);
-    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(await readFile(join(parentDirectory, "agent/agent.ts"), "utf8")).toContain(
+      DEFAULT_AGENT_MODEL_ID,
+    );
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      parentDirectory,
+      expect.anything(),
+    );
+    expect(deps.tryInitializeGit).toHaveBeenCalledWith(parentDirectory);
+    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    const printed = output.messages.join("\n");
-    expect(printed).toContain("Set up an eve agent");
-    expect(printed).toContain("npx eve@latest init <name>");
+    expect(output.messages.join("\n")).toContain("Created an eve agent in");
   });
 
   it("scaffolds and initializes Git for a coding agent but does not spawn the dev server", async () => {

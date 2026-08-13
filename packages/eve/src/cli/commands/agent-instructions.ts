@@ -2,10 +2,11 @@ import { readFileSync } from "node:fs";
 
 // The two coding-agent prompts are one onboarding flow in two phases, composed
 // from the section files in `agent-prompt/`. The setup guide runs before
-// anything is scaffolded (a bare `eve init`); the handoff runs once a project
-// exists (after `eve init <name>`, or when seeding a REPL). They share the
-// `collect-intent`, `vercel-connect`, and `build-and-verify` sections verbatim,
-// so guidance authored once reaches both. `{{devCommand}}` is rendered per
+// anything is scaffolded when malformed init input prevents the command from
+// running; the handoff runs once a project exists (after `eve init`, or when
+// seeding a REPL). Both reuse the `collect-intent`, `vercel-connect`, and
+// `build-and-verify` sections verbatim, so guidance authored once reaches both.
+// `{{devCommand}}` is rendered per
 // caller; `{{workingDirectory}}` is post-scaffold only and lives in the handoff
 // intro. The shared sections use paths relative to the project directory so the
 // setup guide, which has no working directory yet, can reuse them unchanged.
@@ -46,15 +47,15 @@ function compose(
 }
 
 /**
- * The pre-scaffold setup guide, shown when a coding agent runs a bare
- * `eve init`. It scaffolds from scratch, so it renders with the universal
- * `npx eve dev` rather than a launcher-specific command.
+ * The pre-scaffold setup guide shown after malformed coding-agent input. It
+ * scaffolds from scratch, so it renders with the universal `npx eve dev` rather
+ * than a launcher-specific command.
  */
 export function initAgentInstructions(): string {
   return compose(SETUP_SECTIONS, { devCommand: "npx eve dev" });
 }
 
-/** The post-scaffold handoff printed after a coding agent runs `eve init <name>`. */
+/** The post-scaffold handoff printed after a coding agent runs `eve init`. */
 export function initAgentDevHandoff(options: { projectPath: string; devCommand: string }): string {
   return compose(HANDOFF_SECTIONS, {
     devCommand: options.devCommand,
