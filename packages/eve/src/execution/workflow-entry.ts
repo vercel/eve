@@ -1,7 +1,6 @@
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type {
-  DeliverHookPayload,
   DeliverPayload,
   HookPayload,
   RunInput,
@@ -11,6 +10,7 @@ import type {
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
+import type { TurnStepPayload } from "#execution/durable-session-migrations/turn-workflow.js";
 import {
   notifyDelegatedParentStep,
   notifyTurnCallerStep,
@@ -37,6 +37,7 @@ import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
+import type { BufferedTurnWork } from "#execution/turn-control-receiver.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -55,6 +56,7 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
  */
 export interface WorkflowEntryInput {
   readonly input: RunInput["input"];
+  readonly initialRouteRemote?: RunInput["initialRouteRemote"];
   readonly limits?: RunInput["limits"];
   readonly sessionTimeoutMs?: number | false;
   readonly serializedContext: Record<string, unknown>;
@@ -181,28 +183,30 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     const outcome = await runDriverLoop({
       capabilities,
       driverWritable,
-      initialInput: {
-        deliveryMetadata:
-          input.serializedContext["eve.channelDelivery"] === undefined
-            ? undefined
-            : [
-                {
-                  ...(input.serializedContext["eve.channelDelivery"] as NonNullable<
-                    RunInput["delivery"]
-                  >),
-                  payloadIndex: 0,
-                },
-              ],
-        kind: "deliver",
-        payloads: [
-          {
-            message: input.input.message,
-            context: input.input.context,
-            outputSchema: input.input.outputSchema,
-          },
-        ],
-        requestId: readChannelRequestId(input.serializedContext),
-      },
+      initialInput:
+        input.initialRouteRemote ??
+        ({
+          deliveryMetadata:
+            input.serializedContext["eve.channelDelivery"] === undefined
+              ? undefined
+              : [
+                  {
+                    ...(input.serializedContext["eve.channelDelivery"] as NonNullable<
+                      RunInput["delivery"]
+                    >),
+                    payloadIndex: 0,
+                  },
+                ],
+          kind: "deliver",
+          payloads: [
+            {
+              message: input.input.message,
+              context: input.input.context,
+              outputSchema: input.input.outputSchema,
+            },
+          ],
+          requestId: readChannelRequestId(input.serializedContext),
+        } satisfies HookPayload),
       crashCleanupState,
       mode,
       serializedContext: input.serializedContext,
@@ -294,7 +298,7 @@ function createSafeOuterWorkflowError(): Error {
 async function runDriverLoop(input: {
   readonly capabilities?: SessionCapabilities;
   readonly driverWritable: WritableStream<Uint8Array>;
-  readonly initialInput: HookPayload;
+  readonly initialInput: TurnStepPayload;
   readonly crashCleanupState: CrashCleanupState;
   readonly mode: RunMode;
   readonly serializedContext: Record<string, unknown>;
@@ -345,10 +349,10 @@ async function runDriverLoop(input: {
 
       const next = await nextTurnDelivery({
         awaitAuthorizationCallbacks: expectedAttemptIds.size > 0,
-        bufferedDeliveries,
+        bufferedTurnWork,
         bufferedSessionControls,
         commandInbox,
-        deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,
+        deferTurnWork: input.mode === "task" && expectedAttemptIds.size > 0,
         driverWritable: input.driverWritable,
         sessionState,
       });
@@ -381,7 +385,7 @@ async function runDriverLoop(input: {
   const nextTurnControlToken = (): string =>
     `${input.sessionState.sessionId}:turn-control:${String(turnDispatchIndex++)}`;
 
-  const bufferedDeliveries: DeliverHookPayload[] = [];
+  const bufferedTurnWork: BufferedTurnWork[] = [];
   const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
   const commandInbox = createSessionCommandInbox();
   const stableCommandToken = sessionCommandHookToken(input.sessionState.sessionId);
@@ -403,12 +407,12 @@ async function runDriverLoop(input: {
   // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
   const runTurn = async (args: {
-    readonly delivery: HookPayload;
+    readonly delivery: TurnStepPayload;
     readonly serializedContext: Record<string, unknown>;
     readonly sessionState: DurableSessionState;
   }): Promise<TurnDriverAction> => {
     const turn = await dispatchAndAwaitTurn({
-      bufferedDeliveries,
+      bufferedTurnWork,
       bufferedSessionControls,
       capabilities: input.capabilities,
       commandInbox,
@@ -525,6 +529,16 @@ async function runDriverLoop(input: {
       if (next.kind === "reset") {
         await terminateChildSessionsStep({ sessionState: action.sessionState });
         return { kind: "result", result: { output: "" } };
+      }
+
+      if (next.kind === "route-remote") {
+        action = await runTurn({
+          delivery: next.command,
+          serializedContext: action.serializedContext,
+          sessionState: next.sessionState,
+        });
+        input.crashCleanupState.lastSessionState = action.sessionState;
+        continue;
       }
 
       if (next.kind === "clear" || next.kind === "compact") {

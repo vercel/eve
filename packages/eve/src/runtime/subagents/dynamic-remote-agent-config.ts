@@ -11,7 +11,7 @@ import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { JsonObject } from "#shared/json.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 
-export interface DynamicRemoteAgentConfig {
+export interface SerializableRemoteAgentConfig {
   readonly credentialsStepId?: string;
   readonly description: string;
   readonly forwardPrincipal?: boolean;
@@ -20,22 +20,18 @@ export interface DynamicRemoteAgentConfig {
   readonly url: string;
 }
 
-export async function normalizeDynamicRemoteAgentConfig(input: {
-  readonly name: string;
+export async function normalizeSerializableRemoteAgentConfig(input: {
+  readonly message: string;
   readonly value: unknown;
-}): Promise<DynamicRemoteAgentConfig> {
-  const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineRemoteAgent(...), or null.`;
+}): Promise<SerializableRemoteAgentConfig> {
+  const { message } = input;
   const record = expectObjectRecord(input.value, message);
   expectOnlyKnownKeys(
     record,
     ["auth", "description", "forwardPrincipal", "headers", "kind", "outputSchema", "path", "url"],
     message,
   );
-
-  if (record.kind !== "remote") {
-    throw new Error(message);
-  }
-
+  if (record.kind !== "remote") throw new Error(message);
   const url = await resolveUrl(record.url, message);
   const credentialsStepId = readCredentialsStepId(record);
   validateCredentials(record, message);
@@ -44,7 +40,7 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
     credentialsStepId === undefined
   ) {
     throw new Error(
-      `${message} Dynamic remote auth and headers must be compiled by eve so credentials stay out of durable workflow state.`,
+      `${message} Remote auth and headers must be compiled by eve so credentials stay out of durable workflow state.`,
     );
   }
   const config: {
@@ -59,18 +55,22 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
     path: record.path === undefined ? EVE_SESSION_ROUTE_PATH : expectString(record.path, message),
     url,
   };
-
-  if (credentialsStepId !== undefined) {
-    config.credentialsStepId = credentialsStepId;
-  }
+  if (credentialsStepId !== undefined) config.credentialsStepId = credentialsStepId;
   if (record.forwardPrincipal !== undefined) {
     config.forwardPrincipal = expectBoolean(record.forwardPrincipal, message);
   }
   if (record.outputSchema !== undefined) {
     config.outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource);
   }
-
   return config;
+}
+
+export async function normalizeDynamicRemoteAgentConfig(input: {
+  readonly name: string;
+  readonly value: unknown;
+}): Promise<SerializableRemoteAgentConfig> {
+  const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineRemoteAgent(...), or null.`;
+  return await normalizeSerializableRemoteAgentConfig({ message, value: input.value });
 }
 
 async function resolveUrl(value: unknown, message: string): Promise<string> {
@@ -101,3 +101,6 @@ function readCredentialsStepId(record: Record<string, unknown>): string | undefi
   const stepId = (resolver as { readonly stepId?: unknown }).stepId;
   return typeof stepId === "string" ? stepId : undefined;
 }
+
+/** @deprecated Internal compatibility alias. */
+export type DynamicRemoteAgentConfig = SerializableRemoteAgentConfig;

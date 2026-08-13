@@ -25,7 +25,6 @@ export async function transformDynamicRemoteAgentCredentials(
   source: string,
 ): Promise<{ code: string } | null> {
   if (
-    !source.includes("defineDynamic") ||
     !source.includes("defineRemoteAgent") ||
     (!source.includes("auth") && !source.includes("headers"))
   ) {

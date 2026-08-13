@@ -146,20 +146,50 @@ describe("TurnControlReceiver", () => {
     expect(bufferedSessionControls).toEqual(["clear", "compact", "expired"]);
   });
 
+  it("preserves FIFO ordering between sends and routed work during a turn", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedTurnWork: import("#execution/turn-control-receiver.js").BufferedTurnWork[] = [];
+    const route = {
+      auth: null,
+      kind: "route-remote" as const,
+      message: "second",
+      remote: { description: "Remote", path: "/eve/v1/session", url: "https://example.com" },
+      routeId: "remote",
+    };
+
+    await runReceiver([], {
+      bufferedTurnWork,
+      commandInbox: createCommandInbox([{ kind: "send", payload: { message: "first" } }, route]),
+    });
+
+    expect(bufferedTurnWork).toEqual([
+      expect.objectContaining({
+        kind: "delivery",
+        delivery: expect.objectContaining({ payloads: [{ message: "first" }] }),
+      }),
+      route,
+    ]);
+  });
+
   it("buffers a steering message before cancelling the active turn", async () => {
     installControlHook([parkResult()], true);
     const bufferedDeliveries: DeliverHookPayload[] = [];
+    const bufferedTurnWork: import("#execution/turn-control-receiver.js").BufferedTurnWork[] = [];
     vi.mocked(forwardTurnCancellationStep).mockImplementation(async () => {
-      expect(bufferedDeliveries).toEqual([
-        expect.objectContaining({
-          payloads: [{ message: "replace this turn" }],
-          turnPolicy: "steer",
-        }),
+      expect(bufferedTurnWork).toEqual([
+        {
+          kind: "delivery",
+          delivery: expect.objectContaining({
+            payloads: [{ message: "replace this turn" }],
+            turnPolicy: "steer",
+          }),
+        },
       ]);
       return true;
     });
 
     await runReceiver(bufferedDeliveries, {
+      bufferedTurnWork,
       commandInbox: createCommandInbox([
         {
           kind: "send",
@@ -220,17 +250,28 @@ describe("TurnControlReceiver", () => {
 function runReceiver(
   bufferedDeliveries: DeliverHookPayload[],
   options: {
+    readonly bufferedTurnWork?: import("#execution/turn-control-receiver.js").BufferedTurnWork[];
     readonly bufferedSessionControls?: Array<"clear" | "compact" | "expired" | "reset">;
     readonly commandInbox?: SessionCommandInbox;
   } = {},
 ): ReturnType<TurnControlReceiver["waitForAction"]> {
+  const bufferedTurnWork =
+    options.bufferedTurnWork ??
+    bufferedDeliveries.map((delivery) => ({ delivery, kind: "delivery" as const }));
   const receiver = new TurnControlReceiver({
-    bufferedDeliveries,
+    bufferedTurnWork,
     bufferedSessionControls: options.bufferedSessionControls ?? [],
     commandInbox: options.commandInbox ?? createCommandInbox(),
     token: "turn-control",
   });
-  return receiver.waitForAction().finally(() => receiver.dispose());
+  return receiver.waitForAction().finally(async () => {
+    bufferedDeliveries.splice(
+      0,
+      bufferedDeliveries.length,
+      ...bufferedTurnWork.flatMap((work) => (work.kind === "delivery" ? [work.delivery] : [])),
+    );
+    await receiver.dispose();
+  });
 }
 
 function deliveryRequest(requestId: string): TurnControlPayload {

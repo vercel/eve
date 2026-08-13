@@ -104,7 +104,7 @@ const sessionState = { sessionId: "ses-parked-wait" } as DurableSessionState;
 function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelivery>[0] {
   return {
     awaitAuthorizationCallbacks: true,
-    bufferedDeliveries: [],
+    bufferedTurnWork: [],
     bufferedSessionControls: [],
     commandInbox: inbox,
     driverWritable: new WritableStream<Uint8Array>(),
@@ -171,26 +171,57 @@ describe("nextTurnDelivery", () => {
 
     const next = await nextTurnDelivery({
       ...waitInput(inbox),
-      bufferedDeliveries,
+      bufferedTurnWork: bufferedDeliveries.map((delivery) => ({
+        delivery,
+        kind: "delivery" as const,
+      })),
     });
 
     expect(next.kind).toBe("authorization");
     expect(bufferedDeliveries).toHaveLength(1);
   });
 
-  it("buffers task deliveries until the authorization callback arrives", async () => {
-    const inbox = createMockInbox([messageRead("deferred"), authorizationRead()]);
-    const bufferedDeliveries: DeliverHookPayload[] = [];
+  it("preserves delivery then route ordering while authorization defers turn work", async () => {
+    const route = {
+      auth: null,
+      kind: "route-remote" as const,
+      message: "second",
+      remote: { description: "Remote", path: "/eve/v1/session", url: "https://example.com" },
+      routeId: "remote",
+    };
+    const inbox = createMockInbox([
+      messageRead("first"),
+      { result: { done: false, value: route }, source: "session" },
+      authorizationRead(),
+    ]);
+    const bufferedTurnWork: import("#execution/turn-control-receiver.js").BufferedTurnWork[] = [];
 
     const next = await nextTurnDelivery({
       ...waitInput(inbox),
-      bufferedDeliveries,
-      deferDeliveries: true,
+      bufferedTurnWork,
+      deferTurnWork: true,
     });
 
     expect(next.kind).toBe("authorization");
-    expect(bufferedDeliveries).toMatchObject([
-      { kind: "deliver", payloads: [{ message: "deferred" }] },
+    expect(bufferedTurnWork).toEqual([
+      { kind: "delivery", delivery: expect.objectContaining({ payloads: [{ message: "first" }] }) },
+      route,
+    ]);
+  });
+
+  it("buffers task deliveries until the authorization callback arrives", async () => {
+    const inbox = createMockInbox([messageRead("deferred"), authorizationRead()]);
+    const bufferedTurnWork: import("#execution/turn-control-receiver.js").BufferedTurnWork[] = [];
+
+    const next = await nextTurnDelivery({
+      ...waitInput(inbox),
+      bufferedTurnWork,
+      deferTurnWork: true,
+    });
+
+    expect(next.kind).toBe("authorization");
+    expect(bufferedTurnWork).toMatchObject([
+      { kind: "delivery", delivery: { kind: "deliver", payloads: [{ message: "deferred" }] } },
     ]);
   });
 

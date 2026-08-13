@@ -1,6 +1,10 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, SessionCommand } from "#channel/types.js";
+
+export type BufferedTurnWork =
+  | { readonly delivery: DeliverHookPayload; readonly kind: "delivery" }
+  | Extract<SessionCommand, { readonly kind: "route-remote" }>;
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
@@ -17,22 +21,22 @@ export type TurnDriverAction = NextDriverAction;
 
 /** Owns one turn's driver-side control hook and public-delivery relay state. */
 export class TurnControlReceiver {
-  private readonly bufferedDeliveries: DeliverHookPayload[];
   private readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  private readonly bufferedTurnWork: BufferedTurnWork[];
   private readonly commandInbox: SessionCommandInbox;
   private readonly control: Hook<TurnControlPayload>;
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
 
   constructor(input: {
-    readonly bufferedDeliveries: DeliverHookPayload[];
+    readonly bufferedTurnWork: BufferedTurnWork[];
     readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
     readonly commandInbox: SessionCommandInbox;
     readonly token: string;
   }) {
-    this.bufferedDeliveries = input.bufferedDeliveries;
     this.bufferedSessionControls = input.bufferedSessionControls;
     this.commandInbox = input.commandInbox;
+    this.bufferedTurnWork = input.bufferedTurnWork;
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
   }
@@ -88,6 +92,10 @@ export class TurnControlReceiver {
       this.bufferedSessionControls.push("expired");
       return undefined;
     }
+    if (command.kind === "route-remote") {
+      this.bufferedTurnWork.push(command);
+      return undefined;
+    }
     if (command.kind === "runtime-action-result") {
       return undefined;
     }
@@ -110,7 +118,7 @@ export class TurnControlReceiver {
   }
 
   private async bufferDelivery(delivery: DeliverHookPayload): Promise<void> {
-    this.bufferedDeliveries.push(delivery);
+    this.bufferedTurnWork.push({ delivery, kind: "delivery" });
     if (delivery.turnPolicy !== "steer" || !deliveryHasMessage(delivery)) return;
 
     await forwardTurnCancellationStep({
@@ -123,7 +131,9 @@ export class TurnControlReceiver {
     payload: Extract<TurnControlPayload, { readonly kind: "turn-result" }>,
   ): void {
     if (payload.bufferedDeliveries !== undefined) {
-      this.bufferedDeliveries.unshift(...payload.bufferedDeliveries);
+      this.bufferedTurnWork.unshift(
+        ...payload.bufferedDeliveries.map((delivery) => ({ delivery, kind: "delivery" as const })),
+      );
     }
   }
 
@@ -246,9 +256,13 @@ export class TurnControlReceiver {
   }
 
   private takeInputResponseDelivery(): DeliverHookPayload | undefined {
-    const index = this.bufferedDeliveries.findIndex((delivery) => !deliveryHasMessage(delivery));
+    const index = this.bufferedTurnWork.findIndex(
+      (work) => work.kind === "delivery" && !deliveryHasMessage(work.delivery),
+    );
     if (index === -1) return undefined;
-    return this.bufferedDeliveries.splice(index, 1)[0];
+    const work = this.bufferedTurnWork.splice(index, 1)[0];
+    if (work?.kind !== "delivery") return undefined;
+    return work.delivery;
   }
 
   /**
@@ -266,7 +280,7 @@ export class TurnControlReceiver {
       if (winner.kind === "command") {
         const terminal = await this.handleSessionCommand(winner.command);
         if (terminal !== undefined) {
-          this.bufferedDeliveries.unshift(outstanding);
+          this.rebufferDelivery(outstanding);
           return terminal;
         }
         continue;
@@ -279,17 +293,20 @@ export class TurnControlReceiver {
       }
 
       if (payload.kind === "turn-delivery-cancelled" && payload.requestId === requestId) {
-        this.bufferedDeliveries.unshift(outstanding);
+        this.rebufferDelivery(outstanding);
         return undefined;
       }
 
       if (payload.kind === "turn-result") {
-        this.bufferedDeliveries.unshift(outstanding);
+        this.rebufferDelivery(outstanding);
       }
 
       const terminal = this.readTerminalControl(payload);
       if (terminal !== undefined) return terminal;
     }
+  }
+  private rebufferDelivery(delivery: DeliverHookPayload): void {
+    this.bufferedTurnWork.unshift({ delivery, kind: "delivery" });
   }
 }
 

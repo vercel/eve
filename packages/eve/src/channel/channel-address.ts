@@ -61,10 +61,28 @@ export interface ChannelAddress<TState = undefined> {
   resolveSession(): Promise<Session | undefined>;
 }
 
+export async function dispatchOrCreateChannelRoute<TState>(input: {
+  readonly address: ChannelAddress<TState>;
+  readonly command: Extract<SessionCommand, { readonly kind: "route-remote" }>;
+  readonly options: ChannelAddressDeliveryOptions<TState>;
+}): Promise<Session> {
+  return await (input.address as InternalChannelAddress<TState>).dispatchRoute(
+    input.command,
+    input.options,
+  );
+}
+
+interface InternalChannelAddress<TState = undefined> extends ChannelAddress<TState> {
+  dispatchRoute(
+    command: Extract<SessionCommand, { readonly kind: "route-remote" }>,
+    options: ChannelAddressDeliveryOptions<TState>,
+  ): Promise<Session>;
+}
+
 /** Factory for binding a route-local continuation token to a {@link ChannelAddress}. */
 export type ChannelAddressFn<TState = undefined> = (
   continuationToken: string,
-) => ChannelAddress<TState>;
+) => InternalChannelAddress<TState>;
 
 /** Creates one channel address backed by the runtime's continuation dispatch primitive. */
 export function createChannelAddress<TState = undefined>(input: {
@@ -74,12 +92,51 @@ export function createChannelAddress<TState = undefined>(input: {
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
-}): ChannelAddress<TState> {
+}): InternalChannelAddress<TState> {
   const metadata: Partial<ChannelDeliverySource> = input.metadata ?? {};
   const namespacedToken = `${input.channelName}:${input.continuationToken}`;
   if (isReservedSessionCommandToken(namespacedToken)) {
     throw new Error(`Channel address "${namespacedToken}" uses eve's reserved session namespace.`);
   }
+
+  const fixedSession = (sessionId: string): Session =>
+    createSession(sessionId, input.runtime, {
+      ...metadata,
+      turnPolicy: input.turnPolicy,
+    });
+  const mergeAdapterState = (state: TState | undefined): ChannelAdapter<any> =>
+    state === undefined
+      ? input.adapter
+      : {
+          ...input.adapter,
+          state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
+        };
+  const dispatchOrCreateSession = async (args: {
+    readonly command: Extract<SessionCommand, { readonly kind: "send" | "route-remote" }>;
+    readonly createRunInput: (adapter: ChannelAdapter<any>) => RunInput;
+    readonly state?: TState;
+  }): Promise<Session> => {
+    const dispatch = async (): Promise<Session | undefined> => {
+      const result = await input.runtime.dispatchContinuation({
+        command: args.command,
+        continuationToken: namespacedToken,
+      });
+      return result.status === "accepted" ? fixedSession(result.sessionId) : undefined;
+    };
+    const existing = await dispatch();
+    if (existing !== undefined) return existing;
+    try {
+      const handle = await input.runtime.createSession(
+        args.createRunInput(mergeAdapterState(args.state)),
+      );
+      return fixedSession(handle.sessionId);
+    } catch (error) {
+      if (!isRuntimeSessionOwnershipConflictError(error)) throw error;
+      const winner = await dispatch();
+      if (winner !== undefined) return winner;
+      throw error;
+    }
+  };
 
   return {
     continuationToken: input.continuationToken,
@@ -106,65 +163,50 @@ export function createChannelAddress<TState = undefined>(input: {
       };
       const command: Extract<SessionCommand, { readonly kind: "send" }> =
         caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };
-      const dispatch = async (): Promise<Session | undefined> => {
-        const result = await input.runtime.dispatchContinuation({
-          command,
-          continuationToken: namespacedToken,
-        });
-        return result.status === "accepted"
-          ? createSession(result.sessionId, input.runtime, {
-              ...metadata,
-              turnPolicy: input.turnPolicy,
-            })
-          : undefined;
-      };
-
-      const existing = await dispatch();
-      if (existing !== undefined) return existing;
-      if (payload.inputResponses && payload.inputResponses.length > 0) {
-        throw new Error(
-          "Cannot deliver inputResponses — the target session was not found via continuation token.",
-        );
-      }
-
       const state = (options as { readonly state?: TState }).state;
-      const adapter =
-        state === undefined
-          ? input.adapter
-          : {
-              ...input.adapter,
-              state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
-            };
-      const runInput: RunInput = {
+      const createRunInput = (adapter: ChannelAdapter<any>): RunInput => {
+        if (payload.inputResponses && payload.inputResponses.length > 0) {
+          throw new Error(
+            "Cannot deliver inputResponses — the target session was not found via continuation token.",
+          );
+        }
+        return {
+          adapter,
+          auth: options.auth,
+          capabilities: options.mode === "task" ? undefined : { requestInput: true },
+          callback: options.callback,
+          channelName: input.channelName,
+          continuationToken: namespacedToken,
+          delivery,
+          initiatorAuth: options.initiatorAuth,
+          input: {
+            context: payload.context,
+            message: serializeUrlFilePartsInMessage(payload.message) ?? "",
+            outputSchema: payload.outputSchema,
+          },
+          mode: options.mode ?? "conversation",
+          requestId: metadata.requestId,
+          title: options.title,
+        };
+      };
+      return await dispatchOrCreateSession({ command, createRunInput, state });
+    },
+    async dispatchRoute(command, options) {
+      const state = (options as { readonly state?: TState }).state;
+      const createRunInput = (adapter: ChannelAdapter<any>): RunInput => ({
         adapter,
         auth: options.auth,
-        capabilities: options.mode === "task" ? undefined : { requestInput: true },
-        callback: options.callback,
+        capabilities: { requestInput: true },
         channelName: input.channelName,
         continuationToken: namespacedToken,
-        delivery,
+        initialRouteRemote: command,
         initiatorAuth: options.initiatorAuth,
-        input: {
-          context: payload.context,
-          message: serializeUrlFilePartsInMessage(payload.message) ?? "",
-          outputSchema: payload.outputSchema,
-        },
-        mode: options.mode ?? "conversation",
+        input: { message: command.message },
+        mode: "conversation",
         requestId: metadata.requestId,
         title: options.title,
-      };
-      try {
-        const handle = await input.runtime.createSession(runInput);
-        return createSession(handle.sessionId, input.runtime, {
-          ...metadata,
-          turnPolicy: input.turnPolicy,
-        });
-      } catch (error) {
-        if (!isRuntimeSessionOwnershipConflictError(error)) throw error;
-        const winner = await dispatch();
-        if (winner !== undefined) return winner;
-        throw error;
-      }
+      });
+      return await dispatchOrCreateSession({ command, createRunInput, state });
     },
     async send(message, options) {
       return await this.deliver({ message }, options);

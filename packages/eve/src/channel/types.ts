@@ -6,6 +6,7 @@ import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { SerializableRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -177,6 +178,13 @@ export type SessionCommand =
       readonly requestId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
+  | {
+      readonly auth: SessionAuthContext | null;
+      readonly kind: "route-remote";
+      readonly message: string;
+      readonly remote: SerializableRemoteAgentConfig;
+      readonly routeId: string;
+    }
   | { readonly kind: "cancel"; readonly turnId?: string }
   | { readonly kind: "compact" }
   | { readonly kind: "clear" }
@@ -192,7 +200,7 @@ export type ResetSessionResult =
   | { readonly status: "no_active_session" };
 
 export type SessionCommandResult<TCommand extends SessionCommand = SessionCommand> =
-  TCommand extends { readonly kind: "send" }
+  TCommand extends { readonly kind: "send" | "route-remote" }
     ? SessionSendCommandResult
     : TCommand extends { readonly kind: "cancel" }
       ? CancelTurnResult
@@ -385,6 +393,8 @@ export interface SessionCapabilities {
  * subagent tool wrapper).
  */
 export interface RunInput {
+  /** Internal first command for a model-free channel-directed remote session. */
+  readonly initialRouteRemote?: Extract<SessionCommand, { readonly kind: "route-remote" }>;
   readonly adapter: ChannelAdapter<any>;
   /**
    * Registered channel name for root sessions started from an authored

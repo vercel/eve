@@ -22,7 +22,7 @@ import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import {
   continueRemoteAgentSession,
   isRetryableRemoteAgentContinueError,
-  resolveRemoteAgentForAction,
+  resolveRemoteAgentTarget,
 } from "#execution/remote-agent-dispatch.js";
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { hydrateDurableSession } from "#execution/session.js";
@@ -230,10 +230,12 @@ async function deliverToAgentHandle(input: {
   if (address.kind === "agent/remote") {
     let resolvedRemote;
     try {
-      resolvedRemote = resolveRemoteAgentForAction({
+      resolvedRemote = resolveRemoteAgentTarget({
         nodeId: identity.nodeId,
         remoteAgentName: identity.name,
         registry: bundle.subagentRegistry.subagentsByNodeId,
+        dynamicRemoteAgent: undefined,
+        target: action.kind === "remote-agent-call" ? action.remoteTarget : undefined,
       });
     } catch (error) {
       // The agent's node is gone from the compiled bundle; no retry can

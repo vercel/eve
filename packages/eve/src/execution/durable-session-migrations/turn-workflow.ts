@@ -33,6 +33,7 @@ interface RuntimeActionResultStepInput {
 
 export type TurnStepPayload =
   | Exclude<HookPayload, RuntimeActionResultHookPayload>
+  | Extract<import("#channel/types.js").SessionCommand, { readonly kind: "route-remote" }>
   | RuntimeActionResultStepInput;
 
 export interface TurnStepInput {
@@ -63,7 +64,7 @@ export interface TurnWorkflowInput {
 export interface TurnWorkflowDispatchInput {
   readonly capabilities: SessionCapabilities | undefined;
   readonly completionToken: string;
-  readonly delivery: HookPayload;
+  readonly delivery: TurnStepPayload;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;

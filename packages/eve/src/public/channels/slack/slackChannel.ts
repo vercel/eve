@@ -72,6 +72,7 @@ import { markEventHandled } from "./utils.js";
 
 export type {
   SlackRespondOptions,
+  SlackRouteOptions,
   SlackSendOptions,
   SlackSessionOperations,
 } from "#public/channels/slack/session-operations.js";

@@ -58,15 +58,34 @@ export type RuntimeRemoteAgentCallActionRequest = z.infer<
 /**
  * Zod schema for one runtime-owned remote-agent-call action request.
  */
+export const serializableRemoteAgentConfigSchema = z
+  .object({
+    credentialsStepId: z.string().optional(),
+    description: z.string(),
+    forwardPrincipal: z.boolean().optional(),
+    outputSchema: jsonObjectSchema.optional(),
+    path: z.string(),
+    url: z.string(),
+  })
+  .strict();
+
+const remoteAgentTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("registered") }).strict(),
+  z.object({ config: serializableRemoteAgentConfigSchema, kind: z.literal("inline") }).strict(),
+]);
+
 export const runtimeRemoteAgentCallActionRequestSchema = z
   .object({
     callId: z.string(),
     description: z.string(),
     input: jsonObjectSchema,
     kind: z.literal("remote-agent-call"),
+    messageFormat: z.enum(["delegated", "verbatim"]).optional(),
     name: z.string(),
     nodeId: z.string(),
     remoteAgentName: z.string(),
+    remoteTarget: remoteAgentTargetSchema.optional(),
+    sessionMode: z.enum(["conversation", "task"]).optional(),
   })
   .strict();
 

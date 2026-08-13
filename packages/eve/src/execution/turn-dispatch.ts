@@ -1,4 +1,6 @@
-import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#channel/types.js";
+import type { SessionCapabilities } from "#channel/types.js";
+import type { TurnStepPayload } from "#execution/durable-session-migrations/turn-workflow.js";
+import type { BufferedTurnWork } from "#execution/turn-control-receiver.js";
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -22,11 +24,11 @@ export interface DispatchedTurn {
 
 /** Dispatches one turn and services its private-inbox control protocol until it terminates. */
 export async function dispatchAndAwaitTurn(input: {
-  readonly bufferedDeliveries: DeliverHookPayload[];
+  readonly bufferedTurnWork: BufferedTurnWork[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly capabilities?: SessionCapabilities;
   readonly controlToken: string;
-  readonly delivery: HookPayload;
+  readonly delivery: TurnStepPayload;
   readonly commandInbox: SessionCommandInbox;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
@@ -34,7 +36,7 @@ export async function dispatchAndAwaitTurn(input: {
   readonly sessionState: DurableSessionState;
 }): Promise<DispatchedTurn> {
   const control = new TurnControlReceiver({
-    bufferedDeliveries: input.bufferedDeliveries,
+    bufferedTurnWork: input.bufferedTurnWork,
     bufferedSessionControls: input.bufferedSessionControls,
     commandInbox: input.commandInbox,
     token: input.controlToken,
