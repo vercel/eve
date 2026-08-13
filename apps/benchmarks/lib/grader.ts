@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 
-import { AGENT_EVAL_DIRECTORY, SOURCE_ROOT, WORLD_EVENTS_PATH } from "./paths.js";
+import { AGENT_EVAL_DIRECTORY, SOURCE_ROOT, WORKSPACE_ENV, WORLD_EVENTS_PATH } from "./paths.js";
 import type { AuthoringTranscriptEntry, AuthoringWorldEvent } from "./protocol.js";
 
 interface AgentEvalResults {
@@ -12,6 +12,9 @@ interface AgentEvalResults {
     }>;
   };
 }
+
+export const workspace = process.env[WORKSPACE_ENV];
+if (workspace === undefined) throw new Error(`${WORKSPACE_ENV} is required.`);
 
 export interface AuthoringEvalResult {
   readonly commands: ReadonlyArray<string>;

@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { expect, test } from "vitest";
 
-import { authoringEval } from "./grader.js";
+import { authoringEval, workspace } from "./grader.js";
 
 const { commands, transcript, worldEvents } = authoringEval();
 const commandLog = commands.join("\n");
@@ -26,7 +27,7 @@ test("completes the synthetic provider setup decision tree", () => {
 });
 
 test("creates an iMessage channel and leaves the project valid", () => {
-  const channelPath = "agent/channels/imessage.ts";
+  const channelPath = join(workspace, "agent/channels/imessage.ts");
   expect(existsSync(channelPath)).toBe(true);
   expect(readFileSync(channelPath, "utf8")).toContain("photonIMessageChannel");
 });

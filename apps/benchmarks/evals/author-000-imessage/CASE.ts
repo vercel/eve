@@ -9,7 +9,9 @@ export default defineAuthoringCase({
   startingPoint: simpleProject,
   setup: imessageSetup,
   async interact({ send }) {
-    const firstTurn = await send("Let me talk to this agent via iMessage.");
+    const firstTurn = await send(
+      "Let me talk to this agent via iMessage. Configure it locally, but do not deploy it.",
+    );
     if (!PHONE_NUMBER_QUESTION.test(firstTurn.text)) {
       throw new Error(
         `Expected the agent to ask for the user's phone number on its first turn. Received: ${JSON.stringify(firstTurn.text)}`,

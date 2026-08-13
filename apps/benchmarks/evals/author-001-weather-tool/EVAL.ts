@@ -1,8 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { expect, test } from "vitest";
 
-const toolPath = "agent/tools/get_weather.ts";
+import { workspace } from "./grader.js";
+
+const toolPath = join(workspace, "agent/tools/get_weather.ts");
 
 test("creates a filesystem-named weather tool", () => {
   expect(existsSync(toolPath)).toBe(true);

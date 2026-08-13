@@ -23,6 +23,7 @@ import {
   SOURCE_ARCHIVE_PATH,
   SOURCE_ROOT,
   WORKSPACE,
+  WORKSPACE_ENV,
 } from "./paths.js";
 import type { AuthoringTranscriptEntry } from "./protocol.js";
 
@@ -180,7 +181,7 @@ export function createAuthoringAgent(subject: {
         log("[grade] running deterministic assertions");
         const test = await resultOf(
           activeSandbox,
-          `cd ${AGENT_EVAL_DIRECTORY} && vitest run EVAL.test.ts`,
+          `cd ${AGENT_EVAL_DIRECTORY} && ${WORKSPACE_ENV}=${shellQuote(workspace)} vitest run EVAL.test.ts`,
           workspace,
         );
         const scriptsResults = Object.fromEntries(
@@ -204,6 +205,7 @@ export function createAuthoringAgent(subject: {
         return {
           success: test.exitCode === 0 && scriptsPassed,
           output: transcript.at(-1)?.content ?? "",
+          transcript: JSON.stringify(transcript),
           error:
             test.exitCode === 0 && scriptsPassed ? undefined : `${test.stdout}\n${test.stderr}`,
           duration: Date.now() - startedAt,
@@ -220,6 +222,7 @@ export function createAuthoringAgent(subject: {
         return {
           success: false,
           output: transcript.at(-1)?.content ?? "",
+          transcript: JSON.stringify(transcript),
           error: error instanceof Error ? error.message : String(error),
           duration: Date.now() - startedAt,
           scriptsResults: {},
