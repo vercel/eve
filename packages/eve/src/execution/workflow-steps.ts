@@ -8,7 +8,10 @@ import {
   drainDynamicInstructionUserMessages,
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
-import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
+import {
+  dispatchDynamicModelEvent,
+  preserveSerializedSessionDynamicModelSelection,
+} from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import {
   dispatchDynamicSubagentEvent,
@@ -523,14 +526,18 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       throw error;
     }
     writer.releaseLock();
-    // Both carve-outs exist because the cancellation epilogue still publishes
-    // `turn.cancelled` downstream, and the open spans and provider state it
-    // needs to close were written by the step being discarded.
+    // Trace and instrumentation state are needed by the cancellation
+    // epilogue to close the operation the discarded step opened.
+    // The session model is also kept because `session.started` is not emitted
+    // again after this cancellation settles.
     const interrupted = serializeContext(ctx);
     return {
       action: "cancelled",
       serializedContext: preserveSerializedInstrumentationState(
-        preserveSerializedAgentTraceState(input.serializedContext, interrupted),
+        preserveSerializedAgentTraceState(
+          preserveSerializedSessionDynamicModelSelection(input.serializedContext, interrupted),
+          interrupted,
+        ),
         interrupted,
       ),
       sessionState: input.sessionState,

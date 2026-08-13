@@ -107,10 +107,15 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       // A cancel observed while the step was returning must still win: the
       // step may have missed the abort and completed normally. Pending
       // runtime-action batches are exempt — their wait observes the signal.
-      if (
-        result.action === "cancelled" ||
-        (cancellation?.signal.aborted === true && pendingActionKeys === undefined)
-      ) {
+      if (result.action === "cancelled") {
+        // The cancelled step returns only the context carve-outs required by
+        // the driver epilogue and later turns; adopt those before settling.
+        await cursor.adopt(result);
+        await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
+        return;
+      }
+
+      if (cancellation?.signal.aborted === true && pendingActionKeys === undefined) {
         // No `canPark` check here: that gate rejects model-authored waits
         // (`next: null`) in task mode, whereas every session can resume by
         // stable ID after a cancelled turn. The epilogue runs in the driver

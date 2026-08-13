@@ -334,18 +334,18 @@ describe("turnWorkflow", () => {
 
     expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-      serializedContext: { state: "start" },
+      serializedContext: { state: "cancelled" },
       sessionState,
     });
     // The command inbox forwards cancellation to this turn-private hook.
     expect(cancelHookTokens()).toEqual(["turn-token:cancel"]);
-    // The cancelled result is a pure marker: the control payload carries
-    // the cursor's last settled state, not the aborted step's echo.
+    // The cancelled step has already rolled its context back to the allowed
+    // carve-outs, which must reach the driver cancellation epilogue.
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
       action: {
         cancelled: true,
         kind: "park",
-        serializedContext: { state: "start" },
+        serializedContext: { state: "cancelled" },
         sessionState,
       },
       kind: "turn-result",
@@ -685,7 +685,7 @@ describe("turnWorkflow", () => {
 
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].abortSignal?.aborted).toBe(true);
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-      serializedContext: { state: "pending" },
+      serializedContext: { state: "cancelled" },
       sessionState: adoptedState,
     });
     expect(vi.mocked(dispatchRuntimeActionsStep).mock.invocationCallOrder[0]).toBeLessThan(
