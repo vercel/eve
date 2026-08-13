@@ -78,14 +78,16 @@ export function createAuthoringAgent(subject: {
       let activeSandbox: HarnessV1NetworkSandboxSession | undefined;
       let workspace: string | undefined;
 
+      const harnessOptions: Parameters<typeof createCodex>[0] = {
+        auth: { gateway: { apiKey: options.apiKey } },
+        reasoningEffort: "high",
+        port: HARNESS_BRIDGE_PORT,
+      };
+      if (options.model !== undefined) Object.assign(harnessOptions, { model: options.model });
+
       const agent = new HarnessAgent({
         id: "eve-benchmark",
-        harness: createCodex({
-          auth: { gateway: { apiKey: options.apiKey } },
-          ...(options.model === undefined ? {} : { model: options.model }),
-          reasoningEffort: "high",
-          port: HARNESS_BRIDGE_PORT,
-        }),
+        harness: createCodex(harnessOptions),
         sandbox,
         sandboxConfig: {
           workDir: WORKSPACE,
@@ -219,15 +221,18 @@ export function createAuthoringAgent(subject: {
             .write(`${AGENT_EVAL_DIRECTORY}/harness-transcript.json`, JSON.stringify(transcript))
             .catch(() => undefined);
         }
-        return {
+        const result: AgentRunResult = {
           success: false,
           output: transcript.at(-1)?.content ?? "",
           transcript: JSON.stringify(transcript),
           error: error instanceof Error ? error.message : String(error),
           duration: Date.now() - startedAt,
           scriptsResults: {},
-          ...(activeSandbox === undefined ? {} : { sandboxId: activeSandbox.id }),
         };
+        if (activeSandbox !== undefined) {
+          Object.assign(result, { sandboxId: activeSandbox.id });
+        }
+        return result;
       } finally {
         await session?.destroy();
       }
@@ -401,7 +406,9 @@ async function resultOf(
   command: string,
   workingDirectory?: string,
 ) {
-  return sandbox.run({ command, ...(workingDirectory === undefined ? {} : { workingDirectory }) });
+  const options: Parameters<typeof sandbox.run>[0] = { command };
+  if (workingDirectory !== undefined) Object.assign(options, { workingDirectory });
+  return sandbox.run(options);
 }
 
 async function run(
