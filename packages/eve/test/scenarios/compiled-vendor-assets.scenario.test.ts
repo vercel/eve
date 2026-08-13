@@ -82,22 +82,63 @@ describe("compiled vendor assets", () => {
       "--input-type=module",
       "--eval",
       [
-        `import { trace } from ${JSON.stringify(apiUrl)};`,
+        'import { createRequire } from "node:module";',
+        `import { ROOT_CONTEXT, context, trace } from ${JSON.stringify(apiUrl)};`,
         `import { registerOTel } from ${JSON.stringify(vercelOtelUrl)};`,
+        "const require = createRequire(import.meta.url);",
+        'const authoredApi = require("@opentelemetry/api");',
+        "const endedSpans = [];",
+        "const spanProcessor = {",
+        "  forceFlush: async () => {},",
+        "  onEnd: (span) => endedSpans.push(span),",
+        "  onStart: () => {},",
+        "  shutdown: async () => {},",
+        "};",
         'const earlyTracer = trace.getTracer("early");',
         'const before = earlyTracer.startSpan("before").isRecording();',
-        'registerOTel({ serviceName: "eve-vendored-opentelemetry-test" });',
+        "registerOTel({",
+        "  autoDetectResources: false,",
+        "  instrumentations: [],",
+        '  serviceName: "eve-vendored-opentelemetry-test",',
+        "  spanProcessors: [spanProcessor],",
+        "});",
         'const earlySpan = earlyTracer.startSpan("early-after-registration");',
         'const lateSpan = trace.getTracer("late").startSpan("late-after-registration");',
         "const earlyAfter = earlySpan.isRecording();",
         "const lateAfter = lateSpan.isRecording();",
         "earlySpan.end();",
         "lateSpan.end();",
-        "process.stdout.write(JSON.stringify({ before, earlyAfter, lateAfter }));",
+        'const parent = trace.getTracer("vendored").startSpan("vendored-parent");',
+        "await context.with(trace.setSpan(ROOT_CONTEXT, parent), async () => {",
+        "  await Promise.resolve();",
+        '  authoredApi.trace.getTracer("authored").startSpan("authored-child").end();',
+        "});",
+        "parent.end();",
+        'const child = endedSpans.find((span) => span.name === "authored-child");',
+        "process.stdout.write(JSON.stringify({",
+        "  before,",
+        "  childParentSpanId: child?.parentSpanContext?.spanId,",
+        "  childParentTraceId: child?.parentSpanContext?.traceId,",
+        "  earlyAfter,",
+        "  lateAfter,",
+        "  parentSpanId: parent.spanContext().spanId,",
+        "  parentTraceId: parent.spanContext().traceId,",
+        "}));",
       ].join("\n"),
     ]);
 
-    expect(JSON.parse(stdout)).toEqual({ before: false, earlyAfter: true, lateAfter: true });
+    const result = JSON.parse(stdout) as {
+      readonly before: boolean;
+      readonly childParentSpanId: string;
+      readonly childParentTraceId: string;
+      readonly earlyAfter: boolean;
+      readonly lateAfter: boolean;
+      readonly parentSpanId: string;
+      readonly parentTraceId: string;
+    };
+    expect(result).toMatchObject({ before: false, earlyAfter: true, lateAfter: true });
+    expect(result.childParentTraceId).toBe(result.parentTraceId);
+    expect(result.childParentSpanId).toBe(result.parentSpanId);
   });
 
   it("does not generate source maps for vendored packages", async () => {

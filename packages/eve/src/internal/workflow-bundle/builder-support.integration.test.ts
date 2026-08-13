@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolveWorkflowModulePath } from "#internal/application/package.js";
 
 import { bundleFinalWorkflowOutput } from "./builder-support.js";
@@ -26,8 +27,10 @@ describe("bundleFinalWorkflowOutput", () => {
       });
 
       const source = await readFile(target, "utf8");
-      const runtimePath = resolveWorkflowModulePath("workflow/runtime").replaceAll("\\", "/");
-      expect(source).toContain(`from ${JSON.stringify(runtimePath)}`);
+      const runtimeSpecifier = normalizeEsmImportSpecifier(
+        resolveWorkflowModulePath("workflow/runtime"),
+      );
+      expect(source).toContain(`from ${JSON.stringify(runtimeSpecifier)}`);
       expect(source).toContain('Buffer.from(["');
       expect(source).not.toContain("const workflowCode = `");
       expect(source).toContain('workflowEntrypoint(workflowCode, { namespace: "evetest" })');
