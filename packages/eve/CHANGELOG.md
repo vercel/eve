@@ -1,5 +1,18 @@
 # eve
 
+## 0.37.0
+
+### Minor Changes
+
+- fe691aa: Expose Vercel Sandbox Drives and allow authors to mount them when creating live session sandboxes.
+
+### Patch Changes
+
+- d0bb6af: Fix Sign in with Vercel Web Chat projects failing to load user-scoped Vercel Connect tools because the generated channel used a reserved issuer.
+- 7ab7d97: Running eve without a command now initializes the current directory when no eve project is present, and starts development when one is detected.
+- c77c661: `eve init` now asks whether to scaffold a non-empty current directory in place or create a named subdirectory. In-place scaffolds preserve unrelated files and overwrite generated paths; coding-agent and non-interactive launches must pass an explicit directory name.
+- 456c0a5: `eve init` now scaffolds the current directory when no target is provided, including when launched by a coding agent.
+
 ## 0.36.0
 
 ### Minor Changes
