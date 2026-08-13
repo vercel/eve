@@ -3,9 +3,7 @@ title: "CLI"
 description: "Reference for every eve CLI command: init, set, info, build, start, dev, logs, trace, link, deploy, eval, channels, and extension."
 ---
 
-The `eve` binary (`bin: eve`) resolves the application root before running project commands. You can run a command from the application root or any directory beneath it. If the current directory is not inside an eve application, eve checks each immediate subdirectory. When it finds one or more applications, an interactive terminal asks which one to use, even when there is only one candidate. A non-interactive terminal lists the candidates and exits so it never chooses an application implicitly.
-
-Application selection does not scan nested descendants beyond those immediate subdirectories. `eve init` and `eve extension` commands continue to use the current directory because their purpose is to create or build at an explicit location. Remote `dev`, `invoke`, and `acp` commands also do not require a local application. Project commands load `.env` and `.env.local` from the resolved application root. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
+Relevant `eve` commands can run from the application root or any directory beneath it. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
 
 ## Commands
 
