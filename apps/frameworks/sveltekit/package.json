@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter eve build && vite build",
+    "build": "vite build",
     "build:sveltekit": "vite build",
     "dev": "vite dev",
     "preview": "vite preview",

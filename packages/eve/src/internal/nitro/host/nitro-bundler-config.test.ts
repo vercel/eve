@@ -79,4 +79,21 @@ describe("createNitroBundlerConfig", () => {
       expect.objectContaining({ message: "dependency build failure" }),
     );
   });
+
+  it("preserves cross-module warnings that involve authored code", () => {
+    const onLog = getBundlerLogHandler();
+    const defaultHandler = vi.fn();
+    const mixedWarning = {
+      id: "/app/agent/tools/evaluate.ts",
+      ids: [
+        "/app/agent/tools/evaluate.ts",
+        "/app/node_modules/eve/dist/src/compiled/vendor/index.js",
+      ],
+      pluginCode: "/app/node_modules/eve/dist/src/compiled/vendor/index.js",
+    };
+
+    onLog("warn", mixedWarning, defaultHandler);
+
+    expect(defaultHandler).toHaveBeenCalledWith("warn", mixedWarning);
+  });
 });
