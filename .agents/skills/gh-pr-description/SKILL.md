@@ -31,35 +31,64 @@ exactly one of these categories:
   and generated runtime artifacts
 - **Tests** — tests, evals, test-only fixtures, and snapshots
 
-Use a table with one row for each category, including categories with no
-changes:
+Use three full-width category blocks in the order above, including categories
+with no changes. Do not use a table: file paths and justification need the full
+description width to remain readable on GitHub.
 
 ```markdown
 ### Diff size
 
-| Category       | Files changed                          | Diff size | Justification                                     |
-| -------------- | -------------------------------------- | --------: | ------------------------------------------------- |
-| Docs           | 0                                      |   +0 / -0 | Not applicable                                    |
-| Implementation | 1 — `packages/eve/src/example.ts`      |  +12 / -4 | Focused implementation of the behavior above      |
-| Tests          | 1 — `packages/eve/src/example.test.ts` |  +28 / -0 | Regression coverage for success and failure paths |
+**Docs** — 0 files · `+0 / -0`
+
+Not applicable.
+
+**Implementation** — 1 file · `+12 / -4`
+
+- `packages/eve/src/example.ts`
+
+Focused implementation of the behavior above.
+
+**Tests** — 1 file · `+28 / -0`
+
+- `packages/eve/src/example.test.ts`
+
+Regression coverage for success and failure paths.
 ```
 
-Report both the file count and the paths in **Files changed**. Compact path
-groups are acceptable only when every changed path remains accounted for.
-Report additions and deletions from the full branch diff against the PR base in
-**Diff size**, and verify that the three rows reconcile with the complete diff.
-Note binary files separately instead of treating them as zero-line changes.
-Classify a mixed-purpose file by its primary purpose and say that it is
-mixed-purpose in the justification.
+Keep each category's file count, additions, and deletions visible on its bold
+heading line. List its paths as bullets; compact path groups are acceptable only
+when every changed path remains accounted for. For an unwieldy path list, put
+only the paths in a `<details>` block with a `Files (N)` summary. Do not collapse
+the category totals or the entire Diff size section.
+
+Report additions and deletions from the full branch diff against the PR base,
+and verify that the three categories reconcile with the complete diff. Note
+binary files separately instead of treating them as zero-line changes. Classify
+a mixed-purpose file by its primary purpose and say that it is mixed-purpose in
+the justification.
 
 The justification must explain why each category needs that amount of change,
 not merely restate its line count. Explicitly call out unusually large files or
 categories, especially generated files, snapshots, fixtures, mechanical
 changes, or a file that disproportionately dominates the diff, and explain why
-that outlier is necessary and could not reasonably be smaller. If the size is
+that outlier is necessary and could not reasonably be smaller. Keep a concise
+outlier warning visible, then put a long explanation in a category-local
+`<details>` block titled `Why this category is unusually large`. If the size is
 surprising for the stated behavior, flag it for reviewer attention rather than
 normalizing it. The rest of the description should still discuss behavior
 rather than enumerate files; this section is the required exception.
+
+```markdown
+This category is unusually large because generated output dominates the diff.
+
+<details>
+<summary>Why this category is unusually large</summary>
+
+Explain the outlier, why it is necessary, and why it could not reasonably be
+smaller.
+
+</details>
+```
 
 Default to the shortest body that answers the five questions below. Keep the
 Summary under 5 sentences for most PRs; exceed 10 lines only for breaking or
@@ -87,11 +116,21 @@ the compiler now treats missing optional directories as empty.
 
 ### Diff size
 
-| Category       | Files changed                                   | Diff size | Justification                                              |
-| -------------- | ----------------------------------------------- | --------: | ---------------------------------------------------------- |
-| Docs           | 0                                               |   +0 / -0 | Not applicable                                             |
-| Implementation | 1 — `packages/eve/src/compiler/example.ts`      |   +6 / -2 | Keeps the missing-directory handling local to the compiler |
-| Tests          | 1 — `packages/eve/src/compiler/example.test.ts` |  +14 / -0 | Covers the regression without broad fixture changes        |
+**Docs** — 0 files · `+0 / -0`
+
+Not applicable.
+
+**Implementation** — 1 file · `+6 / -2`
+
+- `packages/eve/src/compiler/example.ts`
+
+Keeps the missing-directory handling local to the compiler.
+
+**Tests** — 1 file · `+14 / -0`
+
+- `packages/eve/src/compiler/example.test.ts`
+
+Covers the regression without broad fixture changes.
 ```
 
 Under validation, list exact checks actually run and useful manual coverage. State
