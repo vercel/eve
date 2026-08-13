@@ -8,10 +8,8 @@ import {
   drainDynamicInstructionUserMessages,
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
-import {
-  dispatchDynamicModelEvent,
-  preserveSerializedSessionDynamicModelSelection,
-} from "#context/dynamic-model-lifecycle.js";
+import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
+import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import {
   dispatchDynamicSubagentEvent,
