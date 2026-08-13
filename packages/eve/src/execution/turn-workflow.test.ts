@@ -950,14 +950,14 @@ describe("turnWorkflow", () => {
         callId: "call-1",
         childSessionId: "child-session",
         event: requiredEvent,
-        kind: "subagent-authorization-event",
+        kind: "subagent-forwarded-event",
         subagentName: "delegate",
       },
       {
         callId: "call-1",
         childSessionId: "child-session",
         event: completedEvent,
-        kind: "subagent-authorization-event",
+        kind: "subagent-forwarded-event",
         subagentName: "delegate",
       },
       {
@@ -1044,104 +1044,6 @@ describe("turnWorkflow", () => {
     expect(
       resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result"),
     ).toHaveLength(1);
-  });
-
-  it("proxies a child's nested dispatch events while continuing to await its result", async () => {
-    const runningChildren = [{ callId: "call-1", sessionId: "child-session" }];
-    const pendingState = createSessionState();
-    const proxiedState = withRunningChildren(createSessionState(), runningChildren);
-    const completedState = createSessionState();
-    const requestedEvent = {
-      data: {
-        actions: [
-          {
-            callId: "call-2",
-            description: "Fetch recent Sentry issues",
-            input: { message: "What broke today?" },
-            kind: "subagent-call" as const,
-            name: "fetch_sentry",
-            nodeId: "node-1",
-            subagentName: "fetch-sentry",
-          },
-        ],
-        sequence: 1,
-        stepIndex: 1,
-        turnId: "turn_0",
-      },
-      type: "actions.requested" as const,
-    };
-    installInbox([
-      {
-        callId: "call-1",
-        childSessionId: "child-session",
-        event: requestedEvent,
-        kind: "subagent-progress-event",
-        subagentName: "delegate",
-      },
-      {
-        kind: "runtime-action-result",
-        results: [
-          {
-            callId: "call-1",
-            kind: "subagent-result",
-            origin: "child",
-            output: "child output",
-            subagentName: "delegate",
-          },
-        ],
-      },
-    ]);
-    const dispatchedState = withRunningChildren(pendingState, runningChildren);
-    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
-      results: [],
-      sessionState: dispatchedState,
-    });
-    vi.mocked(runProxySubagentEventStep).mockResolvedValueOnce({
-      serializedContext: { state: "progress" },
-      sessionState: proxiedState,
-    });
-    vi.mocked(turnStep)
-      .mockResolvedValueOnce({
-        action: "park",
-        hasPendingAuthorization: false,
-        hasPendingInputBatch: false,
-        pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
-        serializedContext: { state: "pending" },
-        sessionState: pendingState,
-      })
-      .mockResolvedValueOnce({
-        action: "done",
-        output: "done",
-        serializedContext: { state: "done" },
-        sessionState: completedState,
-      });
-
-    const { input, parentWritable } = createInput({
-      driverCapabilities: { turnInbox: true },
-      mode: "task",
-      sessionState: pendingState,
-    });
-    await turnWorkflow(input);
-
-    expect(vi.mocked(runProxySubagentEventStep).mock.calls).toEqual([
-      [
-        {
-          hookPayload: expect.objectContaining({ event: requestedEvent }),
-          parentWritable,
-          serializedContext: { state: "pending" },
-          sessionState: dispatchedState,
-        },
-      ],
-    ]);
-    expect(vi.mocked(turnStep).mock.calls[1]?.[0]).toMatchObject({
-      input: {
-        kind: "runtime-action-result",
-        results: [expect.objectContaining({ output: "child output" })],
-      },
-      serializedContext: { state: "progress" },
-      sessionState: proxiedState,
-    });
-    expect(routeDeliverToChildren).not.toHaveBeenCalled();
   });
 
   it("mints a unique delivery request id per wait so a stale forward is not re-accepted", async () => {

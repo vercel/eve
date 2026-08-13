@@ -2,19 +2,17 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type {
-  SubagentAuthorizationEvent,
-  SubagentAuthorizationEventHookPayload,
+  SubagentForwardedEvent,
+  SubagentForwardedEventHookPayload,
   SubagentInputRequestHookPayload,
-  SubagentProgressEvent,
-  SubagentProgressEventHookPayload,
 } from "#channel/types.js";
 import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import {
   SUBAGENT_ADAPTER_KIND,
   isSubagentAdapterState,
 } from "#execution/subagent-adapter-state.js";
+import { isSubagentDelegationAction } from "#harness/subagent-depth.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
-import type { RuntimeActionRequest } from "#runtime/actions/types.js";
 
 const log = createLogger("execution.subagent-adapter");
 
@@ -31,35 +29,35 @@ const log = createLogger("execution.subagent-adapter");
 export const SUBAGENT_ADAPTER: ChannelAdapter = {
   kind: SUBAGENT_ADAPTER_KIND,
   async "actions.requested"(data, ctx) {
-    const actions = data.actions.filter(isDispatchActionRequest);
+    // Only delegated work is forwarded. A child's own tool calls are per-step
+    // chatter with unbounded result payloads, and every hop up the chain
+    // replays them into another durable step and another parent stream.
+    const actions = data.actions.filter(isSubagentDelegationAction);
 
     if (actions.length === 0) {
       return;
     }
 
-    await forwardSubagentProgressEvent(
-      { data: { ...data, actions }, type: "actions.requested" },
-      ctx,
-    );
+    await forwardSubagentEvent({ data: { ...data, actions }, type: "actions.requested" }, ctx);
   },
   async "action.result"(data, ctx) {
     if (data.result.kind !== "subagent-result") {
       return;
     }
 
-    await forwardSubagentProgressEvent({ data, type: "action.result" }, ctx);
+    await forwardSubagentEvent({ data, type: "action.result" }, ctx);
   },
   async "approval.candidate"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "approval.candidate" }, ctx);
+    await forwardSubagentEvent({ data, type: "approval.candidate" }, ctx);
   },
   async "approval.settled"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "approval.settled" }, ctx);
+    await forwardSubagentEvent({ data, type: "approval.settled" }, ctx);
   },
   async "authorization.required"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "authorization.required" }, ctx);
+    await forwardSubagentEvent({ data, type: "authorization.required" }, ctx);
   },
   async "authorization.completed"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "authorization.completed" }, ctx);
+    await forwardSubagentEvent({ data, type: "authorization.completed" }, ctx);
   },
   async "input.requested"(data, ctx) {
     const state = ctx.state;
@@ -89,19 +87,8 @@ export const SUBAGENT_ADAPTER: ChannelAdapter = {
   },
 };
 
-/**
- * Nested dispatch is the unit a parent progress surface can render: it is the
- * child's own `subagent.called` boundary, one event per delegated run. A
- * child's tool calls are per-step chatter with unbounded result payloads, and
- * every hop up the chain replays them into another durable step and another
- * parent stream.
- */
-function isDispatchActionRequest(action: RuntimeActionRequest): boolean {
-  return action.kind === "remote-agent-call" || action.kind === "subagent-call";
-}
-
-async function forwardSubagentProgressEvent(
-  event: SubagentProgressEvent,
+async function forwardSubagentEvent(
+  event: SubagentForwardedEvent,
   ctx: ChannelAdapterContext,
 ): Promise<void> {
   const state = ctx.state;
@@ -110,43 +97,21 @@ async function forwardSubagentProgressEvent(
     return;
   }
 
-  await forwardSubagentProgressEventStep({
+  await forwardSubagentEventStep({
     hookPayload: {
       callId: state.callId,
       childSessionId: ctx.ctx.require(SessionIdKey),
       event,
-      kind: "subagent-progress-event",
+      kind: "subagent-forwarded-event",
       subagentName: state.subagentName,
     },
     parentContinuationToken: state.parentContinuationToken,
   });
 }
 
-async function forwardSubagentAuthorizationEvent(
-  event: SubagentAuthorizationEvent,
-  ctx: ChannelAdapterContext,
-): Promise<void> {
-  const state = ctx.state;
-
-  if (!isSubagentAdapterState(state)) {
-    return;
-  }
-
-  await forwardSubagentAuthorizationEventStep({
-    hookPayload: {
-      callId: state.callId,
-      childSessionId: ctx.ctx.require(SessionIdKey),
-      event,
-      kind: "subagent-authorization-event",
-      subagentName: state.subagentName,
-    },
-    parentContinuationToken: state.parentContinuationToken,
-  });
-}
-
-/** Forwards one child nested-dispatch event to its active parent turn. */
-async function forwardSubagentProgressEventStep(input: {
-  readonly hookPayload: SubagentProgressEventHookPayload;
+/** Forwards one child stream event to its active parent turn. */
+async function forwardSubagentEventStep(input: {
+  readonly hookPayload: SubagentForwardedEventHookPayload;
   readonly parentContinuationToken: string;
 }): Promise<void> {
   "use step";
@@ -155,31 +120,7 @@ async function forwardSubagentProgressEventStep(input: {
     await resumeHook(input.parentContinuationToken, input.hookPayload);
   } catch (error) {
     const errorId = createErrorId();
-    log.warn("failed to forward subagent progress event to parent", {
-      callId: input.hookPayload.callId,
-      childSessionId: input.hookPayload.childSessionId,
-      errorId,
-      eventType: input.hookPayload.event.type,
-      parentContinuationToken: input.parentContinuationToken,
-      subagentName: input.hookPayload.subagentName,
-      error,
-    });
-    throw error;
-  }
-}
-
-/** Forwards one child authorization event to its active parent turn. */
-async function forwardSubagentAuthorizationEventStep(input: {
-  readonly hookPayload: SubagentAuthorizationEventHookPayload;
-  readonly parentContinuationToken: string;
-}): Promise<void> {
-  "use step";
-
-  try {
-    await resumeHook(input.parentContinuationToken, input.hookPayload);
-  } catch (error) {
-    const errorId = createErrorId();
-    log.warn("failed to forward subagent authorization event to parent", {
+    log.warn("failed to forward subagent event to parent", {
       callId: input.hookPayload.callId,
       childSessionId: input.hookPayload.childSessionId,
       errorId,

@@ -2,14 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type {
-  SubagentAuthorizationEvent,
-  SubagentAuthorizationEventHookPayload,
-  SubagentProgressEvent,
-  SubagentProgressEventHookPayload,
+  SubagentForwardedEvent,
+  SubagentForwardedEventHookPayload,
 } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import { emitProxiedSubagentEvent } from "#execution/subagent-event-proxy-step.js";
+import {
+  getSubagentDelegationName,
+  isSubagentDelegationAction,
+} from "#harness/subagent-depth.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
@@ -52,7 +54,8 @@ const progressAdapter: ChannelAdapter<ProgressAdapterContext> = {
   kind: "progress-proxy-test",
   "actions.requested"(data, ctx) {
     ctx.state.status = data.actions
-      .map((action) => (action.kind === "subagent-call" ? action.subagentName : action.kind))
+      .filter(isSubagentDelegationAction)
+      .map(getSubagentDelegationName)
       .join(", ");
   },
   "action.result"(data, ctx) {
@@ -133,24 +136,12 @@ function createSession(sessionId: string): HarnessSession {
   };
 }
 
-function authorizationPayload(
-  event: SubagentAuthorizationEvent,
-): SubagentAuthorizationEventHookPayload {
+function forwardedPayload(event: SubagentForwardedEvent): SubagentForwardedEventHookPayload {
   return {
     callId: "call-child",
     childSessionId: "child-session",
     event,
-    kind: "subagent-authorization-event",
-    subagentName: "researcher",
-  };
-}
-
-function progressPayload(event: SubagentProgressEvent): SubagentProgressEventHookPayload {
-  return {
-    callId: "call-child",
-    childSessionId: "child-session",
-    event,
-    kind: "subagent-progress-event",
+    kind: "subagent-forwarded-event",
     subagentName: "researcher",
   };
 }
@@ -174,7 +165,7 @@ describe("subagent authorization proxy", () => {
     const { ctx } = buildContext({ adapter: authorizationAdapter, sessionId: parentSessionId });
     const chunks: Uint8Array[] = [];
     const parentWritable = createCapturingWritable(chunks);
-    const candidateEvent: SubagentAuthorizationEvent = {
+    const candidateEvent: SubagentForwardedEvent = {
       data: {
         candidateId: "candidate-1",
         outcome: "pending",
@@ -186,7 +177,7 @@ describe("subagent authorization proxy", () => {
       },
       type: "approval.candidate",
     };
-    const settledEvent: SubagentAuthorizationEvent = {
+    const settledEvent: SubagentForwardedEvent = {
       data: {
         outcome: "approved",
         requestId: "approval-1",
@@ -201,13 +192,13 @@ describe("subagent authorization proxy", () => {
     await emitProxiedSubagentEvent({
       ctx,
       durableSession: projectToDurableSession(session),
-      hookPayload: authorizationPayload(candidateEvent),
+      hookPayload: forwardedPayload(candidateEvent),
       parentWritable,
     });
     await emitProxiedSubagentEvent({
       ctx,
       durableSession: projectToDurableSession(session),
-      hookPayload: authorizationPayload(settledEvent),
+      hookPayload: forwardedPayload(settledEvent),
       parentWritable,
     });
 
@@ -223,7 +214,7 @@ describe("subagent authorization proxy", () => {
     });
     const chunks: Uint8Array[] = [];
     const parentWritable = createCapturingWritable(chunks);
-    const requiredEvent: SubagentAuthorizationEvent = {
+    const requiredEvent: SubagentForwardedEvent = {
       data: {
         authorization: {
           displayName: "Linear",
@@ -243,7 +234,7 @@ describe("subagent authorization proxy", () => {
     const required = await emitProxiedSubagentEvent({
       ctx,
       durableSession: projectToDurableSession(session),
-      hookPayload: authorizationPayload(requiredEvent),
+      hookPayload: forwardedPayload(requiredEvent),
       parentWritable,
     });
 
@@ -254,7 +245,7 @@ describe("subagent authorization proxy", () => {
       state: { pendingName: "linear" },
     });
 
-    const completedEvent: SubagentAuthorizationEvent = {
+    const completedEvent: SubagentForwardedEvent = {
       data: {
         authorization: requiredEvent.data.authorization,
         name: "linear",
@@ -268,7 +259,7 @@ describe("subagent authorization proxy", () => {
     const completed = await emitProxiedSubagentEvent({
       ctx: rehydrateContext({ bundle, serializedContext: required.serializedContext }),
       durableSession: required.sessionState.snapshot!.session,
-      hookPayload: authorizationPayload(completedEvent),
+      hookPayload: forwardedPayload(completedEvent),
       parentWritable,
     });
 
@@ -289,7 +280,7 @@ describe("subagent progress proxy", () => {
     const { bundle, ctx } = buildContext({ adapter: progressAdapter, sessionId: parentSessionId });
     const chunks: Uint8Array[] = [];
     const parentWritable = createCapturingWritable(chunks);
-    const requestedEvent: SubagentProgressEvent = {
+    const requestedEvent: SubagentForwardedEvent = {
       data: {
         actions: [
           {
@@ -312,7 +303,7 @@ describe("subagent progress proxy", () => {
     const requested = await emitProxiedSubagentEvent({
       ctx,
       durableSession: projectToDurableSession(session),
-      hookPayload: progressPayload(requestedEvent),
+      hookPayload: forwardedPayload(requestedEvent),
       parentWritable,
     });
 
@@ -321,7 +312,7 @@ describe("subagent progress proxy", () => {
       state: { status: "fetch-sentry" },
     });
 
-    const resultEvent: SubagentProgressEvent = {
+    const resultEvent: SubagentForwardedEvent = {
       data: {
         result: {
           callId: "call-fetch-sentry",
@@ -351,7 +342,7 @@ describe("subagent progress proxy", () => {
     const settled = await emitProxiedSubagentEvent({
       ctx: rehydrateContext({ bundle, serializedContext: requested.serializedContext }),
       durableSession: requested.sessionState.snapshot!.session,
-      hookPayload: progressPayload(resultEvent),
+      hookPayload: forwardedPayload(resultEvent),
       parentWritable,
     });
 

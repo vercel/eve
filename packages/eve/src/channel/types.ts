@@ -291,11 +291,20 @@ export interface SubagentInputRequestHookPayload {
   readonly subagentName: string;
 }
 
-/** Responder-specific lifecycle event forwarded from a delegated child. */
-export type SubagentAuthorizationEvent = Extract<
+/**
+ * Child stream event a delegated subagent re-emits through its parent.
+ *
+ * Two families: the responder-bound lifecycle a parent must render to reach a
+ * human, and the nested-dispatch lifecycle a parent progress surface renders.
+ * The dispatch family is narrowed at the forwarding site to the actions the
+ * child delegated onward — a child's own tool calls stay on its own stream.
+ */
+export type SubagentForwardedEvent = Extract<
   UnstampedMessageStreamEvent,
   {
     type:
+      | "action.result"
+      | "actions.requested"
       | "approval.candidate"
       | "approval.settled"
       | "authorization.required"
@@ -304,43 +313,17 @@ export type SubagentAuthorizationEvent = Extract<
 >;
 
 /**
- * Proxy payload sent from a child subagent while it waits for authorization.
+ * Proxy payload sent from a child subagent for one forwarded stream event.
  *
- * Runtime-internal. The parent re-emits the unchanged event through its own
- * channel; the authorization callback continues to target the child directly.
+ * Runtime-internal. The parent re-emits the event through its own channel; an
+ * authorization callback continues to target the child directly, and
+ * dispatched work stays owned by the child.
  */
-export interface SubagentAuthorizationEventHookPayload {
+export interface SubagentForwardedEventHookPayload {
   readonly callId: string;
   readonly childSessionId: string;
-  readonly event: SubagentAuthorizationEvent;
-  readonly kind: "subagent-authorization-event";
-  readonly subagentName: string;
-}
-
-/**
- * Nested-dispatch lifecycle event forwarded from a delegated child.
- *
- * Narrowed to the two action lifecycle events at the forwarding site: a child
- * only forwards the entries that describe work it delegated onward, never its
- * own tool calls.
- */
-export type SubagentProgressEvent = Extract<
-  UnstampedMessageStreamEvent,
-  { type: "action.result" | "actions.requested" }
->;
-
-/**
- * Proxy payload sent from a child subagent when it dispatches nested work.
- *
- * Runtime-internal. The parent re-emits the unchanged event through its own
- * channel so a progress surface bound to the parent session observes what its
- * descendants are doing; the dispatched work itself stays owned by the child.
- */
-export interface SubagentProgressEventHookPayload {
-  readonly callId: string;
-  readonly childSessionId: string;
-  readonly event: SubagentProgressEvent;
-  readonly kind: "subagent-progress-event";
+  readonly event: SubagentForwardedEvent;
+  readonly kind: "subagent-forwarded-event";
   readonly subagentName: string;
 }
 
@@ -353,9 +336,8 @@ export type HookPayload =
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
   | SessionTimeoutHookPayload
-  | SubagentAuthorizationEventHookPayload
-  | SubagentInputRequestHookPayload
-  | SubagentProgressEventHookPayload;
+  | SubagentForwardedEventHookPayload
+  | SubagentInputRequestHookPayload;
 
 /**
  * Initial caller callback attached to a delegated session at creation.

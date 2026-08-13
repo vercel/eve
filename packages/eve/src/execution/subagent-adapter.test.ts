@@ -138,7 +138,7 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
       callId: "call-123",
       childSessionId: "child-session",
       event: { data, type: "authorization.required" },
-      kind: "subagent-authorization-event",
+      kind: "subagent-forwarded-event",
       subagentName: "linear",
     });
   });
@@ -160,7 +160,7 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
       callId: "call-123",
       childSessionId: "child-session",
       event: { data, type: "authorization.completed" },
-      kind: "subagent-authorization-event",
+      kind: "subagent-forwarded-event",
       subagentName: "linear",
     });
   });
@@ -239,39 +239,19 @@ describe("SUBAGENT_ADAPTER input.requested handler", () => {
 });
 
 describe("SUBAGENT_ADAPTER progress handlers", () => {
-  it("forwards a child's nested dispatch batch through each subagent adapter hop", async () => {
+  it("narrows a mixed batch to the dispatch entries through each adapter hop", async () => {
     resumeHookMock.mockClear();
-    const data = {
-      actions: [dispatchAction],
-      sequence: 4,
-      stepIndex: 2,
-      turnId: "child-turn",
-    };
 
     await callAdapterEventHandler(
       SUBAGENT_ADAPTER,
-      { data, type: "actions.requested" },
-      makeContext(),
-    );
-
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
-      callId: "call-123",
-      childSessionId: "child-session",
-      event: { data, type: "actions.requested" },
-      kind: "subagent-progress-event",
-      subagentName: "linear",
-    });
-  });
-
-  it("narrows a mixed batch to the dispatch entries", async () => {
-    resumeHookMock.mockClear();
-
-    await SUBAGENT_ACTIONS_REQUESTED(
       {
-        actions: [toolCallAction, dispatchAction],
-        sequence: 4,
-        stepIndex: 2,
-        turnId: "child-turn",
+        data: {
+          actions: [toolCallAction, dispatchAction],
+          sequence: 4,
+          stepIndex: 2,
+          turnId: "child-turn",
+        },
+        type: "actions.requested",
       },
       makeContext(),
     );
@@ -283,7 +263,7 @@ describe("SUBAGENT_ADAPTER progress handlers", () => {
         data: { actions: [dispatchAction], sequence: 4, stepIndex: 2, turnId: "child-turn" },
         type: "actions.requested",
       },
-      kind: "subagent-progress-event",
+      kind: "subagent-forwarded-event",
       subagentName: "linear",
     });
   });
@@ -320,7 +300,7 @@ describe("SUBAGENT_ADAPTER progress handlers", () => {
       callId: "call-123",
       childSessionId: "child-session",
       event: { data, type: "action.result" },
-      kind: "subagent-progress-event",
+      kind: "subagent-forwarded-event",
       subagentName: "linear",
     });
   });
@@ -337,23 +317,6 @@ describe("SUBAGENT_ADAPTER progress handlers", () => {
         turnId: "child-turn",
       },
       makeContext(),
-    );
-
-    expect(resumeHookMock).not.toHaveBeenCalled();
-  });
-
-  it("skips forwarding when the adapter state is invalid", async () => {
-    resumeHookMock.mockClear();
-    const base = makeContext();
-
-    await SUBAGENT_ACTIONS_REQUESTED(
-      {
-        actions: [dispatchAction],
-        sequence: 4,
-        stepIndex: 2,
-        turnId: "child-turn",
-      },
-      { ctx: base.ctx, state: {}, session: base.session },
     );
 
     expect(resumeHookMock).not.toHaveBeenCalled();
@@ -417,37 +380,7 @@ describe("SUBAGENT_ADAPTER forward failure logging", () => {
     });
   });
 
-  it("includes the progress event type when progress forwarding fails", async () => {
-    resumeHookMock.mockClear();
-    resumeHookMock.mockRejectedValueOnce(new Error("parent gone"));
-
-    await expect(
-      SUBAGENT_ACTIONS_REQUESTED(
-        {
-          actions: [dispatchAction],
-          sequence: 4,
-          stepIndex: 2,
-          turnId: "child-turn",
-        },
-        makeContext(),
-      ),
-    ).rejects.toThrow("parent gone");
-
-    const warnCall = warnSpy.mock.calls.find((call: unknown[]) =>
-      String(call[0]).startsWith("[eve:execution.subagent-adapter]"),
-    );
-    expect(warnCall?.[1]).toMatchObject({
-      callId: "call-123",
-      childSessionId: "child-session",
-      errorId: expect.any(String),
-      eventType: "actions.requested",
-      parentContinuationToken: "parent-token",
-      subagentName: "linear",
-      error: expect.objectContaining({ message: expect.stringContaining("parent gone") }),
-    });
-  });
-
-  it("includes the authorization event type when auth forwarding fails", async () => {
+  it("includes the forwarded event type when event forwarding fails", async () => {
     resumeHookMock.mockClear();
     resumeHookMock.mockRejectedValueOnce(new Error("parent gone"));
 
