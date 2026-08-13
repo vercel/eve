@@ -1,4 +1,5 @@
 import type { Command } from "#compiled/commander/index.js";
+import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
 
 import { parseSetupAnswer } from "./setup-answers.js";
 
@@ -11,14 +12,13 @@ interface IntegrationCommandLogger {
 export function registerIntegrationCommands(input: {
   program: Command;
   logger: IntegrationCommandLogger;
-  appRoot: string;
+  application: CliApplicationContext;
 }): void {
-  const { appRoot, logger, program } = input;
+  const { application, logger, program } = input;
 
   const integration = program.command("integration", { hidden: true });
 
-  integration
-    .command("setup <kind>")
+  applicationCommand(integration.command("setup <kind>"))
     .option("-y, --yes")
     .option(
       "--non-interactive",
@@ -40,7 +40,7 @@ export function registerIntegrationCommands(input: {
         },
       ) => {
         const { runIntegrationSetupCommand } = await import("./integration-setup.js");
-        await runIntegrationSetupCommand(logger, appRoot, kind, {
+        await runIntegrationSetupCommand(logger, application.root, kind, {
           yes: options.yes,
           nonInteractive: options.nonInteractive,
           answers: options.answer,
@@ -48,8 +48,7 @@ export function registerIntegrationCommands(input: {
       },
     );
 
-  integration
-    .command("connect <slug> <service> [canonical-name]")
+  applicationCommand(integration.command("connect <slug> <service> [canonical-name]"))
     .option("-y, --yes")
     .option(
       "--non-interactive",
@@ -63,7 +62,14 @@ export function registerIntegrationCommands(input: {
         options: { nonInteractive?: boolean },
       ) => {
         const { runIntegrationConnectCommand } = await import("./integration-connect.js");
-        await runIntegrationConnectCommand(logger, appRoot, slug, service, canonicalName, options);
+        await runIntegrationConnectCommand(
+          logger,
+          application.root,
+          slug,
+          service,
+          canonicalName,
+          options,
+        );
       },
     );
 }

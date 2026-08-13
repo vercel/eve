@@ -4,6 +4,12 @@ import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-p
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
+import {
+  applicationCommand,
+  commandRequiresApplicationRoot,
+  type CliApplicationContext,
+} from "#cli/application-command.js";
+import { resolveCliApplicationRoot } from "#cli/application-root.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
@@ -81,8 +87,10 @@ interface CliRuntimeDependencies {
     evalIds: readonly string[],
     options: EvalCliOptions,
     logger: CliLogger,
+    appRoot: string,
   ): Promise<void>;
   startHost(appRoot: string, options?: DevelopmentServerOptions): DevelopmentServer;
+  resolveApplicationRoot(cwd: string, options: { readonly interactive: boolean }): Promise<string>;
   startProductionHost(
     appRoot: string,
     options?: {
@@ -153,7 +161,7 @@ function hasInteractiveTerminal(): boolean {
 function createCliProgram(
   logger: CliLogger,
   runtime: CliRuntimeOverrides,
-  appRoot: string,
+  application: CliApplicationContext,
 ): Command {
   const packageVersion = resolveInstalledPackageInfo().version;
   const program = new Command();
@@ -165,7 +173,13 @@ function createCliProgram(
     .version(packageVersion)
     .showHelpAfterError()
     .exitOverride()
-    .hook("preAction", (_program, actionCommand) => {
+    .hook("preAction", async (_program, actionCommand) => {
+      if (commandRequiresApplicationRoot(actionCommand)) {
+        application.root = await (runtime.resolveApplicationRoot ?? resolveCliApplicationRoot)(
+          application.root,
+          { interactive: hasInteractiveTerminal() },
+        );
+      }
       if (["info", "dev", "init"].includes(actionCommand.name())) {
         logger.log(eveCliBanner());
       }
@@ -179,18 +193,20 @@ function createCliProgram(
       },
     });
 
-  program
-    .command("channels")
-    .description("Manage user-authored channels in the current project.")
-    .command("list")
+  applicationCommand(
+    program
+      .command("channels")
+      .description("Manage user-authored channels in the current project.")
+      .command("list"),
+  )
     .description("List user-authored channels in the current project.")
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean }) => {
       const { runChannelsListCommand } = await import("#cli/commands/channels.js");
-      await runChannelsListCommand(logger, appRoot, options);
+      await runChannelsListCommand(logger, application.root, options);
     });
 
-  registerIntegrationCommands({ program, logger, appRoot });
+  registerIntegrationCommands({ program, logger, application });
 
   const extension = program
     .command("extension")
@@ -208,7 +224,7 @@ function createCliProgram(
       }
 
       const { runExtensionInitCommand } = await import("#cli/commands/extension-init.js");
-      await runExtensionInitCommand(logger, appRoot, target);
+      await runExtensionInitCommand(logger, application.root, target);
     });
 
   extension
@@ -216,13 +232,13 @@ function createCliProgram(
     .description("Build the current package as an eve extension.")
     .action(async () => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
-      loadDevelopmentEnvironmentFiles(appRoot);
+      loadDevelopmentEnvironmentFiles(application.root);
 
       const { runExtensionBuildCommand } = await import("#cli/commands/extension-build.js");
-      await runExtensionBuildCommand(logger, appRoot);
+      await runExtensionBuildCommand(logger, application.root);
     });
 
-  registerRegistryCommands({ program, logger, appRoot });
+  registerRegistryCommands({ program, logger, application });
 
   program
     // Optional: a missing target scaffolds or updates the current directory,
@@ -252,7 +268,7 @@ function createCliProgram(
         }
 
         const { runInitCommand } = await import("#cli/commands/init.js");
-        await runInitCommand(logger, appRoot, target, {
+        await runInitCommand(logger, application.root, target, {
           channelWebNextjs: options.channelWebNextjs,
           model: options.model,
           reasoning: options.reasoning,
@@ -260,8 +276,7 @@ function createCliProgram(
       },
     );
 
-  program
-    .command("set")
+  applicationCommand(program.command("set"))
     .description("Change root agent model settings.")
     .option("--model <model>", "Set the agent model (provider/model-id)")
     .option(
@@ -271,30 +286,29 @@ function createCliProgram(
     )
     .action(async (options: { model?: string; reasoning?: AgentReasoningDefinition }) => {
       const { runSetCommand } = await import("#cli/commands/set.js");
-      await runSetCommand(logger, appRoot, options);
+      await runSetCommand(logger, application.root, options);
     });
 
-  registerProjectCommands({ program, logger, appRoot });
+  registerProjectCommands({ program, logger, application });
 
   registerBuildCommand({
-    appRoot,
+    application,
     buildHost: runtime.buildHost,
     logger,
     program,
   });
 
-  program
-    .command("start")
+  applicationCommand(program.command("start"))
     .description("Start a built eve application.")
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 3000)", parsePortOption)
     .action(async (options: ProductionCliOptions) => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 
-      loadDevelopmentEnvironmentFiles(appRoot);
+      loadDevelopmentEnvironmentFiles(application.root);
 
       const startProductionHost = runtime.startProductionHost ?? (await loadStartProductionHost());
-      const server = await startProductionHost(appRoot, {
+      const server = await startProductionHost(application.root, {
         host: options.host,
         port: options.port,
       });
@@ -310,10 +324,10 @@ function createCliProgram(
       await waitForShutdownSignal({ close: () => server.close(), wait: () => server.wait() });
     });
 
-  registerRuntimeInvokeCommand({ appRoot, logger, program, runtime });
+  registerRuntimeInvokeCommand({ application, logger, program, runtime });
 
   registerAcpCommand({
-    appRoot,
+    application,
     eveVersion: packageVersion,
     program,
     resolveVerifiedRemoteDevelopmentClient: runtime.resolveVerifiedRemoteDevelopmentClient,
@@ -321,8 +335,13 @@ function createCliProgram(
     startHost: runtime.startHost,
   });
 
-  program
-    .command("dev")
+  applicationCommand(program.command("dev"), (command) => {
+    const options = command.opts<DevelopmentCliOptions>();
+    return (
+      resolveDevelopmentUrlTarget(options, command.processedArgs[0] as string | undefined) ===
+      undefined
+    );
+  })
     .description("Start the eve development server or connect to an existing URL.")
     .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("--host <host>", "Host interface to bind")
@@ -387,7 +406,10 @@ function createCliProgram(
       if (remoteServerUrl !== undefined) {
         const isActive =
           runtime.isActiveDevelopmentServerForApp ?? (await loadIsActiveDevelopmentServerForApp());
-        existingLocalDevelopmentServer = await isActive({ appRoot, serverUrl: remoteServerUrl });
+        existingLocalDevelopmentServer = await isActive({
+          appRoot: application.root,
+          serverUrl: remoteServerUrl,
+        });
       }
       const runInteractiveUi = async (
         input: {
@@ -408,9 +430,9 @@ function createCliProgram(
             ? {
                 kind: "local",
                 serverUrl: input.serverUrl,
-                workspaceRoot: input.appRoot ?? appRoot,
+                workspaceRoot: input.appRoot ?? application.root,
               }
-            : { kind: "remote", serverUrl: input.serverUrl, workspaceRoot: appRoot };
+            : { kind: "remote", serverUrl: input.serverUrl, workspaceRoot: application.root };
         const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
         const tuiInput: RunDevelopmentTuiInput = {
@@ -447,7 +469,7 @@ function createCliProgram(
 
       if (remoteServerUrl) {
         const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
-        loadDevelopmentEnvironmentFiles(appRoot);
+        loadDevelopmentEnvironmentFiles(application.root);
         logger.log(
           `↗ ${existingLocalDevelopmentServer ? "local" : "remote"} mode targeting ${theme.info(new URL(remoteServerUrl).host)}`,
         );
@@ -495,7 +517,7 @@ function createCliProgram(
 
       try {
         const startHost = runtime.startHost ?? (await loadStartHost());
-        server = startHost(appRoot, {
+        server = startHost(application.root, {
           existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
           host: options.host,
           onBootProgress,
@@ -555,27 +577,24 @@ function createCliProgram(
     .command("logs")
     .description("Inspect local `eve dev` diagnostic logs (.eve/logs).");
 
-  logs
-    .command("show [logid]", { isDefault: true })
+  applicationCommand(logs.command("show [logid]", { isDefault: true }))
     .description("Print a diagnostic log (the most recent when logid is omitted).")
     .option("--dump", "Prepend the log's environment dump (.dump sibling)")
     .option("--events", "Interleave session events from the local workflow store")
     .action(async (logId: string | undefined, options: { dump?: boolean; events?: boolean }) => {
       const { runLogsShowCommand } = await import("#cli/commands/logs.js");
-      await runLogsShowCommand(logger, appRoot, logId, options);
+      await runLogsShowCommand(logger, application.root, logId, options);
     });
 
-  logs
-    .command("ls")
+  applicationCommand(logs.command("ls"))
     .description("List diagnostic logs, most recent first.")
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean }) => {
       const { runLogsListCommand } = await import("#cli/commands/logs.js");
-      await runLogsListCommand(logger, appRoot, options);
+      await runLogsListCommand(logger, application.root, options);
     });
 
-  const traces = program
-    .command("traces [trace]")
+  const traces = applicationCommand(program.command("traces [trace]"))
     .usage("[options] [trace]\n       eve traces ls [options]")
     .description("Show a local `eve dev` trace (the most recent when trace is omitted).")
     .option("--verbose", "Expand every span with all attributes and events")
@@ -583,31 +602,28 @@ function createCliProgram(
     .action(
       async (reference: string | undefined, options: { json?: boolean; verbose?: boolean }) => {
         const { runTraceShowCommand } = await import("#cli/commands/trace.js");
-        await runTraceShowCommand(logger, appRoot, reference, options);
+        await runTraceShowCommand(logger, application.root, reference, options);
       },
     );
 
-  traces
-    .command("ls")
+  applicationCommand(traces.command("ls"))
     .description("List local traces, most recent first.")
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean }) => {
       const { runTraceListCommand } = await import("#cli/commands/trace.js");
-      await runTraceListCommand(logger, appRoot, options);
+      await runTraceListCommand(logger, application.root, options);
     });
 
-  program
-    .command("info")
+  applicationCommand(program.command("info"))
     .description("Print resolved application information.")
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean }) => {
       const printApplicationInfo =
         runtime.printApplicationInfo ?? (await loadPrintApplicationInfo());
-      await printApplicationInfo(logger, appRoot, options);
+      await printApplicationInfo(logger, application.root, options);
     });
 
-  program
-    .command("eval")
+  applicationCommand(program.command("eval"))
     .description("Run evals against an eve agent.")
     .argument(
       "[evalIds...]",
@@ -626,7 +642,7 @@ function createCliProgram(
     .option("--verbose", "Stream per-eval t.log lines to stdout")
     .action(async (evalIds: string[], options: EvalCliOptions) => {
       const runEvalCommand = runtime.runEvalCommand ?? (await loadRunEvalCommand());
-      await runEvalCommand(evalIds, options, logger);
+      await runEvalCommand(evalIds, options, logger, application.root);
     });
 
   return program;
@@ -640,12 +656,12 @@ export async function runCli(
   logger: CliLogger = console,
   runtime: CliRuntimeOverrides = {},
 ): Promise<void> {
-  const appRoot = resolveApplicationRoot();
-  const program = createCliProgram(logger, runtime, appRoot);
+  const application = { root: resolveApplicationRoot() };
+  const program = createCliProgram(logger, runtime, application);
   let input = argv;
   if (input.length === 0) {
     const detectEveProject = runtime.isEveProject ?? (await loadIsEveProject());
-    input = [(await detectEveProject(appRoot)) ? "dev" : "init"];
+    input = [(await detectEveProject(application.root)) ? "dev" : "init"];
   }
 
   try {

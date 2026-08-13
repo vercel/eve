@@ -1,4 +1,5 @@
 import { Command } from "#compiled/commander/index.js";
+import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import {
   parseDevelopmentHeaderOption,
@@ -23,7 +24,7 @@ export type ResolveVerifiedRemoteDevelopmentClient =
   typeof import("#setup/verified-remote-client.js").resolveVerifiedRemoteDevelopmentClient;
 
 export interface RegisterAcpCommandOptions {
-  readonly appRoot: string;
+  readonly application: CliApplicationContext;
   readonly eveVersion: string;
   readonly program: Command;
   readonly resolveVerifiedRemoteDevelopmentClient?: ResolveVerifiedRemoteDevelopmentClient;
@@ -33,8 +34,15 @@ export interface RegisterAcpCommandOptions {
 
 /** Registers the ACP stdio bridge for local and deployed eve agents. */
 export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
-  options.program
-    .command("acp")
+  applicationCommand(options.program.command("acp"), (command) => {
+    const commandOptions = command.opts<AcpCliOptions>();
+    return (
+      resolveDevelopmentUrlTarget(
+        commandOptions,
+        command.processedArgs[0] as string | undefined,
+      ) === undefined
+    );
+  })
     .description("Serve an eve agent through stable ACP v1 over stdio.")
     .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
@@ -50,7 +58,7 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
     )
     .action(async (positionalUrl: string | undefined, commandOptions: AcpCliOptions) => {
       const target = resolveDevelopmentUrlTarget(commandOptions, positionalUrl);
-      loadDevelopmentEnvironmentFiles(options.appRoot);
+      loadDevelopmentEnvironmentFiles(options.application.root);
       const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
 
       if (target !== undefined) {
@@ -79,7 +87,7 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
 
       try {
         const startHost = options.startHost ?? (await loadStartHost());
-        server = startHost(options.appRoot, {
+        server = startHost(options.application.root, {
           existing: "reject",
           host: "127.0.0.1",
           output: "stderr",
@@ -133,7 +141,7 @@ async function runAcp(
     serverUrl: serverInput.serverUrl,
     signal: serverInput.signal,
     vercelScope,
-    workspaceRoot: options.appRoot,
+    workspaceRoot: options.application.root,
   });
   await run({
     auth: clientOptions.auth,
