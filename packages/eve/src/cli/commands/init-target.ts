@@ -54,14 +54,14 @@ async function resolveNamedTarget(parentPath: string, rawTarget: string): Promis
   }
 
   const entries = await readdir(projectPath);
-  if (blockingCreateInPlaceEntries(entries).length > 0) {
+  if (entries.length > 0) {
     return { kind: "existing", projectPath };
   }
   return {
     failurePolicy: "clear",
     kind: "fresh",
     overwriteExisting: false,
-    preservedEntries: entries,
+    preservedEntries: [],
     projectName,
     projectPath,
   };

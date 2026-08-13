@@ -25,7 +25,6 @@ import {
 } from "#setup/primitives/index.js";
 import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
 import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
-import { blockingCreateInPlaceEntries } from "#setup/scaffold/create-in-place.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { validateModelSlug } from "#setup/flows/model-source-change.js";
@@ -195,11 +194,9 @@ async function scaffoldProject(
   const parentPath = resolve(parentDirectory);
   const createInPlace = projectName === CURRENT_DIRECTORY_PROJECT_NAME;
   const projectPath = createInPlace ? parentPath : join(parentPath, projectName);
-  const populateExistingFreshDirectory =
-    !createInPlace &&
-    (await pathExists(projectPath)) &&
-    blockingCreateInPlaceEntries(await readdir(projectPath)).length === 0;
-  if (!createInPlace && (await pathExists(projectPath)) && !populateExistingFreshDirectory) {
+  const populateExistingEmptyDirectory =
+    !createInPlace && (await pathExists(projectPath)) && (await readdir(projectPath)).length === 0;
+  if (!createInPlace && (await pathExists(projectPath)) && !populateExistingEmptyDirectory) {
     throw new Error(`Cannot create project because "${projectPath}" already exists.`);
   }
 
@@ -248,7 +245,7 @@ async function scaffoldProject(
     }
 
     if (stagingDirectory !== undefined) {
-      if (createInPlace || populateExistingFreshDirectory) {
+      if (createInPlace || populateExistingEmptyDirectory) {
         await moveDirectoryContents(stagedProjectPath, projectPath);
       } else {
         await rename(stagedProjectPath, projectPath);

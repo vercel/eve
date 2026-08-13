@@ -1,5 +1,5 @@
 import { execFile, type ExecFileOptions } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -56,6 +56,14 @@ export async function tryInitializeGit(projectPath: string): Promise<GitInitResu
     return { kind: "skipped" };
   }
 
+  const gitPath = join(projectPath, ".git");
+  const gitMetadataExisted = await stat(gitPath).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return false;
+      throw error;
+    },
+  );
   let initialized = false;
   try {
     await runGit(projectPath, ["init"]);
@@ -69,8 +77,8 @@ export async function tryInitializeGit(projectPath: string): Promise<GitInitResu
     await runGit(projectPath, ["commit", "-m", "Initial commit from eve"]);
     return { kind: "initialized" };
   } catch (error) {
-    if (initialized) {
-      await rm(join(projectPath, ".git"), { recursive: true, force: true }).catch(() => {});
+    if (initialized && !gitMetadataExisted) {
+      await rm(gitPath, { recursive: true, force: true }).catch(() => {});
     }
 
     const reason = error instanceof Error ? error.message : String(error);
