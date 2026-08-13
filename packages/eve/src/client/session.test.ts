@@ -800,6 +800,46 @@ describe("ClientSession", () => {
     ]);
   });
 
+  it("keeps following an active turn while authorization is pending", async () => {
+    let streamRequest = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createAcceptedResponse();
+      }
+
+      streamRequest += 1;
+      if (streamRequest === 1) {
+        return createStreamResponse([{ type: "authorization.required", data: {} }]);
+      }
+      if (streamRequest <= 7) {
+        return createStreamResponse([]);
+      }
+      return createStreamResponse([
+        { type: "authorization.completed", data: {} },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession();
+
+    vi.useFakeTimers();
+    try {
+      const eventTypes = await collectEventTypes(await session.send("first"));
+      expect(eventTypes).toEqual([
+        "authorization.required",
+        "authorization.completed",
+        "session.waiting",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(9);
+    expect(session.state.streamIndex).toBe(3);
+  });
+
   it("preserves the session cursor when a turn stream is aborted mid-flight", async () => {
     const encoder = new TextEncoder();
     const abortController = new AbortController();

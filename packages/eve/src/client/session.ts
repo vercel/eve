@@ -185,7 +185,7 @@ export class ClientSession {
         headers: input.headers,
         signal: input.signal,
         startIndex: initialStreamIndex,
-        streamReconnectPolicy: input.streamReconnectPolicy,
+        streamReconnectPolicy: activeTurnReconnectPolicy(input.streamReconnectPolicy),
       })) {
         eventCount += 1;
         yield event;
@@ -240,6 +240,22 @@ export class ClientSession {
       streamReconnectPolicy: input.streamReconnectPolicy,
     });
   }
+}
+
+function activeTurnReconnectPolicy(
+  policy: StreamOptions["streamReconnectPolicy"],
+): StreamOptions["streamReconnectPolicy"] {
+  if (policy && "reconnect" in policy) {
+    return policy;
+  }
+
+  return {
+    ...policy,
+    streamIdleReconnectPolicy: {
+      ...policy?.streamIdleReconnectPolicy,
+      maxAttempts: policy?.streamIdleReconnectPolicy?.maxAttempts ?? Number.POSITIVE_INFINITY,
+    },
+  };
 }
 
 async function postTurn(
