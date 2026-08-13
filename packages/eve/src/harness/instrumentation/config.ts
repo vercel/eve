@@ -1,6 +1,6 @@
-import { createInstrumentationHooks } from "#harness/instrumentation-lifecycle.js";
-import { registerInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
-import { createInstrumentationSetupContext } from "#harness/instrumentation-setup-context.js";
+import { createInstrumentationHooks } from "#harness/instrumentation/lifecycle.js";
+import { registerInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { createInstrumentationSetupContext } from "#harness/instrumentation/setup-context.js";
 import type { InstrumentationDefinition } from "#public/instrumentation/index.js";
 
 /**

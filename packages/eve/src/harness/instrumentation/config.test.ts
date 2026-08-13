@@ -31,12 +31,12 @@ beforeEach(() => {
 describe("instrumentation-config chunk-isolation regression", () => {
   it("a config registered in one module evaluation is visible from another", async () => {
     vi.resetModules();
-    const moduleA = await import("#harness/instrumentation-config.js");
+    const moduleA = await import("#harness/instrumentation/config.js");
     const config = { functionId: "test.instrumentation.cross-module.alice" };
     await moduleA.registerInstrumentationConfig(config, { agentName: "test-agent" });
 
     vi.resetModules();
-    const moduleB = await import("#harness/instrumentation-config.js");
+    const moduleB = await import("#harness/instrumentation/config.js");
 
     // Pre-fix: moduleB's `registeredConfig` is a fresh `undefined` binding.
     // Post-fix: both evaluations share one globalThis-mounted slot.
@@ -45,7 +45,7 @@ describe("instrumentation-config chunk-isolation regression", () => {
 
   it("the config is mounted on globalThis under the canonical symbol", async () => {
     const globalKey = Symbol.for("eve.harness-instrumentation-config");
-    const { registerInstrumentationConfig } = await import("#harness/instrumentation-config.js");
+    const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
 
     const canary = { functionId: "test.instrumentation.global-mount.canary" };
     await registerInstrumentationConfig(canary, { agentName: "test-agent" });
@@ -57,21 +57,21 @@ describe("instrumentation-config chunk-isolation regression", () => {
     const globalKey = Symbol.for("eve.harness-instrumentation-config");
 
     vi.resetModules();
-    const moduleA = await import("#harness/instrumentation-config.js");
+    const moduleA = await import("#harness/instrumentation/config.js");
     const config = { functionId: "test.instrumentation.reimport.canary" };
     await moduleA.registerInstrumentationConfig(config, { agentName: "test-agent" });
     const firstRef = (globalThis as Record<symbol, unknown>)[globalKey];
 
     vi.resetModules();
-    await import("#harness/instrumentation-config.js");
+    await import("#harness/instrumentation/config.js");
     const secondRef = (globalThis as Record<symbol, unknown>)[globalKey];
 
     expect(secondRef).toBe(firstRef);
   });
 
   it("installs harness telemetry settings on the instrumentation runtime", async () => {
-    const { registerInstrumentationConfig } = await import("#harness/instrumentation-config.js");
-    const { getInstrumentationRuntime } = await import("#harness/instrumentation-runtime.js");
+    const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
+    const { getInstrumentationRuntime } = await import("#harness/instrumentation/runtime.js");
 
     await registerInstrumentationConfig(
       {
@@ -93,7 +93,7 @@ describe("instrumentation-config chunk-isolation regression", () => {
 
   it("awaits the setup callback with the resolved context", async () => {
     vi.resetModules();
-    const { registerInstrumentationConfig } = await import("#harness/instrumentation-config.js");
+    const { registerInstrumentationConfig } = await import("#harness/instrumentation/config.js");
 
     const contexts: InstrumentationSetupContext[] = [];
     await registerInstrumentationConfig(

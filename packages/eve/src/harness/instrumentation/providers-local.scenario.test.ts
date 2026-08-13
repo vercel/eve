@@ -9,7 +9,7 @@ import {
   getInstrumentationProviders,
   registerInstrumentationProvider,
   seedInstrumentationProviders,
-} from "#harness/instrumentation-providers.js";
+} from "#harness/instrumentation/providers.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { otelIntegration } from "#public/instrumentation/otel.js";
 

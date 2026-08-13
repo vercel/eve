@@ -12,7 +12,7 @@
 import type {
   InstrumentationCapture,
   InstrumentationEvent,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 import type { JsonValue } from "#public/types/json.js";
 
 export type { JsonValue } from "#public/types/json.js";
@@ -65,7 +65,7 @@ export type {
   InstrumentationTurnStartedEvent,
   InstrumentationTurnTerminalEvent,
   InstrumentationUsage,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 
 /**
  * Marks a value as having come from `defineInstrumentation` or a built-in

@@ -6,7 +6,7 @@ import type {
   InstrumentationTraceContext,
   InstrumentationTurnFailedEvent,
   InstrumentationTurnSettledEvent,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 
 /** Sized so an ordinary session stays one trace and only an outsized one rolls. */
 export const SESSION_WINDOW_TURN_LIMIT = 200;

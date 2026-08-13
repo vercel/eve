@@ -198,7 +198,7 @@ describe("writeCompiledArtifactsFiles", () => {
     // resolves it by package alias, so this also proves the globalThis rooting
     // survives two module instances.
     const { getInstrumentationProviders } =
-      await import("../../src/harness/instrumentation-providers.js");
+      await import("../../src/harness/instrumentation/providers.js");
 
     expect((globalThis as Record<string, unknown>).__eveProviderSetups).toEqual([
       "local:compiled-artifacts-providers-test-agent",

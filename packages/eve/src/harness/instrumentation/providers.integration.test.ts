@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { turnIdempotencyKey } from "#harness/instrumentation-lifecycle.js";
+import { turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import {
   finalizeInstrumentationProviders,
   registerInstrumentationProvider,
-} from "#harness/instrumentation-providers.js";
+} from "#harness/instrumentation/providers.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 
 const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");

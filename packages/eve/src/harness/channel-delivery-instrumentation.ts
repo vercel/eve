@@ -9,8 +9,8 @@ import type {
   InstrumentationChannelDeliveryOutcome,
   InstrumentationChannelDeliveryTerminalEvent,
   InstrumentationHooks,
-} from "#harness/instrumentation-lifecycle.js";
-import { channelDeliveryIdempotencyKey } from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
+import { channelDeliveryIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 
 interface ChannelDeliveryStartInstrumentation {
   readonly agentName?: string;

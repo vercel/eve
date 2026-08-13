@@ -8,7 +8,7 @@ import {
   type TextMapGetter,
   trace,
 } from "#compiled/@opentelemetry/api/index.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { recordErrorOnSpan } from "#internal/logging.js";
 
 /**

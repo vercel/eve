@@ -7,8 +7,8 @@ import {
   releaseAllInstrumentationTurnState,
   takeInstrumentationActionScopes,
   type InstrumentationStateOwner,
-} from "#harness/instrumentation-state.js";
-import { withoutInstrumentationContent } from "#harness/instrumentation-content.js";
+} from "#harness/instrumentation/state.js";
+import { withoutInstrumentationContent } from "#harness/instrumentation/content.js";
 import { createLogger, formatError } from "#internal/logging.js";
 
 import type {
@@ -24,7 +24,7 @@ import type {
   InstrumentationSessionSettledEvent,
   InstrumentationTurnFailedEvent,
   InstrumentationTurnSettledEvent,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 
 const log = createLogger("harness.instrumentation-dispatch");
 const DEFAULT_HANDLER_TIMEOUT_MS = 5_000;

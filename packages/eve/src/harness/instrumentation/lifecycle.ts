@@ -1,5 +1,5 @@
-import { createInstrumentationDispatcher } from "#harness/instrumentation-dispatch.js";
-import type { InstrumentationStateSlot } from "#harness/instrumentation-state.js";
+import { createInstrumentationDispatcher } from "#harness/instrumentation/dispatch.js";
+import type { InstrumentationStateSlot } from "#harness/instrumentation/state.js";
 
 /**
  * Stable eve identity for one actual model attempt.

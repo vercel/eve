@@ -2,7 +2,7 @@ import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import { contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import type { InstrumentationParentLineage } from "#harness/instrumentation-lifecycle.js";
+import type { InstrumentationParentLineage } from "#harness/instrumentation/lifecycle.js";
 import type {
   AgentActionTraceState,
   AgentSessionTraceState,

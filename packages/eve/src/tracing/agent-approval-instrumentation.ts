@@ -12,7 +12,7 @@ import type {
   InstrumentationInputRequestedEvent,
   InstrumentationInputResolvedEvent,
   InstrumentationProviderDefinition,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";

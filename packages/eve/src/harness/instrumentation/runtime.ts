@@ -1,7 +1,7 @@
 import type {
   InstrumentationContextRunner,
   InstrumentationHooks,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 import type { OtelHarnessSettings } from "#tracing/otel-declaration.js";
 
 const INSTRUMENTATION_RUNTIME_KEY = Symbol.for("eve.instrumentation-runtime");

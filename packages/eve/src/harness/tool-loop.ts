@@ -131,14 +131,14 @@ import {
   coordinateApprovalDelivery,
   shouldPrepareApprovalPolicyTools,
 } from "#harness/approval-delivery-coordinator.js";
-import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-context.js";
+import { buildTelemetryRuntimeContext } from "#harness/instrumentation/runtime-context.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import {
   createInstrumentationHandleEvent,
   publishInputResolutions,
-} from "#harness/instrumentation-native-events.js";
-import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
-import { attemptIdempotencyKey } from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/native-events.js";
+import type { InstrumentationAttemptScope } from "#harness/instrumentation/lifecycle.js";
+import { attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import { resolveParentLineage } from "#harness/parent-lineage.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
@@ -156,8 +156,8 @@ import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/stale-input-responses.js";
-import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
+import { getInstrumentationConfig } from "#harness/instrumentation/config.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import type { OtelHarnessSettings } from "#tracing/otel-declaration.js";
 import { normalizeUserContent, resolveAssistantStepText } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";

@@ -14,8 +14,8 @@ import type {
   InstrumentationHandlerContext,
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
-} from "#harness/instrumentation-lifecycle.js";
-import { sessionIdempotencyKey } from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
+import { sessionIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";

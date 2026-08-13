@@ -13,7 +13,7 @@ import {
   type InstrumentationStepAttemptStartedEvent,
   type InstrumentationToolCallStartedEvent,
   type InstrumentationToolCallTerminalEvent,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 
 const scope: InstrumentationAttemptScope = {
   attemptId: "turn-1:step-0:attempt-0",

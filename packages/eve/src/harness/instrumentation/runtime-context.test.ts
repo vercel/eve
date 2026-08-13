@@ -7,7 +7,7 @@ import type { HarnessEmissionState } from "#harness/emission.js";
 import {
   buildTelemetryRuntimeContext,
   type BuildTelemetryRuntimeContextInput,
-} from "#harness/instrumentation-runtime-context.js";
+} from "#harness/instrumentation/runtime-context.js";
 import type { HarnessSession } from "#harness/types.js";
 import type {
   InstrumentationStepStartedEventInput,

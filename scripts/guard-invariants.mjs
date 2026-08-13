@@ -94,7 +94,7 @@
  *             every public authoring value must belong to a capability.
  *
  *   rule 37 — The instrumentation lifecycle contract stays provider-neutral.
- *             `harness/instrumentation-lifecycle.ts` must not import from
+ *             `harness/instrumentation/lifecycle.ts` must not import from
  *             `ai`: its event payloads are eve's published shape, so deriving
  *             them from the model SDK's callback types would make an SDK
  *             upgrade a breaking change for every provider. Map at the bridge.
@@ -346,7 +346,7 @@ function checkRule35(posix, lines, violations) {
 
 // ---------- Rule 37: instrumentation lifecycle provider boundary ----------
 
-const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumentation-lifecycle.ts";
+const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumentation/lifecycle.ts";
 
 /**
  * @param {string} posix

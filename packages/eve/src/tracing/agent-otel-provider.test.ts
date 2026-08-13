@@ -32,7 +32,7 @@ import {
   type InstrumentationParentLineage,
   type InstrumentationTraceContext,
   type InstrumentationUsage,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
   attemptIdempotencyKey,
@@ -40,7 +40,7 @@ import {
   modelCallIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 
 interface TestRuntime {
   readonly exporter: InMemorySpanExporter;

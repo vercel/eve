@@ -13,13 +13,13 @@ import type {
   InstrumentationToolCallStartedEvent,
   InstrumentationToolOutput,
   InstrumentationUsage,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 import {
   attemptIdempotencyKey,
   modelCallIdempotencyKey,
   toolCallIdempotencyKey,
-} from "#harness/instrumentation-lifecycle.js";
-import { structuralProviderMetadata } from "#harness/instrumentation-content.js";
+} from "#harness/instrumentation/lifecycle.js";
+import { structuralProviderMetadata } from "#harness/instrumentation/content.js";
 
 type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telemetry[TKey]>>[0];
 

@@ -2,7 +2,7 @@ import { contextStorage, loadContext } from "#context/container.js";
 import { ActiveChannelDeliveriesKey } from "#context/keys.js";
 import { ContextKey } from "#context/key.js";
 import { type JsonValue, parseJsonValue } from "#shared/json.js";
-import type { InstrumentationAttemptScope } from "#harness/instrumentation-lifecycle.js";
+import type { InstrumentationAttemptScope } from "#harness/instrumentation/lifecycle.js";
 
 /**
  * What every provider has staged, flattened into one durable slot.

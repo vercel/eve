@@ -12,19 +12,19 @@ import type {
   InstrumentationPointEvent,
   InstrumentationTraceContext,
   InstrumentationUsage,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
   inputIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 import {
   rememberInstrumentationActionScope,
   rememberInstrumentationInputScope,
   takeInstrumentationActionScopeForCall,
   takeInstrumentationInputScope,
-} from "#harness/instrumentation-state.js";
+} from "#harness/instrumentation/state.js";
 import type { ResolvedInputBatch } from "#harness/input-requests.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import type { HandleEventFn } from "#harness/types.js";
