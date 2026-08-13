@@ -848,10 +848,7 @@ describe("turnWorkflow", () => {
     });
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({
-        delivery: {
-          kind: "deliver",
-          payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
-        },
+        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
         sessionState: proxyState,
       }),
     );

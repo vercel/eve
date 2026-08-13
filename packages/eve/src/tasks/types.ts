@@ -121,6 +121,9 @@ const TASK_AUTHORIZATION_REQUEST_ID_PREFIX = "task:authorization";
 
 /** Stable task blocker id shared by one authorization attempt's events. */
 export function taskAuthorizationRequestId(event: SubagentAuthorizationEvent): string {
+  if (event.type === "approval.candidate" || event.type === "approval.settled") {
+    return `${TASK_AUTHORIZATION_REQUEST_ID_PREFIX}:${event.data.requestId}`;
+  }
   return `${TASK_AUTHORIZATION_REQUEST_ID_PREFIX}:${event.data.attemptId ?? event.data.name}`;
 }
 

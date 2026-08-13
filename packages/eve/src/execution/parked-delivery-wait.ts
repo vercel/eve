@@ -207,6 +207,12 @@ async function waitForNextSessionAction(input: {
       continue;
     }
 
+    // Child results also arrive through this inbox, but the runtime-action
+    // collector owns them. They are not channel deliveries.
+    if (first.value.kind === "runtime-action-result") {
+      continue;
+    }
+
     const deliveryId = first.value.taskDeliveryId ?? first.value.caller?.taskId;
     if (deliveryId !== undefined && isCancelledTaskDeliveryId(deliveryId, input.cancelledTaskIds)) {
       continue;

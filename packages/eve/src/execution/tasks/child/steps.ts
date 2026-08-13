@@ -10,6 +10,7 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import {
   isTerminalTaskStatus,
+  taskAuthorizationRequestId,
   TASK_VIEW_STREAM_NAMESPACE,
   type TaskInboundAnswerInput,
   type TaskInboundAuthorizationEvent,
@@ -51,11 +52,6 @@ export async function wakeTaskAuthorizationParentStep(input: {
     kind: "subagent-authorization-event",
     subagentName: input.request.subagentName,
   };
-  const eventId =
-    input.request.event.type === "approval.candidate" ||
-    input.request.event.type === "approval.settled"
-      ? input.request.event.data.requestId
-      : input.request.event.data.name;
   const data = input.request.event.data;
   const payload: {
     message?: string;
@@ -72,7 +68,7 @@ export async function wakeTaskAuthorizationParentStep(input: {
   const command: SessionCommand = {
     kind: "send",
     payload,
-    taskDeliveryId: `${input.taskId}:authorization:${input.request.event.type}:${data.turnId}:${data.stepIndex}:${data.sequence}:${eventId}`,
+    taskDeliveryId: `${input.taskId}:authorization:${input.request.event.type}:${data.turnId}:${data.stepIndex}:${data.sequence}:${taskAuthorizationRequestId(input.request.event)}`,
   };
   try {
     await resumeHook(input.token, command);
