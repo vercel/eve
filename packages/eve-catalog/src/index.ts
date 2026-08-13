@@ -482,7 +482,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "context.dev",
     kind: "connection",
     tagline: "search, scrape, extract, and monitor live web data.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description:
         "context.dev: search the live web, scrape and crawl sites, extract structured data, parse files, retrieve brand intelligence, monitor changes, and run batch jobs.",
