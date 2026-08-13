@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 
 import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
+import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
 import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending-input-batches.js";
 import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
@@ -34,6 +35,7 @@ export type ResolvePendingInputResult = {
   readonly outcome: "resolved" | "continue" | "unresolved";
   readonly messages: ModelMessage[];
   readonly rejectedActions?: readonly ResolvedInputActionBatch[];
+  readonly resolvedInputs?: readonly ResolvedInputBatch[];
   readonly session: HarnessSession;
 };
 
@@ -65,6 +67,7 @@ export function finishResolvedInput(input: {
   readonly limitContinuation?: { readonly granted: boolean };
   readonly messages: ModelMessage[];
   readonly rejectedActions?: readonly ResolvedInputActionBatch[];
+  readonly resolvedInputs?: readonly ResolvedInputBatch[];
   readonly resolvedStepInput: ResolvedStepInput | undefined;
   readonly session: HarnessSession;
 }): ResolvePendingInputResult {
@@ -96,6 +99,7 @@ export function finishResolvedInput(input: {
       outcome: "resolved",
       messages: input.messages,
       rejectedActions: input.rejectedActions,
+      resolvedInputs: input.resolvedInputs,
       session: queueDeferredStepInput(input.session, deferredInput),
     };
   }
@@ -106,6 +110,7 @@ export function finishResolvedInput(input: {
     outcome: "resolved",
     messages: input.messages,
     rejectedActions: input.rejectedActions,
+    resolvedInputs: input.resolvedInputs,
     session: input.session,
   };
 }

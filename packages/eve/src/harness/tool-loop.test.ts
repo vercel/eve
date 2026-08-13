@@ -58,7 +58,7 @@ import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harn
 import {
   createInstrumentationHooks,
   type InstrumentationContextRunner,
-} from "#harness/instrumentation-lifecycle.js";
+} from "#harness/instrumentation/lifecycle.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
@@ -77,24 +77,54 @@ vi.mock("ai", () => ({
   tool: vi.fn((t: unknown) => t),
 }));
 
-const { existingOtelIntegration, mockCreateAiSdkHookBridge } = vi.hoisted(() => ({
-  existingOtelIntegration: { onStart: vi.fn() },
+const {
+  mockCreateAiSdkHookBridge,
+  mockGetRegisteredTelemetryIntegrations,
+  registeredAuthorIntegration,
+  registeredOtelIntegration,
+} = vi.hoisted(() => ({
   mockCreateAiSdkHookBridge: vi.fn((..._args: unknown[]) => ({ onStart: vi.fn() })),
+  mockGetRegisteredTelemetryIntegrations: vi.fn((): unknown[] => []),
+  registeredAuthorIntegration: { onStart: vi.fn() },
+  registeredOtelIntegration: { onStart: vi.fn() },
 }));
 
 vi.mock("./ai-sdk-hook-bridge.js", () => ({
   createAiSdkHookBridge: (...args: unknown[]) => mockCreateAiSdkHookBridge(...args),
 }));
 
-vi.mock("./otel-integration.js", () => ({
-  createOtelIntegration: vi.fn(() => existingOtelIntegration),
+vi.mock("./ai-sdk-telemetry.js", () => ({
   ensureOtelIntegration: vi.fn(),
+  getRegisteredTelemetryIntegrations: () => mockGetRegisteredTelemetryIntegrations(),
 }));
 
 const mockGetInstrumentationConfig = vi.fn().mockReturnValue(undefined);
-vi.mock("./instrumentation-config.js", () => ({
+vi.mock("./instrumentation/config.js", () => ({
   getInstrumentationConfig: (...args: unknown[]) => mockGetInstrumentationConfig(...args),
 }));
+
+const mockGetInstrumentationRuntime = vi.fn().mockReturnValue(undefined);
+vi.mock("./instrumentation/runtime.js", () => ({
+  getInstrumentationRuntime: (...args: unknown[]) => mockGetInstrumentationRuntime(...args),
+}));
+
+/**
+ * Registering an authored config writes both stores, so the tests toggle
+ * telemetry through one call rather than keeping two mocks in step by hand.
+ */
+function declareTelemetry(config: Readonly<Record<string, unknown>> | undefined): void {
+  mockGetInstrumentationConfig.mockReturnValue(config);
+  mockGetInstrumentationRuntime.mockReturnValue(
+    config === undefined
+      ? undefined
+      : {
+          otelSettings: {
+            ...config,
+            traceChannelRequests: config["traceChannelRequests"] === true,
+          },
+        },
+  );
+}
 
 vi.mock("./compaction.js", () => ({
   compactMessages: vi.fn(),
@@ -115,7 +145,8 @@ vi.mock("./compaction.js", () => ({
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
-  mockGetInstrumentationConfig.mockReturnValue(undefined);
+  declareTelemetry(undefined);
+  mockGetRegisteredTelemetryIntegrations.mockReturnValue([]);
 });
 
 function createTestSession(overrides?: Partial<HarnessSession>): HarnessSession {
@@ -3277,6 +3308,7 @@ describe("createToolLoopHarness", () => {
     // which mis-routed the resume through the fresh-turn lifecycle path.
     const emission = getHarnessEmissionState(result.session.state);
     expect(emission.turnId).toBe("turn_0");
+    expect(emission.stepIndex).toBe(1);
     expect(emission.sessionStarted).toBe(true);
     expect(isHarnessBetweenTurns(result.session)).toBe(false);
   });
@@ -4448,7 +4480,7 @@ describe("createToolLoopHarness", () => {
           "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
         },
       }));
-      mockGetInstrumentationConfig.mockReturnValue({
+      declareTelemetry({
         events: {
           "step.started": resolveRuntimeContext,
         },
@@ -10029,11 +10061,11 @@ describe("createToolLoopHarness", () => {
         toolResults: [{ toolCallId: "call-1", toolName: "add", output: "42" }],
       });
 
-      mockGetInstrumentationConfig.mockReturnValue({});
+      declareTelemetry({});
       const config = createTestConfig("conversation");
       const runStep = createToolLoopHarness(config);
       const result = await runStep(createTestSession(), { message: "add stuff" });
-      mockGetInstrumentationConfig.mockReturnValue(undefined);
+      declareTelemetry(undefined);
 
       expect(result.next).toBe(runStep);
       expect(result.session.state?.["eve.harness.turnTrace"]).toEqual({
@@ -10096,7 +10128,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [{ toolCallId: "call-1", toolName: "add", output: "42" }],
       });
 
-      mockGetInstrumentationConfig.mockReturnValue({});
+      declareTelemetry({});
       const step1Config = createTestConfig("conversation");
       const step1 = createToolLoopHarness(step1Config);
       const result1 = await step1(createTestSession(), { message: "add stuff" });
@@ -10125,7 +10157,7 @@ describe("createToolLoopHarness", () => {
       const step2 = createToolLoopHarness(step2Config);
       // No input — continuation step
       const result2 = await step2(result1.session);
-      mockGetInstrumentationConfig.mockReturnValue(undefined);
+      declareTelemetry(undefined);
 
       expect(result2.next).toBeNull();
 
@@ -10164,7 +10196,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
       const events: UnstampedMessageStreamEvent[] = [];
-      mockGetInstrumentationConfig.mockReturnValue({});
+      declareTelemetry({});
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", async (event) => {
           events.push(event);
@@ -10181,7 +10213,7 @@ describe("createToolLoopHarness", () => {
         expect(turnStarted?.data.trace).toEqual(authoredTrace);
       } finally {
         getTracerSpy.mockRestore();
-        mockGetInstrumentationConfig.mockReturnValue(undefined);
+        declareTelemetry(undefined);
       }
     });
 
@@ -10194,11 +10226,11 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
 
-      mockGetInstrumentationConfig.mockReturnValue({});
+      declareTelemetry({});
       const config = createTestConfig("conversation");
       const runStep = createToolLoopHarness(config);
       await runStep(createTestSession(), { message: "hi" });
-      mockGetInstrumentationConfig.mockReturnValue(undefined);
+      declareTelemetry(undefined);
 
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
         runtimeContext?: Record<string, unknown>;
@@ -10223,7 +10255,7 @@ describe("createToolLoopHarness", () => {
       });
       const attemptCompleted = vi.fn();
       const hooks = createInstrumentationHooks([
-        { events: { "attempt.completed": attemptCompleted } },
+        { events: { "step.attempt.completed": attemptCompleted }, name: "attempt" },
       ]);
       const runInContext: InstrumentationContextRunner = (_operation, execute) => execute();
       const config = createTestConfig("conversation", undefined, {
@@ -10260,12 +10292,67 @@ describe("createToolLoopHarness", () => {
       expect(attemptCompleted).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
           scope: expect.objectContaining({ attemptIndex: 0 }),
-          type: "attempt.completed",
+          type: "step.attempt.completed",
         }),
+        expect.anything(),
       );
     });
 
-    it("composes lifecycle hooks with existing authored OTel", async () => {
+    it("publishes a delegation action when the AI SDK skips execution callbacks", async () => {
+      setupMockAgent({
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            {
+              content: [
+                {
+                  input: { message: "research this" },
+                  toolCallId: "call-delegate",
+                  toolName: "delegate",
+                  type: "tool-call",
+                },
+              ],
+              role: "assistant",
+            },
+          ],
+        },
+        text: "",
+        toolCalls: [
+          {
+            input: { message: "research this" },
+            toolCallId: "call-delegate",
+            toolName: "delegate",
+            type: "tool-call",
+          },
+        ],
+        toolResults: [],
+      });
+      const started = vi.fn();
+      const hooks = createInstrumentationHooks([
+        { events: { "action.started": started }, name: "actions" },
+      ]);
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", emit, {
+          instrumentation: { hooks, runInContext: (_operation, execute) => execute() },
+          tools: createDelegationToolMap(),
+        }),
+      );
+
+      await runStep(createTestSession(), { message: "delegate" });
+
+      expect(started).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          callId: "call-delegate",
+          kind: "subagent-call",
+          name: "delegate",
+          type: "action.started",
+        }),
+        expect.anything(),
+      );
+    });
+
+    it("composes the bridge with every registered integration", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -10273,7 +10360,12 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      mockGetInstrumentationConfig.mockReturnValue({ recordInputs: true, recordOutputs: false });
+      declareTelemetry({ recordInputs: true, recordOutputs: false });
+      // An authored module can register its own integration alongside eve's.
+      mockGetRegisteredTelemetryIntegrations.mockReturnValue([
+        registeredOtelIntegration,
+        registeredAuthorIntegration,
+      ]);
       const hooks = createInstrumentationHooks([]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
@@ -10295,7 +10387,7 @@ describe("createToolLoopHarness", () => {
         };
       };
       expect(agentCall.telemetry).toMatchObject({
-        integrations: [bridge, existingOtelIntegration],
+        integrations: [bridge, registeredOtelIntegration, registeredAuthorIntegration],
         recordInputs: true,
         recordOutputs: false,
       });
@@ -10332,7 +10424,7 @@ describe("createToolLoopHarness", () => {
           },
         };
       });
-      mockGetInstrumentationConfig.mockReturnValue({
+      declareTelemetry({
         events: {
           "step.started": resolveRuntimeContext,
         },
@@ -10387,7 +10479,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
 
-      mockGetInstrumentationConfig.mockReturnValue({
+      declareTelemetry({
         events: {
           "step.started": () => {
             throw new Error("runtime context resolver failed");
@@ -10425,7 +10517,7 @@ describe("createToolLoopHarness", () => {
           "test.step": `${input.turn.id}:${input.step.index}`,
         },
       }));
-      mockGetInstrumentationConfig.mockReturnValue({
+      declareTelemetry({
         events: {
           "step.started": resolveRuntimeContext,
         },

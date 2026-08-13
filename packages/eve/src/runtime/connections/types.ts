@@ -23,10 +23,15 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
  * `expiresAt` is an optional absolute expiration in **milliseconds since
  * the Unix epoch** ({@link Date.now}). Advisory: the runtime may refresh a
  * cached token before the next call based on it, but is not required to.
+ *
+ * `providerSubject` is the stable subject of the provider account represented
+ * by this credential. It is scoped to the provider and must not be compared
+ * across providers without provider context.
  */
 export interface TokenResult {
   readonly token: string;
   readonly expiresAt?: number;
+  readonly providerSubject?: string;
 }
 
 /**

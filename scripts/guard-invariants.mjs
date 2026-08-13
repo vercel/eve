@@ -93,16 +93,26 @@
  *             dropped, every retained epoch needs a compiling fixture, and
  *             every public authoring value must belong to a capability.
  *
+ *   rule 37 — The instrumentation lifecycle contract stays provider-neutral.
+ *             `harness/instrumentation/lifecycle.ts` must not import from
+ *             `ai`: its event payloads are eve's published shape, so deriving
+ *             them from the model SDK's callback types would make an SDK
+ *             upgrade a breaking change for every provider. Map at the bridge.
+ *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
  */
 import { readFile, readdir, lstat } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
 
+const require = createRequire(import.meta.url);
+const extractorRequire = createRequire(require.resolve("@microsoft/api-extractor/package.json"));
+const ts = extractorRequire("typescript");
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../..");
 const BASELINE_PATH = join(REPO_ROOT, "scripts/guard-invariants-baseline.json");
 
@@ -182,6 +192,7 @@ function isTsLike(relPath) {
  *   rule28: Violation[];
  *   rule33: Violation[];
  *   rule35: Violation[];
+ *   rule37: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -210,6 +221,7 @@ async function scanRepo(state) {
     checkRule28(posix, lines, state.rule28);
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
+    checkRule37(posix, content, state.rule37);
   }
 }
 
@@ -330,6 +342,75 @@ function checkRule35(posix, lines, violations) {
       });
     }
   });
+}
+
+// ---------- Rule 37: instrumentation lifecycle provider boundary ----------
+
+const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumentation/lifecycle.ts";
+
+/**
+ * @param {string} posix
+ * @param {string} source
+ * @param {Violation[]} violations
+ */
+function checkRule37(posix, source, violations) {
+  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT) return;
+
+  const sourceFile = ts.createSourceFile(
+    posix,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const visit = (node) => {
+    const specifier = importSpecifier(node);
+    if (specifier !== undefined && (specifier.text === "ai" || specifier.text.startsWith("ai/"))) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports from "ai". Lifecycle event payloads are eve's own shape, so an AI SDK type reaching them makes an SDK upgrade a breaking change for every provider. Add an eve type here and map to it in ai-sdk-hook-bridge.ts.`,
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+}
+
+function importSpecifier(node) {
+  if (
+    (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+    node.moduleSpecifier !== undefined &&
+    ts.isStringLiteralLike(node.moduleSpecifier)
+  ) {
+    return node.moduleSpecifier;
+  }
+  if (
+    ts.isImportEqualsDeclaration(node) &&
+    ts.isExternalModuleReference(node.moduleReference) &&
+    node.moduleReference.expression !== undefined &&
+    ts.isStringLiteralLike(node.moduleReference.expression)
+  ) {
+    return node.moduleReference.expression;
+  }
+  if (
+    ts.isImportTypeNode(node) &&
+    ts.isLiteralTypeNode(node.argument) &&
+    ts.isStringLiteralLike(node.argument.literal)
+  ) {
+    return node.argument.literal;
+  }
+  if (
+    ts.isCallExpression(node) &&
+    (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+      (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
+    node.arguments[0] !== undefined &&
+    ts.isStringLiteralLike(node.arguments[0])
+  ) {
+    return node.arguments[0];
+  }
+  return undefined;
 }
 
 // ---------- Rule 19: AsyncLocalStorage instances ----------
@@ -1066,6 +1147,7 @@ async function main() {
     rule28: /** @type {Violation[]} */ ([]),
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
+    rule37: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1161,6 +1243,9 @@ async function main() {
   for (const issue of await checkExtensionCapabilityContracts()) {
     violations.push({ rule: 36, ...issue });
   }
+
+  // Rule 37
+  violations.push(...state.rule37);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

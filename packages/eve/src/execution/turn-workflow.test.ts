@@ -551,6 +551,7 @@ describe("turnWorkflow", () => {
   });
 
   it("keeps a local subagent result inside one turn workflow", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_234);
     const initialState = createSessionState({ continuationToken: "slack:C1:" });
     const pendingState = createSessionState({ continuationToken: "slack:C1:T1" });
     const completedState = createSessionState({ continuationToken: "slack:C1:T1" });
@@ -613,8 +614,14 @@ describe("turnWorkflow", () => {
     });
     expect(vi.mocked(turnStep).mock.calls[1]?.[0]).toMatchObject({
       input: {
+        acceptedAtMsByCallId: { "call-1": 1_234 },
         kind: "runtime-action-result",
-        results: [expect.objectContaining({ callId: "call-1", output: "child output" })],
+        results: [
+          expect.objectContaining({
+            callId: "call-1",
+            output: "child output",
+          }),
+        ],
       },
     });
     expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result")).toEqual([
@@ -631,6 +638,7 @@ describe("turnWorkflow", () => {
         action: expect.objectContaining({ kind: "dispatch-runtime-actions" }),
       }),
     );
+    now.mockRestore();
   });
 
   it("waits for dispatch adoption before cascading a cancellation", async () => {
@@ -686,6 +694,7 @@ describe("turnWorkflow", () => {
   });
 
   it("keeps dynamic-workflow child dispatch and immediate remote failures in the same turn", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(2_345);
     const pendingState = createSessionState();
     const completedState = createSessionState();
     installInbox([]);
@@ -731,12 +740,14 @@ describe("turnWorkflow", () => {
       sessionState: pendingState,
     });
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual({
+      acceptedAtMsByCallId: { "call-1": 2_345 },
       kind: "runtime-action-result",
       results: [expect.objectContaining({ callId: "call-1", isError: true })],
     });
     expect(
       resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result"),
     ).toHaveLength(1);
+    now.mockRestore();
   });
 
   it("proxies child HITL and pulls the response through the active turn", async () => {
@@ -828,7 +839,10 @@ describe("turnWorkflow", () => {
     });
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({
-        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+        delivery: {
+          kind: "deliver",
+          payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+        },
         sessionState: proxyState,
       }),
     );

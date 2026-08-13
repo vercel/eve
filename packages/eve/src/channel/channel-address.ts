@@ -1,6 +1,10 @@
 import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import {
+  createChannelDeliveryMetadata,
+  type ChannelDeliverySource,
+} from "#channel/delivery-metadata.js";
 import type { SendPayload } from "#channel/routes.js";
 import { normalizeSendInput, serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
@@ -67,11 +71,11 @@ export function createChannelAddress<TState = undefined>(input: {
   readonly adapter: ChannelAdapter<any>;
   readonly channelName: string;
   readonly continuationToken: string;
-  readonly metadata?: { readonly requestId?: string };
+  readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
 }): ChannelAddress<TState> {
-  const metadata = input.metadata ?? {};
+  const metadata: Partial<ChannelDeliverySource> = input.metadata ?? {};
   const namespacedToken = `${input.channelName}:${input.continuationToken}`;
   if (isReservedSessionCommandToken(namespacedToken)) {
     throw new Error(`Channel address "${namespacedToken}" uses eve's reserved session namespace.`);
@@ -80,10 +84,15 @@ export function createChannelAddress<TState = undefined>(input: {
   return {
     continuationToken: input.continuationToken,
     async deliver(sendInput, options) {
+      const delivery =
+        metadata.channelKind !== undefined && metadata.channelName !== undefined
+          ? createChannelDeliveryMetadata(metadata as ChannelDeliverySource)
+          : undefined;
       const payload = normalizeSendInput(sendInput);
       const caller = sessionCallbackToTurnCaller(options.callback);
       const commandWithoutCaller = {
         auth: options.auth,
+        delivery,
         kind: "send" as const,
         payload: {
           ...payload,
@@ -133,6 +142,7 @@ export function createChannelAddress<TState = undefined>(input: {
         callback: options.callback,
         channelName: input.channelName,
         continuationToken: namespacedToken,
+        delivery,
         initiatorAuth: options.initiatorAuth,
         input: {
           context: payload.context,
@@ -205,7 +215,7 @@ export function createChannelAddress<TState = undefined>(input: {
 export function createChannelAddressFn<TState = undefined>(input: {
   readonly adapter: ChannelAdapter<any>;
   readonly channelName: string;
-  readonly metadata?: { readonly requestId?: string };
+  readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
 }): ChannelAddressFn<TState> {

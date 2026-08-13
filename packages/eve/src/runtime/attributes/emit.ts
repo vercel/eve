@@ -68,6 +68,7 @@ export async function setEveAttributes(attrs: Record<string, EveAttributeValue>)
     const { setAttributes } = await import("#compiled/@workflow/core/index.js");
     await setAttributes(normalized, { allowReservedAttributes: true });
   } catch (error) {
+    if (isTerminalRunAttributeError(error)) return;
     if (!WARNED_ABOUT_TAG_FAILURE) {
       WARNED_ABOUT_TAG_FAILURE = true;
       console.warn("[eve] setEveAttributes failed; suppressing further warnings this process.", {
@@ -76,4 +77,11 @@ export async function setEveAttributes(attrs: Record<string, EveAttributeValue>)
       });
     }
   }
+}
+
+function isTerminalRunAttributeError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.startsWith("Cannot set attributes on run in terminal state")
+  );
 }

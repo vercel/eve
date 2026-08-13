@@ -88,6 +88,9 @@ export class TurnControlReceiver {
       this.bufferedSessionControls.push("expired");
       return undefined;
     }
+    if (command.kind === "runtime-action-result") {
+      return undefined;
+    }
     if (command.kind === "cancel") {
       await forwardTurnCancellationStep({
         payload: command.turnId === undefined ? {} : { turnId: command.turnId },

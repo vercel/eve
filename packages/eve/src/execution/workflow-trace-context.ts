@@ -1,7 +1,7 @@
 import type { ContextContainer } from "#context/container.js";
 import { ParentSessionKey, ParentTraceContextKey } from "#context/keys.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { resolveParentLineage } from "#harness/parent-lineage.js";
 import { prepareTurnTraceContext } from "#harness/prepare-trace-context.js";
 import type { HarnessSession } from "#harness/types.js";

@@ -108,9 +108,9 @@ describe("application host preparation", () => {
       join(firstHostDirectory, "compiled-artifacts-workflow-world.mjs"),
     );
     expect(firstHost.compiledArtifacts.bootstrapPath).not.toContain("/.eve/dev-runtime/snapshots/");
-    expect(firstHost.compiledArtifacts.instrumentationSourcePath).toBe(
+    expect(firstHost.compiledArtifacts.instrumentationSourcePaths).toEqual([
       join(firstHostDirectory, "compiled-artifacts-instrumentation-source.mjs"),
-    );
+    ]);
     expect(await readFile(firstBootstrapPath, "utf8")).not.toContain(
       normalizeEsmImportSpecifier(agentModulePath),
     );

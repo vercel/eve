@@ -3,8 +3,9 @@ import type { RuntimeTraceContext } from "#protocol/message.js";
 import type {
   InstrumentationParentLineage,
   InstrumentationTraceContext,
-} from "#harness/instrumentation-lifecycle.js";
-import type { HarnessInstrumentation } from "#harness/instrumentation-runtime.js";
+} from "#harness/instrumentation/lifecycle.js";
+import { sessionIdempotencyKey, turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+import type { HarnessInstrumentation } from "#harness/instrumentation/runtime.js";
 
 const log = createLogger("harness.prepare-trace-context");
 
@@ -27,6 +28,7 @@ export async function prepareTurnTraceContext(input: {
     try {
       prepared = await input.instrumentation.prepareSessionTrace({
         agentName: input.agentName,
+        idempotencyKey: sessionIdempotencyKey(input.sessionId),
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId,
         sessionId: input.sessionId,
@@ -40,6 +42,7 @@ export async function prepareTurnTraceContext(input: {
   if (input.instrumentation?.prepareTurnTrace !== undefined) {
     try {
       prepared = await input.instrumentation.prepareTurnTrace({
+        idempotencyKey: turnIdempotencyKey(input.sessionId, input.turnId),
         parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId,

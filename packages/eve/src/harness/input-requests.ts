@@ -28,6 +28,7 @@ import type { HarnessSession, StepInput } from "#harness/types.js";
 
 export { getApprovedTools, clearPendingSessionLimitPrompt };
 export type { RejectedActionBatch };
+export type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
 export {
   appendPendingInputBatch,
   consumeDeferredStepInput,
@@ -198,7 +199,11 @@ function resolveTextMessageInput(
     return stepInput;
   }
 
-  const responses = resolveTextToResponses(stepInput.message, pendingBatch.requests);
+  const responseAuthRequired = new Set(pendingBatch.responseAuthRequiredRequestIds ?? []);
+  const textRequests = pendingBatch.requests.filter(
+    (request) => !responseAuthRequired.has(request.requestId),
+  );
+  const responses = resolveTextToResponses(stepInput.message, textRequests);
   if (responses.length === 0) return stepInput;
 
   return compactStepInput({

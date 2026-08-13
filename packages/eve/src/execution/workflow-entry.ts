@@ -182,6 +182,17 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       capabilities,
       driverWritable,
       initialInput: {
+        deliveryMetadata:
+          input.serializedContext["eve.channelDelivery"] === undefined
+            ? undefined
+            : [
+                {
+                  ...(input.serializedContext["eve.channelDelivery"] as NonNullable<
+                    RunInput["delivery"]
+                  >),
+                  payloadIndex: 0,
+                },
+              ],
         kind: "deliver",
         payloads: [
           {
@@ -559,10 +570,8 @@ async function runDriverLoop(input: {
       }
       action = await runTurn({
         delivery: {
-          auth: next.deliver.auth,
+          ...next.remainder,
           kind: "deliver",
-          payloads: [next.remainder],
-          requestId: next.deliver.requestId,
         },
         serializedContext: action.serializedContext,
         sessionState: action.sessionState,

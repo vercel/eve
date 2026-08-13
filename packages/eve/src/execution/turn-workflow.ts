@@ -28,6 +28,7 @@ import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
+import { getRuntimeActionResultKey } from "#runtime/actions/keys.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
@@ -159,6 +160,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           serializedContext: cursor.serializedContext,
           sessionState: cursor.sessionState,
         });
+        const initialAcceptedAtMs = dispatchResult.results.length === 0 ? undefined : Date.now();
         await cursor.adopt(dispatchResult);
 
         const results = await waitForRuntimeActionResults({
@@ -166,6 +168,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           cancellation,
           cursor,
           inboxToken: inbox.token,
+          initialAcceptedAtMs,
           initialResults: dispatchResult.results,
           iterator,
           nextDeliveryRequestId,
@@ -181,7 +184,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
           return;
         }
-        nextStepInput = { kind: "runtime-action-result", results };
+        nextStepInput = { kind: "runtime-action-result", ...results };
         continue;
       }
 
@@ -258,13 +261,20 @@ async function waitForRuntimeActionResults(input: {
   readonly cancellation: TurnCancellationControl | undefined;
   readonly cursor: TurnExecutionCursor;
   readonly inboxToken: string;
+  readonly initialAcceptedAtMs: number | undefined;
   readonly initialResults: readonly RuntimeActionResult[];
   readonly iterator: AsyncIterator<TurnInboxPayload>;
   readonly nextDeliveryRequestId: () => string;
   readonly pendingActionKeys: readonly string[];
-}): Promise<readonly RuntimeActionResult[] | "cancelled" | "cancel-turn"> {
+}): Promise<AcceptedRuntimeActionBatch | "cancelled" | "cancel-turn"> {
   let pendingDeliveryRequest: string | undefined;
   const results: RuntimeActionResult[] = [...input.initialResults];
+  const acceptedAtMsByKey = new Map<string, number>();
+  if (input.initialAcceptedAtMs !== undefined) {
+    for (const result of input.initialResults) {
+      acceptedAtMsByKey.set(getRuntimeActionResultKey(result), input.initialAcceptedAtMs);
+    }
+  }
 
   while (true) {
     const ready = resolveRuntimeActionResultsForKeys({
@@ -280,7 +290,15 @@ async function waitForRuntimeActionResults(input: {
           requestId: pendingDeliveryRequest,
         });
       }
-      return ready;
+      return {
+        acceptedAtMsByCallId: Object.fromEntries(
+          ready.map((result) => [
+            result.callId,
+            acceptedAtMsByKey.get(getRuntimeActionResultKey(result))!,
+          ]),
+        ),
+        results: ready,
+      };
     }
 
     if (input.cursor.sessionState.hasProxyInputRequests && pendingDeliveryRequest === undefined) {
@@ -325,11 +343,16 @@ async function waitForRuntimeActionResults(input: {
       // dispatch failed — is dropped; the genuine child's result (or the
       // dispatch error already in `results`) still resolves the wait.
       const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
-      results.push(
-        ...value.results.filter((result) =>
-          isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
-        ),
+      const accepted = value.results.filter((result) =>
+        isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
       );
+      if (accepted.length > 0) {
+        const acceptedAtMs = Date.now();
+        results.push(...accepted);
+        for (const result of accepted) {
+          acceptedAtMsByKey.set(getRuntimeActionResultKey(result), acceptedAtMs);
+        }
+      }
       continue;
     }
 
@@ -353,9 +376,8 @@ async function waitForRuntimeActionResults(input: {
       pendingDeliveryRequest = undefined;
 
       const routed = await routeDeliverToChildren({
-        auth: value.delivery.auth,
+        delivery: value.delivery,
         parentWritable: input.cursor.parentWritable,
-        payloads: value.delivery.payloads,
         sessionState: input.cursor.sessionState,
       });
       await input.cursor.adopt(routed);
@@ -363,10 +385,15 @@ async function waitForRuntimeActionResults(input: {
         return routed.kind;
       }
       if (routed.remainder !== undefined) {
-        input.bufferedDeliveries.push({ ...value.delivery, payloads: [routed.remainder] });
+        input.bufferedDeliveries.push(routed.remainder);
       }
     }
   }
+}
+
+interface AcceptedRuntimeActionBatch {
+  readonly acceptedAtMsByCallId: Readonly<Record<string, number>>;
+  readonly results: readonly RuntimeActionResult[];
 }
 
 async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {

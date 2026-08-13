@@ -6,10 +6,11 @@ import {
   createEveSessionCancelRoutePath,
   createEveSessionRoutePath,
 } from "#protocol/routes.js";
-import type { CancelTurnResult, SessionAuthContext } from "#channel/types.js";
+import type { CancelTurnResult, SessionAuthContext, SessionTraceContext } from "#channel/types.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import type { HeadersValue } from "#client/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
+import { formatTraceparent } from "#protocol/traceparent.js";
 import {
   formatSubagentInput,
   normalizeRequestedOutputSchema,
@@ -56,6 +57,7 @@ export async function startRemoteAgentSession(input: {
    * in conversation mode so their sessions accept follow-up messages.
    */
   readonly persistentSessions?: boolean;
+  readonly parentTraceContext?: SessionTraceContext;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
 }): Promise<RemoteAgentSessionCoordinates> {
@@ -105,6 +107,13 @@ export async function startRemoteAgentSession(input: {
   }
 
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
+  const traceparent = formatTraceparent(input.parentTraceContext);
+  if (traceparent !== undefined) {
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === "traceparent") delete headers[key];
+    }
+    headers["traceparent"] = traceparent;
+  }
   const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
     body: JSON.stringify(requestBody),
     headers: {

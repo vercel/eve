@@ -45,6 +45,49 @@ describe("authorization callback results", () => {
   });
 });
 
+function candidateChallenge(name: string, candidateId: string) {
+  return {
+    candidateId,
+    challenge: { url: `https://idp.example/${candidateId}` },
+    hookUrl: `https://eve.example/${candidateId}`,
+    name,
+  };
+}
+
+describe("pending authorization state", () => {
+  it("merges concurrent candidate challenges by authorization name", () => {
+    const first = setPendingAuthorization(undefined, {
+      challenges: [candidateChallenge("candidate-1:github", "candidate-1")],
+    });
+    const second = setPendingAuthorization(first, {
+      challenges: [candidateChallenge("candidate-2:github", "candidate-2")],
+    });
+
+    expect(getPendingAuthorization(second)?.challenges).toEqual([
+      expect.objectContaining({ candidateId: "candidate-1", name: "candidate-1:github" }),
+      expect.objectContaining({ candidateId: "candidate-2", name: "candidate-2:github" }),
+    ]);
+  });
+
+  it("replaces a repeated challenge without duplicating it", () => {
+    const first = setPendingAuthorization(undefined, {
+      challenges: [candidateChallenge("candidate-1:github", "candidate-1")],
+    });
+    const second = setPendingAuthorization(first, {
+      challenges: [
+        {
+          ...candidateChallenge("candidate-1:github", "candidate-1"),
+          hookUrl: "https://eve.example/refreshed",
+        },
+      ],
+    });
+
+    expect(getPendingAuthorization(second)?.challenges).toEqual([
+      expect.objectContaining({ hookUrl: "https://eve.example/refreshed" }),
+    ]);
+  });
+});
+
 describe("pending authorization attempts", () => {
   const challenge = (
     name: string,

@@ -28,6 +28,7 @@ import {
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
+import { parseTraceparent } from "#protocol/traceparent.js";
 import {
   EVE_INFO_ROUTE_PATH,
   EVE_SESSION_ROUTE_PATH,
@@ -246,6 +247,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
+        const parentTraceContext = parseTraceparent(req.headers.get("traceparent"));
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
@@ -279,6 +281,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               outputSchema: body.outputSchema,
             },
             mode: body.mode ?? "conversation",
+            parentTraceContext,
           });
         } catch (error) {
           const errorId = logError(log, "session-create request failed", error);

@@ -227,6 +227,36 @@ export interface ActionsRequestedStreamEvent {
   type: "actions.requested";
 }
 
+export type ApprovalCandidateOutcome = "pending" | "rejected" | "failed" | "timed-out" | "stale";
+
+/** Safe lifecycle event for one responder-bound approval candidate. */
+export interface ApprovalCandidateStreamEvent {
+  data: {
+    candidateId: string;
+    outcome: ApprovalCandidateOutcome;
+    requestId: string;
+    responderPrincipalId: string;
+    reason?: string;
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "approval.candidate";
+}
+
+/** Terminal durable settlement for one approval request. */
+export interface ApprovalSettledStreamEvent {
+  data: {
+    outcome: "approved" | "cancelled";
+    requestId: string;
+    responderPrincipalId: string;
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "approval.settled";
+}
+
 /**
  * Stream event emitted when the harness needs human input before it can
  * continue the run.
@@ -542,6 +572,7 @@ export interface CompactionCompletedStreamEvent {
 export interface AuthorizationRequiredStreamEvent {
   data: {
     authorization?: ConnectionAuthorizationChallenge;
+    candidateId?: string;
     description: string;
     name: string;
     sequence: number;
@@ -573,6 +604,7 @@ export type ConnectionAuthorizationOutcome = AuthorizationOutcome;
  */
 export interface AuthorizationCompletedStreamEvent {
   data: {
+    candidateId?: string;
     /**
      * The challenge from the matching `authorization.required` event,
      * journaled across the park. Lets channels keep rendering the
@@ -629,6 +661,8 @@ export interface SessionCompletedStreamEvent {
  * consumers receive {@link MessageStreamEvent}.
  */
 export type UnstampedMessageStreamEvent =
+  | ApprovalCandidateStreamEvent
+  | ApprovalSettledStreamEvent
   | ContextClearedStreamEvent
   | CompactionCompletedStreamEvent
   | CompactionRequestedStreamEvent
@@ -1002,6 +1036,7 @@ export function createActionsRequestedEvent(input: {
  */
 export function createAuthorizationRequiredEvent(input: {
   readonly authorization?: ConnectionAuthorizationChallenge;
+  readonly candidateId?: string;
   readonly description: string;
   readonly name: string;
   readonly sequence: number;
@@ -1019,6 +1054,9 @@ export function createAuthorizationRequiredEvent(input: {
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
   }
+  if (input.candidateId !== undefined) {
+    data.candidateId = input.candidateId;
+  }
   if (input.webhookUrl !== undefined) {
     data.webhookUrl = input.webhookUrl;
   }
@@ -1035,6 +1073,7 @@ export function createAuthorizationRequiredEvent(input: {
  */
 export function createAuthorizationCompletedEvent(input: {
   readonly authorization?: ConnectionAuthorizationChallenge;
+  readonly candidateId?: string;
   readonly name: string;
   readonly outcome: AuthorizationOutcome;
   readonly reason?: string;
@@ -1052,6 +1091,9 @@ export function createAuthorizationCompletedEvent(input: {
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
   }
+  if (input.candidateId !== undefined) {
+    data.candidateId = input.candidateId;
+  }
   if (input.reason !== undefined) {
     data.reason = input.reason;
   }
@@ -1059,6 +1101,20 @@ export function createAuthorizationCompletedEvent(input: {
     data,
     type: "authorization.completed",
   };
+}
+
+/** Creates a safe candidate lifecycle event. */
+export function createApprovalCandidateEvent(
+  input: ApprovalCandidateStreamEvent["data"],
+): ApprovalCandidateStreamEvent {
+  return { data: input, type: "approval.candidate" };
+}
+
+/** Creates a terminal approval settlement event. */
+export function createApprovalSettledEvent(
+  input: ApprovalSettledStreamEvent["data"],
+): ApprovalSettledStreamEvent {
+  return { data: input, type: "approval.settled" };
 }
 
 /**
@@ -1105,8 +1161,8 @@ export function createActionResultEvent(input: {
       error: outcome.error,
       result: input.result,
       sequence: input.sequence,
-      stepIndex: input.stepIndex,
       status: outcome.status,
+      stepIndex: input.stepIndex,
       turnId: input.turnId,
     },
     type: "action.result",

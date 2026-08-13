@@ -587,7 +587,7 @@ describe("resolvePendingInput", () => {
     });
   });
 
-  it("returns a rejected action for an explicitly denied approval", () => {
+  it("returns a rejected action for an ACP denial", () => {
     const session = appendPendingInputBatch({
       event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
       requests: [
@@ -615,7 +615,7 @@ describe("resolvePendingInput", () => {
 
     const result = resolvePendingInput({
       stepInput: {
-        inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
+        inputResponses: [{ requestId: "approval-1", optionId: "deny" }],
       },
       session,
     });
@@ -641,6 +641,18 @@ describe("resolvePendingInput", () => {
               },
             },
             toolName: "bash",
+          },
+        ],
+      },
+    ]);
+    expect(result.resolvedInputs).toMatchObject([
+      {
+        event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
+        inputs: [
+          {
+            outcome: "denied",
+            request: { requestId: "approval-1" },
+            response: { optionId: "deny", requestId: "approval-1" },
           },
         ],
       },
@@ -682,6 +694,18 @@ describe("resolvePendingInput", () => {
 
     expect(result.outcome).toBe("resolved");
     expect(result.rejectedActions).toBeUndefined();
+    expect(result.resolvedInputs).toMatchObject([
+      {
+        event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
+        inputs: [
+          {
+            outcome: "approved",
+            request: { requestId: "approval-1" },
+            response: { optionId: "approve", requestId: "approval-1" },
+          },
+        ],
+      },
+    ]);
   });
 
   it("does not retain approval when a deferred response is superseded", () => {

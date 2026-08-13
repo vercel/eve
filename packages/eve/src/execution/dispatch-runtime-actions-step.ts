@@ -1,8 +1,4 @@
-/**
- * Dispatches every pending runtime action for a parked parent session.
- * Starts commit ownership before their side effect, so the returned state
- * owns every child it may have created.
- */
+/** Starts or continues pending actions, committing ownership before side effects. */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
@@ -70,7 +66,7 @@ import { buildSubagentRunInput, type SubagentInputSource } from "#execution/suba
 import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
+import * as traceState from "#tracing/agent-trace-context-store.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
@@ -157,24 +153,19 @@ export async function dispatchRuntimeActionsStep(input: {
   const initiatorAuth = ctx.get(InitiatorAuthKey) ?? null;
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
-  // Read here, not in the child: trace state is scoped to one session's
-  // context, so this is the last place the parent's window is visible.
-  const parentTraceContext = readSessionTraceContext(input.serializedContext, session.sessionId);
+  // This is the last place the parent's session-scoped trace state is visible.
+  const sessionTraceContext = traceState.readSessionTraceContext(
+    input.serializedContext,
+    session.sessionId,
+  );
   const persistentSessions =
     bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
-  // A corrupt handle store throws; surface that before anything dispatches.
-  // A mid-loop throw after a sibling started would durably replay the whole
-  // batch and re-dispatch that sibling.
+  // Fail before dispatch; replaying after a sibling starts would duplicate it.
   getAgentHandleStore(durableSession.state);
   const plan = planDispatch({ actions: batch.actions, bundle, ctx, session });
-  // Acquired only once preflight can no longer throw, so a planning failure
-  // never leaks the writer lock.
   const writer = input.parentWritable.getWriter();
-  // Split the parent's remaining token quota across the batch's freshly
-  // started local subagents, the children that actually receive an enforced
-  // cap. Continuations already run under their own budget, and remote agents
-  // run on their own deployment under their own limits, so neither dilutes
-  // the local shares.
+  // Only fresh local starts share the remaining quota; continuations and
+  // remote agents already enforce their own budgets.
   const fanoutSize = plan.filter(
     (entry) => entry.kind === "start" && entry.target.kind === "local",
   ).length;
@@ -217,7 +208,13 @@ export async function dispatchRuntimeActionsStep(input: {
             fanoutSize,
             initiatorAuth,
             parentContinuationToken: input.parentContinuationToken,
-            parentTraceContext,
+            parentTraceContext:
+              traceState.readActionTraceContext(
+                input.serializedContext,
+                session.sessionId,
+                batch.event.turnId,
+                entry.target.action.callId,
+              ) ?? sessionTraceContext,
             persistentSessions,
             session,
             target: entry.target,
@@ -470,6 +467,7 @@ async function startSubagent(input: {
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
+        parentTraceContext: input.parentTraceContext,
         persistentSessions: input.persistentSessions,
         session: input.session,
       });
@@ -595,6 +593,7 @@ async function startRemoteSubagent(input: {
   readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
+  readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
   readonly session: RuntimeSession;
 }): Promise<DispatchOutcome> {
@@ -648,6 +647,7 @@ async function startRemoteSubagent(input: {
       callbackBaseUrl,
       callbackToken: input.parentContinuationToken,
       initiatorAuth: input.initiatorAuth,
+      parentTraceContext: input.parentTraceContext,
       persistentSessions: input.persistentSessions,
       remote: resolvedRemote,
       session: input.session,

@@ -154,16 +154,43 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       nodeId: "subagents/research",
     });
     const writes: Uint8Array[] = [];
+    const traceId = "1".repeat(32);
+    const actionSpanId = "3".repeat(16);
 
     const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(writes),
-      serializedContext: {},
+      serializedContext: {
+        "eve.harness.agentTrace": {
+          actions: {
+            "action-1": {
+              attemptIndex: 0,
+              callId: "call-1",
+              kind: "subagent-call",
+              name: "research",
+              parent: { spanId: "2".repeat(16), traceFlags: 1, traceId },
+              rootSessionId: "parent-session",
+              sessionId: "parent-session",
+              spanId: actionSpanId,
+              startTimeMs: 1_700_000_000_000,
+              stepIndex: 0,
+              turnId: "turn-1",
+            },
+          },
+          sessions: {},
+          turns: {},
+        },
+      },
       sessionState: BASE_STATE,
     });
 
     expect(result.results).toEqual([]);
     expect(mocks.createSession).toHaveBeenCalledTimes(1);
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentTraceContext: { isRemote: false, spanId: actionSpanId, traceFlags: 1, traceId },
+      }),
+    );
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [
         {
@@ -277,6 +304,8 @@ describe("dispatchRuntimeActionsStep child starts", () => {
 
   it("owns a remote child with its confirmed remote address", async () => {
     const session = createStartSession({ kind: "remote" });
+    const traceId = "4".repeat(32);
+    const actionSpanId = "5".repeat(16);
     installContext(session, {
       definition: REMOTE_REGISTRY_DEFINITION,
       nodeId: "remote/research",
@@ -286,11 +315,36 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       callbackBaseUrl: "https://caller.example.com",
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(),
-      serializedContext: {},
+      serializedContext: {
+        "eve.harness.agentTrace": {
+          actions: {
+            "action-1": {
+              attemptIndex: 0,
+              callId: "call-1",
+              kind: "remote-agent-call",
+              name: "research",
+              parent: { spanId: "2".repeat(16), traceFlags: 1, traceId },
+              rootSessionId: "parent-session",
+              sessionId: "parent-session",
+              spanId: actionSpanId,
+              startTimeMs: 1_700_000_000_000,
+              stepIndex: 0,
+              turnId: "turn-1",
+            },
+          },
+          sessions: {},
+          turns: {},
+        },
+      },
       sessionState: BASE_STATE,
     });
 
     expect(result.results).toEqual([]);
+    expect(mocks.startRemoteAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentTraceContext: { isRemote: false, spanId: actionSpanId, traceFlags: 1, traceId },
+      }),
+    );
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [
         expect.objectContaining({

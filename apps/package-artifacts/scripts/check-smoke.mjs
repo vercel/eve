@@ -12,6 +12,10 @@ if (
 }
 if (artifact.status !== 302) throw new Error(`/main/eve.tgz returned ${artifact.status}.`);
 
+if (!location.startsWith(`${origin.replace(/\/$/, "")}/`)) {
+  throw new Error("Package route redirected outside the package deployment.");
+}
+
 const tarball = await fetch(location);
 if (!tarball.ok) throw new Error(`Package artifact returned ${tarball.status}.`);
 const signature = new Uint8Array(await tarball.arrayBuffer()).subarray(0, 2);

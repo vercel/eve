@@ -17,7 +17,7 @@ import type {
 } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import type { DeliverPayload, TurnPolicy } from "#channel/types.js";
+import type { DeliverPayload } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -182,6 +182,8 @@ type ChannelSessionFailedHandler<TCtx> = (
  * and the channel context, with no `ctx`; its data includes `sessionId`.
  */
 export interface ChannelEvents<TCtx = void> {
+  readonly "approval.candidate"?: ChannelEventHandler<"approval.candidate", TCtx>;
+  readonly "approval.settled"?: ChannelEventHandler<"approval.settled", TCtx>;
   readonly "context.cleared"?: ChannelEventHandler<"context.cleared", TCtx>;
   readonly "compaction.requested"?: ChannelEventHandler<"compaction.requested", TCtx>;
   readonly "compaction.completed"?: ChannelEventHandler<"compaction.completed", TCtx>;
@@ -248,7 +250,6 @@ export interface Channel<
     input: ReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
   ) => Promise<Session>;
-  readonly turnPolicy?: TurnPolicy;
 }
 
 /**
@@ -281,7 +282,6 @@ export function defineChannel<
     adapter,
     cors,
     receive: definition.receive,
-    turnPolicy: definition.turnPolicy,
   };
 
   return compiled;
@@ -290,6 +290,8 @@ export function defineChannel<
 // The Record type fails to compile if this map drifts from the ChannelEvents
 // keys in either direction.
 const channelEventTypes: Record<keyof ChannelEvents, null> = {
+  "approval.candidate": null,
+  "approval.settled": null,
   "context.cleared": null,
   "compaction.requested": null,
   "compaction.completed": null,
@@ -390,8 +392,9 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
       };
     },
 
-    deliver(payload: DeliverPayload) {
-      return defaultDeliverResult(payload);
+    deliver(payload: DeliverPayload, adapterCtx) {
+      if (definition.deliver === undefined) return defaultDeliverResult(payload);
+      return definition.deliver(payload, adapterCtx as TCtx);
     },
 
     ...eventHandlers,

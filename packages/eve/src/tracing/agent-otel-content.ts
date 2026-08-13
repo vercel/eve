@@ -53,6 +53,44 @@ export function messagesContentAttribute(messages: unknown): string | undefined 
   return truncateSingleMessage(stripped);
 }
 
+/** Serializes model messages using the OpenTelemetry GenAI message schema. */
+export function genAiInputMessagesAttribute(messages: unknown): string | undefined {
+  if (!Array.isArray(messages)) return undefined;
+  const formatted = messages.flatMap((message) => {
+    if (!isRecord(message) || message.role === "system" || typeof message.role !== "string") {
+      return [];
+    }
+    const parts = semanticParts(message.content);
+    return parts.length === 0 ? [] : [{ parts, role: message.role }];
+  });
+  for (let start = 0; start < formatted.length; start += 1) {
+    const json = semanticJsonAttribute(formatted.slice(start));
+    if (json !== undefined) return json;
+  }
+  return semanticJsonAttribute([]);
+}
+
+/** Serializes the system prompt using the OpenTelemetry GenAI instruction schema. */
+export function genAiSystemInstructionsAttribute(instructions: unknown): string | undefined {
+  const text = systemPromptAttribute(instructions);
+  return text === undefined ? undefined : semanticJsonAttribute([{ content: text, type: "text" }]);
+}
+
+/** Serializes one model response using the OpenTelemetry GenAI message schema. */
+export function genAiOutputMessagesAttribute(
+  content: readonly unknown[],
+  finishReason: string,
+): string | undefined {
+  const parts = semanticParts(content);
+  return semanticJsonAttribute([
+    {
+      finish_reason: finishReason === "tool-calls" ? "tool_call" : finishReason,
+      parts,
+      role: "assistant",
+    },
+  ]);
+}
+
 /**
  * Serializes provider-executed tool results, keeping the attribute valid
  * JSON under the cap: when the full payload is too big, each entry's input
@@ -144,6 +182,75 @@ function stringifyContent(value: unknown): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function semanticJsonAttribute(value: unknown): string | undefined {
+  const json = stringifyContent(value);
+  return json !== undefined && json.length <= CONTENT_ATTRIBUTE_LIMIT ? json : undefined;
+}
+
+function semanticParts(content: unknown): Record<string, unknown>[] {
+  if (typeof content === "string") return [{ content, type: "text" }];
+  if (!Array.isArray(content)) return [];
+  const parts: Record<string, unknown>[] = [];
+  for (const part of content) {
+    const formatted = semanticPart(part);
+    if (formatted !== undefined) parts.push(formatted);
+  }
+  return parts;
+}
+
+function semanticPart(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value) || typeof value.type !== "string") return undefined;
+  switch (value.type) {
+    case "text":
+    case "reasoning": {
+      const content = typeof value.text === "string" ? value.text : value.content;
+      return typeof content === "string" ? { content, type: value.type } : undefined;
+    }
+    case "tool-call":
+      return {
+        arguments: value.input,
+        id: stringValue(value.toolCallId) ?? stringValue(value.callId) ?? null,
+        name: value.toolName,
+        type: "tool_call",
+      };
+    case "tool-result":
+      return {
+        id: stringValue(value.toolCallId) ?? stringValue(value.callId) ?? null,
+        response: toolResponse(value.output),
+        type: "tool_call_response",
+      };
+    case "tool-error":
+      return {
+        id: stringValue(value.toolCallId) ?? stringValue(value.callId) ?? null,
+        response: value.error instanceof Error ? value.error.message : value.error,
+        type: "tool_call_response",
+      };
+    default:
+      return { type: value.type };
+  }
+}
+
+function toolResponse(output: unknown): unknown {
+  if (!isRecord(output)) return output;
+  if (
+    (output.type === "text" ||
+      output.type === "error-text" ||
+      output.type === "json" ||
+      output.type === "error-json") &&
+    "value" in output
+  ) {
+    return output.value;
+  }
+  if (output.type === "execution-denied") {
+    return { denied: true, reason: output.reason };
+  }
+  return output;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

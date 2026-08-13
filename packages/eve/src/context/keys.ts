@@ -9,6 +9,7 @@ import type { LanguageModel, SystemModelMessage } from "ai";
 import type { JsonObject } from "#shared/json.js";
 import type {
   ChannelInstrumentationProjection,
+  ChannelDeliveryMetadata,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
@@ -17,6 +18,7 @@ import type {
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
+import type { InstrumentationChannelDeliveryRef } from "#harness/instrumentation/lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
@@ -67,6 +69,18 @@ export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.i
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
+export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
+export interface ActiveChannelDelivery {
+  readonly agentName?: string;
+  readonly delivery: InstrumentationChannelDeliveryRef;
+  readonly rootSessionId: string;
+  readonly sequence: number;
+  readonly sessionId: string;
+  readonly turnId: string;
+}
+export const ActiveChannelDeliveriesKey = new ContextKey<readonly ActiveChannelDelivery[]>(
+  "eve.activeChannelDeliveries",
+);
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",
 );
@@ -145,6 +159,7 @@ export interface DurableDynamicToolMetadata {
   readonly entryKey: string;
   readonly executeStepFnName?: string;
   readonly approvalStepFnName?: string;
+  readonly approvalResponseStepFnName?: string;
   readonly closureVars?: Record<string, unknown>;
 }
 

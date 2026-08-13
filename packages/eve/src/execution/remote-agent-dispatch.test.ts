@@ -92,7 +92,15 @@ describe("startRemoteAgentSession", () => {
     const childSessionId = await startRemoteAgentSession({
       action: createAction(),
       callbackBaseUrl: "https://caller.example.com",
-      remote: createRemoteAgent(),
+      parentTraceContext: {
+        spanId: "2".repeat(16),
+        traceFlags: 1,
+        traceId: "1".repeat(32),
+      },
+      remote: {
+        ...createRemoteAgent(),
+        headers: { Traceparent: "00-authored", "x-static": "yes" },
+      },
       session: {
         agent: {
           modelReference: { id: "mock/test" },
@@ -116,6 +124,7 @@ describe("startRemoteAgentSession", () => {
       headers: {
         authorization: "Bearer remote-token",
         "content-type": "application/json",
+        traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
         "x-static": "yes",
       },
       method: "POST",

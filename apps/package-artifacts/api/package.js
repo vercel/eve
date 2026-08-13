@@ -1,6 +1,9 @@
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+
 import { get } from "@vercel/blob";
 
-import { SHA_PATTERN, packageManifestPath } from "../lib/package.mjs";
+import { SHA_PATTERN, packageArtifactPath, packageManifestPath } from "../lib/package.mjs";
 
 export default async function handler(request, response) {
   const ref = request.query.ref;
@@ -17,15 +20,23 @@ export default async function handler(request, response) {
   const manifest = await resolveManifest(sourceSha);
   if (manifest === undefined) return packageNotFound(response);
 
-  response.setHeader(
-    "Cache-Control",
-    ref === "main" ? "public, max-age=60" : "public, max-age=31536000, immutable",
-  );
   if (request.query.manifest === "1") {
     if (ref !== "main") return packageNotFound(response);
+    response.setHeader("Cache-Control", "public, max-age=60");
     return response.status(200).json(manifest);
   }
-  return response.redirect(302, manifest.tarball);
+  if (ref === "main") {
+    response.setHeader("Cache-Control", "public, max-age=60");
+    return response.redirect(302, manifest.tarball);
+  }
+
+  const artifact = await get(packageArtifactPath(sourceSha), { access: "private" });
+  if (artifact === null) return packageNotFound(response);
+
+  response.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  response.setHeader("Content-Type", "application/gzip");
+  await pipeline(Readable.fromWeb(artifact.stream), response);
+  return undefined;
 }
 
 function packageNotFound(response) {
@@ -33,7 +44,7 @@ function packageNotFound(response) {
 }
 
 async function resolveManifest(sourceSha) {
-  const result = await get(packageManifestPath(sourceSha), { access: "public", useCache: false });
+  const result = await get(packageManifestPath(sourceSha), { access: "private" });
   if (result === null) return undefined;
 
   const manifest = JSON.parse(await new Response(result.stream).text());

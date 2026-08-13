@@ -2,6 +2,11 @@ import type { ModelMessage } from "ai";
 
 import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import {
+  buildResolvedInputBatch,
+  resolveApprovalOutcome,
+  TOOL_EXECUTION_DENIED_MESSAGE,
+} from "#harness/input-request-resolution.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
 import {
@@ -29,12 +34,7 @@ import type { QuestionInputRequest } from "#harness/hitl/question-input-requests
 import type { HarnessSession } from "#harness/types.js";
 
 const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";
-const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
 const TOOL_EXECUTION_DENIED_CODE = "TOOL_EXECUTION_DENIED";
-const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution was denied.";
-const TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE = "Invalid approval response.";
-
-type ApprovalTerminalStatus = "approved" | "denied" | "ignored" | "invalid";
 type ToolApprovalInputRequest = InputRequest & { readonly kind: "tool-approval" };
 
 export type RejectedActionBatch = ResolvedInputActionBatch;
@@ -130,6 +130,10 @@ export function resolveApprovalInputBatches(
     leftoverResponses,
     messages: approval.messages,
     rejectedActions: approval.rejectedActions,
+    resolvedInputs: resolvedBatches.flatMap((batch) => {
+      const resolved = buildResolvedInputBatch(batch, input.responses);
+      return resolved === undefined ? [] : [resolved];
+    }),
     resolvedStepInput: input.resolvedStepInput,
     session: removePendingInputBatches(approval.session, resolvedBatches),
   });
@@ -189,27 +193,6 @@ function recordApprovedTools(input: {
   const state = { ...input.session.state };
   state[APPROVED_TOOLS_KEY] = [...new Set([...getApprovedTools(input.session), ...newKeys])];
   return { ...input.session, state };
-}
-
-function resolveApprovalOutcome(response: InputResponse | undefined): {
-  readonly approved: boolean;
-  readonly reason: string | undefined;
-  readonly status: ApprovalTerminalStatus;
-} {
-  if (response === undefined) {
-    return { approved: false, reason: IGNORED_INPUT_REASON, status: "ignored" };
-  }
-  if (response.optionId === "approve") {
-    return { approved: true, reason: undefined, status: "approved" };
-  }
-  if (response.optionId === "cancel") {
-    return { approved: false, reason: TOOL_EXECUTION_DENIED_MESSAGE, status: "denied" };
-  }
-  return {
-    approved: false,
-    reason: TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE,
-    status: "invalid",
-  };
 }
 
 function buildRejectedActionBatch(

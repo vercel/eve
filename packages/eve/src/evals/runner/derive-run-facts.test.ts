@@ -162,6 +162,39 @@ describe("deriveRunFacts", () => {
     expect(facts.toolCallCount).toBe(2);
   });
 
+  it("preserves framework skill input in the eval tool-call view", () => {
+    const facts = derive([
+      turnStarted("t1", 0),
+      {
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: "skill-1",
+              input: { skill: "research" },
+              kind: "load-skill",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "t1",
+        },
+      },
+      actionResult({ callId: "skill-1", toolName: "load_skill", output: "Skill body" }),
+    ]);
+
+    expect(facts.toolCalls).toEqual([
+      {
+        input: { skill: "research" },
+        name: "load_skill",
+        output: "Skill body",
+        sessionId: undefined,
+        status: "completed",
+        turnIndex: 0,
+      },
+    ]);
+  });
+
   it("uses the normalized failed lifecycle status for error results", () => {
     const events: UnstampedMessageStreamEvent[] = [
       actionsRequested([{ callId: "c1", toolName: "bash" }]),

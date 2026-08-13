@@ -4,10 +4,11 @@ import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { createHarnessDelegationToolDefinition } from "#execution/delegation-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#shared/tool-schema.js";
@@ -255,6 +256,8 @@ function resolveHarnessToolDefinition(input: {
       rawExecute,
       scope: def.name,
     }),
+    frameworkAction:
+      isFrameworkTool && def.name === LOAD_SKILL_TOOL_NAME ? "load-skill" : undefined,
     inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     name: def.name,
     approval: def.approval,
