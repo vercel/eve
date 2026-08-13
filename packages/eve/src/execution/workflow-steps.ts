@@ -8,10 +8,7 @@ import {
   drainDynamicInstructionUserMessages,
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
-import {
-  dispatchDynamicModelEvent,
-  refreshDynamicSessionModelForRuntimeRevision,
-} from "#context/dynamic-model-lifecycle.js";
+import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import {
   dispatchDynamicSubagentEvent,
@@ -25,7 +22,6 @@ import {
   AuthKey,
   CapabilitiesKey,
   ModeKey,
-  SessionDynamicModelRuntimeRevisionKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
 } from "#context/keys.js";
@@ -169,7 +165,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const modelResolutionScope = { moduleMap: bundle.moduleMap, nodeId: bundle.nodeId };
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -344,20 +339,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     const sessionStarted = initialEmissionState.sessionStarted;
 
     if (!sessionStarted) {
-      ctx.set(SessionDynamicModelRuntimeRevisionKey, dynamicRuntimeRevision);
       ctx.set(SessionDynamicSubagentRuntimeRevisionKey, dynamicRuntimeRevision);
       ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicRuntimeRevision);
     } else {
       const refreshEvent = createSessionStartedEvent({ runtime: runtimeIdentity });
       await Promise.all([
-        refreshDynamicSessionModelForRuntimeRevision({
-          ctx,
-          dynamicModel: effectiveAgent.turnAgent.dynamicModel,
-          event: refreshEvent,
-          messages: initialSession.history,
-          runtimeRevision: dynamicRuntimeRevision,
-          scope: modelResolutionScope,
-        }),
         refreshDynamicSessionSubagentsForRuntimeRevision({
           ctx,
           resolvers: dynamicSubagentResolvers,
@@ -403,7 +389,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         dynamicModel: effectiveAgent.turnAgent.dynamicModel,
         event: emitted,
         messages: messages ?? [],
-        scope: modelResolutionScope,
+        scope: {
+          moduleMap: bundle.moduleMap,
+          nodeId: bundle.nodeId,
+        },
       });
     }
     await dispatchDynamicSubagentEvent({
@@ -516,7 +505,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           createRuntime: createWorkflowRuntime,
           handleEvent,
           mode,
-          modelResolutionScope,
+          modelResolutionScope: {
+            moduleMap: bundle.moduleMap,
+            nodeId: bundle.nodeId,
+          },
           node: effectiveNode,
           workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
         });

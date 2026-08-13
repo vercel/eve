@@ -7,12 +7,10 @@ import { ContextContainer } from "#context/container.js";
 import {
   dispatchDynamicModelEvent,
   getActiveDynamicModelSelection,
-  refreshDynamicSessionModelForRuntimeRevision,
 } from "#context/dynamic-model-lifecycle.js";
 import {
   LiveStepDynamicModelSelectionKey,
   SessionDynamicModelReferenceKey,
-  SessionDynamicModelRuntimeRevisionKey,
   TurnDynamicModelReferenceKey,
 } from "#context/keys.js";
 import { defineDynamic } from "#public/definitions/tool.js";
@@ -87,47 +85,6 @@ describe("dynamic model lifecycle", () => {
     expect(getActiveDynamicModelSelection(ctx)?.reference.id).toBe("openai/step");
   });
 
-  it("clears narrower scopes at their lifecycle boundary without a matching handler", async () => {
-    const ctx = new ContextContainer();
-    ctx.set(SessionDynamicModelReferenceKey, {
-      contextWindowTokens: 100_000,
-      id: "openai/session",
-    });
-    ctx.set(TurnDynamicModelReferenceKey, {
-      contextWindowTokens: 100_000,
-      id: "openai/previous-turn",
-    });
-    ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
-      reference: { contextWindowTokens: 100_000, id: "openai/previous-step" },
-    });
-    const dynamicModel = { ...DYNAMIC_MODEL_SOURCE, eventNames: ["session.started"] };
-    const scope = { moduleMap: createModuleMap({}), nodeId: undefined };
-
-    await dispatchDynamicModelEvent({
-      ctx,
-      dynamicModel,
-      event: createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
-      messages: [],
-      scope,
-    });
-    await dispatchDynamicModelEvent({
-      ctx,
-      dynamicModel,
-      event: createStepStartedEvent({
-        modelId: "openai/session",
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "turn_1",
-      }),
-      messages: [],
-      scope,
-    });
-
-    expect(ctx.get(TurnDynamicModelReferenceKey)).toBeNull();
-    expect(ctx.get(LiveStepDynamicModelSelectionKey)).toBeNull();
-    expect(getActiveDynamicModelSelection(ctx)?.reference.id).toBe("openai/session");
-  });
-
   it("replaces turn-scoped selections on each matching turn", async () => {
     const ctx = new ContextContainer();
     let turnModel = "openai/first-turn";
@@ -159,65 +116,6 @@ describe("dynamic model lifecycle", () => {
     turnModel = "openai/second-turn";
     await dispatch(1);
     expect(getActiveDynamicModelSelection(ctx)?.reference.id).toBe("openai/second-turn");
-  });
-
-  it("refreshes a session-scoped selection once per runtime revision", async () => {
-    const ctx = new ContextContainer();
-    let model = "openai/first-deployment";
-    const handler = vi.fn(() => ({
-      model,
-      modelContextWindowTokens: 100_000,
-    }));
-    const moduleMap = createModuleMap({
-      default: {
-        model: defineDynamic({
-          events: { "session.started": handler },
-        }),
-      },
-    });
-    const refresh = (runtimeRevision: string) =>
-      refreshDynamicSessionModelForRuntimeRevision({
-        ctx,
-        dynamicModel: DYNAMIC_MODEL_SOURCE,
-        event: createSessionStartedEvent(),
-        messages: [],
-        runtimeRevision,
-        scope: { moduleMap, nodeId: undefined },
-      });
-
-    await refresh("deployment:one");
-    await refresh("deployment:one");
-
-    expect(handler).toHaveBeenCalledOnce();
-    expect(getActiveDynamicModelSelection(ctx)?.reference.id).toBe("openai/first-deployment");
-
-    model = "openai/second-deployment";
-    await refresh("deployment:two");
-
-    expect(handler).toHaveBeenCalledTimes(2);
-    expect(ctx.get(SessionDynamicModelRuntimeRevisionKey)).toBe("deployment:two");
-    expect(getActiveDynamicModelSelection(ctx)?.reference.id).toBe("openai/second-deployment");
-  });
-
-  it("clears a stale session selection when the current runtime has no session resolver", async () => {
-    const ctx = new ContextContainer();
-    ctx.set(SessionDynamicModelReferenceKey, {
-      contextWindowTokens: 100_000,
-      id: "openai/stale",
-    });
-
-    await refreshDynamicSessionModelForRuntimeRevision({
-      ctx,
-      dynamicModel: { ...DYNAMIC_MODEL_SOURCE, eventNames: ["turn.started"] },
-      event: createSessionStartedEvent(),
-      messages: [],
-      runtimeRevision: "deployment:new",
-      scope: { moduleMap: createModuleMap({}), nodeId: undefined },
-    });
-
-    expect(ctx.get(SessionDynamicModelReferenceKey)).toBeNull();
-    expect(ctx.get(SessionDynamicModelRuntimeRevisionKey)).toBe("deployment:new");
-    expect(getActiveDynamicModelSelection(ctx)).toBeNull();
   });
 
   it("keeps step-scoped live provider instances outside mock mode", async () => {

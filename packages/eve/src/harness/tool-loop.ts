@@ -406,8 +406,7 @@ async function resolveActiveRuntimeModel(input: {
     };
   }
 
-  const selected =
-    input.session.agent.dynamicModel === true ? getActiveDynamicModelSelection(input.ctx) : null;
+  const selected = getActiveDynamicModelSelection(input.ctx);
 
   if (selected === null) {
     const reference = input.session.agent.modelReference;

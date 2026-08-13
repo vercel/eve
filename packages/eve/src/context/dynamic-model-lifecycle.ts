@@ -1,16 +1,15 @@
 import type { ModelMessage } from "ai";
 
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
-import type { AlsContext, ContextContainer } from "#context/container.js";
+import type { AlsContext } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
   LiveStepDynamicModelSelectionKey,
   SessionDynamicModelReferenceKey,
-  SessionDynamicModelRuntimeRevisionKey,
   TurnDynamicModelReferenceKey,
   type LiveDynamicModelSelection,
 } from "#context/keys.js";
-import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
   RuntimeDynamicModelReference,
   RuntimeModelReference,
@@ -100,10 +99,9 @@ export async function dispatchDynamicModelEvent(input: {
 }): Promise<void> {
   if (input.dynamicModel === undefined) return;
   if (!isDynamicModelEventName(input.event.type)) return;
-
-  setSelectionForEvent(input.ctx, input.event.type, null);
   if (!input.dynamicModel.eventNames.includes(input.event.type)) return;
 
+  setSelectionForEvent(input.ctx, input.event.type, null);
   try {
     const definition = await loadDynamicRuntimeModelDefinition({
       dynamicModel: input.dynamicModel,
@@ -128,35 +126,6 @@ export async function dispatchDynamicModelEvent(input: {
   } catch (error) {
     throw isDynamicModelSelectionError(error) ? error : new DynamicModelSelectionError(error);
   }
-}
-
-/**
- * Re-resolves a session-scoped dynamic model when a durable session reaches a
- * different runtime revision. The refresh is internal: lifecycle consumers
- * still observe exactly one `session.started` event for the session.
- */
-export async function refreshDynamicSessionModelForRuntimeRevision(input: {
-  readonly ctx: ContextContainer;
-  readonly dynamicModel: RuntimeDynamicModelReference | undefined;
-  readonly event: SessionStartedStreamEvent;
-  readonly messages: readonly ModelMessage[];
-  readonly runtimeRevision: string;
-  readonly scope: RuntimeModelResolutionScope;
-}): Promise<void> {
-  if (input.ctx.get(SessionDynamicModelRuntimeRevisionKey) === input.runtimeRevision) {
-    return;
-  }
-
-  if (
-    input.dynamicModel === undefined ||
-    !input.dynamicModel.eventNames.includes("session.started")
-  ) {
-    input.ctx.set(SessionDynamicModelReferenceKey, null);
-  } else {
-    await dispatchDynamicModelEvent(input);
-  }
-
-  input.ctx.set(SessionDynamicModelRuntimeRevisionKey, input.runtimeRevision);
 }
 
 function setSelectionForEvent(

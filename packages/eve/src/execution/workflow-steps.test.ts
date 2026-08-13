@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ContextContainer } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
@@ -10,8 +9,6 @@ import {
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
   ModeKey,
-  SessionDynamicModelReferenceKey,
-  SessionDynamicModelRuntimeRevisionKey,
   SessionDynamicSubagentSelectionsKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
@@ -39,7 +36,7 @@ import { createTurnWorkflowInput } from "#execution/durable-session-migrations/t
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
-import { defineDynamic, defineTool } from "#public/definitions/tool.js";
+import { defineTool } from "#public/definitions/tool.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
@@ -1876,114 +1873,6 @@ describe("turnStep", () => {
         resolverSlug: "current",
       }),
     ]);
-  });
-
-  it("resolves a session-scoped dynamic model for an already-started session", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_dynamic");
-    const handler = vi.fn(() => ({
-      model: "openai/session-model",
-      modelContextWindowTokens: 128_000,
-    }));
-    const dynamicModel = {
-      eventNames: ["session.started"],
-      logicalPath: "agent.ts",
-      sourceId: "agent-config",
-      sourceKind: "module",
-    } as const;
-    const turnAgent = {
-      ...TestTurnAgent,
-      dynamicModel,
-      model: undefined,
-    };
-    const compiledArtifactsSource = { kind: "bundled" } as const;
-    const compiledBundle = {
-      adapterRegistry: {
-        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
-      },
-      compiledArtifactsSource,
-      graph: {
-        nodesByNodeId: new Map(),
-        root: {
-          sandboxRegistry: { sandbox: null },
-          turnAgent,
-        },
-      },
-      moduleMap: {
-        nodes: {
-          [ROOT_COMPILED_AGENT_NODE_ID]: {
-            modules: {
-              "agent-config": {
-                default: {
-                  model: defineDynamic({
-                    events: { "session.started": handler },
-                  }),
-                },
-              },
-            },
-          },
-        },
-      },
-      hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
-      subagentRegistry: {},
-      toolRegistry: {},
-      turnAgent,
-    } as never;
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (session): Promise<StepResult> => ({
-        next: { done: true, output: "ok" },
-        session,
-      });
-    });
-
-    const session = createStubSession({
-      state: {
-        "eve.harness.emission": {
-          sequence: 1,
-          sessionStarted: true,
-          stepIndex: 0,
-          turnId: "",
-        },
-      },
-    });
-    installSessionStoreMocks([session]);
-
-    const ctx = new ContextContainer();
-    ctx.set(AuthKey, null);
-    ctx.set(BundleKey, compiledBundle);
-    ctx.set(ChannelKey, threadContextAdapter);
-    ctx.set(ContinuationTokenKey, "http:thread-context");
-    ctx.set(ModeKey, "conversation");
-    ctx.set(SessionIdKey, "session-1");
-
-    const result = await turnStep({
-      input: {
-        kind: "deliver",
-        payloads: [{ message: "follow up" }],
-      },
-      parentWritable: createTestWritable(),
-      serializedContext: serializeContext(ctx),
-      sessionState: createStubSessionState({
-        emissionState: {
-          sequence: 1,
-          sessionStarted: true,
-          stepIndex: 0,
-          turnId: "",
-        },
-      }),
-    });
-
-    expect(handler).toHaveBeenCalledOnce();
-    expect(result.serializedContext[SessionDynamicModelRuntimeRevisionKey.name]).toBe(
-      "deployment:dpl_dynamic",
-    );
-    expect(result.serializedContext[SessionDynamicModelReferenceKey.name]).toEqual({
-      contextWindowTokens: 128_000,
-      id: "openai/session-model",
-      maxOutputTokens: undefined,
-      providerOptions: undefined,
-    });
   });
 
   it("resumes a legacy pending authorization without attempt metadata", async () => {

@@ -1085,38 +1085,6 @@ describe("createToolLoopHarness", () => {
     expect(result.session.compaction.threshold).toBe(180_000);
   });
 
-  it("ignores stale dynamic model selections for a static agent", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const resolveModel = vi.fn(async (reference) => reference.id as LanguageModel);
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { resolveModel }),
-    );
-    const ctx = new ContextContainer();
-    ctx.set(SessionDynamicModelReferenceKey, {
-      contextWindowTokens: 200_000,
-      id: "stale-dynamic-model",
-    });
-    const session = createTestSession({
-      agent: {
-        modelReference: { id: "current-static-model" },
-        system: "You are a test assistant.",
-        tools: [],
-      },
-    });
-
-    await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
-
-    expect(resolveModel).toHaveBeenCalledWith({ id: "current-static-model" });
-    expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].model).toBe("current-static-model");
-  });
-
   it("keeps the compaction threshold stable and fails when no dynamic selection remains", async () => {
     setupMockAgent({
       finishReason: "stop",
