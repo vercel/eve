@@ -46,7 +46,7 @@ export default defineTool({
 
 ## Reset state between turns
 
-State is durable by default and does not reset between turns. If you want a clean slate every turn, overwrite it from a lifecycle [hook](./hooks) on `turn.started`:
+State is durable by default and does not reset between turns. If you want a clean slate every turn, overwrite it from a lifecycle [hook](../guides/hooks) on `turn.started`:
 
 ```ts title="agent/hooks/reset-budget.ts"
 import { defineHook } from "eve/hooks";
@@ -73,7 +73,7 @@ Every [subagent](../subagents) starts with its own fresh state, whether it's a b
 
 ## What to read next
 
-- Read state inside dynamic resolvers → [Dynamic capabilities](./dynamic-capabilities)
+- Read state inside dynamic resolvers → [Dynamic capabilities](../guides/dynamic-capabilities)
 - How step durability works → [Execution model & durability](../concepts/execution-model-and-durability)
 - The `ctx` accessors available alongside state → [TypeScript API Reference](../reference/typescript-api)
 - Tenant-scoped long-term memory in your own store → [Multi-tenant memory](../patterns/multi-tenant-memory)

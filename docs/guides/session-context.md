@@ -10,7 +10,7 @@ eve passes a runtime `ctx` to tool executors, hook handlers, channel event handl
 | `ctx.session`                | Session identity, turn metadata, auth, and parent lineage | This page                                       |
 | `ctx.getSandbox()`           | The current agent's live sandbox handle                   | [Sandbox](../sandbox)                           |
 | `ctx.getSkill(identifier)`   | A handle for a skill visible to the current agent         | [Skills](../skills#read-skill-files-at-runtime) |
-| `defineState(name, initial)` | Durable typed state shared by runtime code in one session | [State](./state)                                |
+| `defineState(name, initial)` | Durable typed state shared by runtime code in one session | [State](../concepts/state)                      |
 
 These APIs work only during eve-managed runtime execution. Calling them during module evaluation, discovery, or a build throws.
 
@@ -74,7 +74,7 @@ The accessor is synchronous; file content is read lazily from the active sandbox
 
 ## Custom state with `defineState`
 
-Use `defineState` for durable per-session values that tools, hooks, and channel handlers share. Unlike the `ctx` accessors, import it from `eve/context` and declare the handle at module scope. Its `get()` and `update()` methods still require active eve execution. See [State](./state) for the read, update, reset, and subagent-isolation model.
+Use `defineState` for durable per-session values that tools, hooks, and channel handlers share. Unlike the `ctx` accessors, import it from `eve/context` and declare the handle at module scope. Its `get()` and `update()` methods still require active eve execution. See [State](../concepts/state) for the read, update, reset, and subagent-isolation model.
 
 ## Where these APIs work
 
@@ -93,7 +93,7 @@ eve establishes the managed context before invoking authored runtime code and ke
 
 ## What to read next
 
-- [State](./state): durable typed values scoped to one session.
+- [State](../concepts/state): durable typed values scoped to one session.
 - [Sandbox](../sandbox): runtime filesystem and process access.
 - [Skills](../skills): load procedures and read packaged skill files.
 - [Sessions, runs, and streaming](../concepts/sessions-runs-and-streaming): the durable session and event contract.

@@ -60,7 +60,7 @@ Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up fro
 
 There's nothing to configure. eve owns the workflow lifecycle, and sessions are durable by default.
 
-You don't write workflow code directly. Workflow primitives (`start()`, `resumeHook()`, etc.) are an implementation detail of eve's runtime layer; channels, tools, and hooks never touch them. Two surfaces give your own code session data: tools read the current session's metadata (id, turn, auth, parent lineage) via `ctx.session`, and [`defineState`](../guides/state) reads or writes session-scoped durable state. See [State](../guides/state) for the read/write model.
+You don't write workflow code directly. Workflow primitives (`start()`, `resumeHook()`, etc.) are an implementation detail of eve's runtime layer; channels, tools, and hooks never touch them. Two surfaces give your own code session data: tools read the current session's metadata (id, turn, auth, parent lineage) via `ctx.session`, and [`defineState`](./state) reads or writes session-scoped durable state. See [State](./state) for the read/write model.
 
 ## Parked work
 
@@ -97,4 +97,4 @@ Conversation history within a session is append-only. Turns land in order, and t
 
 - [Sessions and streaming](./sessions-runs-and-streaming): the handles you hold and the event stream you watch.
 - [Security model](./security-model): the trust boundaries the runtime enforces.
-- [State](../guides/state): durable per-session memory that persists across step boundaries.
+- [State](./state): durable per-session memory that persists across step boundaries.

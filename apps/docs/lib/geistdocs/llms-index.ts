@@ -13,7 +13,14 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 ## Introduction
 
 - [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure a model, understand its layout, and run it locally.
-- [Tutorial](${EVE_ORIGIN}/docs/tutorial/first-agent.md): Build an agent with tools, durable state, and an interface.
+
+## Core Concepts
+
+- [Execution Model and Durability](${EVE_ORIGIN}/docs/concepts/execution-model-and-durability.md): Understand sessions, checkpointed steps, and parked work.
+- [Sessions, Runs, and Streaming](${EVE_ORIGIN}/docs/concepts/sessions-runs-and-streaming.md): Understand session IDs, NDJSON events, controls, and reconnecting.
+- [Default Harness](${EVE_ORIGIN}/docs/concepts/default-harness.md): Understand the built-in loop, tools, workspace, and context assembly.
+- [Context Control](${EVE_ORIGIN}/docs/concepts/context-control.md): Choose what the model sees and when.
+- [Security Model](${EVE_ORIGIN}/docs/concepts/security-model.md): Review trust boundaries, secret handling, credentials, and fail-closed behavior.
 
 ## Build
 
@@ -27,12 +34,12 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Sandbox](${EVE_ORIGIN}/docs/sandbox.md): Configure the isolated shell, filesystem, lifecycle, and network policy.
 - [Subagents](${EVE_ORIGIN}/docs/subagents.md): Delegate work to copies of the root agent or declared specialists.
 - [Evals](${EVE_ORIGIN}/docs/evals/overview.md): Define repeatable scored checks and run them with \`eve eval\`.
-- [Durable State](${EVE_ORIGIN}/docs/guides/state.md): Persist per-session memory across step boundaries.
+- [Durable State](${EVE_ORIGIN}/docs/concepts/state.md): Persist per-session memory across step boundaries.
 - [Session Context](${EVE_ORIGIN}/docs/guides/session-context.md): Use session metadata and runtime accessors in authored code.
 - [Schedules](${EVE_ORIGIN}/docs/schedules.md): Run prompts or handlers on a cron cadence.
 - [Hooks](${EVE_ORIGIN}/docs/guides/hooks.md): Subscribe to runtime stream events.
 - [Dynamic Capabilities](${EVE_ORIGIN}/docs/guides/dynamic-capabilities.md): Resolve models, tools, skills, subagents, and instructions at runtime.
-- [Workflow Tool](${EVE_ORIGIN}/docs/guides/dynamic-workflows.md): Let the model orchestrate subagents through the experimental Workflow tool.
+- [Workflow Tool](${EVE_ORIGIN}/docs/subagents/workflow-tool.md): Let the model orchestrate subagents through the experimental Workflow tool.
 
 ## Integrate
 
@@ -56,13 +63,9 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Observability](${EVE_ORIGIN}/docs/guides/instrumentation.md): Trace agents with OpenTelemetry and inspect workflow metadata.
 - [Terminal UI](${EVE_ORIGIN}/docs/guides/dev-tui.md): Work with a local or deployed agent from the interactive terminal UI.
 
-## Core Concepts
+## Reference
 
-- [Execution Model and Durability](${EVE_ORIGIN}/docs/concepts/execution-model-and-durability.md): Understand sessions, checkpointed steps, and parked work.
-- [Sessions, Runs, and Streaming](${EVE_ORIGIN}/docs/concepts/sessions-runs-and-streaming.md): Understand session IDs, NDJSON events, controls, and reconnecting.
-- [Default Harness](${EVE_ORIGIN}/docs/concepts/default-harness.md): Understand the built-in loop, tools, workspace, and context assembly.
-- [Context Control](${EVE_ORIGIN}/docs/concepts/context-control.md): Choose what the model sees and when.
-- [Security Model](${EVE_ORIGIN}/docs/concepts/security-model.md): Review trust boundaries, secret handling, credentials, and fail-closed behavior.
+- [Tutorial](${EVE_ORIGIN}/docs/tutorial/first-agent.md): Build an agent with tools, durable state, and an interface.
 
 ## Patterns
 
@@ -71,7 +74,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Multi-Tenant Outbound Auth](${EVE_ORIGIN}/docs/patterns/multi-tenant-auth.md): Select tenant-scoped credentials for tools and connections.
 - [Multi-Tenant Approvals](${EVE_ORIGIN}/docs/patterns/multi-tenant-approvals.md): Apply tenant policy to authored and connection tools.
 
-## Reference and Discovery
+## API Reference and Discovery
 
 - [TypeScript API Reference](${EVE_ORIGIN}/docs/reference/typescript-api.md): Find public \`define*\` helpers, runtime context, and import paths.
 - [CLI Reference](${EVE_ORIGIN}/docs/reference/cli.md): Find every eve command and option.

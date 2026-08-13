@@ -4,6 +4,7 @@
   "pages": [
     "execution-model-and-durability",
     "sessions-runs-and-streaming",
+    "state",
     "default-harness",
     "context-control",
     "security-model"

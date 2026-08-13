@@ -7,7 +7,7 @@ The experimental `Workflow` tool lets the model write JavaScript that coordinate
 
 A single turn can already call several subagents, and parallel tool calls dispatch concurrently. What a workflow adds is _programmatic_ coordination. The program decides how many subagents to run based on an earlier result, which output feeds which call, and how to combine everything. That is logic the model cannot express as a few one-off calls.
 
-`Workflow` is a model-facing tool, not an API for authored tools, hooks, or application code. Authored code cannot submit a Workflow program or use `Workflow` to start an arbitrary user-authored Vercel Workflow. Use the [client SDK](./client/overview) when application code needs to start or continue an eve session; use ordinary application APIs for other deterministic orchestration.
+`Workflow` is a model-facing tool, not an API for authored tools, hooks, or application code. Authored code cannot submit a Workflow program or use `Workflow` to start an arbitrary user-authored Vercel Workflow. Use the [client SDK](../guides/client/overview) when application code needs to start or continue an eve session; use ordinary application APIs for other deterministic orchestration.
 
 ## Enable the Workflow tool
 
@@ -53,7 +53,7 @@ Each `tools.analyst(...)` call dispatches a child subagent, so the parent stream
 
 ## What a workflow can orchestrate
 
-A workflow reaches only this agent's own agents: the built-in `agent` (a copy of itself), declared [subagents](../subagents), and [remote agents](./remote-agents). That is the whole list. No files, network, shell, skills, or connections. A workflow is a coordination layer over subagents, not a place to do other work. Each call can still request structured output via `outputSchema`, exactly like a direct subagent delegation.
+A workflow reaches only this agent's own agents: the built-in `agent` (a copy of itself), declared [subagents](./), and [remote agents](../guides/remote-agents). That is the whole list. No files, network, shell, skills, or connections. A workflow is a coordination layer over subagents, not a place to do other work. Each call can still request structured output via `outputSchema`, exactly like a direct subagent delegation.
 
 ## Caps on workflow-spawned subagents
 
@@ -67,7 +67,7 @@ import { experimental_workflow } from "eve/tools";
 export default experimental_workflow({ maxSubagents: 4 });
 ```
 
-**Root-only orchestration.** Only the root session receives `Workflow`. Children started by a workflow receive neither `Workflow` nor the built-in `agent`, so Workflow programs cannot recurse. A declared child can still call subagents defined in its own directory (see [Subagents](../subagents)).
+**Root-only orchestration.** Only the root session receives `Workflow`. Children started by a workflow receive neither `Workflow` nor the built-in `agent`, so Workflow programs cannot recurse. A declared child can still call subagents defined in its own directory (see [Subagents](./)).
 
 ## Where the JavaScript runs
 
@@ -83,6 +83,6 @@ That is an allowlist, not a denylist. The sandbox cannot read files, open a sock
 
 ## What to read next
 
-- Declare the subagents a workflow orchestrates → [Subagents](../subagents)
-- Call another deployment as one of those agents → [Remote agents](./remote-agents)
+- Declare the subagents a workflow orchestrates → [Subagents](./)
+- Call another deployment as one of those agents → [Remote agents](../guides/remote-agents)
 - The `agent/tools/` opt-in mechanism → [Default harness](../concepts/default-harness)

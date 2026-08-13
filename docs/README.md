@@ -46,7 +46,7 @@ Read in this order:
 11. [Session Context](./guides/session-context.md)
 12. [Sessions and Streaming](./concepts/sessions-runs-and-streaming.md)
 13. [Client SDK](./guides/client/overview.mdx)
-14. [Subagents](./subagents.mdx)
+14. [Subagents](./subagents/index.mdx)
 15. [Schedules](./schedules.mdx)
 16. [Evals](./evals/overview.mdx)
 17. [Authentication](./guides/auth-and-route-protection.md)
