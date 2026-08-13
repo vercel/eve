@@ -52,18 +52,22 @@ async function runGit(cwd: string, args: readonly string[]): Promise<void> {
  * failure (without failing `eve init`) is the caller's job.
  */
 export async function tryInitializeGit(projectPath: string): Promise<GitInitResult> {
-  if (!(await isGitAvailable()) || (await isInsideExistingRepository(projectPath))) {
-    return { kind: "skipped" };
-  }
-
   const gitPath = join(projectPath, ".git");
-  const gitMetadataExisted = await stat(gitPath).then(
+  const gitMetadataExists = await stat(gitPath).then(
     () => true,
     (error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return false;
       throw error;
     },
   );
+  if (
+    gitMetadataExists ||
+    !(await isGitAvailable()) ||
+    (await isInsideExistingRepository(projectPath))
+  ) {
+    return { kind: "skipped" };
+  }
+
   let initialized = false;
   try {
     await runGit(projectPath, ["init"]);
@@ -77,7 +81,7 @@ export async function tryInitializeGit(projectPath: string): Promise<GitInitResu
     await runGit(projectPath, ["commit", "-m", "Initial commit from eve"]);
     return { kind: "initialized" };
   } catch (error) {
-    if (initialized && !gitMetadataExisted) {
+    if (initialized) {
       await rm(gitPath, { recursive: true, force: true }).catch(() => {});
     }
 

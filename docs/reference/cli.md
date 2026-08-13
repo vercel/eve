@@ -42,18 +42,14 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 
 | Target                                                                     | What happens                                                                                                                                                             |
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `eve init my-agent`                                                        | Creates an agent project in a new or preexisting empty `my-agent/` directory                                                                                             |
-| `eve init` or `eve init .` in an empty or metadata-only directory          | Creates an agent project in the current directory while retaining supported repository and environment metadata                                                          |
+| `eve init my-agent`                                                        | Creates an agent project in `my-agent/`                                                                                                                                  |
+| `eve init` or `eve init .` in an empty directory                           | Creates an agent project in the current directory                                                                                                                        |
 | `eve init` or `eve init .` in a non-empty directory without `package.json` | Asks whether to scaffold in the current directory or a named subdirectory. Using the current directory preserves unrelated files but overwrites files at generated paths |
 | `eve init .` in an existing project                                        | Adds `agent/` plus missing `eve`, `ai`, and `zod` dependencies. Requires `package.json` and no existing `agent/` files                                                   |
-
-A named directory containing files is treated as an existing project and must have a valid `package.json`. To initialize a directory that contains only Git or supported environment metadata, enter that directory and run `eve init .`.
 
 Coding-agent launches and non-interactive terminals cannot answer the location prompt and fail before writing. Pass a new directory name, such as `eve init my-agent`, in those environments.
 
 After scaffolding, a human terminal usually continues into `eve dev`. If a coding-agent REPL is on `PATH`, the handoff menu can open it instead or exit without starting either process. Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
-
-If dependency installation fails, eve removes a new target or returns a preexisting empty target to an empty state, then prints the `eve init` command to retry. For an existing project or a non-empty current directory, eve keeps the generated changes and prints the package-manager install command to run. Shared workspace files may still change, so review workspace configuration and lockfile changes before committing.
 
 | Flag                   | Type   | Default          | Description                                                                                                              |
 | ---------------------- | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |

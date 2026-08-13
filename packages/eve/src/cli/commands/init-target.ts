@@ -38,7 +38,13 @@ function isCurrentDirectoryTarget(target: string): boolean {
 async function resolveNamedTarget(parentPath: string, rawTarget: string): Promise<InitTarget> {
   const projectName = parseProjectName(rawTarget);
   const projectPath = join(parentPath, projectName);
-  const stats = await stat(projectPath).catch(() => undefined);
+  const stats = await stat(projectPath).then(
+    (result) => result,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    },
+  );
   if (stats === undefined) {
     return {
       failurePolicy: "remove",

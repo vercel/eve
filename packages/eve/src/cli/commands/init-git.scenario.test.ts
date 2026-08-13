@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -46,16 +46,15 @@ describe("tryInitializeGit", () => {
     });
   });
 
-  it("retains preexisting Git metadata when initialization fails", async () => {
-    const projectPath = await createScratchDirectory("eve-init-existing-git-failure-");
+  it("skips initialization when Git metadata already exists", async () => {
+    const projectPath = await createScratchDirectory("eve-init-existing-git-");
     const gitPath = join(projectPath, ".git");
     await mkdir(gitPath);
     await writeFile(join(gitPath, "keep"), "preexisting\n");
     await writeFile(join(projectPath, "package.json"), "{}\n");
 
-    await withoutGitIdentity(projectPath, async () => {
-      await expect(tryInitializeGit(projectPath)).resolves.toMatchObject({ kind: "failed" });
-      await expect(pathExists(join(gitPath, "keep"))).resolves.toBe(true);
-    });
+    await expect(tryInitializeGit(projectPath)).resolves.toEqual({ kind: "skipped" });
+    await expect(readdir(gitPath)).resolves.toEqual(["keep"]);
+    await expect(readFile(join(gitPath, "keep"), "utf8")).resolves.toBe("preexisting\n");
   });
 });
