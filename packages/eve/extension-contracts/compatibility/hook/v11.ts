@@ -2,11 +2,11 @@ import { defineHook } from "#public/hooks/index.js";
 
 export default defineHook({
   events: {
-    "subagent.called"(event, ctx) {
-      console.info("subagent called", {
-        childSessionId: event.data.childSessionId,
+    "subagent.completed"(event, ctx) {
+      console.info("subagent completed", {
+        output: event.data.output,
         sessionId: ctx.session.id,
-        subagentName: event.data.name,
+        subagentName: event.data.subagentName,
       });
     },
   },

@@ -92,6 +92,7 @@ export async function dispatchRuntimeActionsStep(
             parentContinuationToken: input.parentContinuationToken,
             parentTraceContext: prepared.parentTraceContext,
             persistentSessions,
+            serializedContext: prepared.serializedContext,
             session,
             taskOwned: false,
             target: entry.target,

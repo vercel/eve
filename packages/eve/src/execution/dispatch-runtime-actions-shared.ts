@@ -32,6 +32,7 @@ import {
   type RuntimeSession,
 } from "#execution/agent-handle-dispatch.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
+import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
 import {
   assertUniqueRuntimeActionCallIds,
   getPendingRuntimeActionBatch,
@@ -151,6 +152,7 @@ export interface PreparedRuntimeActionDispatch {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly DispatchPlanEntry[];
   readonly session: RuntimeSession;
 }
@@ -215,6 +217,7 @@ export async function prepareRuntimeActionDispatch(input: {
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
+    serializedContext: input.serializedContext,
     session,
   };
 }
@@ -451,10 +454,19 @@ export async function startSubagent(input: {
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
+  readonly serializedContext: Record<string, unknown>;
   readonly session: RuntimeSession;
   readonly taskOwned: boolean;
   readonly target: DispatchStartTarget;
 }): Promise<DispatchOutcome> {
+  const parentTraceContext =
+    readActionTraceContext(
+      input.serializedContext,
+      input.session.sessionId,
+      input.batchEvent.turnId,
+      input.target.action.callId,
+    ) ?? input.parentTraceContext;
+
   switch (input.target.kind) {
     case "local":
       return startLocalSubagent({
@@ -469,7 +481,7 @@ export async function startSubagent(input: {
         fanoutSize: input.fanoutSize,
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
-        parentTraceContext: input.parentTraceContext,
+        parentTraceContext,
         persistentSessions: input.persistentSessions,
         session: input.session,
         source: input.target.source,
@@ -486,6 +498,7 @@ export async function startSubagent(input: {
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
+        parentTraceContext,
         persistentSessions: input.persistentSessions,
         session: input.session,
         taskOwned: input.taskOwned,
