@@ -983,6 +983,39 @@ describe("runInitCommand", () => {
     );
   });
 
+  it("uses a preexisting Git-only named directory for a fresh project", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-git-only-"));
+    const projectRoot = join(parentDirectory, "host-app");
+    await mkdir(join(projectRoot, ".git"), { recursive: true });
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(output, parentDirectory, "host-app", {}, deps);
+
+    await expect(pathExists(join(projectRoot, ".git"))).resolves.toBe(true);
+    await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.confirmInitInNonEmptyDirectory).not.toHaveBeenCalled();
+  });
+
+  it("preserves a preexisting Git-only named directory when installation fails", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-git-only-fail-"));
+    const projectRoot = join(parentDirectory, "host-app");
+    await mkdir(join(projectRoot, ".git"), { recursive: true });
+    await writeFile(join(projectRoot, ".git/HEAD"), "ref: refs/heads/main\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockResolvedValue(false);
+
+    await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
+      "original state",
+    );
+
+    await expect(readdir(projectRoot)).resolves.toEqual([".git"]);
+    await expect(readFile(join(projectRoot, ".git/HEAD"), "utf8")).resolves.toBe(
+      "ref: refs/heads/main\n",
+    );
+  });
+
   it("uses a preexisting empty named directory for a fresh project", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-empty-"));
     const projectRoot = join(parentDirectory, "host-app");

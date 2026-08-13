@@ -207,9 +207,11 @@ async function scaffoldProject(
   const parentPath = resolve(parentDirectory);
   const createInPlace = projectName === CURRENT_DIRECTORY_PROJECT_NAME;
   const projectPath = createInPlace ? parentPath : join(parentPath, projectName);
-  const populateExistingEmptyDirectory =
-    !createInPlace && (await pathExists(projectPath)) && (await readdir(projectPath)).length === 0;
-  if (!createInPlace && (await pathExists(projectPath)) && !populateExistingEmptyDirectory) {
+  const populateExistingFreshDirectory =
+    !createInPlace &&
+    (await pathExists(projectPath)) &&
+    blockingCreateInPlaceEntries(await readdir(projectPath)).length === 0;
+  if (!createInPlace && (await pathExists(projectPath)) && !populateExistingFreshDirectory) {
     throw new Error(`Cannot create project because "${projectPath}" already exists.`);
   }
 
@@ -258,7 +260,7 @@ async function scaffoldProject(
     }
 
     if (stagingDirectory !== undefined) {
-      if (createInPlace || populateExistingEmptyDirectory) {
+      if (createInPlace || populateExistingFreshDirectory) {
         await moveDirectoryContents(stagedProjectPath, projectPath);
       } else {
         await rename(stagedProjectPath, projectPath);
@@ -287,6 +289,7 @@ type PreparedInitProject =
       failurePolicy: "clear" | "preserve" | "remove";
       kind: "created";
       packageManager: PackageManagerKind;
+      preservedTargetEntries: readonly string[];
       projectPath: string;
       retryCommand: string;
       workspaceMember: boolean;
@@ -336,13 +339,17 @@ const INSTALL_OUTPUT_FALLBACK_LINES = 20;
 async function cleanupFreshInitTarget(
   projectPath: string,
   policy: "clear" | "remove",
+  preservedEntries: readonly string[] = [],
 ): Promise<boolean> {
   try {
     if (policy === "remove") {
       await rm(projectPath, { recursive: true, force: true });
     } else {
+      const preserved = new Set(preservedEntries);
       for (const entry of await readdir(projectPath)) {
-        await rm(join(projectPath, entry), { recursive: true, force: true });
+        if (!preserved.has(entry)) {
+          await rm(join(projectPath, entry), { recursive: true, force: true });
+        }
       }
     }
     return true;
@@ -380,11 +387,14 @@ async function runInitSteps(input: {
       ? parentPath
       : undefined
     : await resolveTargetDirectory(parentDirectory, rawTarget);
-  const explicitEmptyDirectory =
-    !currentDirectoryTarget &&
-    existingDirectory !== undefined &&
-    (await readdir(existingDirectory)).length === 0;
-  if (explicitEmptyDirectory) existingDirectory = undefined;
+  const explicitDirectoryEntries =
+    !currentDirectoryTarget && existingDirectory !== undefined
+      ? await readdir(existingDirectory)
+      : undefined;
+  const explicitFreshDirectory =
+    explicitDirectoryEntries !== undefined &&
+    blockingCreateInPlaceEntries(explicitDirectoryEntries).length === 0;
+  if (explicitFreshDirectory) existingDirectory = undefined;
   const evePackage = resolveInitEvePackageOverride();
   let overwriteExisting = false;
   if (currentDirectoryTarget && existingDirectory === undefined) {
@@ -423,14 +433,14 @@ async function runInitSteps(input: {
       const packageManager = await resolveScaffoldPackageManager(plannedProjectPath, dependencies);
       const workspaceMember = isPackageManagerWorkspaceMember(packageManager, plannedProjectPath);
       const retryCommand = initRetryCommand(projectName);
+      const preservedTargetEntries = currentDirectoryTarget
+        ? initialCurrentDirectoryEntries
+        : (explicitDirectoryEntries ?? []);
       const failurePolicy = overwriteExisting
         ? "preserve"
-        : explicitEmptyDirectory ||
-            (currentDirectoryTarget && initialCurrentDirectoryEntries.length === 0)
+        : explicitFreshDirectory || currentDirectoryTarget
           ? "clear"
-          : currentDirectoryTarget
-            ? "preserve"
-            : "remove";
+          : "remove";
       let scaffold: Awaited<ReturnType<typeof scaffoldProject>>;
       try {
         scaffold = await scaffoldProject(
@@ -444,12 +454,16 @@ async function runInitSteps(input: {
         );
       } catch (error) {
         if (failurePolicy !== "preserve") {
-          const cleaned = await cleanupFreshInitTarget(plannedProjectPath, failurePolicy);
+          const cleaned = await cleanupFreshInitTarget(
+            plannedProjectPath,
+            failurePolicy,
+            preservedTargetEntries,
+          );
           const detail = error instanceof Error ? error.message : String(error);
           const cleanup = cleaned
             ? failurePolicy === "remove"
               ? `eve removed the incomplete project at "${plannedProjectPath}".`
-              : `eve restored "${plannedProjectPath}" to an empty directory.`
+              : `eve restored "${plannedProjectPath}" to its original state.`
             : `eve could not completely clean "${plannedProjectPath}".`;
           throw new Error(`${detail}\n\n${cleanup}${workspaceFailureNote(workspaceMember)}`);
         }
@@ -459,6 +473,7 @@ async function runInitSteps(input: {
         failurePolicy,
         kind: "created",
         packageManager,
+        preservedTargetEntries,
         projectPath: scaffold.projectPath,
         retryCommand,
         workspaceMember,
@@ -536,12 +551,16 @@ async function runInitSteps(input: {
       for (const line of failureOutput) logger.error(line);
 
       if (project.failurePolicy !== "preserve") {
-        const cleaned = await cleanupFreshInitTarget(project.projectPath, project.failurePolicy);
+        const cleaned = await cleanupFreshInitTarget(
+          project.projectPath,
+          project.failurePolicy,
+          project.preservedTargetEntries,
+        );
         if (cleaned) {
           const cleanup =
             project.failurePolicy === "remove"
               ? `eve removed the incomplete project at "${project.projectPath}".`
-              : `eve restored "${project.projectPath}" to an empty directory.`;
+              : `eve restored "${project.projectPath}" to its original state.`;
           const workspaceChanged =
             project.workspaceMember || project.workspaceRootMutations.length > 0;
           throw new Error(
