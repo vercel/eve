@@ -488,6 +488,31 @@
       ]
     },
     {
+      "name": "connection/context",
+      "type": "registry:item",
+      "title": "context.dev",
+      "description": "search, scrape, extract, and monitor live web data.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "context", "mcp.context.dev", "context"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/context.ts",
+          "type": "registry:file",
+          "target": "agent/connections/context.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/egnyte",
       "type": "registry:item",
       "title": "Egnyte",
