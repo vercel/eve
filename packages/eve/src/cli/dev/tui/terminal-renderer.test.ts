@@ -114,7 +114,7 @@ function agentInfoWithModel(
     hooks: [],
     instructions: {
       dynamic: [],
-      static: null,
+      static: [],
     },
     kind: "eve-agent-info",
     mode: "development",
@@ -136,7 +136,7 @@ function agentInfoWithModel(
       framework: [],
       reserved: [],
     },
-    version: 1,
+    version: 2,
     workflow: {
       enabled: false,
       toolName: "Workflow",

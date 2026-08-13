@@ -8,8 +8,12 @@ vi.mock("#context/build-callback-context.js", () => ({
   }),
 }));
 
-const { dispatchDynamicInstructionEvent, buildDynamicInstructionMessages } =
-  await import("#context/dynamic-instruction-lifecycle.js");
+const {
+  buildDynamicInstructionMessages,
+  dispatchDynamicInstructionEvent,
+  drainDynamicInstructionUserMessages,
+  prepareDynamicInstructionPreamble,
+} = await import("#context/dynamic-instruction-lifecycle.js");
 
 import { ContextContainer } from "#context/container.js";
 import {
@@ -19,6 +23,7 @@ import {
 } from "#context/keys.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
 
 function createResolver(
   slug: string,
@@ -87,6 +92,64 @@ describe("dispatchDynamicInstructionEvent", () => {
     expect(ctx.get(TurnDynamicInstructionsKey)).toEqual({
       context: [{ role: "system", content: "Turn context." }],
     });
+  });
+
+  it("queues user-role instructions for durable history instead of system context", async () => {
+    const ctx = createCtx();
+    prepareDynamicInstructionPreamble(ctx, [{ content: "Static user context.", role: "user" }]);
+    const resolver = createResolver("context", ["session.started"], () =>
+      defineInstructions({ content: "Dynamic user context.", role: "user" }),
+    );
+
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([]);
+    expect(drainDynamicInstructionUserMessages(ctx)).toEqual([
+      { role: "user", content: "Dynamic user context." },
+    ]);
+    expect([...ctx.entries()].map(([key]) => key.name)).not.toContain(
+      "eve.pendingDynamicInstructionUserMessages",
+    );
+  });
+
+  it("exposes static and session-start user history to the correct lifecycle snapshots", async () => {
+    const ctx = createCtx();
+    const snapshots: string[][] = [];
+    prepareDynamicInstructionPreamble(ctx, [{ content: "Static user.", role: "user" }]);
+    const sessionResolver = createResolver("session", ["session.started"], (_event, rawCtx) => {
+      const resolveCtx = rawCtx as DynamicResolveContext;
+      snapshots.push(resolveCtx.messages.map((message) => String(message.content)));
+      return defineInstructions({ content: "Session user.", role: "user" });
+    });
+    const turnResolver = createResolver("turn", ["turn.started"], (_event, rawCtx) => {
+      const resolveCtx = rawCtx as DynamicResolveContext;
+      snapshots.push(resolveCtx.messages.map((message) => String(message.content)));
+      return defineInstructions({ content: "Turn user.", role: "user" });
+    });
+
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [sessionResolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [turnResolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+
+    expect(snapshots).toEqual([["Static user."], ["Static user.", "Session user."]]);
+    expect(drainDynamicInstructionUserMessages(ctx)).toEqual([
+      { content: "Session user.", role: "user" },
+      { content: "Turn user.", role: "user" },
+    ]);
   });
 
   it("skips resolvers that do not match the event type", async () => {
@@ -197,6 +260,95 @@ describe("dispatchDynamicInstructionEvent", () => {
     });
 
     expect(buildDynamicInstructionMessages(ctx)).toEqual([{ role: "system", content: "v2" }]);
+  });
+
+  it("clears stale turn system instructions on role changes and resolver failures", async () => {
+    const ctx = createCtx();
+    let result: "system" | "user" | "throw" = "system";
+    const resolver = createResolver("context", ["turn.started"], () => {
+      if (result === "throw") throw new Error("failed");
+      return defineInstructions({
+        content: `${result} context`,
+        role: result,
+      });
+    });
+
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([
+      { content: "system context", role: "system" },
+    ]);
+
+    prepareDynamicInstructionPreamble(ctx, []);
+    result = "user";
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([]);
+    expect(drainDynamicInstructionUserMessages(ctx)).toEqual([
+      { content: "user context", role: "user" },
+    ]);
+
+    result = "throw";
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([]);
+  });
+
+  it("keeps valid session system instructions when refresh resolution fails", async () => {
+    const ctx = createCtx();
+    let throws = false;
+    const resolver = createResolver("context", ["session.started"], () => {
+      if (throws) throw new Error("failed");
+      return defineInstructions({ content: "Durable session context." });
+    });
+
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    throws = true;
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([
+      { content: "Durable session context.", role: "system" },
+    ]);
+  });
+
+  it("materializes no message for blank user content", async () => {
+    const ctx = createCtx();
+    prepareDynamicInstructionPreamble(ctx, []);
+    const resolver = createResolver("context", ["turn.started"], () =>
+      defineInstructions({ content: "  \n", role: "user" }),
+    );
+
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+
+    expect(drainDynamicInstructionUserMessages(ctx)).toEqual([]);
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([]);
   });
 
   it("null return clears the resolver's slot", async () => {

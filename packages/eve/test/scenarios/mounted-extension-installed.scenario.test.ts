@@ -278,7 +278,7 @@ describe("mounted extension installed under node_modules", () => {
       {},
     )) as { markdown: string };
     expect(producedInstructions.markdown).toBe("Treat CRM results as authoritative.");
-    expect(manifest.instructions?.markdown).toContain(
+    expect(manifest.instructions.map((entry) => entry.content).join("\n")).toContain(
       "Prefer the CRM tools for account questions.",
     );
   });

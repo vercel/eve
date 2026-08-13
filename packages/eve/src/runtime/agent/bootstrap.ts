@@ -1,3 +1,5 @@
+import type { ModelMessage } from "ai";
+
 import { AGENT_TOOL_NAME, isImplicitAgentToolAvailable } from "#runtime/framework-tools/agent.js";
 import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
@@ -34,6 +36,7 @@ interface RuntimeTurnAgentBase {
   readonly availableSkills?: readonly AvailableSkillDescription[];
   readonly id: string;
   readonly instructions: readonly string[];
+  readonly initialMessages?: readonly ModelMessage[];
   /**
    * Optional model used only for compaction summaries.
    *
@@ -107,6 +110,9 @@ export function createResolvedRuntimeTurnAgent(input: {
       name: skill.name,
     })),
     id,
+    initialMessages: agent.instructions
+      .filter((entry) => entry.role === "user" && entry.content.trim().length > 0)
+      .map((entry) => ({ content: entry.content.trim(), role: "user" as const })),
     instructions: composeRuntimeBasePrompt({
       connections: agent.connections,
       instructions: agent.instructions,

@@ -7,6 +7,7 @@ import type {
   CompiledDynamicSkillDefinition,
   CompiledDynamicToolDefinition,
   CompiledHookDefinition,
+  CompiledInstructionsDefinition,
   CompiledSkillDefinition,
   CompiledToolDefinition,
 } from "#compiler/manifest.js";
@@ -29,7 +30,7 @@ export interface CompiledExtensionContributions {
   readonly dynamicSkills: CompiledDynamicSkillDefinition[];
   readonly dynamicInstructions: CompiledDynamicInstructionsDefinition[];
   readonly connections: CompiledConnectionDefinition[];
-  readonly instructionFragments: string[];
+  readonly instructions: CompiledInstructionsDefinition[];
 }
 
 /**
@@ -257,11 +258,15 @@ async function composeManifestContributions(input: {
   }));
 
   const dynamicInstructions: CompiledDynamicInstructionsDefinition[] = [];
-  const instructionFragments: string[] = [];
+  const instructions: CompiledInstructionsDefinition[] = [];
   for (const source of manifest.instructions) {
     const entry = await compileInstructionsEntry(sourceRoot, source, options);
     if (entry.kind === "instructions") {
-      instructionFragments.push(entry.definition.markdown);
+      instructions.push({
+        ...entry.definition,
+        sourceId: scopeSourceId(entry.definition.sourceId),
+        logicalPath: rebase(entry.definition.logicalPath),
+      });
     } else {
       dynamicInstructions.push({
         ...entry.definition,
@@ -281,7 +286,7 @@ async function composeManifestContributions(input: {
       dynamicSkills,
       dynamicInstructions,
       connections,
-      instructionFragments,
+      instructions,
     },
     disabledToolTargets,
   };
@@ -302,7 +307,7 @@ function describeExtensionSource(
  * composed name. Named contributions (tools, connections, skills, dynamic
  * tools) dedup by their model-facing identifier so an override shadows the
  * extension's same-named entry; unnamed contributions (hooks, dynamic skills,
- * dynamic instructions, instruction fragments) simply concatenate.
+ * dynamic instructions, static instructions) simply concatenate.
  *
  * Exported for unit testing: passing the consumer overrides as `primary` and
  * the extension's own contributions as `secondary` yields consumer-wins
@@ -326,7 +331,7 @@ export function mergeContributions(
     hooks: [...primary.hooks, ...secondary.hooks],
     dynamicSkills: [...primary.dynamicSkills, ...secondary.dynamicSkills],
     dynamicInstructions: [...primary.dynamicInstructions, ...secondary.dynamicInstructions],
-    instructionFragments: [...primary.instructionFragments, ...secondary.instructionFragments],
+    instructions: [...primary.instructions, ...secondary.instructions],
   };
 }
 

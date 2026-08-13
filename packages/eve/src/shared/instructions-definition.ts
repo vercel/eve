@@ -6,22 +6,29 @@
  * `instructions.{ts,cts,mts,js,cjs,mjs}`, or inside the
  * `agent/instructions/` directory for multi-file setups. Module-backed
  * static instructions execute once at build time. The compiler captures
- * the resulting markdown into the compiled manifest.
- *
- * When used inside a `defineDynamic` handler, the runtime lowers the
- * returned markdown to `{ role: "system", content: markdown }`.
- * Instructions produce system messages only. Use channel `context` for
- * user-role messages.
+ * the resulting content into the compiled manifest.
  */
-export interface PublicInstructionsDefinition {
-  markdown: string;
-}
+export type PublicInstructionsDefinition =
+  | {
+      readonly content: string;
+      readonly role?: "system" | "user";
+      readonly markdown?: never;
+    }
+  | {
+      /** @deprecated Use `content`. */
+      readonly markdown: string;
+      readonly content?: never;
+      readonly role?: never;
+    };
+
+export type InstructionsRole = "system" | "user";
 
 /**
  * Internal definition for an instructions prompt authored in markdown or
  * TypeScript.
  */
 export interface InternalInstructionsDefinition {
-  name: string;
-  markdown: string;
+  readonly content: string;
+  readonly name: string;
+  readonly role: InstructionsRole;
 }

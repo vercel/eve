@@ -39,13 +39,16 @@ describe("resolveAgent", () => {
           sourceId: "agent.mjs",
         },
       },
-      instructions: {
-        name: "instructions",
-        logicalPath: "instructions.md",
-        markdown: "You are a weather-focused assistant.",
-        sourceId: "instructions.md",
-        sourceKind: "markdown",
-      },
+      instructions: [
+        {
+          content: "You are a weather-focused assistant.",
+          name: "instructions",
+          logicalPath: "instructions.md",
+          role: "system",
+          sourceId: "instructions.md",
+          sourceKind: "markdown",
+        },
+      ],
       sandbox: {
         logicalPath: "sandbox/sandbox.mjs",
         sourceHash: "sandbox-source-hash",
@@ -197,13 +200,16 @@ describe("resolveAgent", () => {
         warnings: 0,
       },
     });
-    expect(resolved.instructions).toEqual({
-      name: "instructions",
-      logicalPath: "instructions.md",
-      markdown: "You are a weather-focused assistant.",
-      sourceId: "instructions.md",
-      sourceKind: "markdown",
-    });
+    expect(resolved.instructions).toEqual([
+      {
+        content: "You are a weather-focused assistant.",
+        logicalPath: "instructions.md",
+        name: "instructions",
+        role: "system",
+        sourceId: "instructions.md",
+        sourceKind: "markdown",
+      },
+    ]);
     expect(resolved.sandbox).toEqual({
       backend: expect.objectContaining({
         create: expect.any(Function),
@@ -384,7 +390,7 @@ describe("resolveAgent", () => {
       },
       name: "weather-agent",
     });
-    expect(resolved.instructions).toBeUndefined();
+    expect(resolved.instructions).toEqual([]);
     expect(resolved.sandbox).toBeNull();
     expect(resolved.skills).toEqual([]);
     expect(resolved.tools).toEqual([]);

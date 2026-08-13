@@ -128,6 +128,34 @@ describe("createSession", () => {
     expect(session.continuationToken).toBe("root-token");
   });
 
+  it("copies static user instructions only when creating a fresh session", () => {
+    const initialMessages = [{ content: "Pinned tenant policy.", role: "user" as const }];
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent({ initialMessages }),
+    });
+    initialMessages[0] = { content: "mutated", role: "user" };
+
+    expect(session.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
+
+    const refreshed = refreshSessionFromTurnAgent({
+      session,
+      turnAgent: createTestTurnAgent({
+        initialMessages: [{ content: "New deployment policy.", role: "user" }],
+      }),
+    });
+    expect(refreshed.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
+
+    const hydrated = hydrateDurableSession({
+      durable: projectToDurableSession(refreshed),
+      turnAgent: createTestTurnAgent({
+        initialMessages: [{ content: "Another deployment policy.", role: "user" }],
+      }),
+    });
+    expect(hydrated.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
+  });
+
   it("defaults description and inputSchema when null", () => {
     const session = createSession({
       continuationToken: "root-token",

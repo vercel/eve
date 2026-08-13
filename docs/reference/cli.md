@@ -7,28 +7,28 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 
 ## Commands
 
-| Command                       | Description                                                                                                                                           |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                                            |
-| `eve info`                    | Print the resolved application, including discovered tools, skills, subagents, schedules, channels, routes, artifact paths, and discovery diagnostics |
-| `eve build`                   | Compile `.eve/` artifacts and build the host output; prints the output directory                                                                      |
-| `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                                              |
-| `eve dev`                     | Start the local dev server and open the terminal UI                                                                                                   |
-| `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                                 |
-| `eve acp [url]`               | Serve the local application or an existing eve server URL as a stable ACP v1 agent over stdio                                                         |
-| `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                                           |
-| `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                                     |
-| `eve traces ls`               | List locally captured agent traces, most recent first                                                                                                 |
-| `eve traces [trace]`          | Show a local span tree (the most recent when omitted)                                                                                                 |
-| `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                                                |
-| `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                                         |
-| `eve eval`                    | Run evals against the local app or a remote target                                                                                                    |
-| `eve channels list`           | List user-authored channels                                                                                                                           |
-| `eve extension init [target]` | Create a new extension package                                                                                                                        |
-| `eve extension build`         | Build the current package as an extension                                                                                                             |
-| `eve set`                     | Change the root agent's model and reasoning effort                                                                                                    |
-| `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                                     |
-| `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                                          |
+| Command                       | Description                                                                                                                        |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                         |
+| `eve info`                    | Print the resolved application, including static instructions and discovered capabilities, routes, artifact paths, and diagnostics |
+| `eve build`                   | Compile `.eve/` artifacts and build the host output; prints the output directory                                                   |
+| `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                           |
+| `eve dev`                     | Start the local dev server and open the terminal UI                                                                                |
+| `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                              |
+| `eve acp [url]`               | Serve the local application or an existing eve server URL as a stable ACP v1 agent over stdio                                      |
+| `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                        |
+| `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                  |
+| `eve traces ls`               | List locally captured agent traces, most recent first                                                                              |
+| `eve traces [trace]`          | Show a local span tree (the most recent when omitted)                                                                              |
+| `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                             |
+| `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                      |
+| `eve eval`                    | Run evals against the local app or a remote target                                                                                 |
+| `eve channels list`           | List user-authored channels                                                                                                        |
+| `eve extension init [target]` | Create a new extension package                                                                                                     |
+| `eve extension build`         | Build the current package as an extension                                                                                          |
+| `eve set`                     | Change the root agent's model and reasoning effort                                                                                 |
+| `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                  |
+| `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                       |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
 
@@ -141,7 +141,7 @@ eve info [--json]
 | -------- | ---- | ------- | ------------ |
 | `--json` | flag | off     | Emit as JSON |
 
-Run this first when something behaves unexpectedly. It confirms a file was discovered, lists the active surface, and surfaces discovery diagnostics, all faster than booting the dev server.
+Run this first when something behaves unexpectedly. It confirms a file was discovered, lists the active surface, and surfaces discovery diagnostics, all faster than booting the dev server. Static instructions appear in source order with their `system` or `user` role. Dynamic instruction results are runtime-only and do not appear here.
 
 ## `eve build`
 

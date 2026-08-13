@@ -221,13 +221,16 @@ describe("compiler artifacts", () => {
         },
       ],
       kind: "eve-agent-compiled-manifest",
-      instructions: {
-        name: "instructions",
-        logicalPath: "instructions.md",
-        markdown: "You are a precise assistant.",
-        sourceId: "instructions.md",
-        sourceKind: "markdown",
-      },
+      instructions: [
+        {
+          content: "You are a precise assistant.",
+          name: "instructions",
+          logicalPath: "instructions.md",
+          role: "system",
+          sourceId: "instructions.md",
+          sourceKind: "markdown",
+        },
+      ],
       version: COMPILED_AGENT_MANIFEST_VERSION,
     });
     expect(normalizeArtifactValue(JSON.parse(diagnosticsText), appRoot)).toMatchObject({
@@ -581,7 +584,9 @@ describe("compileAgent", () => {
     const composed = result.manifest.tools.find((tool) => tool.name === "crm__crm_search");
     expect(composed?.sourceId).toBe("ext:crm:tools/crm_search.mjs");
     expect(composed?.description).toBe("Search the CRM.");
-    expect(result.manifest.instructions?.markdown).toContain("Prefer the CRM over guessing.");
+    expect(result.manifest.instructions.map((entry) => entry.content).join("\n")).toContain(
+      "Prefer the CRM over guessing.",
+    );
 
     const moduleMapText = await readFile(result.paths.moduleMapPath, "utf8");
     expect(moduleMapText).toContain("@acme/crm/extension/tools/crm_search.mjs");

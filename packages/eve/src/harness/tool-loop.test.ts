@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
+import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
@@ -21,6 +22,7 @@ import {
   ParentSessionKey,
   SandboxKey,
   SessionKey,
+  SessionIdKey,
   SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicSubagentSelectionsKey,
@@ -30,6 +32,9 @@ import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
+import { defineInstructions } from "#public/definitions/instructions.js";
+import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
+import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
 import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
@@ -8787,7 +8792,7 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("clears model history without replacing the session or its durable state", async () => {
+  it("clears static and dynamic user instructions without rerunning lifecycle events", async () => {
     const { emit, events } = createEventCollector();
     const resolveModel = vi.fn();
     const runStep = createToolLoopHarness(
@@ -8807,7 +8812,8 @@ describe("createToolLoopHarness", () => {
         threshold: 100_000,
       },
       history: [
-        { content: "old message", role: "user" },
+        { content: "Static user instructions.", role: "user" },
+        { content: "Dynamic user instructions.", role: "user" },
         { content: "old reply", role: "assistant" },
       ],
       limits,
@@ -8839,7 +8845,7 @@ describe("createToolLoopHarness", () => {
     expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
 
-  it("forces compaction without starting a model turn", async () => {
+  it("compacts user instructions as ordinary history without starting a model turn", async () => {
     const compactedHistory: ModelMessage[] = [
       { content: "Summary of our conversation so far:", role: "user" },
       { content: "summary", role: "assistant" },
@@ -8865,7 +8871,8 @@ describe("createToolLoopHarness", () => {
         threshold: 100_000,
       },
       history: [
-        { content: "old message", role: "user" },
+        { content: "Static user instructions.", role: "user" },
+        { content: "Dynamic user instructions.", role: "user" },
         { content: "old reply", role: "assistant" },
       ],
     });
@@ -8877,6 +8884,11 @@ describe("createToolLoopHarness", () => {
     expect(result.session.compaction).toEqual({ recentWindowSize: 10, threshold: 100_000 });
     expect(shouldCompact).not.toHaveBeenCalled();
     expect(compactMessages).toHaveBeenCalledOnce();
+    expect(vi.mocked(compactMessages).mock.calls[0]?.[0]).toEqual([
+      { content: "Static user instructions.", role: "user" },
+      { content: "Dynamic user instructions.", role: "user" },
+      { content: "old reply", role: "assistant" },
+    ]);
     expect(onCompaction).toHaveBeenCalledOnce();
     expect(ToolLoopAgent).not.toHaveBeenCalled();
     expect(getCompatibilityEventTypes(events)).toEqual([
@@ -10875,8 +10887,9 @@ describe("createToolLoopHarness", () => {
       };
       const instance = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value as {
         generate: ReturnType<typeof vi.fn>;
+        stream: ReturnType<typeof vi.fn>;
       };
-      const call = instance.generate.mock.calls[0]?.[0] as {
+      const call = (instance.generate.mock.calls[0]?.[0] ?? instance.stream.mock.calls[0]?.[0]) as {
         messages: Array<{ role: string; content: unknown }>;
       };
       return { instructions: settings.instructions, messages: call.messages };
@@ -11052,6 +11065,62 @@ describe("createToolLoopHarness", () => {
       });
       expect(messages.find((m) => m.content === "dynamic-system-instruction")).toBeUndefined();
       expect(messages.at(-1)?.content).toEqual(userContent);
+    });
+
+    it("commits dynamic user instructions before the current delivery in model history", async () => {
+      setupMockAgent(defaultModelResult());
+      const ctx = new ContextContainer();
+      ctx.set(SessionIdKey, "test-session");
+      const snapshots: string[][] = [];
+      const resolver: ResolvedDynamicInstructionsResolver = {
+        eventNames: ["session.started", "turn.started"],
+        events: {
+          "session.started": (_event, rawCtx) => {
+            const resolveCtx = rawCtx as DynamicResolveContext;
+            snapshots.push(resolveCtx.messages.map((message) => String(message.content)));
+            return defineInstructions({ content: "Session context.", role: "user" });
+          },
+          "turn.started": (_event, rawCtx) => {
+            const resolveCtx = rawCtx as DynamicResolveContext;
+            snapshots.push(resolveCtx.messages.map((message) => String(message.content)));
+            return defineInstructions({ content: "Turn context.", role: "user" });
+          },
+        },
+        logicalPath: "instructions/context.ts",
+        slug: "context",
+        sourceId: "instructions/context.ts",
+        sourceKind: "module",
+      };
+      const handleEvent: HarnessEmitFn = async (event, messages) => {
+        await dispatchDynamicInstructionEvent({
+          ctx,
+          event,
+          messages: messages ?? [],
+          resolvers: [resolver],
+        });
+      };
+      const runStep = createToolLoopHarness(createTestConfig("conversation", handleEvent));
+      const session = createTestSession({
+        history: [{ content: "Static context.", role: "user" }],
+      });
+
+      const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hello." }));
+
+      expect(snapshots).toEqual([["Static context."], ["Static context.", "Session context."]]);
+      expect(getLastAgentSettings().instructions).toBe("You are a test assistant.");
+      expect(getLastAgentSettings().messages).toEqual([
+        { content: "Static context.", role: "user" },
+        { content: "Session context.", role: "user" },
+        { content: "Turn context.", role: "user" },
+        { content: "Hello.", role: "user" },
+      ]);
+      expect(result.session.history).toEqual([
+        { content: "Static context.", role: "user" },
+        { content: "Session context.", role: "user" },
+        { content: "Turn context.", role: "user" },
+        { content: "Hello.", role: "user" },
+        { content: "ok", role: "assistant" },
+      ]);
     });
 
     it("preserves the Anthropic system cache breakpoint when merging instructions", async () => {

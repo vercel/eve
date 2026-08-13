@@ -55,7 +55,7 @@ export function buildVercelAgentSummary(input: {
             description: manifest.config.description,
             modelRouting: { kind: "dynamic" },
           },
-    instructions: manifest.instructions ? toInstructionsEntry(manifest.instructions) : null,
+    instructions: manifest.instructions.map(toInstructionsEntry),
     schedules: manifest.schedules.map(toScheduleEntry),
     tools: manifest.tools.map(toToolEntry),
     skills: manifest.skills.map(toSkillEntry),
@@ -115,9 +115,10 @@ function toInstructionsEntry(
   instructions: CompiledInstructionsDefinition,
 ): VercelEveInstructionsEntry {
   return {
+    content: instructions.content,
     logicalPath: instructions.logicalPath,
+    role: instructions.role,
     sourceKind: instructions.sourceKind,
-    markdown: instructions.markdown,
   };
 }
 

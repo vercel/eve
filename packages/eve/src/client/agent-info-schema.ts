@@ -86,7 +86,10 @@ const skill = entry.extend({
   metadata: z.record(z.string(), z.string()).optional(),
 });
 
-const instructions = entry.extend({ markdown: z.string() });
+const instructions = entry.extend({
+  content: z.string(),
+  role: z.enum(["system", "user"]),
+});
 
 const schedule = entry.extend({
   cron: z.string(),
@@ -174,7 +177,7 @@ export const AgentInfoResultSchema = z.object({
   hooks: z.array(hook),
   instructions: z.object({
     dynamic: z.array(dynamicResolver),
-    static: instructions.nullable(),
+    static: z.array(instructions),
   }),
   kind: z.literal("eve-agent-info"),
   mode: z.enum(["development", "production"]),
@@ -196,7 +199,7 @@ export const AgentInfoResultSchema = z.object({
     framework: z.array(frameworkTool),
     reserved: z.array(z.string()),
   }),
-  version: z.literal(1),
+  version: z.literal(2),
   workflow: z.object({
     enabled: z.boolean(),
     toolName: z.string(),

@@ -4,7 +4,7 @@
  * `#runtime/sessions/runtime-context-keys.ts`.
  */
 
-import type { LanguageModel, SystemModelMessage } from "ai";
+import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 
 import type { JsonObject } from "#shared/json.js";
 import type {
@@ -266,3 +266,13 @@ export const SessionDynamicInstructionsKey = new ContextKey<
 export const TurnDynamicInstructionsKey = new ContextKey<
   Record<string, readonly SystemModelMessage[]>
 >("eve.turnDynamicInstructions");
+
+/** Existing history exposed only to instructions resolvers during a preamble. */
+export const DynamicInstructionResolveMessagesKey = new ContextKey<readonly ModelMessage[]>(
+  "eve.dynamicInstructionResolveMessages",
+);
+
+/** User-role results waiting to be committed immediately after a preamble. */
+export const PendingDynamicInstructionUserMessagesKey = new ContextKey<readonly ModelMessage[]>(
+  "eve.pendingDynamicInstructionUserMessages",
+);

@@ -105,13 +105,16 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
         sourceKind: "module",
       },
     },
-    instructions: {
-      logicalPath: "instructions.md",
-      markdown: "Use the routed model.",
-      name: "instructions",
-      sourceId: "instructions.md",
-      sourceKind: "markdown",
-    },
+    instructions: [
+      {
+        content: "Use the routed model.",
+        logicalPath: "instructions.md",
+        name: "instructions",
+        role: "system",
+        sourceId: "instructions.md",
+        sourceKind: "markdown",
+      },
+    ],
   });
 
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);

@@ -20,7 +20,7 @@ const AGENT_MESSAGING_INSTRUCTION =
  */
 interface ComposeRuntimeBasePromptInput {
   connections?: readonly ResolvedConnectionDefinition[];
-  instructions?: ResolvedInstructionsDefinition;
+  instructions?: readonly ResolvedInstructionsDefinition[];
   /**
    * Whether the agent opted into `experimental.subagentPersistentSessions`.
    * Gates the agent-messaging prompt block that documents `agentId`
@@ -51,19 +51,27 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
 }
 
 function createInstructionsPromptBlocks(
-  instructions: ResolvedInstructionsDefinition | undefined,
+  instructions: readonly ResolvedInstructionsDefinition[] | undefined,
 ): readonly string[] {
-  if (instructions === undefined) {
+  const systemInstructions = (instructions ?? []).filter(
+    (entry) => entry.role === "system" && entry.content.trim().length > 0,
+  );
+  if (systemInstructions.length === 0) {
     return [];
   }
 
-  const markdown = instructions.markdown.trim();
-
-  if (markdown.length === 0) {
-    return [];
-  }
-
-  return [`Instructions (${instructions.name})\n${markdown}`];
+  const only = systemInstructions.length === 1 ? systemInstructions[0] : undefined;
+  const name =
+    only !== undefined &&
+    !only.sourceId.startsWith("ext:") &&
+    !only.sourceId.startsWith("ext-override:")
+      ? only.name
+      : "instructions";
+  const content = systemInstructions
+    .map((entry) => entry.content)
+    .join("\n\n")
+    .trim();
+  return [`Instructions (${name})\n${content}`];
 }
 
 function createWorkspacePromptBlocks(
