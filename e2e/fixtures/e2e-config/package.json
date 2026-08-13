@@ -11,7 +11,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@opentelemetry/core": "catalog:",
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@vercel/otel": "catalog:",
     "eve": "workspace:*"

@@ -5,22 +5,22 @@ packages:
   - packages/*
 
 allowBuilds:
-  # Registry templates import types only; this optional build is not needed.
-  "@google/genai": false
-  braintrust: false
-  "@mongodb-js/zstd": true
-  "@nestjs/core": true
-  "@parcel/watcher": false
-  bufferutil: false
-  cbor-extract: true
-  esbuild: true
-  node-liblzma: false
-  phase: false
-  protobufjs: true
-  sharp: true
-  unrs-resolver: true
-  vue-demi: false
-  webgpu: true
+  "@google/genai": false # No-op preinstall.
+  "@parcel/watcher": false # Builds from source only when explicitly requested.
+  braintrust: false # Installs an optional CLI binary; the SDK does not need it.
+  bufferutil: false # The package already includes the supported prebuilt bindings.
+  esbuild: true # Verifies the installed platform binary.
+  phase: false # Would install its own Git hooks.
+  protobufjs: false # Only checks the package version.
+  sharp: false # Prebuilt platform packages need no install script.
+  unrs-resolver: false # Prebuilt platform packages need no repair script.
+  webgpu: true # Clears macOS quarantine from its packaged native binding.
+
+ignoredOptionalDependencies:
+  - "@braintrust/bt-*"
+  - "@mongodb-js/zstd"
+  - cbor-extract
+  - node-liblzma
 
 catalog:
   "@ai-sdk/anthropic": "^4.0.36"
