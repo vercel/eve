@@ -41,6 +41,7 @@ describe("createChannelAddress", () => {
     expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
       command: {
         auth: null,
+        idempotency: undefined,
         kind: "send",
         payload: { message: "hello" },
         requestId: undefined,
@@ -53,6 +54,27 @@ describe("createChannelAddress", () => {
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: { kind: "clear" },
       sessionId: "sess_1",
+    });
+  });
+
+  it("forwards a replay identity into the session command", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress({
+      adapter: { kind: "http" },
+      channelName: "mcp",
+      continuationToken: "invocation:1",
+      runtime,
+    });
+    const idempotency = { fingerprint: "answers-a", key: "question-batch" };
+
+    await address.respond([{ optionId: "yes", requestId: "question" }], {
+      auth: null,
+      idempotency,
+    });
+
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
+      command: expect.objectContaining({ idempotency }),
+      continuationToken: "mcp:invocation:1",
     });
   });
 

@@ -7,7 +7,13 @@ import {
   INVOCATION_OWNER_ATTRIBUTE,
   invocationInputRequestId,
   invocationOwnerKey,
+  invocationUpdateIdempotency,
 } from "#internal/invocation/metadata.js";
+import {
+  CHANNEL_DELIVERY_RECEIPT_ATTRIBUTE,
+  serializeChannelDeliveryIdempotency,
+} from "#channel/delivery-idempotency.js";
+import type { ChannelDeliveryIdempotency } from "#channel/types.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -166,7 +172,8 @@ describe("WorkflowAgentInvocationExecution", () => {
   it("returns working immediately after accepting pending input", async () => {
     const requestId = invocationInputRequestId("event_1", "question");
     const responses = [{ optionId: "yes", requestId }] as const;
-    runsGet.mockResolvedValue(run({ status: "running" }));
+    const pendingRun = run({ status: "running" });
+    runsGet.mockResolvedValue(pendingRun);
     let events: HandleMessageStreamEvent[] = [
       {
         type: "input.requested",
@@ -193,7 +200,12 @@ describe("WorkflowAgentInvocationExecution", () => {
       } as HandleMessageStreamEvent,
     ];
     getReadable.mockImplementation(() => eventStream(events));
-    deliver.mockResolvedValue({ sessionId: "wrun_invocation" });
+    deliver.mockImplementation(async () => {
+      const update = invocationUpdateIdempotency(responses);
+      pendingRun.attributes[CHANNEL_DELIVERY_RECEIPT_ATTRIBUTE] =
+        serializeChannelDeliveryIdempotency(update);
+      return { sessionId: "wrun_invocation" };
+    });
 
     await expect(
       execution().update({
@@ -208,9 +220,83 @@ describe("WorkflowAgentInvocationExecution", () => {
     expect(from).toHaveBeenCalledWith("invocation:token");
     expect(deliver).toHaveBeenCalledWith(
       { inputResponses: [{ optionId: "yes", requestId: "question" }] },
-      { auth },
+      {
+        auth,
+        idempotency: invocationUpdateIdempotency(responses),
+      },
     );
     expect(getReadable).toHaveBeenCalledWith({ startIndex: -64 });
+  });
+
+  it("returns the recorded result for a repeated accepted update", async () => {
+    const responses = [{ optionId: "yes", requestId: "question" }] as const;
+    const update = invocationUpdateIdempotency(responses);
+    runsGet.mockResolvedValue(run({ status: "running", update }));
+    getReadable.mockReturnValue(eventStream([]));
+
+    await expect(
+      execution().update({ auth, invocationId: "wrun_invocation", responses }),
+    ).resolves.toMatchObject({ invocation: { status: "working" }, type: "success" });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("rejects a different answer after the pending input set was claimed", async () => {
+    const accepted = [{ optionId: "yes", requestId: "question" }] as const;
+    const attempted = [{ optionId: "no", requestId: "question" }] as const;
+    const acceptedUpdate = invocationUpdateIdempotency(accepted);
+    runsGet.mockResolvedValue(run({ status: "running", update: acceptedUpdate }));
+    getReadable.mockReturnValue(eventStream([]));
+
+    await expect(
+      execution().update({ auth, invocationId: "wrun_invocation", responses: attempted }),
+    ).resolves.toEqual({
+      message: "Input was already answered with a different response.",
+      type: "conflict",
+    });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("converges when a concurrent update accepts the same response first", async () => {
+    const responses = [
+      { optionId: "yes", requestId: invocationInputRequestId("event_1", "question") },
+    ] as const;
+    const update = invocationUpdateIdempotency(responses);
+    const pendingRun = run({ status: "running" });
+    runsGet.mockResolvedValue(pendingRun);
+    let events: HandleMessageStreamEvent[] = [
+      {
+        type: "input.requested",
+        data: {
+          requests: [
+            {
+              action: {
+                callId: "call_1",
+                input: {},
+                kind: "tool-call",
+                toolName: "ask_question",
+              },
+              kind: "question",
+              prompt: "Proceed?",
+              requestId: "question",
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+        meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
+      } as HandleMessageStreamEvent,
+    ];
+    getReadable.mockImplementation(() => eventStream(events));
+    deliver.mockImplementation(async () => {
+      pendingRun.attributes[CHANNEL_DELIVERY_RECEIPT_ATTRIBUTE] =
+        serializeChannelDeliveryIdempotency(update);
+      throw new Error("continuation was already consumed");
+    });
+
+    await expect(
+      execution().update({ auth, invocationId: "wrun_invocation", responses }),
+    ).resolves.toMatchObject({ invocation: { status: "working" }, type: "success" });
   });
 
   it("requires one update to answer the complete pending input batch", async () => {
@@ -219,7 +305,11 @@ describe("WorkflowAgentInvocationExecution", () => {
     getReadable.mockImplementation(() =>
       eventStream([inputRequestedEvent("event_split", ["one", "two"])]),
     );
-    deliver.mockResolvedValue({ sessionId: "wrun_invocation" });
+    deliver.mockImplementation(async (_payload, options) => {
+      pendingRun.attributes[CHANNEL_DELIVERY_RECEIPT_ATTRIBUTE] =
+        serializeChannelDeliveryIdempotency(options.idempotency);
+      return { sessionId: "wrun_invocation" };
+    });
 
     const one = invocationInputRequestId("event_split", "one");
     const two = invocationInputRequestId("event_split", "two");
@@ -259,7 +349,11 @@ describe("WorkflowAgentInvocationExecution", () => {
     runsGet.mockResolvedValue(pendingRun);
     let events: HandleMessageStreamEvent[] = [inputRequestedEvent("event_first", ["question"])];
     getReadable.mockImplementation(() => eventStream(events));
-    deliver.mockResolvedValue({ sessionId: "wrun_invocation" });
+    deliver.mockImplementation(async (_payload, options) => {
+      pendingRun.attributes[CHANNEL_DELIVERY_RECEIPT_ATTRIBUTE] =
+        serializeChannelDeliveryIdempotency(options.idempotency);
+      return { sessionId: "wrun_invocation" };
+    });
 
     const firstRequestId = invocationInputRequestId("event_first", "question");
     await execution().update({
@@ -296,6 +390,9 @@ describe("WorkflowAgentInvocationExecution", () => {
     ).resolves.toMatchObject({ type: "success" });
 
     expect(deliver).toHaveBeenCalledTimes(2);
+    expect(deliver.mock.calls[0]?.[1].idempotency.key).not.toBe(
+      deliver.mock.calls[1]?.[1].idempotency.key,
+    );
   });
 
   it("projects and clears pending connection authorization", async () => {
@@ -434,11 +531,16 @@ function execution(): WorkflowAgentInvocationExecution {
   return new WorkflowAgentInvocationExecution({ channelName: "mcp", createSession, from });
 }
 
-function run(input: { ownerKey?: string; status: string }) {
+function run(input: { ownerKey?: string; status: string; update?: ChannelDeliveryIdempotency }) {
   const attributes: Record<string, string> = {
     "$eve.invocation_owner": input.ownerKey ?? invocationOwnerKey(auth),
     "$eve.invocation_token": "invocation:token",
   };
+  if (input.update !== undefined) {
+    attributes[CHANNEL_DELIVERY_RECEIPT_ATTRIBUTE] = serializeChannelDeliveryIdempotency(
+      input.update,
+    );
+  }
   return {
     attributes,
     createdAt: new Date("2026-07-20T00:00:00.000Z"),

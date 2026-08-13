@@ -3,6 +3,7 @@ import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 import type {
   DeliverHookPayload,
   RuntimeActionResultHookPayload,
+  ChannelDeliveryIdempotency,
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
@@ -85,7 +86,12 @@ export interface SessionCommandInboxHandle extends SessionCommandInbox {
  * only the channel alias. Reads already committed to a retired alias remain in
  * the multiplexed queue and are consumed exactly once.
  */
-export function createSessionCommandInbox(): SessionCommandInboxHandle {
+export function createSessionCommandInbox(
+  options: {
+    /** Persists a claim before the corresponding delivery is exposed. */
+    readonly onDeliveryClaim?: (identity: ChannelDeliveryIdempotency) => Promise<void> | void;
+  } = {},
+): SessionCommandInboxHandle {
   let stable: SessionCommandHookState | undefined;
   let continuation: SessionCommandHookState | undefined;
   let authorization: SessionCommandHookState | undefined;
@@ -95,6 +101,14 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
   let offered: Promise<IteratorResult<SessionInboxPayload>> | null = null;
   let offeredRead: HookRead | undefined;
   let wake: (() => void) | undefined;
+  const claimedDeliveries = new Map<string, string>();
+
+  const consume = (read: HookRead): void => {
+    read.state.pending = false;
+    read.state.resolved = undefined;
+    if (read.result.done) read.state.closed = true;
+  };
+
   const enqueue = (read: HookRead): void => {
     ready.push(read);
     ready.sort((left, right) => left.order - right.order);
@@ -168,15 +182,27 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
     }
 
     offered = (async () => {
-      while (ready.length === 0) {
-        await new Promise<void>((resolve) => {
-          wake = resolve;
-        });
-      }
+      while (true) {
+        while (ready.length === 0) {
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+        }
 
-      const read = ready.shift()!;
-      offeredRead = read;
-      return read.result;
+        const read = ready.shift()!;
+        const identity = read.result.done ? undefined : readDeliveryIdempotency(read.result.value);
+        if (identity !== undefined && claimedDeliveries.has(identity.key)) {
+          consume(read);
+          arm(read.state);
+          continue;
+        }
+        if (identity !== undefined) {
+          await options.onDeliveryClaim?.(identity);
+          claimedDeliveries.set(identity.key, identity.fingerprint);
+        }
+        offeredRead = read;
+        return read.result;
+      }
     })();
     return offered;
   };
@@ -212,9 +238,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
         throw new Error("Cannot consume a session command before it resolves.");
       }
 
-      offeredRead.state.pending = false;
-      offeredRead.state.resolved = undefined;
-      if (offeredRead.result.done) offeredRead.state.closed = true;
+      consume(offeredRead);
       offeredRead = undefined;
       offered = null;
     },
@@ -319,4 +343,22 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
       retired.push(previous);
     },
   };
+}
+
+function readDeliveryIdempotency(
+  payload: SessionInboxPayload,
+): ChannelDeliveryIdempotency | undefined {
+  if (!("idempotency" in payload)) return undefined;
+  const identity = payload.idempotency;
+  if (
+    typeof identity !== "object" ||
+    identity === null ||
+    typeof identity.key !== "string" ||
+    identity.key.length === 0 ||
+    typeof identity.fingerprint !== "string" ||
+    identity.fingerprint.length === 0
+  ) {
+    return undefined;
+  }
+  return identity;
 }

@@ -37,7 +37,7 @@ export function computeChannelRouteRegistrations(
 ): readonly NitroChannelRouteRegistration[] {
   const manifestChannels = preparedHost.compileResult.manifest.channels;
   const authoredNames = new Set<string>();
-  const authoredRoutes: NitroChannelRouteRegistration[] = [];
+  const authoredRoutes: SourcedChannelRouteRegistration[] = [];
   const disabledNames = new Set<string>();
   const allFrameworkNames = getAllFrameworkChannelNames();
 
@@ -55,31 +55,48 @@ export function computeChannelRouteRegistrations(
       continue;
     }
     authoredNames.add(entry.name);
-    authoredRoutes.push({ method: entry.method, route: entry.urlPath, cors: entry.cors });
+    authoredRoutes.push({
+      method: entry.method,
+      route: entry.urlPath,
+      cors: entry.cors,
+      source: entry.logicalPath,
+    });
   }
 
   const activeFrameworkRoutes = getFrameworkChannelDefinitions()
     .filter((channel) => !authoredNames.has(channel.name) && !disabledNames.has(channel.name))
-    .map((channel): NitroChannelRouteRegistration => ({
+    .map((channel): SourcedChannelRouteRegistration => ({
       method: channel.method,
       route: channel.urlPath,
       cors: channel.cors,
+      source: `framework channel "${channel.name}"`,
     }));
 
   // Concatenate framework defaults first, authored second. Each
   // (method, route) pair is registered exactly once.
-  const seen = new Set<string>();
+  const seen = new Map<string, SourcedChannelRouteRegistration>();
   const merged: NitroChannelRouteRegistration[] = [];
   for (const registration of [...activeFrameworkRoutes, ...authoredRoutes]) {
     const key = createChannelRouteKey(registration);
-    if (seen.has(key)) {
-      continue;
+    const previous = seen.get(key);
+    if (previous !== undefined) {
+      throw new Error(
+        `Channel route collision for ${key}: "${previous.source}" and "${registration.source}" both register the same route.`,
+      );
     }
-    seen.add(key);
-    merged.push(registration);
+    seen.set(key, registration);
+    merged.push({
+      method: registration.method,
+      route: registration.route,
+      cors: registration.cors,
+    });
   }
 
   return merged;
+}
+
+interface SourcedChannelRouteRegistration extends NitroChannelRouteRegistration {
+  readonly source: string;
 }
 
 /**

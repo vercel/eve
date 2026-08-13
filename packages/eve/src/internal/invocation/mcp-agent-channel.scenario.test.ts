@@ -82,17 +82,32 @@ describe("MCP agent channel", () => {
         expect(hidden.isError).toBe(true);
 
         const responses = [{ optionId: "yes", requestId }];
-        await expect(
+        const immediateRetries = await Promise.all([
           callTool(server.url, "alice", "modern", "agent_update", {
             invocationId,
             responses,
           }),
-        ).resolves.toMatchObject({ invocationId });
+          callTool(server.url, "alice", "modern", "agent_update", {
+            invocationId,
+            responses,
+          }),
+        ]);
+        expect(immediateRetries).toEqual([
+          expect.objectContaining({ invocationId }),
+          expect.objectContaining({ invocationId }),
+        ]);
 
         const completed = await pollInvocation(server.url, "alice", "modern", invocationId, [
           "completed",
         ]);
         expect(completed).toMatchObject({ result: "MCP-LIFECYCLE-COMPLETE" });
+        await expect(
+          callTool(server.url, "alice", "modern", "agent_update", {
+            invocationId,
+            responses,
+          }),
+        ).resolves.toMatchObject({ invocationId, status: "completed" });
+
         await initializeLegacy(server.url, "alice");
         const legacyStarted = await callTool(server.url, "alice", "legacy", "agent_start", {
           message: "Cancel this lifecycle.",

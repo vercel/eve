@@ -166,6 +166,14 @@ export type TurnPolicy = "steer" | "queue";
 /** Default policy for message sends produced by current channel surfaces. */
 export const DEFAULT_TURN_POLICY: TurnPolicy = "steer";
 
+/** Stable identity used to make a channel delivery replay-safe. */
+export interface ChannelDeliveryIdempotency {
+  /** Identifies the logical delivery across retries. */
+  readonly key: string;
+  /** Identifies its canonical payload; a different value for one key conflicts. */
+  readonly fingerprint: string;
+}
+
 /** One command accepted by a durable session inbox. */
 export type SessionCommand =
   | {
@@ -174,6 +182,7 @@ export type SessionCommand =
       readonly kind: "send";
       readonly payload: DeliverPayload;
       readonly delivery?: ChannelDeliveryMetadata;
+      readonly idempotency?: ChannelDeliveryIdempotency;
       readonly requestId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
@@ -228,6 +237,8 @@ export interface DeliverHookPayload {
   readonly caller?: TurnCaller;
   /** Additive durable metadata. Absent on envelopes written by older deployments. */
   readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
+  /** Replay identity supplied by the channel producer. */
+  readonly idempotency?: ChannelDeliveryIdempotency;
   /** Inbound channel request id used only for workflow attributes. */
   readonly requestId?: string;
   readonly kind: "deliver";

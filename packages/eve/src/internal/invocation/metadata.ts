@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
+import type { InputResponse } from "#runtime/input/types.js";
 import {
   INVOCATION_OWNER_ATTRIBUTE,
   INVOCATION_TOKEN_ATTRIBUTE,
 } from "#internal/invocation/attributes.js";
+import type { ChannelDeliveryIdempotency } from "#channel/types.js";
 
 export { INVOCATION_OWNER_ATTRIBUTE, INVOCATION_TOKEN_ATTRIBUTE };
 
@@ -30,6 +32,32 @@ export function invocationOwnerKey(auth: SessionAuthContext | null): string {
           auth.subject ?? "",
         ];
   return createHash("sha256").update(JSON.stringify(identity), "utf8").digest("hex");
+}
+
+export function invocationUpdateFingerprint(responses: readonly InputResponse[]): {
+  readonly receipt: string;
+  readonly requestSet: string;
+} {
+  const canonical = responses
+    .map((response) => ({
+      optionId: response.optionId ?? null,
+      requestId: response.requestId,
+      text: response.text ?? null,
+    }))
+    .toSorted((left, right) => left.requestId.localeCompare(right.requestId));
+  const requestSet = createHash("sha256")
+    .update(JSON.stringify(canonical.map((response) => response.requestId)), "utf8")
+    .digest("hex");
+  const receipt = createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
+  return { receipt, requestSet };
+}
+
+/** Replay identity shared by retries of one complete pending-input response batch. */
+export function invocationUpdateIdempotency(
+  responses: readonly InputResponse[],
+): ChannelDeliveryIdempotency {
+  const { receipt, requestSet } = invocationUpdateFingerprint(responses);
+  return { fingerprint: receipt, key: requestSet };
 }
 
 export function buildInvocationAttributes(

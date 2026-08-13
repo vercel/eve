@@ -11,15 +11,22 @@ import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import type {
   AgentInvocation,
   AgentInvocationAuthorizationRequest,
+  AgentInvocationExecution,
   AgentInvocationMutationResult,
   AgentInvocationStatus,
-} from "#internal/invocation/agent-invocation.js";
+} from "#internal/invocation/agent-invocation-service.js";
 import {
   INVOCATION_OWNER_ATTRIBUTE,
   INVOCATION_TOKEN_ATTRIBUTE,
   invocationInputRequestId,
   invocationOwnerKey,
+  invocationUpdateIdempotency,
+  invocationUpdateFingerprint,
 } from "#internal/invocation/metadata.js";
+import {
+  CHANNEL_DELIVERY_RECEIPT_ATTRIBUTE,
+  parseChannelDeliveryIdempotency,
+} from "#channel/delivery-idempotency.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
@@ -27,7 +34,7 @@ import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { parseJsonValue } from "#shared/json.js";
 
-export class WorkflowAgentInvocationExecution {
+export class WorkflowAgentInvocationExecution implements AgentInvocationExecution {
   readonly #channelName: string;
   readonly #createSession: RouteSessionCreator;
   readonly #from: ChannelFrom;
@@ -97,11 +104,20 @@ export class WorkflowAgentInvocationExecution {
   }): Promise<AgentInvocationMutationResult> {
     const current = await this.read(input);
     if (current === undefined) return { type: "not_found" };
-    if (current.status !== "input_required") {
-      return conflict("Invocation is not waiting for input.");
-    }
     const run = await this.#readInvocationRun(input.invocationId, input.auth);
     if (run === undefined) return { type: "not_found" };
+    const fingerprint = invocationUpdateFingerprint(input.responses);
+    const recorded = parseChannelDeliveryIdempotency(
+      run.attributes[CHANNEL_DELIVERY_RECEIPT_ATTRIBUTE],
+    );
+    if (current.status !== "input_required") {
+      if (recorded?.key === fingerprint.requestSet) {
+        return recorded.fingerprint === fingerprint.receipt
+          ? { invocation: current, type: "success" }
+          : conflict("Input was already answered with a different response.");
+      }
+      return conflict("Invocation is not waiting for input.");
+    }
     const pendingBatch = latestPendingInputBatch(
       await readRecentPersistedEvents(input.invocationId),
     );
@@ -124,17 +140,38 @@ export class WorkflowAgentInvocationExecution {
     ) {
       return conflict("Responses must answer the complete pending input batch exactly once.");
     }
+    const update = invocationUpdateIdempotency(input.responses);
+    if (recorded?.key === update.key) {
+      return recorded.fingerprint === update.fingerprint
+        ? { invocation: current, type: "success" }
+        : conflict("Input was already answered with a different response.");
+    }
+
     const token = run.attributes[INVOCATION_TOKEN_ATTRIBUTE];
     if (token === undefined) return { type: "not_found" };
+    let deliveryError: unknown;
     try {
       const source = this.#from(token) as InternalChannelSource;
       await source[INTERNAL_CHANNEL_DELIVER](
         { inputResponses: deliveredResponses },
-        { auth: input.auth },
+        { auth: input.auth, idempotency: update },
       );
     } catch (error) {
       if (RunExpiredError.is(error)) return { type: "not_found" };
-      throw error;
+      deliveryError = error;
+    }
+
+    const accepted = await this.#waitForInvocationUpdateReceipt(
+      input.invocationId,
+      input.auth,
+      update.key,
+    );
+    if (accepted === undefined) {
+      if (deliveryError !== undefined) throw deliveryError;
+      throw new Error("Timed out waiting for the durable invocation update receipt.");
+    }
+    if (accepted.fingerprint !== update.fingerprint) {
+      return conflict("Input was already answered with a different response.");
     }
 
     return {
@@ -171,9 +208,27 @@ export class WorkflowAgentInvocationExecution {
       throw error;
     }
   }
+
+  async #waitForInvocationUpdateReceipt(
+    invocationId: string,
+    auth: SessionAuthContext | null,
+    key: string,
+  ) {
+    const deadline = Date.now() + INVOCATION_UPDATE_RECEIPT_TIMEOUT_MS;
+    while (true) {
+      const run = await this.#readInvocationRun(invocationId, auth);
+      const receipt = parseChannelDeliveryIdempotency(
+        run?.attributes[CHANNEL_DELIVERY_RECEIPT_ATTRIBUTE],
+      );
+      if (receipt?.key === key) return receipt;
+      if (Date.now() >= deadline) return undefined;
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+  }
 }
 
 const INVOCATION_EVENT_WINDOW_SIZE = 64;
+const INVOCATION_UPDATE_RECEIPT_TIMEOUT_MS = 10_000;
 
 async function readRecentPersistedEvents(
   invocationId: string,

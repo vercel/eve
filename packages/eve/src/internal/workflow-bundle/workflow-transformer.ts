@@ -14,6 +14,7 @@ const BUILTIN_STEP_NAMES = new Set([
   "__builtin_response_json",
   "__builtin_response_text",
   "__builtin_set_attributes",
+  "__builtin_set_strict_attributes",
 ]);
 
 type WorkflowDirectiveMode = "workflow" | "step" | "client" | false;

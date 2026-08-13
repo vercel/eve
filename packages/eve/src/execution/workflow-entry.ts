@@ -9,6 +9,10 @@ import type {
   TurnCaller,
 } from "#channel/types.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
+import {
+  CHANNEL_DELIVERY_RECEIPT_ATTRIBUTE,
+  serializeChannelDeliveryIdempotency,
+} from "#channel/delivery-idempotency.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import {
@@ -38,6 +42,7 @@ import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-c
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
+import { setStrictWorkflowAttributes } from "#internal/workflow/set-strict-attributes.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
@@ -383,7 +388,13 @@ async function runDriverLoop(input: {
 
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
-  const commandInbox = createSessionCommandInbox();
+  const commandInbox = createSessionCommandInbox({
+    onDeliveryClaim: async (identity) => {
+      await setStrictWorkflowAttributes({
+        [CHANNEL_DELIVERY_RECEIPT_ATTRIBUTE]: serializeChannelDeliveryIdempotency(identity),
+      });
+    },
+  });
   const stableCommandToken = sessionCommandHookToken(input.sessionState.sessionId);
   await commandInbox.claimStable(stableCommandToken);
   // Per-session authorization-callback hook. Claimed before any turns so it

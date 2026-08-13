@@ -29,6 +29,8 @@ interface BaseChannelAddressDeliveryOptions {
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly initiatorAuth?: SessionAuthContext | null;
+  /** Internal replay identity for a delivery that may be retried. */
+  readonly idempotency?: import("#channel/types.js").ChannelDeliveryIdempotency;
   readonly mode?: RunMode;
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
@@ -93,6 +95,7 @@ export function createChannelAddress<TState = undefined>(input: {
       const commandWithoutCaller = {
         auth: options.auth,
         delivery,
+        idempotency: options.idempotency,
         kind: "send" as const,
         payload: {
           ...payload,

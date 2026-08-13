@@ -14,6 +14,7 @@ describe("sendCommandToDelivery", () => {
     const wire = sendCommandToDelivery({
       auth: null,
       caller,
+      idempotency: { fingerprint: "payload-a", key: "delivery-a" },
       kind: "send",
       payload,
       requestId: "req-1",
@@ -23,6 +24,7 @@ describe("sendCommandToDelivery", () => {
     expect(wire).toEqual({
       auth: null,
       caller,
+      idempotency: { fingerprint: "payload-a", key: "delivery-a" },
       kind: "deliver",
       payload,
       payloads: [payload],

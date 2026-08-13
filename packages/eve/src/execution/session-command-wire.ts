@@ -29,6 +29,7 @@ export function sendCommandToDelivery(
     caller: command.caller,
     deliveryMetadata:
       command.delivery === undefined ? undefined : [{ ...command.delivery, payloadIndex: 0 }],
+    idempotency: command.idempotency,
     kind: "deliver",
     payload: command.payload,
     payloads: [command.payload],

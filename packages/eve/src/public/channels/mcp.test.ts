@@ -89,7 +89,7 @@ describe("mcpChannel", () => {
     });
     expect(body.result.tools[2]).toMatchObject({
       annotations: {
-        idempotentHint: false,
+        idempotentHint: true,
       },
       inputSchema: {
         properties: {

@@ -10,10 +10,10 @@ import {
   type Channel,
 } from "#public/definitions/channel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
-import type {
-  AgentInvocation,
-  AgentInvocationMutationResult,
-} from "#internal/invocation/agent-invocation.js";
+import {
+  AgentInvocationService,
+  type AgentInvocation,
+} from "#internal/invocation/agent-invocation-service.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
@@ -349,16 +349,18 @@ async function handleMcpRequest(
   }
   const description =
     typeof agentInfo.agent.description === "string" ? agentInfo.agent.description : undefined;
-  const execution = new WorkflowAgentInvocationExecution({
-    channelName,
-    createSession,
-    from: args.from,
-  });
+  const service = new AgentInvocationService(
+    new WorkflowAgentInvocationExecution({
+      channelName,
+      createSession,
+      from: args.from,
+    }),
+  );
   return await createMcpStreamableHttpServer({
     authenticate: async () => auth,
     name: agentInfo.agent.name,
     tools: createInvocationTools(
-      execution,
+      service,
       description,
       auth.authenticator === "none" && auth.principalType === "anonymous",
     ),
@@ -367,7 +369,7 @@ async function handleMcpRequest(
 }
 
 function createInvocationTools(
-  execution: WorkflowAgentInvocationExecution,
+  service: AgentInvocationService,
   agentDescription: string | undefined,
   publicAccess: boolean,
 ): readonly McpServerTool[] {
@@ -396,7 +398,7 @@ function createInvocationTools(
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
       },
       async call(body, context) {
-        const invocation = await execution.create({
+        const invocation = await service.create({
           auth: context.auth,
           message: body.message,
           outputSchema: asJsonObject(body.outputSchema),
@@ -419,12 +421,10 @@ function createInvocationTools(
       },
       async call(body, context) {
         return invocationResult(
-          requiredInvocation(
-            await execution.read({
-              auth: context.auth,
-              invocationId: body.invocationId,
-            }),
-          ),
+          await service.read({
+            auth: context.auth,
+            invocationId: body.invocationId,
+          }),
         );
       },
     }),
@@ -432,7 +432,7 @@ function createInvocationTools(
       definition: {
         annotations: {
           destructiveHint: true,
-          idempotentHint: false,
+          idempotentHint: true,
           openWorldHint: true,
           readOnlyHint: false,
         },
@@ -446,13 +446,11 @@ function createInvocationTools(
       },
       async call(body, context) {
         return invocationResult(
-          requiredMutation(
-            await execution.update({
-              auth: context.auth,
-              invocationId: body.invocationId,
-              responses: body.responses,
-            }),
-          ),
+          await service.update({
+            auth: context.auth,
+            invocationId: body.invocationId,
+            responses: body.responses,
+          }),
         );
       },
     }),
@@ -472,33 +470,15 @@ function createInvocationTools(
       },
       async call(body, context) {
         return invocationResult(
-          requiredInvocation(
-            await execution.cancel({
-              auth: context.auth,
-              invocationId: body.invocationId,
-            }),
-          ),
+          await service.cancel({
+            auth: context.auth,
+            invocationId: body.invocationId,
+          }),
         );
       },
     }),
   ];
   return tools;
-}
-
-function requiredInvocation(invocation: AgentInvocation | undefined): AgentInvocation {
-  if (invocation === undefined) throw new Error("Invocation not found.");
-  return invocation;
-}
-
-function requiredMutation(result: AgentInvocationMutationResult): AgentInvocation {
-  switch (result.type) {
-    case "success":
-      return result.invocation;
-    case "conflict":
-      throw new Error(result.message);
-    case "not_found":
-      throw new Error("Invocation not found.");
-  }
 }
 
 function invocationResult(invocation: AgentInvocation): McpCallToolResult {

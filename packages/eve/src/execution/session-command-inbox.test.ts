@@ -84,6 +84,50 @@ describe("createSessionCommandInbox", () => {
     await inbox.dispose();
   });
 
+  it("durably claims one idempotent delivery per key", async () => {
+    const first = idempotentDelivery("question-set", "answer-a");
+    const onDeliveryClaim = vi.fn();
+    installHooks(
+      createMockHook({
+        reads: [
+          Promise.resolve(resolved(first)),
+          Promise.resolve(resolved(idempotentDelivery("question-set", "answer-b"))),
+          Promise.resolve(resolved({ kind: "clear" })),
+        ],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionCommandInbox({ onDeliveryClaim });
+
+    await inbox.claimStable("stable");
+    await expect(inbox.next()).resolves.toEqual(resolved(first));
+    inbox.consumeNext();
+    await expect(inbox.next()).resolves.toEqual(resolved({ kind: "clear" }));
+    inbox.consumeNext();
+    await inbox.dispose();
+    expect(onDeliveryClaim).toHaveBeenCalledExactlyOnceWith({
+      fingerprint: "answer-a",
+      key: "question-set",
+    });
+  });
+
+  it("does not expose or consume an idempotent delivery when its durable claim fails", async () => {
+    const update = idempotentDelivery("question-set", "answer-a");
+    const persistenceError = new Error("receipt storage unavailable");
+    installHooks(createMockHook({ reads: [Promise.resolve(resolved(update))], token: "stable" }));
+    const inbox = createSessionCommandInbox({
+      onDeliveryClaim: vi.fn().mockRejectedValue(persistenceError),
+    });
+
+    await inbox.claimStable("stable");
+    await expect(inbox.next()).rejects.toBe(persistenceError);
+    expect(() => inbox.consumeNext()).toThrow(
+      "Cannot consume a session command before it resolves.",
+    );
+    await expect(inbox.next()).rejects.toBe(persistenceError);
+    await inbox.dispose();
+  });
+
   it("disposes a conflicting continuation candidate without releasing current ownership", async () => {
     const stable = createMockHook({ token: "stable" });
     const current = createMockHook({ token: "current" });
@@ -328,6 +372,14 @@ function installHooks(...hooks: readonly MockHook[]): void {
 
 function send(message: string): SessionInboxPayload {
   return { kind: "send", payload: { message } };
+}
+
+function idempotentDelivery(key: string, fingerprint: string): SessionInboxPayload {
+  return {
+    idempotency: { fingerprint, key },
+    kind: "deliver",
+    payloads: [{ inputResponses: [{ optionId: "yes", requestId: "question" }] }],
+  };
 }
 
 function resolved(value: SessionInboxPayload): IteratorResult<SessionInboxPayload> {
