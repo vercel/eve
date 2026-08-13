@@ -112,10 +112,17 @@ export class McpConnectionClient implements ConnectionClient {
       if (!isMcpHttpFallbackRetryableError(error)) {
         throw error;
       }
-      return await createMCPClient({
-        protocolVersionDiscovery: this.#connection.protocolVersionDiscovery,
-        transport: { fetch, headers, type: "sse", url },
-      });
+      try {
+        return await createMCPClient({
+          protocolVersionDiscovery: this.#connection.protocolVersionDiscovery,
+          transport: { fetch, headers, type: "sse", url },
+        });
+      } catch (fallbackError) {
+        if (isMcpSseTransportUnsupportedError(fallbackError)) {
+          throw error;
+        }
+        throw fallbackError;
+      }
     }
   }
 
@@ -386,6 +393,11 @@ function isMcpHttpFallbackRetryableError(error: unknown): boolean {
   return status === 400 || status === 404 || status === 405;
 }
 
+function isMcpSseTransportUnsupportedError(error: unknown): boolean {
+  const status = readHttpStatus(error);
+  return status === 404 || status === 405;
+}
+
 function readHttpStatus(error: unknown): number | undefined {
   for (const candidate of walkErrorChain(error)) {
     if (!isObject(candidate)) {
@@ -409,6 +421,10 @@ function readHttpStatus(error: unknown): number | undefined {
       const match = /\bHTTP\s+(\d{3})\b/u.exec(candidate.message);
       if (match?.[1] !== undefined) {
         return Number(match[1]);
+      }
+      const transportMatch = /\bTransport Error:\s*(\d{3})\b/u.exec(candidate.message);
+      if (transportMatch?.[1] !== undefined) {
+        return Number(transportMatch[1]);
       }
     }
   }
