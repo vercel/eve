@@ -147,6 +147,106 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     parentTurnId: "turn-1",
   });
 
+  it("starts and continues an inline remote without a registry definition", async () => {
+    const inline = {
+      description: "Inline preview.",
+      outputSchema: { properties: { answer: { type: "string" } }, type: "object" },
+      path: "/eve/v1/session",
+      url: "https://inline.example.com",
+    } as const;
+    const first = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "route:one",
+          description: inline.description,
+          input: { message: "first", outputSchema: inline.outputSchema },
+          kind: "remote-agent-call" as const,
+          messageFormat: "verbatim" as const,
+          name: "inline-route",
+          nodeId: "$channel:inline-route",
+          remoteAgentName: "inline-route",
+          remoteTarget: { config: inline, kind: "inline" as const },
+          sessionMode: "conversation" as const,
+        },
+      ],
+      event: { sequence: 1, stepIndex: 0, turnId: "turn_1" },
+      responseMessages: [],
+      settlement: "pass-through",
+      session: createBaseSession(),
+    });
+    installContext(first);
+
+    const started = await dispatchRuntimeActionsStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.startRemoteAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: expect.objectContaining({
+          input: { message: "first", outputSchema: inline.outputSchema },
+          messageFormat: "verbatim",
+        }),
+        persistentSessions: true,
+        remote: expect.objectContaining({ url: inline.url }),
+      }),
+    );
+    const handle = getAgentHandleStore(readResultSessionState(started, first))?.handles[0];
+    if (handle?.phase !== "running" || handle.address.kind !== "agent/remote") {
+      throw new Error("expected running remote handle");
+    }
+    const parked: AgentHandle = {
+      address: handle.address,
+      identity: handle.identity,
+      lastStatus: "first result",
+      phase: "parked",
+    };
+    const followUp = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "route:two",
+          description: inline.description,
+          input: {
+            agentId: parked.identity.id,
+            message: "second",
+            outputSchema: inline.outputSchema,
+          },
+          kind: "remote-agent-call" as const,
+          messageFormat: "verbatim" as const,
+          name: "inline-route",
+          nodeId: "$channel:inline-route",
+          remoteAgentName: "inline-route",
+          remoteTarget: { config: inline, kind: "inline" as const },
+          sessionMode: "conversation" as const,
+        },
+      ],
+      event: { sequence: 2, stepIndex: 0, turnId: "turn_2" },
+      responseMessages: [],
+      settlement: "pass-through",
+      session: createBaseSession(parked),
+    });
+    installContext(followUp);
+
+    await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox-2",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.continueRemoteAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "second",
+        outputSchema: inline.outputSchema,
+        remote: expect.objectContaining({ url: handle.address.url }),
+        sessionId: handle.address.sessionId,
+      }),
+    );
+  });
+
   it("owns a local child before the start effect and confirms its running address", async () => {
     const session = createStartSession({ kind: "local" });
     installContext(session, {

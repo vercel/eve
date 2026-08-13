@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createChannelAddress } from "#channel/channel-address.js";
+import { createChannelAddress, dispatchOrCreateChannelRoute } from "#channel/channel-address.js";
+import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { Runtime } from "#channel/types.js";
 
 function createRuntime(): Runtime {
@@ -15,6 +16,42 @@ function createRuntime(): Runtime {
 }
 
 describe("createChannelAddress", () => {
+  it("retries a routed command against the winner of a creation race", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.dispatchContinuation)
+      .mockResolvedValueOnce({ status: "session_not_active" })
+      .mockResolvedValueOnce({ sessionId: "winner", status: "accepted" });
+    vi.mocked(runtime.createSession).mockRejectedValueOnce(
+      new RuntimeSessionOwnershipConflictError({
+        continuationToken: "slack:C1:T1",
+        ownerSessionId: "winner",
+        sessionId: "loser",
+      }),
+    );
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+    const command = {
+      auth: null,
+      kind: "route-remote" as const,
+      message: "hello",
+      remote: { description: "Remote", path: "/eve/v1/session", url: "https://example.com" },
+      routeId: "remote",
+    };
+
+    const session = await dispatchOrCreateChannelRoute({
+      address,
+      command,
+      options: { auth: null },
+    });
+
+    expect(session.id).toBe("winner");
+    expect(runtime.dispatchContinuation).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects channel addresses in the framework-reserved session namespace", () => {
     expect(() =>
       createChannelAddress({

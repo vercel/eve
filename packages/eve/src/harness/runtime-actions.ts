@@ -58,6 +58,7 @@ interface PendingRuntimeActionEventMetadata {
  */
 export interface PendingRuntimeActionBatch {
   readonly actions: readonly RuntimeActionRequest[];
+  readonly settlement?: "pass-through";
   readonly event: PendingRuntimeActionEventMetadata;
   readonly responseMessages: readonly ModelMessage[];
 }
@@ -119,13 +120,21 @@ export function setPendingRuntimeActionBatch(input: {
   readonly event: PendingRuntimeActionEventMetadata;
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
+  readonly settlement?: "pass-through";
 }): HarnessSession {
   const state = { ...input.session.state };
-  state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
+  const batch: {
+    actions: RuntimeActionRequest[];
+    event: PendingRuntimeActionEventMetadata;
+    responseMessages: ModelMessage[];
+    settlement?: "pass-through";
+  } = {
     actions: [...input.actions],
     event: input.event,
     responseMessages: [...input.responseMessages],
-  } satisfies PendingRuntimeActionBatch;
+  };
+  if (input.settlement !== undefined) batch.settlement = input.settlement;
+  state[PENDING_RUNTIME_ACTION_BATCH_KEY] = batch;
 
   return { ...input.session, state };
 }
@@ -135,7 +144,7 @@ export function setPendingRuntimeActionBatch(input: {
  * batch when every action has a matching result. Unknown and duplicate results
  * are ignored.
  */
-function resolveReadyRuntimeActionResults(input: {
+export function resolveReadyRuntimeActionResults(input: {
   readonly results: readonly RuntimeActionResult[];
   readonly session: HarnessSession;
 }): RuntimeActionResult[] | undefined {
@@ -163,6 +172,85 @@ function resolveRuntimeActionResultsForBatch(input: {
   });
 }
 
+/** Settles the non-model lifecycle shared by every runtime-action batch. */
+export async function settleReadyRuntimeActions(input: {
+  readonly emit?: HarnessEmitFn;
+  readonly results: readonly RuntimeActionResult[];
+  readonly session: HarnessSession;
+}): Promise<
+  | {
+      readonly batch: PendingRuntimeActionBatch;
+      readonly results: readonly RuntimeActionResult[];
+      readonly session: HarnessSession;
+    }
+  | undefined
+> {
+  const batch = getPendingRuntimeActionBatch(input.session.state);
+  if (batch === undefined) return undefined;
+  const readyResults = resolveRuntimeActionResultsForBatch({
+    batch,
+    results: input.results,
+    state: input.session.state,
+  });
+  if (readyResults === undefined) return undefined;
+
+  if (input.emit !== undefined) {
+    for (const result of readyResults) {
+      if (result.kind === "subagent-result" && result.isError !== true) {
+        await input.emit({
+          data: {
+            callId: result.callId,
+            output:
+              typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+            subagentName: result.subagentName,
+          },
+          type: "subagent.completed",
+        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
+      }
+      await input.emit(
+        createActionResultEvent({
+          result,
+          sequence: batch.event.sequence,
+          stepIndex: batch.event.stepIndex,
+          turnId: batch.event.turnId,
+        }),
+      );
+    }
+  }
+
+  let session = input.session;
+  for (const result of readyResults) {
+    if (result.kind !== "subagent-result" || result.origin !== "child") continue;
+    const handle = findRunningAgentHandle(session.state, { callId: result.callId });
+    if (handle === undefined) continue;
+    const outcome = readSubagentResultOutcome(result);
+    if (outcome === undefined) continue;
+    if (outcome.kind === "terminal" && "continuationToken" in handle.address) {
+      session = clearProxyInputRequestsForChild(session, handle.address.continuationToken);
+    }
+    const settled = settleAgentTurn(session, {
+      operationId: handle.operation.id,
+      outcome,
+    });
+    if (settled.kind === "settled") session = settled.session;
+  }
+
+  session = clearPendingRuntimeActionBatch(session);
+  for (const result of readyResults) {
+    if (result.kind !== "subagent-result") continue;
+    const outcome = readSubagentResultOutcome(result);
+    if (outcome === undefined) continue;
+    session = setTurnUsageState(
+      session,
+      accumulateSessionUsage({
+        previous: getTurnUsageState(session.state),
+        usage: outcome.usageDelta,
+      }),
+    );
+  }
+  return { batch, results: readyResults, session };
+}
+
 /**
  * Resolves one pending runtime-action batch back into model history.
  *
@@ -186,109 +274,17 @@ export async function resolvePendingRuntimeActions(input: {
     };
   }
 
-  const readyResults = resolveReadyRuntimeActionResults({
+  const settled = await settleReadyRuntimeActions({
+    emit: input.emit,
     results: input.stepInput?.runtimeActionResults ?? [],
     session: input.session,
   });
-
-  if (readyResults === undefined) {
-    return {
-      messages: [...input.session.history],
-      outcome: "unresolved",
-      session: input.session,
-    };
+  if (settled === undefined) {
+    return { messages: [...input.session.history], outcome: "unresolved", session: input.session };
   }
+  const nextSession = settled.session;
 
-  if (input.emit !== undefined) {
-    for (const result of readyResults) {
-      if (result.kind === "subagent-result" && result.isError !== true) {
-        await input.emit({
-          data: {
-            callId: result.callId,
-            output:
-              typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-            subagentName: result.subagentName,
-          },
-          type: "subagent.completed",
-        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
-      }
-
-      await input.emit(
-        createActionResultEvent({
-          result,
-          sequence: batch.event.sequence,
-          stepIndex: batch.event.stepIndex,
-          turnId: batch.event.turnId,
-        }),
-      );
-    }
-  }
-
-  // Settle each bound child result against its running handle from the
-  // outcome the child engine reported: `parked` keeps the handle (the child
-  // is idle and resumable), `terminal` deletes it. Before a terminal
-  // deletion the proxy-input entry keyed by the child's continuation token
-  // is cleared (the handle is the only record of that token) so future
-  // deliveries don't route responses to a dead child.
-  let nextSession: HarnessSession = input.session;
-  for (const result of readyResults) {
-    // Dispatch failures never settle handles: the dispatch step already
-    // rejected (deleted) the handle when it synthesized the failure.
-    if (result.kind !== "subagent-result" || result.origin !== "child") {
-      continue;
-    }
-    const handle = findRunningAgentHandle(nextSession.state, { callId: result.callId });
-    if (handle === undefined) {
-      continue;
-    }
-    const outcome = readSubagentResultOutcome(result);
-    if (outcome === undefined) {
-      continue;
-    }
-    if (outcome.kind === "terminal" && "continuationToken" in handle.address) {
-      nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
-    }
-    const settled = settleAgentTurn(nextSession, {
-      operationId: handle.operation.id,
-      outcome,
-    });
-    if (settled.kind === "settled") {
-      nextSession = settled.session;
-    }
-  }
-
-  const state = { ...nextSession.state };
-  delete state[PENDING_RUNTIME_ACTION_BATCH_KEY];
-  nextSession = {
-    ...nextSession,
-    state: Object.keys(state).length > 0 ? state : undefined,
-  };
-
-  // Draw settled child spend down against the parent's session totals so
-  // the session token limits and the remaining-quota budget granted to later
-  // delegations account for what the tree has already spent. Every outcome
-  // carries the child turn's `usageDelta`, folded exactly once per settled
-  // result (each batch resolves once), so repeated turns of a persistent
-  // child never double-count earlier turns. Only child-produced results
-  // carry an outcome; parent-side dispatch failures never do.
-  for (const result of readyResults) {
-    if (result.kind !== "subagent-result") {
-      continue;
-    }
-    const outcome = readSubagentResultOutcome(result);
-    if (outcome === undefined) {
-      continue;
-    }
-    nextSession = setTurnUsageState(
-      nextSession,
-      accumulateSessionUsage({
-        previous: getTurnUsageState(nextSession.state),
-        usage: outcome.usageDelta,
-      }),
-    );
-  }
-
-  const toolResults = readyResults.map((result) => {
+  const toolResults = settled.results.map((result) => {
     switch (result.kind) {
       case "load-skill-result":
         return {
@@ -375,9 +371,12 @@ export function createRuntimeActionRequestFromToolCall(input: {
         toolName: input.toolCall.toolName,
       }),
       kind: "remote-agent-call",
+      messageFormat: "delegated",
       name: definition.name,
       nodeId: definition.runtimeAction.nodeId,
       remoteAgentName: definition.runtimeAction.remoteAgentName ?? definition.name,
+      remoteTarget: { kind: "registered" },
+      sessionMode: "task",
     };
   }
 

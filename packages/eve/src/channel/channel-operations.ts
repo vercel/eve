@@ -1,9 +1,15 @@
 import type { UserContent } from "ai";
+import type { RemoteAgentDefinition } from "#public/definitions/remote-agent.js";
+import {
+  channelDirectedRemoteIdentity,
+  normalizeChannelDirectedRemote,
+} from "#execution/channel-directed-remote.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
 import {
   createChannelAddressFn,
+  dispatchOrCreateChannelRoute,
   type ChannelAddressDeliveryOptions,
 } from "#channel/channel-address.js";
 import type { SendPayload } from "#channel/routes.js";
@@ -47,10 +53,27 @@ interface BaseChannelRespondOptions {
 /** Options for answering pending input requests at an existing continuation address. */
 export type ChannelRespondOptions = BaseChannelRespondOptions;
 
+interface BaseChannelRouteOptions {
+  readonly auth: SessionAuthContext | null;
+  readonly initiatorAuth?: SessionAuthContext | null;
+  readonly title?: string;
+}
+
+/** Supported options for a channel-directed remote turn. */
+export type ChannelRouteOptions<TState = undefined> = [TState] extends [undefined]
+  ? BaseChannelRouteOptions
+  : BaseChannelRouteOptions & { readonly state: TState };
+
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
   /** Starts or resumes a turn with a user message. May create a session. */
   send(message: string | UserContent, options: ChannelSendOptions<TState>): Promise<Session>;
+  /** Routes an explicit message to a remote through the canonical session driver. */
+  route(
+    remote: RemoteAgentDefinition,
+    message: string,
+    options: ChannelRouteOptions<TState>,
+  ): Promise<Session>;
   /** Answers pending input requests. Never creates a session. */
   respond(
     inputResponses: readonly InputResponse[],
@@ -111,6 +134,17 @@ export function createChannelOperations<TState = undefined>(input: {
             },
             options,
           );
+        },
+        async route(remote, message, options) {
+          const normalized = await normalizeChannelDirectedRemote(remote);
+          const command = {
+            auth: options.auth,
+            kind: "route-remote" as const,
+            message,
+            remote: normalized,
+            routeId: channelDirectedRemoteIdentity(normalized),
+          };
+          return await dispatchOrCreateChannelRoute({ address: bound, command, options });
         },
         async respond(inputResponses, options) {
           if (inputResponses.length === 0) {

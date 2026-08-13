@@ -13,7 +13,8 @@ export function createDynamicCapabilityTransformPlugin(
       const transformDynamicTools =
         options.dynamicTools !== false && normalizedId.includes("/tools/");
       const transformDynamicRemoteAgents =
-        options.dynamicRemoteAgents !== false && normalizedId.includes("/subagents/");
+        options.dynamicRemoteAgents !== false &&
+        (normalizedId.includes("/subagents/") || normalizedId.includes("/channels/"));
       if (!transformDynamicTools && !transformDynamicRemoteAgents) {
         return null;
       }

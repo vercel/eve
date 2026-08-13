@@ -7,6 +7,7 @@ import {
   cancelRemoteAgentTurn,
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
+  resolveRemoteAgentTransport,
 } from "#execution/remote-agent-dispatch.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#harness/handles/store.js";
@@ -24,6 +25,7 @@ vi.mock("./remote-agent-dispatch.js", () => ({
   cancelRemoteAgentTurn: vi.fn(),
   isRetryableRemoteAgentCancelError: vi.fn(),
   resolveRemoteAgentForAction: vi.fn(),
+  resolveRemoteAgentTransport: vi.fn(),
 }));
 
 const LOCAL_RUNNING_HANDLE: AgentHandle = {
@@ -129,6 +131,42 @@ describe("cancelDescendantTurnsStep", () => {
       sessionId: "local-child",
     });
     expect(deserializeContext).not.toHaveBeenCalled();
+  });
+
+  it("uses a handle's inline remote config when cancelling", async () => {
+    const inlineConfig = {
+      credentialsStepId: "inline-credentials",
+      description: "Channel-directed remote.",
+      path: "/eve/v1/session",
+      url: "https://remote.example.com",
+    };
+    if (REMOTE_RUNNING_HANDLE.address.kind !== "agent/remote") throw new Error("expected remote");
+    const inlineHandle: AgentHandle = {
+      ...REMOTE_RUNNING_HANDLE,
+      address: {
+        ...REMOTE_RUNNING_HANDLE.address,
+        inline: true,
+        inlineCredentialsStepId: inlineConfig.credentialsStepId,
+      },
+    };
+    installRemoteRegistry();
+    vi.mocked(resolveRemoteAgentTransport).mockReturnValue(remote as never);
+    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({
+      sessionId: "remote-child",
+      status: "accepted",
+    });
+
+    await cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createRunningState({ remoteHandle: inlineHandle }),
+    });
+
+    expect(resolveRemoteAgentTransport).toHaveBeenCalledWith({
+      credentialsStepId: inlineConfig.credentialsStepId,
+      name: REMOTE_RUNNING_HANDLE.identity.name,
+      nodeId: REMOTE_RUNNING_HANDLE.identity.nodeId,
+      url: REMOTE_RUNNING_HANDLE.address.url,
+    });
   });
 
   it("uses the selected dynamic remote config when cancelling", async () => {
@@ -302,10 +340,12 @@ function installRemoteRegistry(selection?: unknown): void {
   } as never);
 }
 
-function createRunningState(input: { readonly includeRemote?: boolean } = {}) {
+function createRunningState(
+  input: { readonly includeRemote?: boolean; readonly remoteHandle?: AgentHandle } = {},
+) {
   const includeRemote = input.includeRemote ?? true;
   const handles = includeRemote
-    ? [LOCAL_RUNNING_HANDLE, REMOTE_RUNNING_HANDLE]
+    ? [LOCAL_RUNNING_HANDLE, input.remoteHandle ?? REMOTE_RUNNING_HANDLE]
     : [LOCAL_RUNNING_HANDLE];
   return createDurableSessionState({
     session: createSession({ [AGENT_HANDLES_STATE_KEY]: { handles } }),

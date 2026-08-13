@@ -25,6 +25,9 @@ export function mockChannelContext<TState = undefined>(
   return {
     from(continuationToken) {
       const source: InternalChannelSource<TState> = {
+        async route() {
+          throw new Error("route() is not implemented by mockChannelOperations.");
+        },
         async send(message, options) {
           return (await observeDelivery(continuationToken, { ...options, message })) as never;
         },

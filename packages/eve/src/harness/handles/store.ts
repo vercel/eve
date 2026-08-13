@@ -87,6 +87,8 @@ export type AgentAddress =
       readonly sessionId: string;
       readonly url: string;
       readonly callbackBaseUrl: string;
+      readonly inline?: true;
+      readonly inlineCredentialsStepId?: string;
     };
 
 /**
@@ -176,6 +178,8 @@ const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     callbackBaseUrl: z.url(),
+    inline: z.literal(true).optional(),
+    inlineCredentialsStepId: nonEmptyString.optional(),
     kind: z.literal("agent/remote"),
     sessionId: nonEmptyString,
     url: z.url(),

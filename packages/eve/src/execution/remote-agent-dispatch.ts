@@ -1,6 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { AgentHandleError } from "#protocol/agent-handle-error.js";
+import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import {
   createEveCallbackRoutePath,
   createEveSessionCancelRoutePath,
@@ -29,9 +30,9 @@ const CreateSessionResponseSchema = z.object({
   status: z.literal("accepted"),
 });
 
-type RemoteAgentSessionCoordinates = {
+interface RemoteAgentSessionCoordinates {
   readonly sessionId: string;
-};
+}
 
 class RemoteAgentCancelRequestError extends Error {
   readonly retryable: boolean;
@@ -93,11 +94,14 @@ export async function startRemoteAgentSession(input: {
         createEveCallbackRoutePath(callbackToken),
       ),
     },
-    message: formatRemoteAgentCallInputMessage({
-      action: input.action,
-      persistentSession: input.persistentSessions,
-      remote: input.remote,
-    }),
+    message:
+      input.action.messageFormat === "verbatim"
+        ? readRemoteAgentMessage(input.action)
+        : formatRemoteAgentCallInputMessage({
+            action: input.action,
+            persistentSession: input.persistentSessions,
+            remote: input.remote,
+          }),
     mode: input.persistentSessions === true ? "conversation" : "task",
     outputSchema:
       normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
@@ -298,6 +302,59 @@ export function isRetryableRemoteAgentCancelError(error: unknown): boolean {
   return !(error instanceof RemoteAgentCancelRequestError) || error.retryable;
 }
 
+export function resolveRemoteAgentTarget(input: {
+  readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
+  readonly nodeId: string;
+  readonly registry: RuntimeSubagentRegistry["subagentsByNodeId"];
+  readonly remoteAgentName: string;
+  readonly target: RuntimeRemoteAgentCallActionRequest["remoteTarget"];
+}): ResolvedRuntimeRemoteAgentNode {
+  if (input.target?.kind === "inline") {
+    return resolveInlineRemoteAgent({
+      config: input.target.config,
+      name: input.remoteAgentName,
+      nodeId: input.nodeId,
+    });
+  }
+  return resolveRemoteAgentForAction(input);
+}
+
+export function resolveRemoteAgentTransport(input: {
+  readonly credentialsStepId?: string;
+  readonly name: string;
+  readonly nodeId: string;
+  readonly url: string;
+}): ResolvedRuntimeRemoteAgentNode {
+  return resolveInlineRemoteAgent({
+    config: {
+      credentialsStepId: input.credentialsStepId,
+      description: "Remote agent transport.",
+      path: EVE_SESSION_ROUTE_PATH,
+      url: input.url,
+    },
+    name: input.name,
+    nodeId: input.nodeId,
+  });
+}
+
+function resolveInlineRemoteAgent(input: {
+  readonly config: DynamicRemoteAgentConfig;
+  readonly name: string;
+  readonly nodeId: string;
+}): ResolvedRuntimeRemoteAgentNode {
+  const credentials = resolveDynamicRemoteAgentCredentials(input.config);
+  return {
+    ...input.config,
+    ...credentials,
+    kind: "remote",
+    logicalPath: "framework://inline-remote-agent",
+    name: input.name,
+    nodeId: input.nodeId,
+    sourceId: "eve:inline-remote-agent",
+    sourceKind: "module",
+  };
+}
+
 export function resolveRemoteAgentForAction(input: {
   readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
   readonly nodeId: string;
@@ -448,12 +505,16 @@ async function resolveRemoteAgentRequestHeaders(
   return headers;
 }
 
+function readRemoteAgentMessage(action: RuntimeRemoteAgentCallActionRequest): string {
+  return typeof action.input.message === "string" ? action.input.message : "";
+}
+
 function formatRemoteAgentCallInputMessage(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
   readonly persistentSession?: boolean;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
 }): string {
-  const message = typeof input.action.input.message === "string" ? input.action.input.message : "";
+  const message = readRemoteAgentMessage(input.action);
   return formatSubagentInput({
     description: input.remote.description,
     message,

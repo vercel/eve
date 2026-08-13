@@ -14,10 +14,14 @@ type DynamicRemoteAgentConfig = NonNullable<
 export function createAgentContinuationBundle(input: {
   readonly action: RuntimeAgentHandleAction;
   readonly bundle: CompiledBundle;
-  readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
+  readonly remoteConfig?: DynamicRemoteAgentConfig;
 }): CompiledBundle {
-  const { action, dynamicRemoteAgent } = input;
-  if (action.kind !== "remote-agent-call" || dynamicRemoteAgent === undefined) {
+  const { action, remoteConfig } = input;
+  if (
+    action.kind !== "remote-agent-call" ||
+    action.remoteTarget?.kind === "inline" ||
+    remoteConfig === undefined
+  ) {
     return input.bundle;
   }
 
@@ -27,7 +31,7 @@ export function createAgentContinuationBundle(input: {
       nodeId === action.nodeId
         ? {
             definition: resolveRemoteAgentForAction({
-              dynamicRemoteAgent,
+              dynamicRemoteAgent: remoteConfig,
               nodeId,
               registry,
               remoteAgentName: action.remoteAgentName,

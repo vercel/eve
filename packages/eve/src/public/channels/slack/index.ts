@@ -37,6 +37,7 @@ export {
   type SlackReceiveTarget,
   type SlackSessionTarget,
   type SlackRespondOptions,
+  type SlackRouteOptions,
   type SlackSendOptions,
   type SlackSessionOperations,
   type SlackThread,

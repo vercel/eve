@@ -2,12 +2,14 @@ import type {
   ChannelFrom,
   ChannelResolveSession,
   ChannelRespondOptions,
+  ChannelRouteOptions,
   ChannelSendOptions,
   ChannelSource,
 } from "#channel/channel-operations.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { UserContent } from "ai";
+import type { RemoteAgentDefinition } from "#public/definitions/remote-agent.js";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 
 type SlackSource = ChannelSource<SlackChannelState>;
@@ -18,6 +20,10 @@ export type SlackSendOptions = Omit<ChannelSendOptions<SlackChannelState>, "auth
 };
 
 /** Options for an input response already bound to one Slack thread. */
+export type SlackRouteOptions = Omit<ChannelRouteOptions<SlackChannelState>, "auth" | "state"> & {
+  readonly auth?: SessionAuthContext | null;
+};
+
 export type SlackRespondOptions = Omit<ChannelRespondOptions, "auth"> & {
   readonly auth?: SessionAuthContext | null;
 };
@@ -25,6 +31,11 @@ export type SlackRespondOptions = Omit<ChannelRespondOptions, "auth"> & {
 /** Current-owner operations already bound to one Slack thread. */
 export interface SlackSessionOperations {
   send(message: string | UserContent, options?: SlackSendOptions): ReturnType<SlackSource["send"]>;
+  route(
+    remote: RemoteAgentDefinition,
+    message: string,
+    options?: SlackRouteOptions,
+  ): ReturnType<SlackSource["route"]>;
   respond(
     inputResponses: readonly InputResponse[],
     options?: SlackRespondOptions,
@@ -51,6 +62,13 @@ export function bindSlackSessionOperations(input: {
   return {
     async send(message, options = {}) {
       return await source.send(message, {
+        ...options,
+        auth: auth(options.auth),
+        state: input.state,
+      });
+    },
+    async route(remote, message, options = {}) {
+      return await source.route(remote, message, {
         ...options,
         auth: auth(options.auth),
         state: input.state,

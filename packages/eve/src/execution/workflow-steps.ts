@@ -55,6 +55,8 @@ import {
 } from "#harness/workflow-runtime-action-state.js";
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { settlePassThroughRuntimeActionTurn } from "#execution/pass-through-runtime-action-turn.js";
+import { prepareChannelDirectedTurn } from "#execution/channel-directed-turn.js";
 import type { HarnessSession, SettledTurn, StepInput, StepResult } from "#harness/types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -210,21 +212,71 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
   }
 
-  // Apply deliver-time auth ferried via `resumeHook` (initial-turn
-  // input has no auth; it was seeded by buildRunContext).
+  if (input.input?.kind === "route-remote") {
+    ctx.set(AuthKey, input.input.auth);
+  }
+  // Apply deliver-time auth ferried via `resumeHook` (initial-turn input has no
+  // auth; it was seeded by buildRunContext).
   if (input.input?.kind === "deliver" && input.input.auth !== undefined) {
     ctx.set(AuthKey, input.input.auth ?? null);
   }
 
-  const initialSession = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
+  let initialSession = hydrateDurableSession({
+    compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });
   const instrumentation = getInstrumentationRuntime();
   const initialEmissionState = getHarnessEmissionState(initialSession.state);
+
+  const routeEmit = async (event: UnstampedMessageStreamEvent) => {
+    const adapterCtx = buildAdapterContext(adapter, ctx);
+    const handled = await callAdapterEventHandler(adapter, event, adapterCtx);
+    const writer = input.parentWritable.getWriter();
+    try {
+      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(handled)));
+    } finally {
+      writer.releaseLock();
+    }
+  };
+
+  if (input.input?.kind === "route-remote") {
+    const emission = await emitTurnPreamble(
+      routeEmit,
+      { message: input.input.message },
+      getHarnessEmissionState(initialSession.state),
+    );
+    initialSession = prepareChannelDirectedTurn({
+      command: input.input,
+      session: setHarnessEmissionState(initialSession, emission),
+    });
+    return {
+      action: "park",
+      ...derivePendingState(initialSession),
+      serializedContext: serializeContext(ctx),
+      sessionState: createDurableSessionState({ session: initialSession }),
+    };
+  }
+
+  if (input.input?.kind === "runtime-action-result") {
+    recordSubagentUsageSpans(input.input.results);
+    if (input.input.acceptedAtMsByCallId !== undefined) {
+      ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);
+    }
+    const settled = await settlePassThroughRuntimeActionTurn({
+      emit: routeEmit,
+      results: input.input.results,
+      session: initialSession,
+    });
+    if (settled !== undefined) {
+      return {
+        action: "park",
+        ...derivePendingState(settled),
+        serializedContext: serializeContext(ctx),
+        sessionState: createDurableSessionState({ session: settled }),
+      };
+    }
+  }
 
   if (rawInput.input?.kind === "deliver") {
     await contextStorage.run(ctx, () =>
@@ -277,10 +329,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
     resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
   } else if (input.input?.kind === "runtime-action-result") {
-    recordSubagentUsageSpans(input.input.results);
-    if (input.input.acceptedAtMsByCallId !== undefined) {
-      ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);
-    }
     resolved = { runtimeActionResults: input.input.results };
   }
 

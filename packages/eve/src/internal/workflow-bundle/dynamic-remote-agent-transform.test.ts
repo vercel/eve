@@ -131,6 +131,14 @@ export default defineDynamic({
     expect(credentials.headers!()).toEqual({ "x-runtime": "fresh" });
   });
 
+  it("transforms channel-authored remote definitions without defineDynamic", async () => {
+    const result = await transformDynamicRemoteAgentCredentials(
+      "channels/slack.ts",
+      `const preview = defineRemoteAgent({ auth: createAuth(), description: "Preview", url: "https://example.com" });`,
+    );
+    expect(result?.code).toContain("__eveResolveRemoteAgentCredentials");
+  });
+
   it("does not transform public remote definitions without credentials", async () => {
     await expect(
       transformDynamicRemoteAgentCredentials(

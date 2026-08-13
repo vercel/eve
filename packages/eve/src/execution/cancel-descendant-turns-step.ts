@@ -6,6 +6,7 @@ import {
   cancelRemoteAgentTurn,
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
+  resolveRemoteAgentTransport,
 } from "#execution/remote-agent-dispatch.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
@@ -113,12 +114,20 @@ async function cancelRemoteDescendant(input: {
   try {
     const { ctx, registry } = await input.remoteContext;
     const selection = getDynamicSubagentSelection(ctx, handle.identity.nodeId);
-    const resolved = await resolveRemoteAgentForAction({
-      dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
-      nodeId: handle.identity.nodeId,
-      remoteAgentName: handle.identity.name,
-      registry,
-    });
+    const resolved =
+      handle.address.inline === true
+        ? resolveRemoteAgentTransport({
+            credentialsStepId: handle.address.inlineCredentialsStepId,
+            name: handle.identity.name,
+            nodeId: handle.identity.nodeId,
+            url: handle.address.url,
+          })
+        : await resolveRemoteAgentForAction({
+            dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
+            nodeId: handle.identity.nodeId,
+            remoteAgentName: handle.identity.name,
+            registry,
+          });
     // Cancel where the child actually runs: the registry URL may point at a
     // newer deployment than the one that adopted this child, so the
     // dispatch-recorded URL wins — mirroring continuation delivery.

@@ -51,7 +51,7 @@ import {
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import {
-  resolveRemoteAgentForAction,
+  resolveRemoteAgentTarget,
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
 import {
@@ -93,7 +93,7 @@ type DispatchPlanEntry =
       readonly kind: "resume";
       readonly action: RuntimeAgentHandleAction;
       readonly agentId: string;
-      readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
+      readonly remoteConfig?: DynamicRemoteAgentConfig;
     }
   | { readonly kind: "reject"; readonly result: RuntimeSubagentDispatchFailure }
   | { readonly kind: "start"; readonly target: DispatchStartTarget };
@@ -108,7 +108,7 @@ type DispatchStartTarget =
   | {
       readonly kind: "remote";
       readonly action: RuntimeRemoteAgentCallActionRequest;
-      readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
+      readonly remoteConfig?: DynamicRemoteAgentConfig;
     };
 
 export async function dispatchRuntimeActionsStep(input: {
@@ -189,7 +189,7 @@ export async function dispatchRuntimeActionsStep(input: {
             bundle: createAgentContinuationBundle({
               action: entry.action,
               bundle,
-              dynamicRemoteAgent: entry.dynamicRemoteAgent,
+              remoteConfig: entry.remoteConfig,
             }),
             currentSession: nextSession,
             parentToken: input.parentContinuationToken ?? session.continuationToken,
@@ -311,9 +311,13 @@ function planDispatch(input: {
         return {
           action,
           agentId,
-          dynamicRemoteAgent:
-            action.kind === "remote-agent-call" && dynamicSubagentSelection?.kind === "remote"
-              ? dynamicSubagentSelection.remoteAgent
+          remoteConfig:
+            action.kind === "remote-agent-call"
+              ? action.remoteTarget?.kind === "inline"
+                ? action.remoteTarget.config
+                : dynamicSubagentSelection?.kind === "remote"
+                  ? dynamicSubagentSelection.remoteAgent
+                  : undefined
               : undefined,
           kind: "resume",
         };
@@ -409,10 +413,12 @@ function classifyFreshStart(input: {
         kind: "start",
         target: {
           action,
-          dynamicRemoteAgent:
-            dynamicSubagentSelection?.kind === "remote"
-              ? dynamicSubagentSelection.remoteAgent
-              : undefined,
+          remoteConfig:
+            action.remoteTarget?.kind === "inline"
+              ? action.remoteTarget.config
+              : dynamicSubagentSelection?.kind === "remote"
+                ? dynamicSubagentSelection.remoteAgent
+                : undefined,
           kind: "remote",
         },
       };
@@ -464,11 +470,12 @@ async function startSubagent(input: {
         bundle: input.bundle,
         callbackBaseUrl: input.callbackBaseUrl,
         currentSession: input.currentSession,
-        dynamicRemoteAgent: input.target.dynamicRemoteAgent,
+        remoteConfig: input.target.remoteConfig,
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext: input.parentTraceContext,
-        persistentSessions: input.persistentSessions,
+        persistentSessions:
+          input.target.action.sessionMode === "conversation" || input.persistentSessions,
         session: input.session,
       });
     default: {
@@ -590,7 +597,7 @@ async function startRemoteSubagent(input: {
   readonly bundle: CompiledBundle;
   readonly callbackBaseUrl: string | undefined;
   readonly currentSession: RuntimeSession;
-  readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
+  readonly remoteConfig?: DynamicRemoteAgentConfig;
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
@@ -602,17 +609,18 @@ async function startRemoteSubagent(input: {
   // Preflight resolution failures happen before ownership exists, so they
   // reject without touching the handle store.
   let callbackBaseUrl: string;
-  let resolvedRemote: ReturnType<typeof resolveRemoteAgentForAction>;
+  let resolvedRemote: ReturnType<typeof resolveRemoteAgentTarget>;
   try {
     if (input.callbackBaseUrl === undefined) {
       throw new Error("Cannot dispatch remote agent without a callback base URL.");
     }
     callbackBaseUrl = input.callbackBaseUrl;
-    resolvedRemote = resolveRemoteAgentForAction({
-      dynamicRemoteAgent: input.dynamicRemoteAgent,
+    resolvedRemote = resolveRemoteAgentTarget({
+      dynamicRemoteAgent: input.remoteConfig,
       nodeId: action.nodeId,
       remoteAgentName: action.remoteAgentName,
       registry: input.bundle.subagentRegistry.subagentsByNodeId,
+      target: action.remoteTarget,
     });
   } catch (error) {
     logError(log, "remote agent start failed", error, {
@@ -637,7 +645,11 @@ async function startRemoteSubagent(input: {
   const preparedSession = prepareAgentStart(input.currentSession, {
     identity,
     operation,
-    target: { callbackBaseUrl, kind: "agent/remote", url: resolvedRemote.url },
+    target: {
+      callbackBaseUrl,
+      kind: "agent/remote",
+      url: resolvedRemote.url,
+    },
   });
 
   try {
@@ -654,6 +666,11 @@ async function startRemoteSubagent(input: {
     });
     const address = {
       callbackBaseUrl,
+      inline: action.remoteTarget?.kind === "inline" ? true : undefined,
+      inlineCredentialsStepId:
+        action.remoteTarget?.kind === "inline"
+          ? action.remoteTarget.config.credentialsStepId
+          : undefined,
       kind: "agent/remote",
       sessionId: child.sessionId,
       url: resolvedRemote.url,

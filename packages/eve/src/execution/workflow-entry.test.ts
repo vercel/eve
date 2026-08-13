@@ -145,6 +145,32 @@ describe("workflowEntry", () => {
     vi.unstubAllEnvs();
   });
 
+  it("runs an initial route-remote command without dispatching a model turn", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      deliveryHooks: [{ getConflict: vi.fn(async () => null), token: "http:test" }],
+      turnControls: [],
+    });
+    const command = {
+      auth: null,
+      kind: "route-remote" as const,
+      message: "direct",
+      remote: { description: "Remote", path: "/eve/v1/session", url: "https://example.com" },
+      routeId: "remote",
+    };
+
+    const pending = workflowEntry({
+      initialRouteRemote: command,
+      input: { message: "" },
+      serializedContext: createSerializedContext(),
+    }).catch(() => undefined);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(dispatchTurnStep).toHaveBeenCalledWith(expect.objectContaining({ delivery: command }));
+    await pending;
+  });
+
   it("injects the workflow run id as the canonical session id before the first turn", async () => {
     const sessionState = createBaseSessionState();
     const getConflict = vi.fn(async () => null);

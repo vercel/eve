@@ -40,7 +40,7 @@ describe("dispatchAndAwaitTurn", () => {
     const commandInbox = createCommandInbox({ rekeyContinuation: rekeyHook });
 
     await dispatchAndAwaitTurn({
-      bufferedDeliveries: [],
+      bufferedTurnWork: [],
       bufferedSessionControls: [],
       commandInbox,
       controlToken: "turn-control",
@@ -74,7 +74,7 @@ describe("dispatchAndAwaitTurn", () => {
     const commandInbox = createCommandInbox({ rekeyContinuation: rekeyHook });
 
     await dispatchAndAwaitTurn({
-      bufferedDeliveries: [],
+      bufferedTurnWork: [],
       bufferedSessionControls: [],
       commandInbox,
       controlToken: "turn-control",
@@ -129,9 +129,9 @@ describe("dispatchAndAwaitTurn", () => {
       }),
     );
 
-    const bufferedDeliveries: DeliverHookPayload[] = [];
+    const bufferedTurnWork: import("#execution/turn-control-receiver.js").BufferedTurnWork[] = [];
     await dispatchAndAwaitTurn({
-      bufferedDeliveries,
+      bufferedTurnWork,
       bufferedSessionControls: [],
       commandInbox: createCommandInbox({
         next: async () => ({
@@ -150,11 +150,17 @@ describe("dispatchAndAwaitTurn", () => {
       sessionState: state,
     });
 
-    expect(bufferedDeliveries).toEqual([
-      { kind: "deliver", payloads: [{ message: "earlier remainder" }] },
-      expect.objectContaining({
-        payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
-      }),
+    expect(bufferedTurnWork).toEqual([
+      {
+        delivery: { kind: "deliver", payloads: [{ message: "earlier remainder" }] },
+        kind: "delivery",
+      },
+      {
+        delivery: expect.objectContaining({
+          payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
+        }),
+        kind: "delivery",
+      },
     ]);
   });
 
@@ -180,9 +186,11 @@ describe("dispatchAndAwaitTurn", () => {
       },
     ]);
 
-    const bufferedDeliveries: DeliverHookPayload[] = [delivery];
+    const bufferedTurnWork: import("#execution/turn-control-receiver.js").BufferedTurnWork[] = [
+      { delivery, kind: "delivery" },
+    ];
     const turn = await dispatchAndAwaitTurn({
-      bufferedDeliveries,
+      bufferedTurnWork,
       bufferedSessionControls: [],
       commandInbox: createCommandInbox(),
       controlToken: "turn-control",
@@ -195,7 +203,7 @@ describe("dispatchAndAwaitTurn", () => {
 
     expect(forwardTurnDeliveryStep).toHaveBeenCalledOnce();
     expect(turn.action.kind).toBe("park");
-    expect(bufferedDeliveries).toEqual([delivery]);
+    expect(bufferedTurnWork).toEqual([{ delivery, kind: "delivery" }]);
   });
 
   it("defers control-hook disposal until the caller invokes dispose()", async () => {
@@ -208,7 +216,7 @@ describe("dispatchAndAwaitTurn", () => {
     ]);
 
     const turn = await dispatchAndAwaitTurn({
-      bufferedDeliveries: [],
+      bufferedTurnWork: [],
       bufferedSessionControls: [],
       commandInbox: createCommandInbox(),
       controlToken: "turn-control",

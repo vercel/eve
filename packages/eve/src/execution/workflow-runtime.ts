@@ -139,6 +139,7 @@ export function createWorkflowRuntime(config: {
         -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
       } = {
         input: input.input,
+        initialRouteRemote: input.initialRouteRemote,
         limits: input.limits,
         serializedContext,
       };

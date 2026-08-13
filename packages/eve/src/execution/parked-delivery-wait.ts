@@ -1,11 +1,15 @@
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import type { DeliverHookPayload, DeliverPayload, SessionCommand } from "#channel/types.js";
+import type { BufferedTurnWork } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
-import { coalesceDeliveries } from "#harness/messages.js";
 
 type NextSessionAction =
+  | {
+      readonly command: Extract<SessionCommand, { readonly kind: "route-remote" }>;
+      readonly kind: "route-remote";
+    }
   | { readonly kind: "clear" }
   | { readonly kind: "compact" }
   | { readonly kind: "expired" }
@@ -27,6 +31,11 @@ export interface AuthorizationCallbackInstruction {
 
 /** What the parked driver should do with the next session activity. */
 export type NextTurnInstruction =
+  | {
+      readonly command: Extract<SessionCommand, { readonly kind: "route-remote" }>;
+      readonly kind: "route-remote";
+      readonly sessionState: DurableSessionState;
+    }
   | { readonly kind: "clear"; readonly sessionState: DurableSessionState }
   | { readonly kind: "compact"; readonly sessionState: DurableSessionState }
   | { readonly kind: "expired"; readonly sessionState: DurableSessionState }
@@ -56,10 +65,10 @@ export type NextTurnInstruction =
  */
 export async function nextTurnDelivery(input: {
   readonly awaitAuthorizationCallbacks?: boolean;
-  readonly bufferedDeliveries: DeliverHookPayload[];
+  readonly bufferedTurnWork: BufferedTurnWork[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly commandInbox: SessionCommandInbox;
-  readonly deferDeliveries?: boolean;
+  readonly deferTurnWork?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
 }): Promise<NextTurnInstruction> {
@@ -76,10 +85,10 @@ export async function nextTurnDelivery(input: {
 }
 
 async function awaitNextTurnDelivery(input: {
-  readonly bufferedDeliveries: DeliverHookPayload[];
+  readonly bufferedTurnWork: BufferedTurnWork[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly commandInbox: SessionCommandInbox;
-  readonly deferDeliveries?: boolean;
+  readonly deferTurnWork?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
 }): Promise<NextTurnInstruction> {
@@ -87,14 +96,18 @@ async function awaitNextTurnDelivery(input: {
 
   while (true) {
     const nextAction = await waitForNextSessionAction({
-      bufferedDeliveries: input.bufferedDeliveries,
+      bufferedTurnWork: input.bufferedTurnWork,
       bufferedSessionControls: input.bufferedSessionControls,
       commandInbox: input.commandInbox,
-      deferDeliveries: input.deferDeliveries,
+      deferTurnWork: input.deferTurnWork,
     });
 
     if (nextAction.kind === "authorization") {
       return { ...nextAction, sessionState };
+    }
+
+    if (nextAction.kind === "route-remote") {
+      return { command: nextAction.command, kind: "route-remote", sessionState };
     }
 
     if (nextAction.kind !== "delivery") {
@@ -127,25 +140,27 @@ async function awaitNextTurnDelivery(input: {
 }
 
 async function waitForNextSessionAction(input: {
-  readonly bufferedDeliveries: DeliverHookPayload[];
+  readonly bufferedTurnWork: BufferedTurnWork[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly commandInbox: SessionCommandInbox;
-  readonly deferDeliveries?: boolean;
+  readonly deferTurnWork?: boolean;
 }): Promise<NextSessionAction> {
   const pendingSessionControl = input.bufferedSessionControls.shift();
   if (pendingSessionControl !== undefined) {
     return { kind: pendingSessionControl };
   }
-
   if (
-    input.deferDeliveries !== true &&
+    input.deferTurnWork !== true &&
     !input.commandInbox.hasReadyAuthorization() &&
-    input.bufferedDeliveries.length > 0
+    input.bufferedTurnWork.length > 0
   ) {
-    return {
-      delivery: takeBufferedTurnDelivery(input.bufferedDeliveries),
-      kind: "delivery",
-    };
+    const work = input.bufferedTurnWork.shift();
+    if (work?.kind === "route-remote") {
+      return { command: work, kind: "route-remote" };
+    }
+    if (work?.kind === "delivery") {
+      return { delivery: work.delivery, kind: "delivery" };
+    }
   }
 
   while (true) {
@@ -171,6 +186,14 @@ async function waitForNextSessionAction(input: {
       return { kind: "expired" };
     }
 
+    if (first.value.kind === "route-remote") {
+      if (input.deferTurnWork === true) {
+        input.bufferedTurnWork.push(first.value);
+        continue;
+      }
+      return { command: first.value, kind: "route-remote" };
+    }
+
     if (
       first.value.kind === "clear" ||
       first.value.kind === "compact" ||
@@ -190,43 +213,18 @@ async function waitForNextSessionAction(input: {
     }
 
     if (first.value.kind === "deliver") {
-      if (input.deferDeliveries === true) {
-        input.bufferedDeliveries.push(first.value);
+      if (input.deferTurnWork === true) {
+        input.bufferedTurnWork.push({ delivery: first.value, kind: "delivery" });
         continue;
       }
       return { delivery: first.value, kind: "delivery" };
     }
 
     const delivery = sendCommandToDelivery(first.value);
-    if (input.deferDeliveries === true) {
-      input.bufferedDeliveries.push(delivery);
+    if (input.deferTurnWork === true) {
+      input.bufferedTurnWork.push({ delivery, kind: "delivery" });
       continue;
     }
     return { delivery, kind: "delivery" };
   }
-}
-
-function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): DeliverHookPayload {
-  const first = bufferedDeliveries.shift();
-  if (first === undefined) {
-    throw new Error("Cannot take a turn delivery from an empty buffer.");
-  }
-
-  const turnDeliveries = [first];
-  let caller = first.caller;
-  while (bufferedDeliveries.length > 0) {
-    const next = bufferedDeliveries[0];
-    if (next === undefined || (caller !== undefined && next.caller !== undefined)) {
-      break;
-    }
-
-    const delivery = bufferedDeliveries.shift();
-    if (delivery === undefined) {
-      throw new Error("Buffered turn delivery disappeared while partitioning.");
-    }
-    turnDeliveries.push(delivery);
-    caller ??= delivery.caller;
-  }
-
-  return coalesceDeliveries(turnDeliveries);
 }

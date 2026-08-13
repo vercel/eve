@@ -150,6 +150,37 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
+  it("sends channel-directed first messages verbatim", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const action = createAction();
+
+    await startRemoteAgentSession({
+      action: { ...action, messageFormat: "verbatim" },
+      callbackBaseUrl: "https://caller.example.com",
+      persistentSessions: true,
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+      },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body.message).toBe("find the marker");
+    expect(body.mode).toBe("conversation");
+  });
+
   it("rejects the former create-session response shape", async () => {
     const fetchMock = vi
       .fn()
