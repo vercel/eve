@@ -48,11 +48,11 @@ Any OTel-compatible backend works (Braintrust, PostHog, Raindrop, Arize, Honeyco
 
 Three more fields control what the AI SDK records inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
 
-- `recordInputs` records full message history on each step span (defaults to `true`). Set it to `false` if inputs contain sensitive content or you want to reduce span payload size.
-- `recordOutputs` records model outputs on spans (defaults to `true`). Set it to `false` to disable output recording.
+- `recordInputs` records full message history on each step span. It defaults to `false`; set it to `true` to include input content.
+- `recordOutputs` records model outputs on spans. It defaults to `false`; set it to `true` to include output content.
 - `functionId` overrides the function name on spans (defaults to the agent name).
 
-For sensitive, regulated, or production data, set `recordInputs` and `recordOutputs` to `false` unless you have reviewed the exporter and its data-retention path.
+eve records metadata without model or tool inputs and outputs by default. Enable either content category only after reviewing the exporter and its data-retention path.
 
 You are responsible for ensuring any observability or eval provider is approved for the data exported to it.
 
@@ -173,14 +173,14 @@ Tag writes are best-effort: a failure is logged once per process and then swallo
 
 These tags power the **Agent Runs** tab in the Vercel dashboard. When you deploy on Vercel, the platform auto-detects `eve` as the framework and surfaces an Agent Runs view under your project's **Observability** tab, where you can browse sessions and drill into each conversation's trace, with no `instrumentation.ts` required. The tab is currently gated per team. See [Deploy to Vercel](./deployment/vercel#inspect-agent-runs) for enablement. Agent Runs is separate from the OpenTelemetry export above. Use OTel when you want spans in Braintrust, PostHog, Datadog, or another third-party backend.
 
-Note: By default, telemetry records full message history and model outputs You may need to disclose these data flows in your privacy materials if utilized.
-
 ## Local traces
 
 Without an `instrumentation.ts`, `eve dev` records spans to disk — one trace per session, with turns, model steps, and tool calls. Read them two ways:
 
-- [`/traces`](dev-tui#logs-and-traces) in the dev TUI: a live viewer that replays the trace as a conversation.
+- [`/traces`](dev-tui#logs-and-traces) in the dev TUI: a live trace viewer that replays captured content as a conversation.
 - [`eve traces`](../reference/cli#eve-traces): a span tree in the terminal, `eve traces ls` to list. Works after `eve dev` exits.
+
+Local traces omit model and tool inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` in `.env.local` to capture that content.
 
 Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing is recorded locally. For span attributes, retention, and the `EVE_TRACES*` variables, see [`eve traces`](../reference/cli#eve-traces).
 
