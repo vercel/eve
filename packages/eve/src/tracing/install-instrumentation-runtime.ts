@@ -13,7 +13,7 @@ import { createLogger, formatError } from "#internal/logging.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
 import { hasSessionRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
-import type { CollectedOtel } from "#tracing/otel-declaration.js";
+import type { CollectedOtel, RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import { registerOtelPipeline, type RegisteredOtelPipeline } from "#tracing/otel-registration.js";
 
 const log = createLogger("tracing.install-instrumentation-runtime");
@@ -32,6 +32,7 @@ export function installInstrumentationRuntime(input: {
   readonly collected: CollectedOtel;
   readonly frameworkVersion: string;
   readonly providers: readonly InstrumentationProviderDefinition[];
+  readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly serviceName: string;
 }): InstrumentationRuntime {
   const serialBefore: InstrumentationProviderDefinition[] = [];
@@ -82,6 +83,7 @@ export function installInstrumentationRuntime(input: {
     otelSettings: input.collected.declared ? input.collected.settings : undefined,
     prepareSessionTrace,
     prepareTurnTrace,
+    runtimeContextResolvers: input.runtimeContextResolvers,
     runInContext,
     shutdown: () => {
       shutdown ??= settleAll([

@@ -7,6 +7,8 @@ import type {
 } from "#compiled/@vercel/otel/index.js";
 
 import { PROVIDER, type InstrumentationProvider } from "#public/instrumentation/provider.js";
+import type { InstrumentationRuntimeContextInput } from "#public/instrumentation/index.js";
+import type { JsonObject } from "#shared/json.js";
 import { batchSpanProcessor } from "#tracing/batch-span-processor.js";
 import type { ResolvedContentOptions } from "#tracing/content-attributes.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
@@ -19,9 +21,11 @@ import { vercelRuntimeSpanProcessor } from "#tracing/vercel-runtime-span-exporte
  * one tracer provider, so it has one resource, one sampler, and one propagator
  * set. Destinations are the plural half and live in `otelIntegration()`.
  *
- * `contextManager` and `instrumentations` are deliberately absent: eve's span
- * nesting depends on the former, and the latter cannot reach anything eve
- * imported before setup ran.
+ * `contextManager` is deliberately absent: eve's span nesting depends on it.
+ * `instrumentations` is accepted so providers can opt into Node auto-
+ * instrumentations (e.g. `@opentelemetry/auto-instrumentations-node`); the
+ * packages patch modules eve already imported, so their effects are limited
+ * to code loaded after registration.
  */
 export interface OtelOptions {
   /**
@@ -49,6 +53,15 @@ export interface OtelOptions {
   readonly sampler?: SamplerOrName;
   /** Composed into one propagator. All inject; the first to extract wins. */
   readonly propagators?: readonly PropagatorOrName[];
+  /**
+   * OpenTelemetry `Instrumentation` instances passed through to
+   * `registerOTel`. Use them to patch Node.js built-ins (HTTP, DNS, fs, etc.)
+   * for automatic spans around outbound work. Disabled by default because eve
+   * already imports the model SDK before registration, so patching cannot
+   * reach it — but code loaded after registration (tool modules, connection
+   * clients) will be instrumented.
+   */
+  readonly instrumentations?: readonly unknown[];
 }
 
 /**
@@ -73,6 +86,17 @@ export interface OtelIntegrationOptions extends ContentOptions {
   readonly spanProcessors?: readonly SpanProcessor[];
   /** Wrapped in eve's batching processor and appended after `spanProcessors`. */
   readonly traceExporter?: SpanExporter;
+  /**
+   * Contributes runtime context that the AI SDK merges into telemetry spans
+   * for each model call. Child spans inherit the values, so a destination can
+   * stamp channel or auth identity onto every span in the turn.
+   *
+   * Synchronous: the harness collects from every destination before the model
+   * call, so a return that is not a plain object is dropped (warning-only).
+   * Keys beginning with `eve.` are reserved and dropped. Return `undefined`
+   * to contribute nothing.
+   */
+  readonly runtimeContext?: (input: InstrumentationRuntimeContextInput) => JsonObject | undefined;
 }
 
 const OTEL_DECLARATION = Symbol.for("eve.instrumentation.otel");
@@ -92,6 +116,7 @@ export interface OtelIntegration extends InstrumentationProvider {
   readonly [OTEL_INTEGRATION]: true;
   /** Resolved from `ContentOptions`, so the union does not re-apply defaults. */
   readonly content: ResolvedContentOptions;
+  readonly runtimeContext?: (input: InstrumentationRuntimeContextInput) => JsonObject | undefined;
   readonly spanProcessors: readonly SpanProcessorOrName[];
 }
 
@@ -132,6 +157,7 @@ export function otelIntegration(options: OtelIntegrationOptions = {}): OtelInteg
     [OTEL_INTEGRATION]: true,
     [PROVIDER]: true,
     content,
+    runtimeContext: options.runtimeContext,
     spanProcessors:
       content.recordInputs && content.recordOutputs
         ? spanProcessors
@@ -178,6 +204,7 @@ export function isOtelIntegration(value: unknown): value is OtelIntegration {
 
 /** The one pipeline a process can register. @internal */
 export interface OtelPipeline {
+  readonly instrumentations?: readonly unknown[];
   readonly propagators?: readonly PropagatorOrName[];
   readonly resource?: Readonly<Record<string, unknown>>;
   readonly sampler?: SamplerOrName;
@@ -198,6 +225,11 @@ export interface OtelHarnessSettings {
 }
 
 /** @internal */
+export type RuntimeContextResolver = (
+  input: InstrumentationRuntimeContextInput,
+) => JsonObject | undefined;
+
+/** @internal */
 export interface CollectedOtel {
   /**
    * Whether anything declared OpenTelemetry. False means eve should leave the
@@ -205,6 +237,7 @@ export interface CollectedOtel {
    */
   readonly declared: boolean;
   readonly pipeline: OtelPipeline;
+  readonly runtimeContextResolvers: readonly RuntimeContextResolver[];
   readonly settings: OtelHarnessSettings;
 }
 
@@ -224,6 +257,7 @@ export interface CollectedOtel {
  */
 export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   const spanProcessors: SpanProcessorOrName[] = [];
+  const runtimeContextResolvers: RuntimeContextResolver[] = [];
   let declaration: OtelDeclaration | undefined;
   let declared = false;
   let recordInputs = false;
@@ -235,6 +269,9 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
       recordInputs ||= value.content.recordInputs;
       recordOutputs ||= value.content.recordOutputs;
       spanProcessors.push(...value.spanProcessors);
+      if (value.runtimeContext !== undefined) {
+        runtimeContextResolvers.push(value.runtimeContext);
+      }
       continue;
     }
     if (!isOtelDeclaration(value)) continue;
@@ -251,11 +288,13 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   return {
     declared,
     pipeline: {
+      instrumentations: options.instrumentations,
       propagators: options.propagators,
       resource: options.resource,
       sampler: options.sampler,
       spanProcessors,
     },
+    runtimeContextResolvers,
     settings: {
       functionId: options.functionId,
       recordInputs,

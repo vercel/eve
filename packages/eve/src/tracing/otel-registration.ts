@@ -119,9 +119,7 @@ export function registerOtelPipeline(input: {
     attributes: pipeline.resource,
     autoDetectResources: false,
     idGenerator,
-    // eve imports the model SDK before any of this runs, so an auto
-    // instrumentation registered here could not patch it anyway.
-    instrumentations: [],
+    instrumentations: pipeline.instrumentations ?? [],
     propagators: [...(pipeline.propagators ?? ["none"]), markerPropagator],
     serviceName: input.serviceName,
     spanProcessors: pipeline.spanProcessors.map((processor) =>

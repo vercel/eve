@@ -115,10 +115,13 @@ export function finalizeInstrumentationProviders(input: {
   readonly serviceName: string;
 }): InstrumentationRuntime {
   const registered = getInstrumentationProviders();
+  const providerDefinitions = registered.map(toProviderDefinition);
+  const collected = collectOtelPipeline(registered.map((entry) => entry.provider));
   return installInstrumentationRuntime({
-    collected: collectOtelPipeline(registered.map((entry) => entry.provider)),
+    collected,
     frameworkVersion: resolveInstalledPackageInfo().version,
-    providers: registered.map(toProviderDefinition),
+    providers: providerDefinitions,
+    runtimeContextResolvers: collected.runtimeContextResolvers,
     serviceName: input.serviceName,
   });
 }

@@ -8,6 +8,7 @@ import {
   buildTelemetryRuntimeContext,
   type BuildTelemetryRuntimeContextInput,
 } from "#harness/instrumentation/runtime-context.js";
+import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import type { HarnessSession } from "#harness/types.js";
 import type {
   InstrumentationStepStartedEventInput,
@@ -230,5 +231,62 @@ describe("buildTelemetryRuntimeContext", () => {
       throw new Error("expected support channel");
     }
     expect(captured.channel.metadata).toMatchObject({ nested: { value: "original" } });
+  });
+
+  describe("provider runtimeContext resolvers", () => {
+    it("emits framework keys when a provider resolver returns undefined", () => {
+      const resolver: RuntimeContextResolver = () => undefined;
+      const runtimeContext = build({ authored: undefined, providerResolvers: [resolver] });
+
+      expect(runtimeContext).toEqual(FRAMEWORK_KEYS);
+    });
+
+    it("merges a single provider resolver beneath framework keys", () => {
+      const resolver: RuntimeContextResolver = () => ({ team: "platform" });
+      const runtimeContext = build({ authored: undefined, providerResolvers: [resolver] });
+
+      expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, team: "platform" });
+    });
+
+    it("merges multiple provider resolvers, later ones overriding earlier", () => {
+      const first: RuntimeContextResolver = () => ({ env: "prod", team: "a" });
+      const second: RuntimeContextResolver = () => ({ team: "b" });
+      const runtimeContext = build({ authored: undefined, providerResolvers: [first, second] });
+
+      expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, env: "prod", team: "b" });
+    });
+
+    it("drops reserved eve.* keys from provider resolver results", () => {
+      const resolver: RuntimeContextResolver = () =>
+        ({ "eve.session.id": "override", team: "platform" }) as never;
+      const runtimeContext = build({ authored: undefined, providerResolvers: [resolver] });
+
+      expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, team: "platform" });
+    });
+
+    it("continues when a provider resolver throws", () => {
+      const failing: RuntimeContextResolver = () => {
+        throw new Error("boom");
+      };
+      const healthy: RuntimeContextResolver = () => ({ team: "platform" });
+      const runtimeContext = build({ authored: undefined, providerResolvers: [failing, healthy] });
+
+      expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, team: "platform" });
+    });
+
+    it("returns undefined when no authored config and no provider resolvers", () => {
+      expect(build({ authored: undefined, providerResolvers: undefined })).toBeUndefined();
+      expect(build({ authored: undefined, providerResolvers: [] })).toBeUndefined();
+    });
+
+    it("merges provider resolver results alongside the legacy step.started hook", () => {
+      const resolver: RuntimeContextResolver = () => ({ source: "provider" });
+      const runtimeContext = build({
+        authored: { events: { "step.started": () => ({ runtimeContext: { source: "legacy" } }) } },
+        providerResolvers: [resolver],
+      });
+
+      expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, source: "provider" });
+    });
   });
 });

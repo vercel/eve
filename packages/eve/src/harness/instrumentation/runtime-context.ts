@@ -11,6 +11,7 @@ import {
 } from "#context/keys.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import {
   normalizeInstrumentationChannelKind,
   resolveInstrumentationProjection,
@@ -35,6 +36,7 @@ export interface BuildTelemetryRuntimeContextInput {
     readonly instructions: string | SystemModelMessage | undefined;
     readonly messages: readonly ModelMessage[];
   };
+  readonly providerResolvers?: readonly RuntimeContextResolver[];
   readonly session: HarnessSession;
 }
 
@@ -48,16 +50,21 @@ export interface BuildTelemetryRuntimeContextInput {
 export function buildTelemetryRuntimeContext(
   input: BuildTelemetryRuntimeContextInput,
 ): Record<string, unknown> | undefined {
-  if (input.authored === undefined) {
+  const hasAuthored = input.authored !== undefined;
+  const hasProviderResolvers =
+    input.providerResolvers !== undefined && input.providerResolvers.length > 0;
+  if (!hasAuthored && !hasProviderResolvers) {
     return undefined;
   }
 
   const authoredRuntimeContext = resolveStepStartedRuntimeContext(input);
+  const providerRuntimeContext = resolveProviderRuntimeContext(input);
   const context = contextStorage.getStore();
   const projection = context?.get(ChannelInstrumentationKey);
 
   return {
     ...authoredRuntimeContext,
+    ...providerRuntimeContext,
     "eve.channel.kind": normalizeInstrumentationChannelKind(projection?.kind),
     "eve.environment": input.environment,
     "eve.session.id": input.session.sessionId,
@@ -158,6 +165,46 @@ function resolveStepStartedRuntimeContext(
   }
 
   return filterAuthoredRuntimeContext(runtimeContext, source);
+}
+
+/**
+ * Collects `runtimeContext` contributions from every provider resolver,
+ * invoking each with a snapshot of the same input the legacy `step.started`
+ * hook receives. Failures are warning-only so one provider cannot break the
+ * turn. Later providers override earlier ones on key collision.
+ */
+function resolveProviderRuntimeContext(
+  input: BuildTelemetryRuntimeContextInput,
+): InstrumentationRuntimeContext | undefined {
+  const resolvers = input.providerResolvers;
+  if (resolvers === undefined || resolvers.length === 0) {
+    return undefined;
+  }
+
+  const merged: Record<string, JsonValue> = {};
+  let contributed = false;
+
+  for (const resolver of resolvers) {
+    const source = "provider.runtimeContext";
+    const invoke = () => {
+      const stepStartedInput = buildInstrumentationStepStartedInput(input);
+      return resolver(stepStartedInput);
+    };
+    const result = resolveInstrumentationProjection({
+      invoke,
+      log,
+      source,
+    });
+    if (result === undefined) continue;
+
+    const filtered = filterAuthoredRuntimeContext(result as JsonObject, source);
+    if (filtered === undefined) continue;
+
+    Object.assign(merged, filtered);
+    contributed = true;
+  }
+
+  return contributed ? merged : undefined;
 }
 
 function projectSessionAuth(context: AlsContext | undefined): {

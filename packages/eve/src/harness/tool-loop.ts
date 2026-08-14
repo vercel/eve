@@ -558,11 +558,13 @@ function buildHarnessToolsWithDynamicSubagents(
 
 export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   const baseEmit = config.handleEvent;
-  const otelSettings = getInstrumentationRuntime()?.otelSettings;
-  // The custom-context enrichment below still reads the authored config object
-  // directly. Its replacement on the provider surface is unresolved, so a
-  // provider directory contributes no custom context yet.
+  const instrumentationRuntime = getInstrumentationRuntime();
+  const otelSettings = instrumentationRuntime?.otelSettings;
+  // The legacy single-file layout reads its runtime-context resolver from the
+  // authored config object; the provider directory collects resolvers at install
+  // time onto the runtime. Both paths feed buildTelemetryRuntimeContext.
   const authoredConfig = getInstrumentationConfig();
+  const providerRuntimeContextResolvers = instrumentationRuntime?.runtimeContextResolvers;
   if (otelSettings !== undefined) {
     ensureOtelIntegration();
   }
@@ -1289,6 +1291,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             instructions,
             messages: modelMessages,
           },
+          providerResolvers: providerRuntimeContextResolvers,
           session,
         }),
       };

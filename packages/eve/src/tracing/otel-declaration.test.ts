@@ -186,4 +186,17 @@ describe("collectOtelPipeline", () => {
       collectOtelPipeline([otel({ sampler: "always_on" }), otel({ sampler: "always_off" })]),
     ).toThrow(/declares `otel\(\)` more than once/u);
   });
+
+  it("passes declared instrumentations onto the pipeline", () => {
+    const instrumentation = { name: "test-instrumentation" };
+    const collected = collectOtelPipeline([otel({ instrumentations: [instrumentation] })]);
+
+    expect(collected.pipeline.instrumentations).toStrictEqual([instrumentation]);
+  });
+
+  it("defaults to undefined instrumentations when none are declared", () => {
+    const collected = collectOtelPipeline([otel()]);
+
+    expect(collected.pipeline.instrumentations).toBeUndefined();
+  });
 });

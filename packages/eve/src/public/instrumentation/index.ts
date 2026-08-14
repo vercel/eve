@@ -92,9 +92,9 @@ export interface InstrumentationModelInput {
 }
 
 /**
- * Input passed to `events["step.started"]`. eve runs the callback after
- * building the final model input for this attempt and before constructing
- * the AI SDK model call.
+ * Input passed to `events["step.started"]` and to a provider's
+ * `runtimeContext` resolver. eve builds it after assembling the final model
+ * input for this attempt and before constructing the AI SDK model call.
  */
 export interface InstrumentationStepStartedEventInput {
   readonly channel: InstrumentationChannel;
@@ -103,6 +103,13 @@ export interface InstrumentationStepStartedEventInput {
   readonly step: InstrumentationStep;
   readonly turn: InstrumentationTurn;
 }
+
+/**
+ * Input passed to a provider's `runtimeContext` resolver. Same shape as
+ * {@link InstrumentationStepStartedEventInput}: channel, session, model input,
+ * step, and turn coordinates.
+ */
+export type InstrumentationRuntimeContextInput = InstrumentationStepStartedEventInput;
 
 /**
  * Result of a `step.started` callback. eve merges `runtimeContext` into the

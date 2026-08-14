@@ -5,7 +5,7 @@ import type {
   InstrumentationTraceContext,
   InstrumentationTurnStartedEvent,
 } from "#harness/instrumentation/lifecycle.js";
-import type { OtelHarnessSettings } from "#tracing/otel-declaration.js";
+import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/otel-declaration.js";
 
 const INSTRUMENTATION_RUNTIME_KEY = Symbol.for("eve.instrumentation-runtime");
 
@@ -20,6 +20,8 @@ export interface InstrumentationRuntime {
     event: InstrumentationTurnStartedEvent,
   ) => Promise<InstrumentationTraceContext>;
   otelSettings: OtelHarnessSettings | undefined;
+  /** Provider `runtimeContext` resolvers, collected at install time. */
+  readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly runInContext: InstrumentationContextRunner;
   readonly shutdown: () => Promise<void>;
 }
