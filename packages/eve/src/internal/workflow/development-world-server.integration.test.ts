@@ -82,7 +82,7 @@ describe("parent development Workflow World", () => {
             workflowName: turnWorkflowReference.workflowId,
           },
           eventType: "run_created",
-          specVersion: 5,
+          specVersion: 6,
         },
       ]);
       const runId = readCreatedRunId(created);
@@ -108,7 +108,7 @@ describe("parent development Workflow World", () => {
           runInput: {
             deploymentId: "generation-a",
             input: new Uint8Array(),
-            specVersion: 5,
+            specVersion: 6,
             workflowName: workflowEntryReference.workflowId,
           },
         }),
@@ -142,7 +142,7 @@ describe("parent development Workflow World", () => {
           workflowName: turnWorkflowReference.workflowId,
         },
         eventType: "run_created",
-        specVersion: 5,
+        specVersion: 6,
       },
     ]);
     await first.close();
@@ -187,7 +187,7 @@ describe("parent development Workflow World", () => {
             workflowName: turnWorkflowReference.workflowId,
           },
           eventType: "run_created",
-          specVersion: 5,
+          specVersion: 6,
         },
       ]);
       const runId = readCreatedRunId(created);
@@ -236,7 +236,7 @@ describe("parent development Workflow World", () => {
             workflowName: turnWorkflowReference.workflowId,
           },
           eventType: "run_created",
-          specVersion: 5,
+          specVersion: 6,
         },
       ]);
       const runId = readCreatedRunId(created);
