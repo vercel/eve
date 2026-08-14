@@ -9,6 +9,7 @@ import {
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
   ModeKey,
+  SessionCallbackKey,
   SessionDynamicSubagentSelectionsKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicToolMetadataKey,
@@ -26,6 +27,7 @@ import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import { createInputRequestedEvent } from "#protocol/message.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   createDurableSessionState,
@@ -1365,6 +1367,98 @@ describe("dispatchRuntimeActionsStep", () => {
 });
 
 describe("turnStep", () => {
+  it("routes remote task HITL only to the parent callback", async () => {
+    const inputRequested = vi.fn();
+    const remoteTaskAdapter: ChannelAdapter = {
+      kind: "remote-task-test",
+      "input.requested": inputRequested,
+    };
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[remoteTaskAdapter.kind, remoteTaskAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: { experimental: { tasks: true } } },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
+      return async (stepSession): Promise<StepResult> => {
+        await input.handleEvent?.(
+          createInputRequestedEvent({
+            requests: [
+              {
+                action: {
+                  callId: "tool-call-1",
+                  input: {},
+                  kind: "tool-call",
+                  toolName: "dangerous_tool",
+                },
+                kind: "tool-approval",
+                options: [
+                  { id: "approve", label: "Approve" },
+                  { id: "cancel", label: "Cancel" },
+                ],
+                prompt: "Approve?",
+                requestId: "request-1",
+              },
+            ],
+            sequence: 1,
+            stepIndex: 2,
+            turnId: "turn-child",
+          }),
+        );
+        return { next: null, session: stepSession };
+      };
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, remoteTaskAdapter);
+    ctx.set(ContinuationTokenKey, "child-token");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionCallbackKey, {
+      callId: "parent-call",
+      subagentName: "remote-worker",
+      taskId: "task_abc",
+      token: "task-token",
+      url: "https://parent.example/eve/v1/callback/task-token",
+    });
+    ctx.set(SessionIdKey, "child-session");
+
+    await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "run the task" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://parent.example/eve/v1/callback/task-token",
+      expect.objectContaining({
+        body: expect.stringContaining('"kind":"task.input-requested"'),
+      }),
+    );
+    expect(inputRequested).not.toHaveBeenCalled();
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toEqual([]);
+  });
+
   it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
     const session = createStubSession();
     installSessionStoreMocks([session]);

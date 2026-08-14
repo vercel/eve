@@ -147,6 +147,8 @@ import { attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import { resolveParentLineage } from "#harness/parent-lineage.js";
 import { prepareTurnTraceContext } from "#harness/prepare-trace-context.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import {
   consumeDeferredStepInput,
   getApprovedTools,
@@ -624,8 +626,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let emissionState = getHarnessEmissionState(session.state);
     const store = contextStorage.getStore();
     const parent = store?.get(ParentSessionKey);
-    const hasDelegatedCaller = parent !== undefined || store?.get(SessionCallbackKey) !== undefined;
-    const parentLineage = resolveParentLineage(parent, store?.get(ChannelKey));
+    const channel = store?.get(ChannelKey);
+    const callback = store?.get(SessionCallbackKey);
+    const hasDelegatedCaller = parent !== undefined || callback !== undefined;
+    const taskOwned =
+      callback?.taskId !== undefined ||
+      readTaskIdFromInboxToken(String(channel?.state?.parentContinuationToken ?? "")) !== undefined;
+    const taskUpdatesEnabled = taskOwned && config.tools.has(TASK_UPDATE_TOOL_NAME);
+    const parentLineage = resolveParentLineage(parent, channel);
     const parentTraceContext = store?.get(ParentTraceContextKey);
     let activeAttemptScope: InstrumentationAttemptScope | undefined;
     const emit = createInstrumentationHandleEvent({
@@ -1336,6 +1344,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         : modelMessages;
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
       const advertisedHarnessTools = getAdvertisedTools({
+        delegatedCaller: taskUpdatesEnabled,
         session,
         tools: harnessTools,
       });
@@ -1352,6 +1361,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       if (ctx !== undefined) {
         const dynamicTools = getAdvertisedTools({
+          delegatedCaller: taskUpdatesEnabled,
           session,
           tools: buildDynamicTools(ctx),
         });
@@ -1389,6 +1399,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           : undefined;
 
       const advertisedModelTools = await getAdvertisedTools({
+        delegatedCaller: taskUpdatesEnabled,
         modelTools: flatTools,
         session,
         tools: advertisedHarnessTools,
@@ -1421,6 +1432,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               attemptScope,
               instrumentationHooks,
               config.instrumentation?.runInContext,
+              telemetryRuntimeContext,
             );
 
       const hooks = buildStepHooks({
@@ -1867,6 +1879,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       config,
       emit,
       emissionState,
+      delegatedCaller: taskUpdatesEnabled,
       promptMessages: messages,
       result,
       runStep,
@@ -2385,6 +2398,7 @@ async function handleStepResult(input: {
   readonly config: ToolLoopHarnessConfig;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
+  readonly delegatedCaller: boolean;
   readonly promptMessages: readonly ModelMessage[];
   readonly result: HarnessStepResult;
   readonly runStep: StepFn;
@@ -2473,6 +2487,7 @@ async function handleStepResult(input: {
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
   const advertisedRuntimeActionTools = getAdvertisedTools({
+    delegatedCaller: input.delegatedCaller,
     session: baseSession,
     tools: input.runtimeActionTools,
   });

@@ -8,8 +8,8 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
  * Framework task tools for `experimental.tasks`.
  *
  * With the flag on, subagent calls return a task receipt instead of
- * blocking the parent turn; these tools are the model's controls over
- * that delegated work. `task_peek` and `task_cancel` are
+ * blocking the parent turn; these tools coordinate that delegated work.
+ * `task_peek`, `task_cancel`, and `task_update` are
  * execute-less runtime actions — they need durable session state and
  * world access, so the runtime-action dispatch step executes them.
  * `task_sleep` only records a durable pause and executes in-loop.
@@ -17,22 +17,22 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 export const TASK_PEEK_TOOL_NAME = "task_peek";
 export const TASK_CANCEL_TOOL_NAME = "task_cancel";
-export const TASK_SEND_TOOL_NAME = "task_send";
 export const TASK_SLEEP_TOOL_NAME = "task_sleep";
+export const TASK_UPDATE_TOOL_NAME = "task_update";
 
 /** Every model-visible task tool name, for gating and dispatch matching. */
 export const TASK_TOOL_NAMES: ReadonlySet<string> = new Set([
   TASK_PEEK_TOOL_NAME,
   TASK_CANCEL_TOOL_NAME,
-  TASK_SEND_TOOL_NAME,
   TASK_SLEEP_TOOL_NAME,
+  TASK_UPDATE_TOOL_NAME,
 ]);
 
 /** Task-control tools executed by the runtime-action dispatch step. */
 export const TASK_CONTROL_TOOL_NAMES: ReadonlySet<string> = new Set([
   TASK_PEEK_TOOL_NAME,
   TASK_CANCEL_TOOL_NAME,
-  TASK_SEND_TOOL_NAME,
+  TASK_UPDATE_TOOL_NAME,
 ]);
 
 const TASK_IDS_SCHEMA = z
@@ -43,13 +43,8 @@ const TASK_IDS_SCHEMA = z
 export const TASK_PEEK_INPUT_SCHEMA = z.strictObject({ taskIds: TASK_IDS_SCHEMA });
 export const TASK_CANCEL_INPUT_SCHEMA = z.strictObject({ taskIds: TASK_IDS_SCHEMA });
 
-export const TASK_SEND_INPUT_SCHEMA = z.strictObject({
-  message: z
-    .string()
-    .describe(
-      "Follow-up message for a finished task's agent; starts a new task in the same conversation.",
-    ),
-  taskId: z.string().min(1).describe("Task id from an earlier task receipt."),
+export const TASK_UPDATE_INPUT_SCHEMA = z.strictObject({
+  message: z.string().min(1).describe("Brief description of what this task is currently doing."),
 });
 
 const MAX_SLEEP_SECONDS = Math.floor(Number.MAX_SAFE_INTEGER / 1_000);
@@ -92,15 +87,13 @@ const TASK_CANCEL_DESCRIPTION =
   "Request cooperative cancellation of one or more background tasks. " +
   "Cancellation is final: a task that finishes after you cancel it stays cancelled. Cancelling an already-finished task changes nothing.";
 
-const TASK_SEND_DESCRIPTION =
-  "Send a follow-up message to a finished background task's agent. " +
-  "This starts a new task in the same conversation and returns its receipt. " +
-  "Human input for an input_required task is routed directly through the parent channel. " +
-  "A task that is still working cannot receive sends.";
-
 const TASK_SLEEP_DESCRIPTION =
   "Pause durably before continuing, for paced background-task checks. " +
   "Does not read or change any task; follow it with task_peek.";
+
+const TASK_UPDATE_DESCRIPTION =
+  "Briefly tell the parent agent what this background task is currently doing. " +
+  "Report activity, not preliminary findings or results.";
 
 /**
  * Builds the harness definitions injected when the root agent enables
@@ -125,12 +118,6 @@ export function createTaskToolHarnessDefinitions(): readonly HarnessToolDefiniti
       runtimeAction: { kind: "task-control" },
     },
     {
-      description: TASK_SEND_DESCRIPTION,
-      inputSchema: TASK_SEND_INPUT_SCHEMA,
-      name: TASK_SEND_TOOL_NAME,
-      runtimeAction: { kind: "task-control" },
-    },
-    {
       description: TASK_SLEEP_DESCRIPTION,
       execute: async (input: { readonly seconds: number }) => {
         requestTurnSleep(Math.ceil(input.seconds * 1_000));
@@ -139,6 +126,12 @@ export function createTaskToolHarnessDefinitions(): readonly HarnessToolDefiniti
       inputSchema: TASK_SLEEP_INPUT_SCHEMA,
       name: TASK_SLEEP_TOOL_NAME,
       outputSchema: TASK_SLEEP_OUTPUT_SCHEMA,
+    },
+    {
+      description: TASK_UPDATE_DESCRIPTION,
+      inputSchema: TASK_UPDATE_INPUT_SCHEMA,
+      name: TASK_UPDATE_TOOL_NAME,
+      runtimeAction: { kind: "task-control" },
     },
   ];
 }
@@ -150,8 +143,8 @@ export function createTaskToolHarnessDefinitions(): readonly HarnessToolDefiniti
  * rejects `experimental.tasks` on subagents, authored tools with the
  * same name shadow the framework tool, and `disableTool(name)` removes
  * individual tools. Root-node self-delegated children share this node's
- * config, so advertised-tools additionally hides the tools from any
- * child-shaped session.
+ * config, so advertised-tools uses caller/session shape to expose only
+ * `task_update` to delegated task children.
  */
 export function isTaskToolAvailable(input: {
   readonly disabledFrameworkTools: readonly string[];
@@ -188,6 +181,6 @@ function createResolvedTaskToolStub(input: {
 export const TASK_TOOL_DEFINITIONS: readonly ResolvedToolDefinition[] = [
   createResolvedTaskToolStub({ description: TASK_PEEK_DESCRIPTION, name: TASK_PEEK_TOOL_NAME }),
   createResolvedTaskToolStub({ description: TASK_CANCEL_DESCRIPTION, name: TASK_CANCEL_TOOL_NAME }),
-  createResolvedTaskToolStub({ description: TASK_SEND_DESCRIPTION, name: TASK_SEND_TOOL_NAME }),
   createResolvedTaskToolStub({ description: TASK_SLEEP_DESCRIPTION, name: TASK_SLEEP_TOOL_NAME }),
+  createResolvedTaskToolStub({ description: TASK_UPDATE_DESCRIPTION, name: TASK_UPDATE_TOOL_NAME }),
 ];

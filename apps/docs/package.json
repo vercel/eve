@@ -44,6 +44,7 @@
     "sonner": "2.0.7",
     "streamdown": "catalog:",
     "tailwind-merge": "3.6.0",
+    "three": "0.184.0",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -77,6 +78,7 @@
     "@types/pngjs": "^6.0.5",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@types/three": "0.184.1",
     "@upstash/agentkit-eve-extension": "^0.4.0",
     "@vectorize-io/hindsight-eve": "^0.2.1",
     "@veltdev/chat-sdk-adapter": "0.2.4",

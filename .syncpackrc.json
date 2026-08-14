@@ -18,6 +18,13 @@
       "isIgnored": true
     },
     {
+      "label": "The Buzz adapter accepts compatible eve patch releases",
+      "dependencies": ["eve"],
+      "packages": ["@eve/buzz-acp-adapter"],
+      "dependencyTypes": ["prod"],
+      "pinVersion": "workspace:^"
+    },
+    {
       "label": "Workspace packages must use the workspace: protocol",
       "dependencies": ["eve-*", "eve"],
       "dependencyTypes": ["dev", "prod", "peer"],

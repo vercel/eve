@@ -278,7 +278,7 @@ describe("createNodeHarnessTools", () => {
   it("does not inject task tools without experimental.tasks", () => {
     const tools = createNodeHarnessTools({ node: createTestNode() });
 
-    for (const name of ["task_peek", "task_cancel", "task_send", "task_sleep"]) {
+    for (const name of ["task_peek", "task_cancel", "task_sleep", "task_update"]) {
       expect(tools.has(name)).toBe(false);
     }
   });
@@ -295,7 +295,7 @@ describe("createNodeHarnessTools", () => {
       },
     });
 
-    for (const name of ["task_peek", "task_cancel", "task_send"]) {
+    for (const name of ["task_peek", "task_cancel", "task_update"]) {
       expect(tools.get(name)?.runtimeAction).toEqual({ kind: "task-control" });
       expect(tools.get(name)?.execute).toBeUndefined();
     }

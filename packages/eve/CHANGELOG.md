@@ -1,5 +1,45 @@
 # eve
 
+## 0.38.3
+
+### Patch Changes
+
+- 8b2a914: Authorize Slack HITL answers with `onInputResponse` before they resume a parked session. Omitting the hook preserves the existing submitting-user authorization behavior regardless of other Slack handlers.
+- c2b9bbf: Slack `onEvent` handlers can now pass `title` to `ctx.send()` to set the run title without changing the message sent to the model.
+
+## 0.38.2
+
+### Patch Changes
+
+- 250d67a: Bump `@workflow/*` packages to the latest 5.0.0 betas (`core` beta.42, `errors` beta.17, `world` beta.27, `world-local` beta.36, `world-vercel` beta.38, `world-postgres` beta.34). The development Workflow world now advertises spec version 6 (slot-numbered event ids), matching the updated local world.
+- f9f29d3: Surface AI Gateway model catalog request failures during compilation instead of reporting unavailable models as missing metadata. Models with eve-owned metadata continue to compile without the catalog.
+- 77de320: Let background task children send intermediate progress to their parent with `task_update`, using the existing local and remote child-to-parent transports. Remote task HITL is now presented only by the parent channel, finished agents continue through their original subagent tool with `agentId`, and the redundant `task_send` tool has been removed.
+- 88f6ca9: Configure MCP channel endpoints with `route`, default them to `/eve/v1/mcp`, and derive OAuth protected-resource metadata paths from the MCP resource identifier.
+- fe1ad3b: Search by item name when suggesting registry matches, so path typos such as `channels/slack` can still suggest `channel/slack`.
+
+## 0.38.1
+
+### Patch Changes
+
+- d23467d: Allow extensions to contribute namespaced subagents, including their tools, configuration access, nested subagents, and directory-mount overrides.
+- cb2fa2a: Configure MCP channel endpoints with `route`, default them to `/eve/v1/mcp`, and derive OAuth protected-resource metadata paths from the MCP resource identifier.
+
+## 0.38.0
+
+### Minor Changes
+
+- 48c1105: Replace `stop()` on frontend agent bindings with `cancel()`. Cancellation now targets the exact durable turn through `MessageResponse.cancel()` while the binding stays attached through settlement.
+
+### Patch Changes
+
+- 8904392: Extensions can now contribute channels. Mounted channel IDs receive the extension namespace while their authored route paths remain unchanged.
+- 4c3c475: Built-in inbound hooks can now return `title` to set the workflow run title without changing the message sent to the model.
+- a7d34e5: Make Nitro-backed builds more reliable by preserving per-import conditional exports, keeping authored and vendored OpenTelemetry tracers on one registered provider, and running development worker close hooks during an explicit shutdown handshake. Workflow artifacts are now emitted directly instead of repaired through post-build string rewrites.
+- bdd5a9b: Suggest close registry matches when `eve add` cannot find the requested item.
+- ccc604c: Show `eve add` help and registry search guidance when no item is provided.
+- abcd06d: Resolve project-scoped CLI commands from the nearest enclosing eve application when run from a nested directory.
+- 775c061: Extensions can contribute schedules. Mounted schedule IDs use the extension namespace while cron expressions and handler behavior remain unchanged.
+
 ## 0.37.1
 
 ### Patch Changes

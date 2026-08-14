@@ -126,7 +126,7 @@ The parent receives these framework-owned tools:
 interface TaskParentTools {
   task_cancel(input: { taskIds: string[] }): Promise<TaskToolResult<boolean>>;
   task_peek(input: { taskIds: string[] }): Promise<TaskToolResult<TaskView[]>>;
-  task_send(input: { taskId: string; message: string }): Promise<TaskToolResult<TaskView>>;
+  task_update(input: { message: string }): Promise<{ status: "sent"; taskId: string }>;
   task_sleep(input: { seconds: number }): Promise<TaskToolResult<boolean>>;
 }
 ```
@@ -138,7 +138,7 @@ The controls have distinct behavior:
 
 - `task_peek` reads current state without blocking and does not return credentials or routing
   handles.
-- `task_send` sends a follow-up message after the prior task became terminal, creating a new task
+- Passing `agentId` to the original subagent tool sends a follow-up after the prior task became terminal, creating a new task
   bound to the same child session. It never reopens a terminal task or answers HITL.
 - `task_cancel` requests cooperative cancellation. A committed terminal state is final, so a late
   child result cannot revive a cancelled task.
@@ -344,7 +344,7 @@ The current [MCP Tasks extension] provides the closest standard vocabulary:
 - full task snapshots in `notifications/tasks`;
 - terminal states that do not change.
 
-eve's `task_peek`, `task_send`, and `task_cancel` map to those operations. `task_sleep` is an eve
+eve's `task_peek` and `task_cancel` map to those operations. `task_sleep` is an eve
 control, not an MCP method. eve is not implementing the MCP wire protocol in this work.
 
 One semantic difference is decided. MCP treats a tool-level `isError: true` result as
@@ -384,7 +384,7 @@ than MCP compatibility.
   task views with `task_peek` and decide whether the available state is sufficient.
 - `task_peek` observes current state without waking or mutating the executor.
 - Parent-session responses route directly to the intended local task child without a parent model
-  turn and cannot cross task or session ownership. `task_send` accepts terminal follow-up messages only.
+  turn and cannot cross task or session ownership. Follow-up messages use the original subagent tool with `agentId`.
 - One child session owns at most one nonterminal task; repeated sends return `AGENT_BUSY` and do
   not queue.
 - Cancellation is cooperative and idempotent. A late completion cannot overwrite `cancelled`.

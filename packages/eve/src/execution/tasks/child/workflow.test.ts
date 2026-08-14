@@ -9,6 +9,7 @@ import {
   wakeTaskAuthorizationParentStep,
   wakeTaskInputRequestParentStep,
   wakeTaskParentStep,
+  wakeTaskUpdateParentStep,
 } from "#execution/tasks/child/steps.js";
 import { taskRunWorkflow } from "#execution/tasks/child/workflow.js";
 import type {
@@ -34,6 +35,7 @@ vi.mock("#execution/tasks/child/steps.js", () => ({
   wakeTaskAuthorizationParentStep: vi.fn(),
   wakeTaskInputRequestParentStep: vi.fn(),
   wakeTaskParentStep: vi.fn(),
+  wakeTaskUpdateParentStep: vi.fn(),
 }));
 
 afterEach(() => {
@@ -74,6 +76,75 @@ function appendedStatuses(): readonly string[] {
 }
 
 describe("taskRunWorkflow", () => {
+  it("forwards child updates after dispatch acknowledgement without changing the view", async () => {
+    const update = {
+      callId: "update-call",
+      childStepIndex: 2,
+      childTurnId: "turn-child",
+      kind: "task-update" as const,
+      message: "Found three matching records.",
+    };
+    mockCommandHook([
+      update,
+      { command: { kind: "ready" }, kind: "task-command" },
+      { ...update, callId: "update-call-2" },
+      { command: { data: "done", kind: "complete" }, kind: "task-command" },
+    ]);
+
+    const view = createWorkingView();
+    await taskRunWorkflow({
+      taskInboxToken: "task-token",
+      initialView: view,
+      parentContinuationToken: "parent-session-token",
+    });
+
+    expect(wakeTaskUpdateParentStep).toHaveBeenNthCalledWith(1, {
+      token: "parent-session-token",
+      update,
+      view,
+    });
+    expect(wakeTaskUpdateParentStep).toHaveBeenNthCalledWith(2, {
+      token: "parent-session-token",
+      update: { ...update, callId: "update-call-2" },
+      view,
+    });
+    expect(appendedStatuses()).toEqual(["working", "working", "completed"]);
+  });
+
+  it("forwards a fast child update before its terminal wake", async () => {
+    const update = {
+      callId: "update-call",
+      childStepIndex: 2,
+      childTurnId: "turn-child",
+      kind: "task-update" as const,
+      message: "Final progress update.",
+    };
+    mockCommandHook([
+      update,
+      { command: { data: "done", kind: "complete" }, kind: "task-command" },
+      { command: { kind: "ready" }, kind: "task-command" },
+    ]);
+
+    await taskRunWorkflow({
+      taskInboxToken: "task-token",
+      initialView: createWorkingView(),
+      parentContinuationToken: "parent-session-token",
+    });
+
+    expect(wakeTaskUpdateParentStep).toHaveBeenCalledWith({
+      token: "parent-session-token",
+      update,
+      view: expect.objectContaining({ status: "completed" }),
+    });
+    expect(wakeTaskParentStep).toHaveBeenCalledWith({
+      token: "parent-session-token",
+      view: expect.objectContaining({ status: "completed" }),
+    });
+    expect(vi.mocked(wakeTaskUpdateParentStep).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(wakeTaskParentStep).mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
   it("publishes the initial view, applies commands, and stops at terminal", async () => {
     mockCommandHook([
       { command: { kind: "ready" }, kind: "task-command" },

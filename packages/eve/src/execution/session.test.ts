@@ -415,6 +415,25 @@ describe("mintSubagentContinuationToken", () => {
 });
 
 describe("refreshSessionFromTurnAgent", () => {
+  it("keeps session-specific system additions alongside refreshed authored instructions", () => {
+    const session = createSession({
+      continuationToken: "child-token",
+      sessionId: "child-session",
+      systemPromptAdditions: ["Background task updates"],
+      turnAgent: createTestTurnAgent({ instructions: ["Original instructions."] }),
+    });
+    expect(session.agent.system).toBe("Original instructions.\n\nBackground task updates");
+
+    const refreshed = refreshSessionFromTurnAgent({
+      session,
+      systemPromptAdditions: ["Background task updates"],
+      turnAgent: createTestTurnAgent({ instructions: ["Updated instructions."] }),
+    });
+
+    expect(refreshed.agent.system).toBe("Updated instructions.\n\nBackground task updates");
+    expect(refreshed.state).toBeUndefined();
+  });
+
   it("refreshes the current agent configuration while preserving history", () => {
     const session = createSession({
       continuationToken: "root-token",

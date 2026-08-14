@@ -249,9 +249,10 @@ function searchPresentationSections(
 async function printAddSuggestions(
   logger: RegistryCommandLogger,
   appRoot: string,
-  query: string,
+  item: string,
 ): Promise<void> {
   try {
+    const query = item.split("/").at(-1) || item;
     const { resultsBySource, sources, metadataByAddress } = await searchRegistryCatalog(appRoot, {
       limit: ADD_SUGGESTION_LIMIT,
       query,

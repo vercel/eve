@@ -168,7 +168,7 @@ export async function prepareRuntimeActionDispatch(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   /**
-   * Classify `task_peek` / `task_cancel` / `task_send` calls as
+   * Classify task-control calls as
    * task-control plan entries. Only task mode plans them; in plain mode
    * those calls fail as unsupported batch actions.
    */

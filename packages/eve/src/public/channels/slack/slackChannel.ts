@@ -15,6 +15,7 @@ import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { InputResponse } from "#runtime/input/types.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
@@ -292,6 +293,8 @@ export interface SlackInitialMessage {
 export interface SlackEventSendOptions {
   readonly auth: SessionAuthContext | null;
   readonly target: SlackReceiveTarget;
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 }
 
 /** Options for answering pending input requests from a generic Slack event handler. */
@@ -376,6 +379,12 @@ export interface SlackInboundMessageContext extends SlackContext, SlackSessionOp
 /** Interaction-scoped context handed to `slackChannel({ onInteraction })`. */
 export interface SlackInteractionContext extends SlackContext, SlackSessionOperations {}
 
+/** Context handed to `slackChannel({ onInputResponse })` before eve resumes HITL. */
+export interface SlackInputResponseContext extends SlackContext {
+  /** Auth derived from the Slack user who submitted the signed interaction. */
+  readonly defaultAuth: SessionAuthContext;
+}
+
 export interface SlackInteractionAction {
   readonly actionId: string;
   readonly value?: string;
@@ -415,6 +424,25 @@ export interface SlackInteractionUser {
   /** Legacy display handle, kept for older workspaces. */
   readonly name?: string;
 }
+
+/** Decoded eve-owned HITL response submitted through Slack interactivity. */
+export type SlackInputResponseSubmission =
+  | {
+      readonly type: "block_actions";
+      readonly inputResponses: readonly InputResponse[];
+      readonly actions: readonly SlackInteractionAction[];
+      readonly messageTs?: string;
+      readonly user: SlackInteractionUser;
+    }
+  | {
+      readonly type: "view_submission";
+      readonly inputResponses: readonly InputResponse[];
+      readonly messageTs: string;
+      readonly user: SlackInteractionUser;
+    };
+
+/** Result of a Slack HITL response admission hook. Return `null` to reject. */
+export type SlackInputResponseResult = { readonly auth: SessionAuthContext | null } | null;
 
 /**
  * Result of an `onAppMention` or `onDirectMessage` callback. Return an
@@ -604,6 +632,20 @@ export interface SlackChannelConfig {
     ctx: SlackInteractionContext,
   ): void | Promise<void>;
 
+  /**
+   * Authorizes an eve-owned HITL answer before the pending input resolves.
+   * Return `{ auth }` to accept the response, or `null` to reject it and keep
+   * the request pending. Thrown errors are logged and treated as rejection.
+   *
+   * When this hook is omitted, Slack preserves its built-in behavior and
+   * accepts the response with the submitting user's auth, regardless of other
+   * authored handlers.
+   */
+  onInputResponse?(
+    ctx: SlackInputResponseContext,
+    submission: SlackInputResponseSubmission,
+  ): SlackInputResponseResult | Promise<SlackInputResponseResult>;
+
   readonly events?: SlackChannelEvents;
 }
 
@@ -651,6 +693,7 @@ export interface SlackChannel extends Channel<
 export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
+  const onInputResponse = config.onInputResponse ?? defaultOnInputResponse;
   const authorizationRequiredOverride = config.events?.["authorization.required"];
   const candidateHandler =
     config.events?.["approval.candidate"] ?? defaultEvents["approval.candidate"]!;
@@ -753,7 +796,11 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
         const contentType = req.headers.get("content-type") ?? "";
         if (contentType.includes("application/x-www-form-urlencoded")) {
-          return handleInteractionPost(body, { from, resolveSession, waitUntil }, { config });
+          return handleInteractionPost(
+            body,
+            { from, resolveSession, waitUntil },
+            { config, onInputResponse },
+          );
         }
         return handleEventPost({
           body,
@@ -776,6 +823,10 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   });
 }
 
+function defaultOnInputResponse(ctx: SlackInputResponseContext): SlackInputResponseResult {
+  return { auth: ctx.defaultAuth };
+}
+
 /**
  * Shared proactive Slack receive path used by both the channel's public
  * `receive` hook and the pre-bound `send` function exposed to `onEvent`.
@@ -785,6 +836,7 @@ async function receiveOnSlack(
     readonly auth: SessionAuthContext | null;
     readonly message: string | UserContent;
     readonly target: SlackReceiveTarget;
+    readonly title?: string;
   },
   deps: {
     readonly from: ChannelFrom<SlackChannelState>;
@@ -839,6 +891,7 @@ async function receiveOnSlack(
       teamId: deps.teamId ?? null,
       triggeringUserId: deps.triggeringUserId ?? null,
     },
+    title: input.title,
   });
 }
 
@@ -1133,9 +1186,9 @@ async function dispatchSlackEvent(input: {
       input.resolveSession(slackContinuationToken(target.channelId, target.threadTs)),
     respond: (inputResponses, { auth, target }) =>
       sourceFor(target).respond(inputResponses, { auth }),
-    send: (message, { auth, target }) =>
+    send: (message, { auth, target, title }) =>
       receiveOnSlack(
-        { auth, message, target },
+        { auth, message, target, title },
         {
           from: input.from,
           credentials: input.credentials,

@@ -15,6 +15,7 @@ import type {
   TaskInboundAuthorizationEvent,
   TaskInboundInputRequest,
   TaskInboundTurnStarted,
+  TaskInboundUpdate,
 } from "#tasks/types.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
 
@@ -117,6 +118,15 @@ const taskTurnStartedCallbackSchema = z.object({
   turnId: z.string().min(1),
 });
 
+const taskUpdateCallbackSchema = z.object({
+  callId: z.string().min(1),
+  childStepIndex: eventCoordinateSchema,
+  childTurnId: z.string().min(1),
+  kind: z.literal("task.update"),
+  message: z.string().min(1),
+  taskId: z.string().min(1),
+});
+
 /**
  * Turn callbacks must carry the explicit `AgentTurnOutcome` envelope:
  * the receiving parent settles the child's handle from `outcome.kind`, so
@@ -209,6 +219,17 @@ export async function handleSessionCallbackRequest(
     return Response.json({ ok: true }, { status: 202 });
   }
 
+  const update = projectTaskUpdate(body, token);
+  if (update instanceof Response) return update;
+  if (update !== undefined) {
+    try {
+      await resumeHook(token, update);
+    } catch {
+      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+    }
+    return Response.json({ ok: true }, { status: 202 });
+  }
+
   const started = projectTaskTurnStarted(body, token);
   if (started instanceof Response) return started;
   if (started !== undefined) {
@@ -293,6 +314,26 @@ function projectTaskTurnStarted(
     childTurnId: parsed.data.turnId,
     kind: "turn-started",
     taskId: parsed.data.taskId,
+  };
+}
+
+function projectTaskUpdate(
+  value: unknown,
+  token: string,
+): TaskInboundUpdate | Response | undefined {
+  if (callbackKind(value) !== "task.update") return undefined;
+  const parsed = taskUpdateCallbackSchema.safeParse(value);
+  if (!parsed.success) {
+    return Response.json({ error: "Invalid task update callback.", ok: false }, { status: 400 });
+  }
+  const tokenRejection = rejectMismatchedTaskToken(token, parsed.data.taskId);
+  if (tokenRejection !== undefined) return tokenRejection;
+  return {
+    callId: parsed.data.callId,
+    childStepIndex: parsed.data.childStepIndex,
+    childTurnId: parsed.data.childTurnId,
+    kind: "task-update",
+    message: parsed.data.message,
   };
 }
 

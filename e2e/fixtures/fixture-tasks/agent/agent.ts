@@ -12,6 +12,10 @@ const TASK_ID_PATTERN = /task_[a-z0-9]+/iu;
 function respond(request: MockModelRequest): MockModelResponse | string {
   // Framework agent-list notes are model context, not scenario turns.
   const message = [...request.userMessages].reverse().find(isScenarioMessage) ?? "";
+  if (request.userMessages.some((entry) => entry.includes("TASK-UPDATE-PROGRESS"))) {
+    return "TASK-UPDATE-RECEIVED";
+  }
+  if (message.includes("TASK-UPDATE-CHILD")) return sendTaskUpdate(request);
   if (message.includes("TASK-FANOUT-INTERACTIVE-CHECK")) return "TASK-FANOUT-INTERACTIVE-OK";
   if (message.includes("TASK-CANCEL-NOW")) return cancelWorkerTask(request);
   if (message.includes("CHILD-TASK-EXCLUSIVITY-RACE")) return raceBusyWorker(request);
@@ -52,6 +56,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message === "TASK-FANOUT-PARENT-UPDATES") return fanoutTasks(request, 10);
   if (message === "TASK-PARENT-WAKE-UPDATES") return fanoutTasks(request, 3);
   if (message === "TASK-FAN-IN") return fanInTasks(request);
+  if (message === "TASK-UPDATE-SETUP") return startTaskUpdateChild(request);
   if (message === "TASK-CANCEL-SETUP") return setupCancelWorker(request);
   if (message.startsWith("TASK-CANCEL-VERIFY ")) {
     return peekTask(request, "task-cancel-verify", "TASK-CANCEL-STATUS", message);
@@ -97,6 +102,44 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message === "TASK-D6-PARTIAL-FANOUT-FAILURE") return partialFailureFanout(request);
 
   return `Mock reply: ${message}`;
+}
+
+function startTaskUpdateChild(request: MockModelRequest): MockModelResponse | string {
+  if (resultById(request, "task-update-child") === undefined) {
+    return {
+      toolCalls: [
+        {
+          id: "task-update-child",
+          input: { message: "TASK-UPDATE-CHILD" },
+          name: "agent",
+        },
+      ],
+    };
+  }
+  return "TASK-UPDATE-STARTED";
+}
+
+function sendTaskUpdate(request: MockModelRequest): MockModelResponse | string {
+  const result = resultById(request, "task-update-progress");
+  if (result === undefined) {
+    return {
+      toolCalls: [
+        {
+          id: "task-update-progress",
+          input: { message: "TASK-UPDATE-PROGRESS" },
+          name: "task_update",
+        },
+      ],
+    };
+  }
+  if (
+    result.output === null ||
+    typeof result.output !== "object" ||
+    Reflect.get(result.output, "status") !== "sent"
+  ) {
+    throw new Error("task_update did not confirm delivery.");
+  }
+  return "TASK-UPDATE-CHILD-DONE";
 }
 
 function fanoutTasks(request: MockModelRequest, size: number): MockModelResponse | string {
@@ -366,19 +409,19 @@ function raceBusyWorker(request: MockModelRequest): MockModelResponse | string {
   const second = resultById(request, "child-task-exclusivity-send-b");
   if (first === undefined && second === undefined) {
     const initial = resultById(request, "child-task-exclusivity-initial-worker");
-    const taskId = findTaskId(initial?.output);
-    if (taskId === undefined) throw new Error("Busy-worker race has no initial task id.");
+    const agentId = findAgentId(initial?.output);
+    if (agentId === undefined) throw new Error("Busy-worker race has no initial agent id.");
     return {
       toolCalls: [
         {
           id: "child-task-exclusivity-send-a",
-          input: { message: "Return BUSY-WORKER-A.", taskId },
-          name: "task_send",
+          input: { agentId, message: "Return BUSY-WORKER-A." },
+          name: "busy-worker",
         },
         {
           id: "child-task-exclusivity-send-b",
-          input: { message: "Return BUSY-WORKER-B.", taskId },
-          name: "task_send",
+          input: { agentId, message: "Return BUSY-WORKER-B." },
+          name: "busy-worker",
         },
       ],
     };
@@ -389,14 +432,14 @@ function raceBusyWorker(request: MockModelRequest): MockModelResponse | string {
 function laterBusyWorker(request: MockModelRequest, message: string): MockModelResponse | string {
   const result = resultById(request, "child-task-exclusivity-later");
   if (result === undefined) {
-    const taskId = findTaskId(message);
-    if (taskId === undefined) throw new Error("Later exclusivity send has no task id.");
+    const agentId = findAgentId(message);
+    if (agentId === undefined) throw new Error("Later exclusivity continuation has no agent id.");
     return {
       toolCalls: [
         {
           id: "child-task-exclusivity-later",
-          input: { message: "Return BUSY-WORKER-LATER.", taskId },
-          name: "task_send",
+          input: { agentId, message: "Return BUSY-WORKER-LATER." },
+          name: "busy-worker",
         },
       ],
     };
@@ -411,8 +454,8 @@ function continueApprovalWorker(
   const callId = "task-continuation-hitl-send";
   const result = resultById(request, callId);
   if (result === undefined) {
-    const taskId = findTaskId(message);
-    if (taskId === undefined) throw new Error("Continuation HITL send has no task id.");
+    const agentId = findAgentId(message);
+    if (agentId === undefined) throw new Error("Continuation HITL has no agent id.");
     return {
       toolCalls: [
         {
@@ -420,9 +463,9 @@ function continueApprovalWorker(
           input: {
             message:
               "Run four continuation approval gates in order, then return CHILD-GATES-COMPLETE.",
-            taskId,
+            agentId,
           },
-          name: "task_send",
+          name: "approval-worker",
         },
       ],
     };
@@ -448,6 +491,26 @@ function findTaskId(value: unknown): string | undefined {
     if (typeof taskId === "string") return taskId;
     for (const entry of Object.values(value)) {
       const nested = findTaskId(entry);
+      if (nested !== undefined) return nested;
+    }
+  }
+  return undefined;
+}
+
+function findAgentId(value: unknown): string | undefined {
+  if (typeof value === "string") return /ag_[^\s<>]+/u.exec(value)?.[0];
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const agentId = findAgentId(entry);
+      if (agentId !== undefined) return agentId;
+    }
+    return undefined;
+  }
+  if (value !== null && typeof value === "object") {
+    const agentId = Reflect.get(value, "agentId");
+    if (typeof agentId === "string") return agentId;
+    for (const entry of Object.values(value)) {
+      const nested = findAgentId(entry);
       if (nested !== undefined) return nested;
     }
   }

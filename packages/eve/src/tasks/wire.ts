@@ -4,9 +4,8 @@ import { readTaskUsage, taskAuthorizationRequestId } from "#tasks/types.js";
 /**
  * Translates one inbound hook payload into a lifecycle command.
  *
- * The child wire is unchanged by `experimental.tasks`; delegated
- * dispatch hands children the task run's hook token, so the payloads
- * that used to resume the parent turn arrive here instead:
+ * Delegated dispatch hands children the task run's hook token, so the
+ * payloads that used to resume the parent turn arrive here instead:
  *
  * - a settled child turn (local notification or remote callback)
  *   carries an explicit outcome — its result status decides

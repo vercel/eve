@@ -205,7 +205,7 @@ async function mcpRequest(
     headers["mcp-protocol-version"] = MCP_PROTOCOL_VERSION;
     if (typeof params.name === "string") headers["mcp-name"] = params.name;
   }
-  return await fetch(new URL("/mcp", serverUrl), {
+  return await fetch(new URL("/eve/v1/mcp", serverUrl), {
     body: JSON.stringify({
       id: crypto.randomUUID(),
       jsonrpc: "2.0",

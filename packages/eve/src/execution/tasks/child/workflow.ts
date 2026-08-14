@@ -8,6 +8,7 @@ import {
   wakeTaskAuthorizationParentStep,
   wakeTaskInputRequestParentStep,
   wakeTaskParentStep,
+  wakeTaskUpdateParentStep,
 } from "#execution/tasks/child/steps.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
 import { translateTaskInboundPayload } from "#tasks/wire.js";
@@ -20,6 +21,7 @@ import {
   type TaskInboundAnswerInput,
   type TaskInboundAuthorizationEvent,
   type TaskInboundInputRequest,
+  type TaskInboundUpdate,
   type TaskRunInboundPayload,
   type TaskView,
 } from "#tasks/types.js";
@@ -55,9 +57,9 @@ function isTaskRunFinished(view: TaskView, dispatchAcknowledged: boolean): boole
  * change nothing.
  *
  * Wake policy: a transition into a ready status — terminal or
- * `input_required` — delivers a framework notification to the parent
- * session. A parked parent starts a turn; an active turn observes the
- * delivery at its next safe boundary. Nothing else wakes the parent.
+ * `input_required` — and an explicit child `task_update` deliver a
+ * framework notification to the parent session. A parked parent starts
+ * a turn; an active turn observes the delivery at its next safe boundary.
  *
  * The run ends when the task reaches a terminal status. Its view
  * stream stays readable, so terminal tasks remain peekable; the
@@ -89,6 +91,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     let view = input.initialView;
     let pendingInputRequest: TaskInboundInputRequest | undefined;
     let pendingAuthorizationEvents: TaskInboundAuthorizationEvent[] = [];
+    let pendingUpdates: TaskInboundUpdate[] = [];
     let dispatchAcknowledged = false;
     await appendTaskViewStep({ view });
 
@@ -121,6 +124,18 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       if (payload.kind === "authorization-event") {
         pendingAuthorizationEvents.push(payload);
       }
+      if (payload.kind === "task-update") {
+        if (dispatchAcknowledged && !isTerminalTaskStatus(view.status)) {
+          await wakeTaskUpdateParentStep({
+            token: input.parentContinuationToken,
+            update: payload,
+            view,
+          });
+        } else {
+          pendingUpdates.push(payload);
+        }
+        continue;
+      }
       const isExecutorResultAfterCancellation =
         view.status === "cancelled" && payload.kind === "runtime-action-result";
       const isTaskInputAnswer = payload.kind === "input-response";
@@ -139,6 +154,14 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       }
       if (command === undefined) continue;
       if (isReadinessCommand && isTerminalTaskStatus(view.status)) {
+        for (const update of pendingUpdates) {
+          await wakeTaskUpdateParentStep({
+            token: input.parentContinuationToken,
+            update,
+            view,
+          });
+        }
+        pendingUpdates = [];
         await wakeTaskParentStep({ token: input.parentContinuationToken, view });
         continue;
       }
@@ -157,6 +180,16 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
           taskId: view.taskId,
           token: input.parentContinuationToken,
         });
+      }
+      if (dispatchAcknowledged && pendingUpdates.length > 0 && !isTerminalTaskStatus(view.status)) {
+        for (const update of pendingUpdates) {
+          await wakeTaskUpdateParentStep({
+            token: input.parentContinuationToken,
+            update,
+            view,
+          });
+        }
+        pendingUpdates = [];
       }
       if (becameTerminal || routableAuthorizationEvents.length > 0) pendingAuthorizationEvents = [];
       const routableInputRequest =

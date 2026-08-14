@@ -11,7 +11,7 @@
  * parent turn inbox, and every start dispatches a conversation-mode
  * (persistent) child so the background task stays resumable.
  *
- * Task-control calls (`task_peek` / `task_cancel` / `task_send`) execute
+ * Task-control calls (`task_peek` / `task_cancel` / `task_update`) execute
  * inline in this step, which holds the session ownership index and world
  * access they need.
  */
@@ -77,9 +77,11 @@ export async function dispatchTaskStep(
       if (entry.kind === "task-control") {
         const control = await executeTaskControlAction({
           action: entry.action,
+          adapter: prepared.adapter,
           bundle,
           parentStepIndex: batch.event.stepIndex,
           parentTurnId: batch.event.turnId,
+          serializedContext: prepared.serializedContext,
           session: nextSession,
         });
         nextSession = control.session;

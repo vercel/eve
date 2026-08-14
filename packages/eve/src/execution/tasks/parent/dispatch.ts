@@ -12,7 +12,8 @@ import {
   readTaskViews,
   readTaskView,
 } from "#execution/tasks/parent/control-shared.js";
-import { executeTaskSend } from "#execution/tasks/parent/send.js";
+import { executeTaskUpdate } from "#execution/tasks/child/update.js";
+import type { ChannelAdapter } from "#channel/adapter.js";
 import type { DelegatedTask } from "#execution/tasks/parent/delegate.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
@@ -27,7 +28,7 @@ import {
   TASK_CANCEL_TOOL_NAME,
   TASK_CONTROL_TOOL_NAMES,
   TASK_PEEK_TOOL_NAME,
-  TASK_SEND_TOOL_NAME,
+  TASK_UPDATE_TOOL_NAME,
 } from "#runtime/framework-tools/tasks.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import { isTerminalTaskStatus, type TaskView } from "#tasks/types.js";
@@ -37,7 +38,7 @@ const log = createLogger("execution.tasks.dispatch");
 const CANCEL_COMMIT_POLL_ATTEMPTS = 10;
 const CANCEL_COMMIT_POLL_DELAY_MS = 250;
 
-/** True for `task_peek` / `task_cancel` / `task_send` calls. */
+/** True for task-control calls dispatched outside the model loop. */
 export function isTaskControlAction(
   action: RuntimeActionRequest,
 ): action is RuntimeToolCallActionRequest {
@@ -49,14 +50,15 @@ export function isTaskControlAction(
  * the durable session state (ownership index) and world access the
  * tools need.
  *
- * Returns the (possibly updated) session: `task_send` follow-ups record
- * new tasks and settle the continued agent handle.
+ * Returns the current session alongside the action result.
  */
 export async function executeTaskControlAction(input: {
   readonly action: RuntimeToolCallActionRequest;
+  readonly adapter?: ChannelAdapter;
   readonly bundle: CompiledBundle;
   readonly parentStepIndex?: number;
   readonly parentTurnId: string;
+  readonly serializedContext?: Record<string, unknown>;
   readonly session: RuntimeSession;
 }): Promise<{
   readonly result: RuntimeActionResult;
@@ -65,8 +67,17 @@ export async function executeTaskControlAction(input: {
 }> {
   const { action, session } = input;
 
-  if (action.toolName === TASK_SEND_TOOL_NAME) {
-    return executeTaskSend(input);
+  if (action.toolName === TASK_UPDATE_TOOL_NAME) {
+    return {
+      result: await executeTaskUpdate({
+        action,
+        adapter: input.adapter,
+        childStepIndex: input.parentStepIndex ?? 0,
+        childTurnId: input.parentTurnId,
+        serializedContext: input.serializedContext,
+      }),
+      session,
+    };
   }
 
   const taskIds = readTaskIds(action.input);

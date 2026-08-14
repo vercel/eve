@@ -138,17 +138,22 @@ export function createCompiledRuntimeModelCatalogLoader(
 
     try {
       return await getFetchedCatalog();
-    } catch {
+    } catch (error) {
       if (cachedCatalog !== null) {
         return cachedCatalog;
       }
-      return null;
+      throw error;
     }
   };
 
   return {
     async getModelLimits(modelId) {
       const normalizedId = normalizeCatalogModelId(modelId);
+      const builtInLimits = builtInCompiledRuntimeModelLimitsById.get(normalizedId);
+      if (builtInLimits !== undefined) {
+        return builtInLimits;
+      }
+
       const resolved = await resolveModelsFromCacheOrFetch();
 
       if (resolved !== null) {
@@ -163,7 +168,7 @@ export function createCompiledRuntimeModelCatalogLoader(
         }
       }
 
-      return builtInCompiledRuntimeModelLimitsById.get(normalizedId) ?? null;
+      return null;
     },
 
     async getByProviderModelId(provider, providerModelId) {

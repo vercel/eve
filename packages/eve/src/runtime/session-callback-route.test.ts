@@ -117,6 +117,33 @@ describe("session callback route", () => {
     });
   });
 
+  it("forwards remote task updates to the owning task hook", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const response = await handleSessionCallbackRequest(
+      new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {
+        body: JSON.stringify({
+          callId: "update-call",
+          childStepIndex: 2,
+          childTurnId: "turn-child",
+          kind: "task.update",
+          message: "Found three matching records.",
+          taskId: TASK_ID,
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: TASK_TOKEN }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith(TASK_TOKEN, {
+      callId: "update-call",
+      childStepIndex: 2,
+      childTurnId: "turn-child",
+      kind: "task-update",
+      message: "Found three matching records.",
+    });
+  });
+
   it.each([
     ["parent turn token", "turn-inbox", TASK_ID],
     ["different task token", TASK_TOKEN, "task_other"],

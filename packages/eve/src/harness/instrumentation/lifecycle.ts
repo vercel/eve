@@ -273,6 +273,7 @@ export interface InstrumentationStepAttemptStartedEvent {
   readonly type: "step.attempt.started";
   readonly idempotencyKey: string;
   readonly operation: InstrumentationOperationRef;
+  readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
 }
 
@@ -400,6 +401,7 @@ export interface InstrumentationModelCallStartedEvent {
   /** Content. Absent unless this provider declared `capture: "content"`. */
   readonly input?: InstrumentationModelInput;
   readonly model: InstrumentationModelRef;
+  readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
 }
 

@@ -154,6 +154,53 @@ describe("createAiSdkHookBridge", () => {
     expect(keys).toEqual([modelCallIdempotencyKey(scope, 2), modelCallIdempotencyKey(scope, 2)]);
   });
 
+  it("attaches merged runtime context to step and model started events", async () => {
+    const stepStarted: InstrumentationStepAttemptStartedEvent[] = [];
+    const modelStarted: InstrumentationModelCallStartedEvent[] = [];
+    const hooks = createInstrumentationHooks([
+      {
+        events: {
+          "model.call.started": (event) => void modelStarted.push(event),
+          "step.attempt.started": (event) => void stepStarted.push(event),
+        },
+        name: "context",
+      },
+    ]);
+    const runtimeContext = { "eve.session.id": "session-1", "posthog.distinct_id": "user-1" };
+    const bridge = createAiSdkHookBridge(scope, hooks, undefined, runtimeContext);
+
+    await Reflect.apply(bridge.onStart!, bridge, [
+      { callId: "call-1", modelId: "model", operationId: "ai.streamText", provider: "test" },
+    ]);
+    await Reflect.apply(bridge.onStepStart!, bridge, [{ callId: "call-1", stepNumber: 0 }]);
+    await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [
+      { callId: "call-1", messages: [], modelId: "model", provider: "test", tools: undefined },
+    ]);
+
+    expect(stepStarted).toHaveLength(1);
+    expect(stepStarted[0]!.runtimeContext).toEqual(runtimeContext);
+    expect(modelStarted).toHaveLength(1);
+    expect(modelStarted[0]!.runtimeContext).toEqual(runtimeContext);
+  });
+
+  it("omits runtime context from started events when the merged record is empty", async () => {
+    const modelStarted: InstrumentationModelCallStartedEvent[] = [];
+    const hooks = createInstrumentationHooks([
+      {
+        events: { "model.call.started": (event) => void modelStarted.push(event) },
+        name: "context",
+      },
+    ]);
+    const bridge = createAiSdkHookBridge(scope, hooks, undefined, {});
+
+    await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [
+      { callId: "call-1", messages: [], modelId: "model", provider: "test", tools: undefined },
+    ]);
+
+    expect(modelStarted).toHaveLength(1);
+    expect(modelStarted[0]!.runtimeContext).toBeUndefined();
+  });
+
   it("publishes step provider metadata as step.metadata, skipping steps without any", async () => {
     const events: InstrumentationStepAttemptMetadataEvent[] = [];
     const hooks = createInstrumentationHooks([

@@ -92,15 +92,29 @@ async function hydrateCompiledModuleMapFromManifest(
         nodeId: subagent.nodeId,
       })),
   ];
+  const nodeManifestById = new Map(nodeManifests.map((entry) => [entry.nodeId, entry.manifest]));
+  const parentNodeIdByChild = new Map(
+    manifest.subagentEdges.map((edge) => [edge.childNodeId, edge.parentNodeId]),
+  );
+  const extensionNamespacesByNodeId = new Map<string, ReadonlyMap<string, string>>();
+  const extensionNamespacesForNode = (nodeId: string): ReadonlyMap<string, string> => {
+    const cached = extensionNamespacesByNodeId.get(nodeId);
+    if (cached !== undefined) return cached;
+
+    const parentNodeId = parentNodeIdByChild.get(nodeId);
+    const namespaces = new Map(
+      parentNodeId === undefined ? [] : extensionNamespacesForNode(parentNodeId),
+    );
+    for (const mount of nodeManifestById.get(nodeId)?.extensionMounts ?? []) {
+      namespaces.set(mount.namespace, mount.packageNamespace);
+    }
+    extensionNamespacesByNodeId.set(nodeId, namespaces);
+    return namespaces;
+  };
 
   for (const nodeManifest of nodeManifests) {
     const scopeIndex: ExtensionScopeIndex = {
-      byMountNamespace: new Map(
-        nodeManifest.manifest.extensionMounts.map((mount) => [
-          mount.namespace,
-          mount.packageNamespace,
-        ]),
-      ),
+      byMountNamespace: extensionNamespacesForNode(nodeManifest.nodeId),
       byMountSourceId: new Map(
         nodeManifest.manifest.extensionMounts.map((mount) => [
           mount.mountSourceId,

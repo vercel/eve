@@ -20,6 +20,7 @@ export const PUBLIC_SURFACES = [
   { path: "src/public/extension/index.ts", capabilities: ["extension", "config"] },
   { path: "src/public/channels/index.ts", capabilities: ["channel"] },
   { path: "src/public/schedules/index.ts", capabilities: ["schedule"] },
+  { path: "src/public/index.ts", capabilities: ["subagent"] },
   { path: "src/public/tools/index.ts", capabilities: ["tool", "dynamicTool"] },
   { path: "src/public/connections/index.ts", capabilities: ["connection"] },
   { path: "src/public/hooks/index.ts", capabilities: ["hook"] },

@@ -26,9 +26,10 @@ type SemanticInput =
   | "answer-input"
   | "authorization-callback"
   | "start-turn"
-  | "task-send"
+  | "agent-continuation"
   | "task-peek"
   | "task-notification"
+  | "task-update"
   | "parent-message";
 
 type SemanticEvent =
@@ -36,7 +37,8 @@ type SemanticEvent =
   | "input-requested"
   | "authorization-required"
   | "authorization-completed"
-  | "task-ready-notification";
+  | "task-ready-notification"
+  | "task-update-notification";
 
 type SemanticSideEffect =
   | "task-view-append"
@@ -291,9 +293,9 @@ export const TASK_TRANSITIONS = {
       sideEffects: { executed: ["child-dispatch", "task-index-write"] },
     },
   }),
-  "task.agent.send.accepted-terminal-available": transition({
+  "task.agent.continue.accepted-terminal-available": transition({
     preState: { lifecycle: ["completed", "failed", "cancelled"], agent: "available" },
-    input: "task-send",
+    input: "agent-continuation",
     guards: ["source-task-is-terminal", "agent-has-no-nonterminal-task"],
     expected: {
       outcome: "accepted",
@@ -302,15 +304,26 @@ export const TASK_TRANSITIONS = {
       sideEffects: { executed: ["task-index-write", "child-delivery"] },
     },
   }),
-  "task.agent.send.rejected-agent-busy": transition({
+  "task.agent.continue.rejected-agent-busy": transition({
     preState: { agent: "busy" },
-    input: "task-send",
+    input: "agent-continuation",
     guards: ["agent-has-a-nonterminal-task"],
     expected: {
       outcome: "rejected",
       postState: { agent: "busy" },
       events: { suppressed: ["background-receipt"] },
       sideEffects: { suppressed: ["task-index-write", "child-delivery"] },
+    },
+  }),
+  "task.update.emitted-working": transition({
+    preState: { lifecycle: "working" },
+    input: "task-update",
+    guards: ["child-is-owned-by-task"],
+    expected: {
+      outcome: "emitted",
+      postState: { lifecycle: "working" },
+      events: { emitted: ["task-update-notification"] },
+      sideEffects: { executed: ["parent-wake"], suppressed: ["task-view-append"] },
     },
   }),
   "task.authorization.callback.accepted-current-attempt": transition({

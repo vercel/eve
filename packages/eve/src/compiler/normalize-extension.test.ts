@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyOverrideDisables,
+  composeExtensionSubagentSources,
   type CompiledExtensionContributions,
   mergeContributions,
 } from "#compiler/normalize-extension.js";
+import {
+  createAgentSourceManifest,
+  createLocalSubagentSourceRef,
+  createModuleSourceRef,
+} from "#discover/manifest.js";
 
 // mergeContributions only reads each named contribution's identifier for dedup,
 // so minimal partial fixtures suffice.
@@ -94,6 +100,63 @@ describe("mergeContributions", () => {
       { content: "override", role: "system" },
       { content: "extension", role: "user" },
     ]);
+  });
+});
+
+describe("composeExtensionSubagentSources", () => {
+  it("namespaces extension subagents and lets a directory override win", () => {
+    const extensionRoot = "/packages/crm/dist/extension";
+    const overrideRoot = "/app/agent/extensions/crm";
+    const createSubagent = (root: string, subagentId: string) => {
+      const agentRoot = `${root}/subagents/${subagentId}`;
+      return createLocalSubagentSourceRef({
+        entryPath: agentRoot,
+        logicalPath: `subagents/${subagentId}`,
+        manifest: createAgentSourceManifest({
+          agentId: subagentId,
+          agentRoot,
+          appRoot: "/app",
+          configModule: createModuleSourceRef({ logicalPath: "agent.ts" }),
+          tools: [createModuleSourceRef({ logicalPath: "tools/search.ts" })],
+        }),
+        rootPath: agentRoot,
+        subagentId,
+      });
+    };
+    const extensionManifest = createAgentSourceManifest({
+      agentRoot: extensionRoot,
+      appRoot: "/packages/crm",
+      subagents: [
+        createSubagent(extensionRoot, "reviewer"),
+        createSubagent(extensionRoot, "analyst"),
+      ],
+    });
+    const overrideManifest = createAgentSourceManifest({
+      agentRoot: overrideRoot,
+      appRoot: "/app",
+      subagents: [createSubagent(overrideRoot, "reviewer")],
+    });
+
+    const result = composeExtensionSubagentSources({
+      consumerAgentRoot: "/app/agent",
+      mount: {
+        namespace: "crm",
+        specifier: "@acme/crm",
+        packageName: "@acme/crm",
+        packageRoot: "/packages/crm",
+        sourceRoot: extensionRoot,
+        manifest: extensionManifest,
+        overrides: overrideManifest,
+      },
+    });
+
+    expect(result.map((source) => [source.subagentId, source.sourceId])).toEqual([
+      ["crm__reviewer", "ext-override:crm:subagents/reviewer"],
+      ["crm__analyst", "ext:crm:subagents/analyst"],
+    ]);
+    expect(result[1]?.manifest.tools[0]?.sourceId).toBe(
+      "ext:crm:subagents/analyst/tools/search.ts",
+    );
   });
 });
 

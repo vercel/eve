@@ -43,8 +43,8 @@ import {
 export interface McpChannelInput {
   /** Existing eve route-auth policy. Use `none()` for explicit public access. */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
-  /** Streamable HTTP endpoint path. Defaults to `/mcp`. */
-  readonly path?: string;
+  /** Override the default MCP route path (`/eve/v1/mcp`). */
+  readonly route?: string;
 }
 
 /** Public MCP channel exposing durable agent invocation compatibility tools. */
@@ -62,7 +62,7 @@ export function mcpChannel(input: McpChannelInput): McpChannel {
   if (input?.auth === undefined) {
     throw new Error("mcpChannel requires auth. Use none() for explicit public access.");
   }
-  const path = input.path ?? "/mcp";
+  const path = input.route ?? "/eve/v1/mcp";
   const oauth = readOAuthResourceOptions(input.auth);
   const routes = [
     GET(
@@ -85,7 +85,7 @@ export function mcpChannel(input: McpChannelInput): McpChannel {
 }
 
 function protectedResourceMetadataRoutes(options: OAuthResourceOptions, resourcePath: string) {
-  const metadataPath = options.metadataPath ?? "/.well-known/oauth-protected-resource";
+  const metadataPath = protectedResourceMetadataPath(options, resourcePath);
   return [
     GET(metadataPath, async (request) =>
       protectedResourceMetadataResponse(request, options, resourcePath, false),
@@ -95,6 +95,17 @@ function protectedResourceMetadataRoutes(options: OAuthResourceOptions, resource
     ),
     OPTIONS(metadataPath, async (request) => protectedResourceMetadataOptionsResponse(request)),
   ] as const;
+}
+
+function protectedResourceMetadataPath(
+  options: OAuthResourceOptions,
+  resourcePath: string,
+): string {
+  if (options.metadataPath !== undefined) return options.metadataPath;
+  const path = options.resource === undefined ? resourcePath : new URL(options.resource).pathname;
+  return path === "/"
+    ? "/.well-known/oauth-protected-resource"
+    : `/.well-known/oauth-protected-resource${path}`;
 }
 
 function protectedResourceMetadataResponse(
@@ -149,7 +160,7 @@ function addResourceChallenge(
   options: OAuthResourceOptions,
 ): Response {
   if (response.status !== 401 && response.status !== 403) return response;
-  const metadataPath = options.metadataPath ?? "/.well-known/oauth-protected-resource";
+  const metadataPath = protectedResourceMetadataPath(options, new URL(request.url).pathname);
   const publicBase = options.resource ?? new URL(request.url).origin;
   const metadataUrl = new URL(metadataPath, publicBase).toString();
   const headers = new Headers(response.headers);
