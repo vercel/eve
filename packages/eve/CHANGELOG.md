@@ -1,5 +1,15 @@
 # eve
 
+## 0.38.2
+
+### Patch Changes
+
+- 250d67a: Bump `@workflow/*` packages to the latest 5.0.0 betas (`core` beta.42, `errors` beta.17, `world` beta.27, `world-local` beta.36, `world-vercel` beta.38, `world-postgres` beta.34). The development Workflow world now advertises spec version 6 (slot-numbered event ids), matching the updated local world.
+- f9f29d3: Surface AI Gateway model catalog request failures during compilation instead of reporting unavailable models as missing metadata. Models with eve-owned metadata continue to compile without the catalog.
+- 77de320: Let background task children send intermediate progress to their parent with `task_update`, using the existing local and remote child-to-parent transports. Remote task HITL is now presented only by the parent channel, finished agents continue through their original subagent tool with `agentId`, and the redundant `task_send` tool has been removed.
+- 88f6ca9: Configure MCP channel endpoints with `route`, default them to `/eve/v1/mcp`, and derive OAuth protected-resource metadata paths from the MCP resource identifier.
+- fe1ad3b: Search by item name when suggesting registry matches, so path typos such as `channels/slack` can still suggest `channel/slack`.
+
 ## 0.38.1
 
 ### Patch Changes
