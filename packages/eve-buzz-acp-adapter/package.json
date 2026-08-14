@@ -40,7 +40,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "eve": "workspace:*"
+    "eve": "workspace:^"
   },
   "devDependencies": {
     "vitest": "catalog:"

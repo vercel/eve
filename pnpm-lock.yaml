@@ -1341,7 +1341,7 @@ importers:
   packages/eve-buzz-acp-adapter:
     dependencies:
       eve:
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../eve
     devDependencies:
       vitest:
