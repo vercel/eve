@@ -929,6 +929,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     tagline: "Trace your agent with a local or self-hosted Jaeger OTLP backend.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
+  {
+    slug: "inference",
+    name: "Inference.net",
+    kind: "instrumentation",
+    tagline: "Export eve traces to Inference.net for OpenInference-shaped observability.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
 ];
 
 const BY_SLUG = new Map(INTEGRATIONS.map((entry) => [entry.slug, entry]));

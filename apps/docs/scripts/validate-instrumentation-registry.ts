@@ -26,6 +26,7 @@ const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   arize: "arize",
   raindrop: "raindrop",
   jaeger: "jaeger",
+  inference: "inference",
 };
 
 const docsRoot = join(import.meta.dirname, "..");

@@ -751,6 +751,15 @@ export const shopifyLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const inferenceLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 94 89" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M94 0H70.981V89H94V0Z" fill="#0D121C" />
+    <path d="M59.272 0H42.944V89H59.272V0Z" fill="#FF4405" />
+    <path d="M31.989 0H19.466V89H31.989V0Z" fill="#FAC515" />
+    <path d="M8.956 0H0V89H8.956V0Z" fill="#53B1FD" />
+  </svg>
+);
+
 export const logos = {
   eve: eveLogo,
   web: webLogo,
@@ -773,6 +782,7 @@ export const logos = {
   braintrust: braintrustLogo,
   jaeger: jaegerLogo,
   raindrop: raindropLogo,
+  inference: inferenceLogo,
   kernel: kernelLogo,
   upstash: upstashLogo,
   arcana: arcanaLogo,

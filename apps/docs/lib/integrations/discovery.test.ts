@@ -232,5 +232,17 @@ describe("integration discovery", () => {
     expect(posthogMarkdown).toContain("eve add instrumentation/posthog");
     expect(posthogMarkdown).toContain("PostHogTraceExporter");
     expect(posthogMarkdown).toContain("POSTHOG_PROJECT_TOKEN");
+
+    const inference = getIntegration("inference");
+    expect(inference).toBeDefined();
+
+    const inferenceMarkdown = integrationMarkdown(inference!);
+    expect(inferenceMarkdown).toContain("eve add instrumentation/inference");
+    expect(inferenceMarkdown).toContain("defineCatalystEveInstrumentation");
+    expect(inferenceMarkdown).toContain("INFERENCE_API_KEY");
+    expect(inferenceMarkdown).toContain("INFERENCE_OTLP_ENDPOINT");
+    expect(inferenceMarkdown).toContain("createOpenAICompatible");
+    expect(inferenceMarkdown).toContain("https://api.inference.net/v1");
+    expect(integrationSearchText(inference!)).toContain("catalyst");
   });
 });

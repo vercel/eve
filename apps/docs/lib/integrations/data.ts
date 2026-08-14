@@ -2477,6 +2477,66 @@ docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/jaeger:latest
 
 Point the exporter at your collector's OTLP HTTP endpoint when self-hosting. See the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy and the \`recordInputs\`/\`recordOutputs\` controls.`,
   },
+  inference: {
+    logo: "inference",
+    docsHref: "/docs/guides/instrumentation",
+    keywords: [
+      "otel",
+      "opentelemetry",
+      "tracing",
+      "observability",
+      "catalyst",
+      "openinference",
+      "gateway",
+      "inference",
+    ],
+    install: `Add Inference.net tracing from eve's registry. The install writes \`agent/instrumentation.ts\` and adds \`@inference/tracing\`:
+
+\`\`\`bash
+eve add instrumentation/inference
+\`\`\``,
+    quickStart: `eve installs \`agent/instrumentation.ts\` with Inference.net's eve helper. This integration leaves input and output capture off to match eve's default:
+
+\`\`\`ts
+// agent/instrumentation.ts
+import { defineCatalystEveInstrumentation } from "@inference/tracing/eve";
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation(
+  defineCatalystEveInstrumentation({
+    recordInputs: false,
+    recordOutputs: false,
+  }) as Parameters<typeof defineInstrumentation>[0],
+);
+\`\`\`
+
+To route model calls through Inference Gateway, install \`@ai-sdk/openai-compatible\` and point \`agent/agent.ts\` at Inference.net:
+
+\`\`\`ts
+// agent/agent.ts
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { defineAgent } from "eve";
+
+const inference = createOpenAICompatible({
+  name: "inference.net",
+  baseURL: process.env.INFERENCE_BASE_URL ?? "https://api.inference.net/v1",
+  apiKey: process.env.INFERENCE_API_KEY!,
+  includeUsage: true,
+});
+
+export default defineAgent({
+  model: inference(process.env.INFERENCE_MODEL ?? "claude-haiku-4-5"),
+  modelContextWindowTokens: 200_000,
+});
+\`\`\``,
+    configure: `Create an API key in the [Inference.net dashboard](https://inference.net) and expose it as \`INFERENCE_API_KEY\`. Set \`INFERENCE_OTLP_ENDPOINT\` to \`https://telemetry.inference.net\` before the eve process starts. Optional \`INFERENCE_SERVICE_NAME\` and \`INFERENCE_SERVICE_VERSION\` become the OpenTelemetry resource attributes; when omitted, Inference.net uses eve's agent name.
+
+Set \`recordInputs\` and \`recordOutputs\` to \`true\` after you review Inference.net's data-retention path if the dashboard should show full prompts, responses, tool arguments, or tool results.
+
+When model calls go through Inference Gateway, also set \`INFERENCE_BASE_URL\` (defaults to \`https://api.inference.net/v1\`) and \`INFERENCE_MODEL\`. \`includeUsage: true\` lets the provider return token counts for Inference.net columns. Set \`modelContextWindowTokens\` when eve cannot infer context-window metadata from a custom AI SDK provider.
+
+See the [Inference.net eve traces guide](https://docs.inference.net/integrations/traces/eve) for verification steps and the [instrumentation guide](/docs/guides/instrumentation) for the trace hierarchy.`,
+  },
 };
 
 function buildChannel(entry: IntegrationEntry): Integration {

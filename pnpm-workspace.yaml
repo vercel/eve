@@ -66,6 +66,7 @@ catalogs:
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
+  - "@inference/tracing"
   - "@linqapp/chat-sdk-adapter"
   - "@linqapp/sdk"
   - "@supermemory/eve"
