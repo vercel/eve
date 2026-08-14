@@ -8,8 +8,8 @@ const description =
   "eve eves are hands-on gatherings where developers come together to build the agents of tomorrow with eve and Vercel. The event pairs a practical, guided build with open networking, demos, and direct product feedback. You’ll leave with a working eve agent, new connections, and a clearer path from idea to production.";
 const ogImage = {
   url: "/eve-nights-og.png",
-  width: 3200,
-  height: 1800,
+  width: 4800,
+  height: 2512,
   alt: "eve community nights",
 };
 
