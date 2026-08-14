@@ -5,7 +5,7 @@ import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
-import { resolveCliApplicationRoot } from "#cli/application-root.js";
+import { findCliApplicationRoot, resolveCliApplicationRoot } from "#cli/application-root.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
@@ -64,7 +64,7 @@ interface CliLogger {
 
 interface CliRuntimeDependencies {
   isCodingAgentLaunch(): Promise<boolean>;
-  isEveProject(appRoot: string): Promise<boolean>;
+  findApplicationRoot(cwd: string): Promise<string | undefined>;
   isActiveDevelopmentServerForApp(input: {
     readonly appRoot: string;
     readonly serverUrl: string;
@@ -137,10 +137,6 @@ async function loadRunEvalCommand(): Promise<CliRuntimeDependencies["runEvalComm
 
 async function loadStartHost(): Promise<CliRuntimeDependencies["startHost"]> {
   return (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
-}
-
-async function loadIsEveProject(): Promise<CliRuntimeDependencies["isEveProject"]> {
-  return (await import("#setup/scaffold/index.js")).isEveProject;
 }
 
 const loadIsActiveDevelopmentServerForApp = async () =>
@@ -663,8 +659,14 @@ export async function runCli(
   const program = createCliProgram(logger, runtime, applicationContext);
   let input = argv;
   if (input.length === 0) {
-    const detectEveProject = runtime.isEveProject ?? (await loadIsEveProject());
-    input = [(await detectEveProject(applicationContext.root)) ? "dev" : "init"];
+    const findApplicationRoot = runtime.findApplicationRoot ?? findCliApplicationRoot;
+    const appRoot = await findApplicationRoot(applicationContext.root);
+    if (appRoot === undefined) {
+      input = ["init"];
+    } else {
+      applicationContext.root = appRoot;
+      input = ["dev"];
+    }
   }
 
   try {

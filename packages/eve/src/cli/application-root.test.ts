@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { resolveCliApplicationRoot } from "#cli/application-root.js";
+import { findCliApplicationRoot, resolveCliApplicationRoot } from "#cli/application-root.js";
 
 function dependencies(projects: readonly string[]) {
   const knownProjects = new Set(projects);
@@ -28,7 +28,13 @@ describe("resolveCliApplicationRoot", () => {
     ]);
   });
 
-  it("fails when no enclosing directory is an application", async () => {
+  it("returns undefined when finding from outside an application", async () => {
+    const deps = dependencies([]);
+
+    await expect(findCliApplicationRoot("/workspace/packages", deps)).resolves.toBeUndefined();
+  });
+
+  it("fails when resolving from outside an application", async () => {
     const deps = dependencies([]);
 
     await expect(resolveCliApplicationRoot("/workspace/packages", deps)).rejects.toThrow(

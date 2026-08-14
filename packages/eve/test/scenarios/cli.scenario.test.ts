@@ -283,7 +283,7 @@ describe("runCli", () => {
       error: vi.fn(),
       log: vi.fn(),
     };
-    const isEveProject = vi.fn(async () => true);
+    const findApplicationRoot = vi.fn(async () => process.cwd());
     const startHost = vi.fn(() => ({
       start: async () => {
         throw new Error("dev started");
@@ -293,12 +293,12 @@ describe("runCli", () => {
 
     await expect(
       runCli([], logger, {
-        isEveProject,
+        findApplicationRoot,
         startHost,
       }),
     ).rejects.toThrow("dev started");
 
-    expect(isEveProject).toHaveBeenCalledOnce();
+    expect(findApplicationRoot).toHaveBeenCalledOnce();
     expect(startHost).toHaveBeenCalledOnce();
   });
 
