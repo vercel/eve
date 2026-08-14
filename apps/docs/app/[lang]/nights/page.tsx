@@ -4,7 +4,8 @@ import Link from "next/link";
 import { NightsGalaxy } from "./nights-galaxy";
 
 const title = "eve eves";
-const description = "eve eves bring the community together after dark.";
+const description =
+  "eve eves are hands-on gatherings where developers come together to build the agents of tomorrow with eve and Vercel. The event pairs a practical, guided build with open networking, demos, and direct product feedback. You’ll leave with a working eve agent, new connections, and a clearer path from idea to production.";
 const ogImage = {
   url: "/eve-nights-og.png",
   width: 3200,
@@ -36,17 +37,17 @@ export const viewport: Viewport = {
 const events = [
   {
     city: "San Francisco",
-    date: "thursday, august 27, 17:30 pdt",
+    date: "Thursday, August 27, 5:30 PM PDT",
     href: "https://luma.com/eveSF",
   },
   {
     city: "New York",
-    date: "tuesday, september 8, 17:30 edt",
+    date: "Tuesday, September 8, 5:30 PM EDT",
     href: "https://luma.com/eveNY",
   },
   {
     city: "London",
-    date: "tuesday, september 15, 17:30 bst",
+    date: "Tuesday, September 15, 5:30 PM BST",
     href: "https://luma.com/eveLDN",
   },
 ] as const;
@@ -84,22 +85,23 @@ const NightsPage = () => (
             <span className="justify-self-start font-mono text-[14px] text-white/60">eve eves</span>
             <Link
               aria-label="back to eve.dev"
-              className="justify-self-center text-white transition-opacity hover:opacity-70"
+              className="justify-self-center text-white transition-opacity hover:opacity-70 [&>svg]:size-8"
               href="/"
             >
-              <LogoIconVercel size={18} />
+              <LogoIconVercel size={32} />
             </Link>
             <span className="justify-self-end font-mono text-[14px] text-white/60">2026</span>
           </div>
 
           <div className="-mx-3 flex w-[calc(100%+24px)] flex-col gap-2">
-            {events.map((event) => (
+            {events.map((event, index) => (
               <a
                 key={event.city}
                 data-nights-animated
-                className="group flex w-full touch-manipulation items-end justify-between rounded px-3 py-3 transition-colors hover:bg-white/5 focus-visible:bg-white/10 focus-visible:outline-none animate-[eve-nights-rise_700ms_120ms_ease-out_both]"
+                className="group flex w-full touch-manipulation items-end justify-between rounded px-3 py-3 transition-colors hover:bg-white/5 focus-visible:bg-white/10 focus-visible:outline-none animate-[eve-nights-rise_700ms_ease-out_both]"
                 href={event.href}
                 rel="noreferrer"
+                style={{ animationDelay: `${120 + index * 100}ms` }}
                 target="_blank"
               >
                 <span className="flex min-w-0 flex-col gap-0.5 pr-4">
