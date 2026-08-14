@@ -52,6 +52,18 @@ describe("resolveCliApplicationRoot", () => {
     await expect(resolveCliApplicationRoot("/repo/agent/tools", deps)).resolves.toBe("/repo");
   });
 
+  it("finds a named agent workspace member", async () => {
+    const deps = dependencies(async () => ({
+      agentRoot: "/repo/agents/billing/agent",
+      appRoot: "/repo/agents/billing",
+      layout: "nested",
+    }));
+
+    await expect(findCliApplicationRoot("/repo/agents/billing/tools", deps)).resolves.toBe(
+      "/repo/agents/billing",
+    );
+  });
+
   it("finds flat application roots", async () => {
     const deps = dependencies(async () => ({
       agentRoot: "/repo/agents/billing",
