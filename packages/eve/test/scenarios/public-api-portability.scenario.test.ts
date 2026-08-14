@@ -94,6 +94,48 @@ export default defineSandbox({
     },
   },
   {
+    descriptor: {
+      files: {
+        "agent/memory/user.ts": `import { defineMemory } from "eve/memory";
+import {
+  fileMemory,
+  inMemory,
+  type MemoryDocumentBackend,
+} from "eve/memory/file";
+import { vercelBlob, type VercelBlobBackendOptions } from "eve/memory/file/vercel";
+
+const blobOptions: VercelBlobBackendOptions = { prefix: "portable/memory" };
+const backend: MemoryDocumentBackend = process.env.VERCEL
+  ? vercelBlob(blobOptions)
+  : inMemory();
+
+export default defineMemory({
+  provider: fileMemory({ backend, maxEntries: 25 }),
+  scope: "shared",
+});
+`,
+      },
+      name: "file-memory-public-api-portability",
+    },
+    include: [
+      "src/public/memory/index.ts",
+      "src/public/memory/file/index.ts",
+      "src/public/memory/file/vercel.ts",
+    ],
+    name: "lets tsc typecheck file-memory providers and backends from public subpaths",
+    packageExports: {
+      "./memory": {
+        types: "./dist/src/public/memory/index.d.ts",
+      },
+      "./memory/file": {
+        types: "./dist/src/public/memory/file/index.d.ts",
+      },
+      "./memory/file/vercel": {
+        types: "./dist/src/public/memory/file/vercel.d.ts",
+      },
+    },
+  },
+  {
     descriptor: SLACK_ROUTE_PORTABILITY_DESCRIPTOR,
     include: ["src/public/channels/slack/index.ts", "src/public/definitions/channel.ts"],
     name: "lets tsc typecheck a default-exported slackChannel without extra annotations",

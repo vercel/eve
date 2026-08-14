@@ -111,6 +111,16 @@
       "import": "./dist/src/public/memory/scope.js",
       "default": "./dist/src/public/memory/scope.js"
     },
+    "./memory/file": {
+      "types": "./dist/src/public/memory/file/index.d.ts",
+      "import": "./dist/src/public/memory/file/index.js",
+      "default": "./dist/src/public/memory/file/index.js"
+    },
+    "./memory/file/vercel": {
+      "types": "./dist/src/public/memory/file/vercel.d.ts",
+      "import": "./dist/src/public/memory/file/vercel.js",
+      "default": "./dist/src/public/memory/file/vercel.js"
+    },
     "./tools/sleep": {
       "types": "./dist/src/public/tools/sleep.d.ts",
       "import": "./dist/src/public/tools/sleep.js",
