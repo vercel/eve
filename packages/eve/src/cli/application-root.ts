@@ -1,5 +1,5 @@
-import { readdir } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { access, readdir } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
 
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { DiscoveryProjectResolutionError, resolveDiscoveryProject } from "#discover/project.js";
@@ -11,6 +11,7 @@ interface ApplicationRootDirectoryEntry {
 
 export interface ResolveCliApplicationRootDependencies {
   readonly createPrompter: () => Prompter;
+  readonly pathExists: (path: string) => Promise<boolean>;
   readonly readDirectory: (
     path: string,
     options: { readonly withFileTypes: true },
@@ -20,6 +21,14 @@ export interface ResolveCliApplicationRootDependencies {
 
 const defaultDependencies: ResolveCliApplicationRootDependencies = {
   createPrompter,
+  async pathExists(path) {
+    try {
+      await access(path);
+      return true;
+    } catch {
+      return false;
+    }
+  },
   readDirectory: readdir,
   resolveDiscoveryProject,
 };
@@ -44,6 +53,19 @@ export async function findCliApplicationRoot(
   return await tryResolveApplicationRoot(cwd, dependencies);
 }
 
+async function hasAuthoredPackageBoundary(
+  appRoot: string,
+  dependencies: ResolveCliApplicationRootDependencies,
+): Promise<boolean> {
+  let directory = appRoot;
+  while (true) {
+    if (await dependencies.pathExists(join(directory, "package.json"))) return true;
+    const parent = dirname(directory);
+    if (parent === directory) return false;
+    directory = parent;
+  }
+}
+
 async function findChildApplicationRoots(
   cwd: string,
   dependencies: ResolveCliApplicationRootDependencies,
@@ -56,7 +78,8 @@ async function findChildApplicationRoots(
   const roots = await Promise.all(
     directories.map(async (directory) => {
       const appRoot = await tryResolveApplicationRoot(directory, dependencies);
-      return appRoot === directory ? appRoot : undefined;
+      if (appRoot !== directory) return undefined;
+      return (await hasAuthoredPackageBoundary(appRoot, dependencies)) ? appRoot : undefined;
     }),
   );
   return roots.filter((root): root is string => root !== undefined);

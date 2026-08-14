@@ -26,11 +26,16 @@ function projectNotFound(path: string): DiscoveryProjectResolutionError {
 
 function dependencies(input: {
   readonly directories?: readonly string[];
+  readonly packageRoots?: readonly string[];
   readonly projects?: Readonly<Record<string, { appRoot: string; layout?: "flat" | "nested" }>>;
   readonly select?: (options: unknown) => Promise<string>;
 }): ResolveCliApplicationRootDependencies {
+  const packageRoots = new Set(input.packageRoots ?? Object.keys(input.projects ?? {}));
   return {
     createPrompter: () => ({ select: input.select ?? vi.fn() }) as Prompter,
+    pathExists: vi.fn(async (path) =>
+      [...packageRoots].some((root) => path === `${root}/package.json`),
+    ),
     readDirectory: vi.fn(async () =>
       (input.directories ?? []).map((name) => ({ name, isDirectory: () => true })),
     ),
@@ -81,6 +86,37 @@ describe("resolveCliApplicationRoot", () => {
       options: [{ value: "/workspace/weather", label: "./weather" }],
       initialValue: "/workspace/weather",
     });
+  });
+
+  it("excludes a flat-shaped child without an authored package boundary", async () => {
+    const select = vi.fn();
+    const deps = dependencies({
+      directories: ["state-usage"],
+      packageRoots: [],
+      projects: { "/workspace/state-usage": { appRoot: "/workspace/state-usage", layout: "flat" } },
+      select,
+    });
+
+    await expect(
+      resolveCliApplicationRoot("/workspace", { interactive: true }, deps),
+    ).resolves.toBe("/workspace");
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("includes a flat child inside an authored package boundary", async () => {
+    const select = vi.fn(async () => "/workspace/billing");
+    const deps = dependencies({
+      directories: ["billing"],
+      packageRoots: ["/workspace"],
+      projects: {
+        "/workspace/billing": { appRoot: "/workspace/billing", layout: "flat" },
+      },
+      select,
+    });
+
+    await expect(
+      resolveCliApplicationRoot("/workspace", { interactive: true }, deps),
+    ).resolves.toBe("/workspace/billing");
   });
 
   it("does not treat a child's enclosing parent application as a child candidate", async () => {
