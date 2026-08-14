@@ -27,7 +27,11 @@ import {
   spawnPackageManager,
 } from "#setup/primitives/index.js";
 import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
-import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
+import {
+  addAgentToProject,
+  applyAddAgentToProjectPlan,
+  planAddAgentToProject,
+} from "#setup/scaffold/create/add-to-project.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { validateModelSlug } from "#setup/flows/model-source-change.js";
@@ -41,7 +45,10 @@ import {
 } from "#setup/scaffold/create/project.js";
 
 import { initAgentDevHandoff, initAgentReplPrompt } from "./agent-instructions.js";
-import { confirmInitInNonEmptyDirectory } from "./init-confirm.js";
+import {
+  confirmExistingPackageIntegration,
+  confirmInitInNonEmptyDirectory,
+} from "./init-confirm.js";
 import {
   cleanupFreshInitTarget,
   workspaceFailureNote,
@@ -63,10 +70,15 @@ export interface InitCommandOptions {
   model?: string;
   /** Reasoning effort written to the root agent config. Set by `--reasoning`. */
   reasoning?: AgentReasoningDefinition;
+  /** Applies a previewed existing-package integration without a TTY prompt. */
+  yes?: boolean;
 }
 
 export interface InitCommandDependencies {
   addAgentToProject: typeof addAgentToProject;
+  applyAddAgentToProjectPlan: typeof applyAddAgentToProjectPlan;
+  planAddAgentToProject: typeof planAddAgentToProject;
+  confirmExistingPackageIntegration: typeof confirmExistingPackageIntegration;
   confirmInitInNonEmptyDirectory: typeof confirmInitInNonEmptyDirectory;
   detectInvokingPackageManager: typeof detectInvokingPackageManager;
   detectPackageManager: typeof detectPackageManager;
@@ -84,6 +96,8 @@ export interface InitCommandDependencies {
 
 const defaultDependencies: InitCommandDependencies = {
   addAgentToProject,
+  applyAddAgentToProjectPlan,
+  confirmExistingPackageIntegration,
   confirmInitInNonEmptyDirectory,
   detectInvokingPackageManager,
   detectPackageManager,
@@ -91,6 +105,7 @@ const defaultDependencies: InitCommandDependencies = {
   isCodingAgentLaunch,
   now: () => performance.now(),
   runPackageManagerInstall,
+  planAddAgentToProject,
   scaffoldBaseProject,
   selectInitHandoff,
   spawnCodingAgentRepl,
@@ -164,13 +179,17 @@ async function addToExistingProject(
   }
 
   const manager = await dependencies.detectPackageManager(targetPath);
-  const result = await dependencies.addAgentToProject({
+  const plan = await dependencies.planAddAgentToProject({
     projectRoot: targetPath,
     model: options.model ?? DEFAULT_AGENT_MODEL_ID,
     reasoning: options.reasoning,
     packageManager: manager.kind,
     evePackage,
   });
+  if (!options.yes) {
+    await dependencies.confirmExistingPackageIntegration(plan.summary);
+  }
+  const result = await dependencies.applyAddAgentToProjectPlan(plan);
   return {
     packageManager: manager.kind,
     nodeEngineOverride: result.nodeEngineOverride,

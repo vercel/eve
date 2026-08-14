@@ -116,6 +116,11 @@ function withReleaseAgeExclusions(source: string): string {
   return lines.join("\n");
 }
 
+export function preparePnpmWorkspacePolicy(source: string | undefined): string {
+  if (source === undefined) return PNPM_WORKSPACE_CONTENT;
+  return withReleaseAgeExclusions(withSharpBuildPolicy(source));
+}
+
 async function ensurePnpmWorkspacePolicy(filePath: string): Promise<"skipped" | "written"> {
   if (!(await pathExists(filePath))) {
     await writeFile(filePath, PNPM_WORKSPACE_CONTENT, "utf8");
@@ -123,7 +128,7 @@ async function ensurePnpmWorkspacePolicy(filePath: string): Promise<"skipped" | 
   }
 
   const current = await readFile(filePath, "utf8");
-  const next = withReleaseAgeExclusions(withSharpBuildPolicy(current));
+  const next = preparePnpmWorkspacePolicy(current);
   if (next === current) {
     return "skipped";
   }

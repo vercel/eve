@@ -36,11 +36,14 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export async function patchPackageJson(
-  path: string,
+export interface PreparedPackageJsonPatch extends PackageJsonPatchResult {
+  bytes: Buffer;
+}
+
+export function preparePackageJsonPatch(
+  raw: string,
   patch: PackageJsonPatch,
-): Promise<PackageJsonPatchResult> {
-  const raw = await readFile(path, "utf8");
+): PreparedPackageJsonPatch {
   const parsed = JSON.parse(raw) as PackageJsonShape;
   let changed = false;
   let nodeEngineOverride: NodeEngineOverride | undefined;
@@ -82,8 +85,18 @@ export async function patchPackageJson(
     }
   }
 
-  if (changed) {
-    await writeFile(path, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
-  }
-  return { changed, nodeEngineOverride };
+  return {
+    bytes: Buffer.from(changed ? `${JSON.stringify(parsed, null, 2)}\n` : raw),
+    changed,
+    nodeEngineOverride,
+  };
+}
+
+export async function patchPackageJson(
+  path: string,
+  patch: PackageJsonPatch,
+): Promise<PackageJsonPatchResult> {
+  const prepared = preparePackageJsonPatch(await readFile(path, "utf8"), patch);
+  if (prepared.changed) await writeFile(path, prepared.bytes);
+  return { changed: prepared.changed, nodeEngineOverride: prepared.nodeEngineOverride };
 }

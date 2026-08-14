@@ -108,7 +108,7 @@ export function isPackageManagerWorkspaceMember(
   return workspaceRoot !== undefined && resolve(workspaceRoot) !== resolve(projectRoot);
 }
 
-function workspaceRootPackageJsonPath(
+export function workspaceRootPackageJsonPath(
   packageManager: PackageManagerKind,
   projectRoot: string,
 ): string | undefined {
@@ -162,7 +162,7 @@ async function ensurePackageManagerWorkspaceIncludesProject(
   }
 }
 
-function packageManagerRootOnlyPackageJsonPatch(
+export function packageManagerRootOnlyPackageJsonPatch(
   packageManager: PackageManagerKind,
   input: {
     readonly aiPackageVersion?: string;

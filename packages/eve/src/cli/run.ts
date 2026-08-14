@@ -239,7 +239,7 @@ function createCliProgram(
       "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
       parseReasoningOption,
     )
-    .option("-y, --yes", "Accepted for compatibility; has no effect")
+    .option("-y, --yes", "Confirm previewed existing-package integration edits")
     .action(
       async (
         target: string | undefined,
@@ -250,15 +250,12 @@ function createCliProgram(
           yes?: boolean;
         },
       ) => {
-        if (options.yes) {
-          logger.error("warning: --yes has no effect for eve init.");
-        }
-
         const { runInitCommand } = await import("#cli/commands/init.js");
         await runInitCommand(logger, applicationContext.root, target, {
           channelWebNextjs: options.channelWebNextjs,
           model: options.model,
           reasoning: options.reasoning,
+          yes: options.yes,
         });
       },
     );

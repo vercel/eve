@@ -321,6 +321,21 @@ describe("eve init compatibility flags", () => {
       channelWebNextjs: undefined,
       model: "openai/gpt-5.6-sol",
       reasoning: "high",
+      yes: undefined,
+    });
+  });
+
+  it("forwards explicit existing-package confirmation to init", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+
+    await runCli(["init", ".", "--yes"], logger);
+
+    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), ".", {
+      channelWebNextjs: undefined,
+      model: undefined,
+      reasoning: undefined,
+      yes: true,
     });
   });
 
