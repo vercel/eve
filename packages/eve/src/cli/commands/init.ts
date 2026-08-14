@@ -183,17 +183,16 @@ async function resolveScaffoldPackageManager(
 }
 
 async function scaffoldProject(
-  parentDirectory: string,
+  projectPath: string,
   projectName: string,
+  createInPlace: boolean,
   packageManager: PackageManagerKind,
   options: InitCommandOptions,
   dependencies: InitCommandDependencies,
   evePackage: EvePackageContract | undefined,
   overwriteExisting: boolean,
 ): Promise<{ projectPath: string; workspaceRootMutations: WorkspaceRootMutation[] }> {
-  const parentPath = resolve(parentDirectory);
-  const createInPlace = projectName === CURRENT_DIRECTORY_PROJECT_NAME;
-  const projectPath = createInPlace ? parentPath : join(parentPath, projectName);
+  const parentPath = resolve(projectPath, "..");
   const populateExistingEmptyDirectory =
     !createInPlace && (await pathExists(projectPath)) && (await readdir(projectPath)).length === 0;
   if (!createInPlace && (await pathExists(projectPath)) && !populateExistingEmptyDirectory) {
@@ -331,12 +330,7 @@ async function runInitSteps(input: {
   const { dependencies, logger, options, parentDirectory, target } = input;
   const debug = isLogLevelEnabled("debug");
   const agentLaunched = await dependencies.isCodingAgentLaunch();
-  const initTarget = await resolveInitTarget({
-    agentLaunched,
-    confirmInitInNonEmptyDirectory: dependencies.confirmInitInNonEmptyDirectory,
-    parentDirectory,
-    target,
-  });
+  const initTarget = await resolveInitTarget({ parentDirectory, target });
   const evePackage = resolveInitEvePackageOverride();
 
   const progress = startCliLiveRow(logger);
@@ -359,8 +353,9 @@ async function runInitSteps(input: {
       let scaffold: Awaited<ReturnType<typeof scaffoldProject>>;
       try {
         scaffold = await scaffoldProject(
-          parentDirectory,
+          initTarget.projectPath,
           initTarget.projectName,
+          initTarget.createInPlace,
           packageManager,
           options,
           dependencies,
@@ -392,7 +387,7 @@ async function runInitSteps(input: {
         packageManager,
         preservedTargetEntries: initTarget.preservedEntries,
         projectPath: scaffold.projectPath,
-        retryCommand: `eve init ${initTarget.projectName}`,
+        retryCommand: `eve init ${initTarget.projectPath}`,
         workspaceMember,
         workspaceRootMutations: scaffold.workspaceRootMutations,
       };
