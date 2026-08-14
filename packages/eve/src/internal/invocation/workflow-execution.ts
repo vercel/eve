@@ -28,16 +28,10 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import { parseJsonValue } from "#shared/json.js";
 
 export class WorkflowAgentInvocationExecution {
-  readonly #channelName: string;
   readonly #createSession: RouteSessionCreator;
   readonly #from: ChannelFrom;
 
-  constructor(input: {
-    readonly channelName: string;
-    readonly createSession: RouteSessionCreator;
-    readonly from: ChannelFrom;
-  }) {
-    this.#channelName = input.channelName;
+  constructor(input: { readonly createSession: RouteSessionCreator; readonly from: ChannelFrom }) {
     this.#createSession = input.createSession;
     this.#from = input.from;
   }
@@ -51,7 +45,7 @@ export class WorkflowAgentInvocationExecution {
     const handle = await this.#createSession({
       auth: input.auth,
       capabilities: { requestInput: true },
-      continuationToken: `${this.#channelName}:${continuationToken}`,
+      continuationToken,
       externalInvocation: {
         continuationToken,
         ownerKey: invocationOwnerKey(input.auth),

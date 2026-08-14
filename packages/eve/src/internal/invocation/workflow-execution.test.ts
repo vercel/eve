@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RunHandle, SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
 import {
   buildInvocationAttributes,
@@ -9,6 +9,7 @@ import {
   invocationOwnerKey,
 } from "#internal/invocation/metadata.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
+import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 
@@ -35,7 +36,7 @@ const auth: SessionAuthContext = {
   principalType: "user",
 };
 
-const createSession = vi.fn<() => Promise<RunHandle>>();
+const createSession = vi.fn<RouteSessionCreator>();
 const deliver = vi.fn();
 const from = vi.fn(() => ({ [INTERNAL_CHANNEL_DELIVER]: deliver }) as never);
 
@@ -59,10 +60,13 @@ describe("WorkflowAgentInvocationExecution", () => {
     expect(createSession).toHaveBeenCalledWith(
       expect.objectContaining({
         capabilities: { requestInput: true },
+        continuationToken: expect.stringMatching(/^invocation:/),
         externalInvocation: expect.objectContaining({ continuationToken: expect.any(String) }),
         mode: "task",
       }),
     );
+    const createInput = createSession.mock.calls[0]?.[0];
+    expect(createInput?.externalInvocation?.continuationToken).toBe(createInput?.continuationToken);
     expect(invocation).toMatchObject({
       createdAt: "2026-07-20T00:00:00.000Z",
       invocationId: "wrun_invocation",
@@ -431,7 +435,7 @@ describe("WorkflowAgentInvocationExecution", () => {
 });
 
 function execution(): WorkflowAgentInvocationExecution {
-  return new WorkflowAgentInvocationExecution({ channelName: "mcp", createSession, from });
+  return new WorkflowAgentInvocationExecution({ createSession, from });
 }
 
 function run(input: { ownerKey?: string; status: string }) {

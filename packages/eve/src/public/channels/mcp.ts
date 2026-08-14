@@ -350,7 +350,6 @@ async function handleMcpRequest(
   const description =
     typeof agentInfo.agent.description === "string" ? agentInfo.agent.description : undefined;
   const execution = new WorkflowAgentInvocationExecution({
-    channelName,
     createSession,
     from: args.from,
   });
