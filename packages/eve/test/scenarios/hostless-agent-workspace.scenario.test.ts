@@ -1,4 +1,4 @@
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
@@ -40,12 +40,6 @@ describe("hostless agent workspace", () => {
       installDependencies: true,
       name: "hostless-agent-workspace",
     });
-    const packageJsonPath = join(app.appRoot, "package.json");
-    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
-    packageJson.eve = { agents: ["agents/*"] };
-    packageJson.scripts = { build: "eve build" };
-    await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
-
     await runPnpmCommand({ args: ["exec", "vercel", "build", "--yes"], cwd: app.appRoot });
 
     const outputRoot = join(app.appRoot, ".vercel", "output");

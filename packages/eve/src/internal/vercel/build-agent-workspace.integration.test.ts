@@ -1,4 +1,4 @@
-import { lstat, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -43,12 +43,9 @@ describe("buildAgentWorkspace", () => {
         src: "^/eve/agents/support/eve/v1/(.*)$",
       },
     ]);
-    const serviceRoot = await lstat(join(root, ".eve", "vercel-services", "eve-support"));
-    const serviceOutput = await lstat(
-      join(root, ".eve", "vercel-services", "eve-support", ".vercel", "output"),
-    );
-    expect(serviceRoot.isDirectory()).toBe(true);
-    expect(serviceOutput.isSymbolicLink()).toBe(true);
+    await expect(
+      access(join(root, ".eve", "vercel-services", "eve-support")),
+    ).resolves.toBeUndefined();
 
     expect(config.services["eve-support"]).toEqual({
       buildCommand:

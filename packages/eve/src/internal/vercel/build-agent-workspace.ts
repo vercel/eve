@@ -1,4 +1,4 @@
-import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { AgentWorkspace } from "#internal/agent-workspace.js";
@@ -8,12 +8,6 @@ import { resolveAgentWorkspaceDeploymentMode } from "#internal/vercel/agent-work
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 
 const VERCEL_BUILD_OUTPUT_VERSION = 3;
-
-function resolveMemberBuildCommand(appRoot: string): string {
-  return `node ${quoteVercelShellArgument(
-    toVercelRelativePath(appRoot, resolveEveBinaryPath(appRoot)),
-  )} build`;
-}
 
 /** Emit the inferred Vercel Services project for a strict hostless workspace. */
 export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<string> {
@@ -26,7 +20,9 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
   const agents = workspace.members.map((member) => ({
     agent: {
       appRoot: member.appRoot,
-      buildCommand: resolveMemberBuildCommand(member.appRoot),
+      buildCommand: `node ${quoteVercelShellArgument(
+        toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
+      )} build`,
       name: member.name,
       publicRoutePrefix: `/eve/agents/${member.name}`,
     },
@@ -41,10 +37,7 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
   await rm(outputDirectory, { force: true, recursive: true });
   await mkdir(outputDirectory, { recursive: true });
   await Promise.all(
-    assembled.rootDirectories.map(async (rootDirectory) => {
-      await mkdir(join(rootDirectory, ".vercel"), { recursive: true });
-      await symlink(outputDirectory, join(rootDirectory, ".vercel", "output"), "junction");
-    }),
+    assembled.rootDirectories.map((rootDirectory) => mkdir(rootDirectory, { recursive: true })),
   );
   await writeFile(
     join(outputDirectory, "config.json"),
