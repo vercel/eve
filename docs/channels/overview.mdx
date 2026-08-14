@@ -69,6 +69,7 @@ eve's first-class channels use eve-owned runtimes for webhook handling, verifica
 | ------------------------------------------- | ---------------------------------------------------------- |
 | A web app / browser chat UI                 | eve channel + [`useEveAgent`](../guides/frontend/overview) |
 | Local tooling, SDK clients, `curl`          | [eve HTTP channel](./eve) (default)                        |
+| MCP clients delegating durable work         | [MCP](./mcp)                                               |
 | Slack mentions, DMs, buttons                | [Slack](./slack)                                           |
 | iMessage                                    | [Photon](./photon)                                         |
 | Discord slash commands, components          | [Discord](./discord)                                       |
@@ -89,6 +90,7 @@ Where an eve agent communicates with people, you may be required to disclose tha
 ## What to read next
 
 - [Slack](./slack): the most common platform channel, end to end
+- [MCP](./mcp): expose the agent as a durable invocation service
 - [Custom channels](./custom): build a channel for any surface with `defineChannel`
 - [Frontend](../guides/frontend/overview): browser chat on the eve channel with `useEveAgent`
 - [Integrations](/integrations): browse every built-in channel in one gallery using the Channels filter
