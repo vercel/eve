@@ -89,7 +89,7 @@ describe("CLI command registration", () => {
       resolveApplicationRoot: resolveRoot,
     });
 
-    expect(resolveRoot).toHaveBeenCalledWith(resolve(process.cwd()));
+    expect(resolveRoot).toHaveBeenCalledWith(resolve(process.cwd()), { interactive: false });
     expect(runSetCommand).toHaveBeenCalledWith(logger, "/workspace/weather", {
       model: "openai/gpt-5.6-sol",
       reasoning: undefined,

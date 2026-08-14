@@ -1,44 +1,122 @@
+import { resolve } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
-import { findCliApplicationRoot, resolveCliApplicationRoot } from "#cli/application-root.js";
+import {
+  findCliApplicationRoot,
+  resolveCliApplicationRoot,
+  type ResolveCliApplicationRootDependencies,
+} from "#cli/application-root.js";
+import { DiscoveryProjectResolutionError } from "#discover/project.js";
+import {
+  createDiscoverErrorDiagnostic,
+  DISCOVER_PROJECT_NOT_FOUND,
+} from "#discover/diagnostics.js";
+import type { Prompter } from "#setup/prompter.js";
 
-function dependencies(projects: readonly string[]) {
-  const knownProjects = new Set(projects);
-  return { isEveProject: vi.fn(async (path: string) => knownProjects.has(path)) };
+function projectNotFound(path: string): DiscoveryProjectResolutionError {
+  return new DiscoveryProjectResolutionError(
+    createDiscoverErrorDiagnostic({
+      code: DISCOVER_PROJECT_NOT_FOUND,
+      message: `Could not resolve an eve agent root from "${path}".`,
+      sourcePath: path,
+    }),
+  );
+}
+
+function dependencies(input: {
+  readonly directories?: readonly string[];
+  readonly projects?: Readonly<Record<string, { appRoot: string; layout?: "flat" | "nested" }>>;
+  readonly select?: (options: unknown) => Promise<string>;
+}): ResolveCliApplicationRootDependencies {
+  return {
+    createPrompter: () => ({ select: input.select ?? vi.fn() }) as Prompter,
+    readDirectory: vi.fn(async () =>
+      (input.directories ?? []).map((name) => ({ name, isDirectory: () => true })),
+    ),
+    resolveDiscoveryProject: vi.fn(async (path: string | undefined) => {
+      const resolvedPath = resolve(path ?? process.cwd());
+      const project = input.projects?.[resolvedPath];
+      if (project === undefined) throw projectNotFound(resolvedPath);
+      return {
+        agentRoot: project.layout === "flat" ? project.appRoot : `${project.appRoot}/agent`,
+        appRoot: project.appRoot,
+        layout: project.layout ?? "nested",
+      };
+    }),
+  };
 }
 
 describe("resolveCliApplicationRoot", () => {
-  it("uses the current application root", async () => {
-    const deps = dependencies(["/repo"]);
+  it("uses the application root resolved by project discovery", async () => {
+    const deps = dependencies({ projects: { "/repo/agent/tools": { appRoot: "/repo" } } });
 
-    await expect(resolveCliApplicationRoot("/repo", deps)).resolves.toBe("/repo");
-    expect(deps.isEveProject).toHaveBeenCalledTimes(1);
+    await expect(resolveCliApplicationRoot("/repo/agent/tools", {}, deps)).resolves.toBe("/repo");
+    expect(deps.readDirectory).not.toHaveBeenCalled();
   });
 
-  it("uses the nearest ancestor application root", async () => {
-    const deps = dependencies(["/repo", "/repo/apps/agent"]);
+  it("finds flat application roots", async () => {
+    const deps = dependencies({
+      projects: { "/repo/agents/billing": { appRoot: "/repo/agents/billing", layout: "flat" } },
+    });
 
-    await expect(resolveCliApplicationRoot("/repo/apps/agent/agent/tools", deps)).resolves.toBe(
-      "/repo/apps/agent",
+    await expect(findCliApplicationRoot("/repo/agents/billing", deps)).resolves.toBe(
+      "/repo/agents/billing",
     );
-    expect(deps.isEveProject.mock.calls.map(([path]) => path)).toEqual([
-      "/repo/apps/agent/agent/tools",
-      "/repo/apps/agent/agent",
-      "/repo/apps/agent",
-    ]);
   });
 
-  it("returns undefined when finding from outside an application", async () => {
-    const deps = dependencies([]);
+  it("always asks before using an immediate child application", async () => {
+    const select = vi.fn(async () => "/workspace/weather");
+    const deps = dependencies({
+      directories: ["weather", "notes"],
+      projects: { "/workspace/weather": { appRoot: "/workspace/weather" } },
+      select,
+    });
 
-    await expect(findCliApplicationRoot("/workspace/packages", deps)).resolves.toBeUndefined();
+    await expect(
+      resolveCliApplicationRoot("/workspace", { interactive: true }, deps),
+    ).resolves.toBe("/workspace/weather");
+    expect(select).toHaveBeenCalledWith({
+      message: "Which eve application should run this command?",
+      options: [{ value: "/workspace/weather", label: "./weather" }],
+      initialValue: "/workspace/weather",
+    });
   });
 
-  it("fails when resolving from outside an application", async () => {
-    const deps = dependencies([]);
+  it("does not treat a child's enclosing parent application as a child candidate", async () => {
+    const deps = dependencies({
+      directories: ["nested"],
+      projects: { "/workspace/nested": { appRoot: "/workspace" } },
+    });
 
-    await expect(resolveCliApplicationRoot("/workspace/packages", deps)).rejects.toThrow(
-      "No eve application found in this directory or its ancestors.",
+    await expect(
+      resolveCliApplicationRoot("/workspace", { interactive: true }, deps),
+    ).resolves.toBe("/workspace");
+  });
+
+  it("lists child applications instead of choosing non-interactively", async () => {
+    const deps = dependencies({
+      directories: ["weather"],
+      projects: { "/workspace/weather": { appRoot: "/workspace/weather" } },
+    });
+
+    await expect(
+      resolveCliApplicationRoot("/workspace", { interactive: false }, deps),
+    ).rejects.toThrow("Run the command from inside one of these applications:\n  - ./weather");
+  });
+
+  it("preserves cwd when no enclosing or immediate-child application exists", async () => {
+    const deps = dependencies({ directories: ["packages"] });
+
+    await expect(resolveCliApplicationRoot("./workspace", {}, deps)).resolves.toBe(
+      resolve("./workspace"),
     );
+  });
+
+  it("does not hide unexpected discovery failures", async () => {
+    const deps = dependencies({});
+    vi.mocked(deps.resolveDiscoveryProject).mockRejectedValue(new Error("read failed"));
+
+    await expect(resolveCliApplicationRoot("/workspace", {}, deps)).rejects.toThrow("read failed");
   });
 });
