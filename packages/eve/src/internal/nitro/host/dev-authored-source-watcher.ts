@@ -8,6 +8,7 @@ import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/ty
 import type { DevelopmentWorkspaceExtension } from "#internal/nitro/host/dev-workspace-extensions.js";
 import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import { getDevelopmentEnvironmentFilePaths } from "#cli/dev/environment.js";
+import { gatewayCredentialPreferencePath } from "#setup/gateway-credential-preference.js";
 import {
   AUTHORED_ARTIFACTS_UPDATED_LOG_LINE,
   STRUCTURAL_RELOAD_LOG_LINE,
@@ -217,6 +218,7 @@ async function resolveAuthoredWatchPaths(
     join(host.appRoot, "jsconfig.json"),
     join(host.appRoot, "tsconfig.json"),
     join(host.appRoot, TS_CONFIG_GLOB_NAME),
+    gatewayCredentialPreferencePath(host.appRoot),
   ]);
   const tsconfigPaths = await resolveTsConfigWatchPaths(host.appRoot);
   const sourceSnapshotWatchPaths = await resolveDevelopmentSourceSnapshotWatchPaths(host.appRoot);
@@ -331,10 +333,14 @@ function shouldIgnoreWatcherPath(
   path: string,
   workspaceExtensions: readonly DevelopmentWorkspaceExtension[],
 ): boolean {
-  const pathParts = normalize(path).split(sep).filter(Boolean);
+  const normalizedPath = normalize(path);
+  const pathParts = normalizedPath.split(sep).filter(Boolean);
+  const gatewayCredentialPreference =
+    pathParts.at(-2) === ".eve" && pathParts.at(-1) === "gateway-credential.json";
 
   return (
-    pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part)) ||
+    (!gatewayCredentialPreference &&
+      pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part))) ||
     workspaceExtensions.some((extension) => isPathInsideOrEqual(path, extension.config.outDir))
   );
 }

@@ -1734,7 +1734,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /** Commits one command outcome, promoting explicit status to a top-level result. */
   renderCommandResult(text: string, tone?: "success" | "error"): void {
-    const content = stripTerminalControls(text);
+    const content = stripAnsi(text);
     if (content.trim().length === 0) return;
     this.#start();
     this.#pushBlock(

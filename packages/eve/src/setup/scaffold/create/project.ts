@@ -4,6 +4,10 @@ import { basename, join, resolve } from "node:path";
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
 import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
+import {
+  isChatGptModelSelection,
+  parseChatGptModelSelection,
+} from "../../../shared/chatgpt-model.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { blockingCreateInPlaceEntries } from "../create-in-place.js";
@@ -100,13 +104,24 @@ export function agentTemplateFiles(
   reasoning?: AgentReasoningDefinition,
 ): Record<string, string> {
   return {
-    "agent/agent.ts": BASE_AGENT_TEMPLATE.replaceAll("__EVE_INIT_MODEL__", model).replaceAll(
-      "__EVE_INIT_REASONING__",
-      reasoningTemplateLine(reasoning),
-    ),
+    "agent/agent.ts": renderAgentTemplate(model, reasoning),
     "agent/channels/eve.ts": WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"],
     "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
   };
+}
+
+function renderAgentTemplate(
+  model: string,
+  reasoning: AgentReasoningDefinition | undefined,
+): string {
+  const chatGptModelId = parseChatGptModelSelection(model);
+  if (chatGptModelId !== undefined) {
+    return `import { defineAgent } from "eve";\nimport { chatgpt } from "eve/models/openai";\n\nexport default defineAgent({\n  model: chatgpt(${JSON.stringify(chatGptModelId)}),\n${reasoningTemplateLine(reasoning)}});\n`;
+  }
+  return BASE_AGENT_TEMPLATE.replaceAll("__EVE_INIT_MODEL__", model).replaceAll(
+    "__EVE_INIT_REASONING__",
+    reasoningTemplateLine(reasoning),
+  );
 }
 
 function reasoningTemplateLine(reasoning: AgentReasoningDefinition | undefined): string {
@@ -116,6 +131,9 @@ function reasoningTemplateLine(reasoning: AgentReasoningDefinition | undefined):
 }
 
 function renderTemplate(content: string, ctx: TemplateContext): string {
+  if (content === BASE_AGENT_TEMPLATE && isChatGptModelSelection(ctx.model)) {
+    return renderAgentTemplate(ctx.model, ctx.reasoning);
+  }
   return content
     .replaceAll("__EVE_INIT_APP_NAME__", ctx.appName)
     .replaceAll("__EVE_INIT_MODEL__", ctx.model)

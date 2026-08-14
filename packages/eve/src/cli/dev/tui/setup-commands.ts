@@ -46,6 +46,8 @@ export interface TuiSetupCommandInput {
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
+  /** Live ChatGPT identity shown only inside model configuration UI. */
+  chatGptAccountLabel?: string;
   /** Suspends development runtime artifacts while registry installation and setup mutate them. */
   withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
   /** Test seam; defaults to the real TUI-native prompter over `renderer`. */
@@ -213,6 +215,7 @@ async function executeSetupCommand(
           appRoot,
           prompter,
           signal,
+          chatGptAccountLabel: input.chatGptAccountLabel,
           deps: {
             pickModelSettings: (request) => renderer.readModelEditor(request),
             runProviderFlow: (providerInput) =>
@@ -222,6 +225,8 @@ async function executeSetupCommand(
         if (input.initialModelStep !== undefined) {
           modelInput.initialStep = input.initialModelStep;
         }
+        modelInput.withExclusiveTerminal = (task) =>
+          renderer.withInheritedStdio(() => input.withExclusiveTerminal?.(task) ?? task());
         const result = await flows.runModelFlow(modelInput);
         if (result.kind === "cancelled") {
           return {
@@ -275,6 +280,13 @@ async function executeSetupCommand(
         if (result.kind === "needs-link") {
           return {
             message: "Not linked to a Vercel project — run /model to connect one first.",
+            preserveFlowDiagnostics: true,
+          };
+        }
+        if (result.kind === "local-model") {
+          return {
+            message:
+              "ChatGPT subscription models are local-only. Switch to an AI Gateway or server-authenticated model before deploying.",
             preserveFlowDiagnostics: true,
           };
         }
@@ -505,33 +517,15 @@ function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
  * without linking anything.
  */
 function providerOutcomeMessage(outcome: ModelProviderOutcome): string {
-  const { resolution, status } = outcome;
-  if (status.kind === "gateway-project") {
-    if (resolution === undefined) {
-      return "Project linked. No model credential found; set AI_GATEWAY_API_KEY in .env.local.";
-    }
-    if (resolution.credential === "oidc") {
-      return "Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.";
-    }
-    // A gateway key outranks the project's OIDC token at runtime — claiming
-    // the OIDC connection while the key authenticates every call would split
-    // this message from the status bar and the actual resolution.
-    if (resolution.shadowedOidc !== undefined) {
-      const from = resolution.source.kind === "shell" ? "shell" : resolution.source.path;
-      const remove =
-        resolution.source.kind === "shell"
-          ? "unset it in your shell"
-          : `remove it from ${resolution.source.path}`;
-      return (
-        `Project linked. AI_GATEWAY_API_KEY (${from}) outranks the project's ` +
-        `VERCEL_OIDC_TOKEN and stays the active credential — ${remove} to run on the project.`
-      );
-    }
-    return "Project linked. Connected to AI Gateway via AI_GATEWAY_API_KEY.";
+  const { status } = outcome;
+  if (outcome.selected === "gateway-project") {
+    return status.kind === "gateway-project"
+      ? "Project linked. Connected to AI Gateway via Project OIDC."
+      : "AI Gateway via Project selected. Complete project linking to connect.";
   }
   if (status.kind === "gateway-key") {
     const where = status.source.kind === "shell" ? "your shell" : status.source.path;
     return `Connected to AI Gateway via ${status.envKey} in ${where}.`;
   }
-  return "Provider updated — no gateway credential detected; set AI_GATEWAY_API_KEY in .env.local.";
+  return "AI Gateway via API key selected — set AI_GATEWAY_API_KEY to connect.";
 }

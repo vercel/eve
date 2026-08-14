@@ -89,7 +89,7 @@ A few additional helpers round out the set: `defineGlobTool`, `defineGrepTool`, 
 | `eve/context`                                               | `defineState`, session and state types                                                                    |
 | `eve/sandbox`                                               | `defineSandbox`, backends                                                                                 |
 | `eve/instrumentation`                                       | `defineInstrumentation`, `isChannel`                                                                      |
-| `eve/models/openai`                                         | `experimental_chatgpt`                                                                                    |
+| `eve/models/openai`                                         | `chatgpt`, deprecated `experimental_chatgpt`                                                              |
 | `eve/evals`                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                                                 |
 | `eve/evals/expect`                                          | `includes`, `equals`, `matches`, `similarity`                                                             |
 | `eve/evals/reporters`                                       | `Braintrust`, `JUnit`, `EvalReporter`                                                                     |
@@ -102,19 +102,34 @@ Exported types ship from the same entrypoint as the helper they describe (for ex
 
 ## ChatGPT subscription models
 
-`experimental_chatgpt()` from `eve/models/openai` serves an OpenAI model through the local Codex login and bills the ChatGPT subscription. With no argument, it selects `gpt-5.6-sol`:
+`chatgpt()` from `eve/models/openai` serves an OpenAI model through the local Codex login and bills the ChatGPT subscription. With no argument, it selects `gpt-5.6-sol`:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
-import { experimental_chatgpt } from "eve/models/openai";
+import { chatgpt } from "eve/models/openai";
 
 export default defineAgent({
-  model: experimental_chatgpt(),
+  model: chatgpt(),
   modelContextWindowTokens: 200_000,
 });
 ```
 
-Pass another bare OpenAI model slug to override the default. The helper reads credentials from `codex login`, so use it only where that local login exists.
+Pass another bare OpenAI model slug to override the default. `experimental_chatgpt()` remains as a deprecated alias.
+
+Authentication is delegated entirely to the Codex CLI:
+
+1. Install or upgrade `codex` and run `codex login`.
+2. `eve dev` asks `codex app-server` for a usable access token. Codex owns refresh and credential persistence; eve does not read or write Codex login files.
+3. Normal token expiry is refreshed automatically. If the login is revoked, the status line shows `codex login`; completing login inside or outside eve repairs the running dev session without restarting it.
+
+ChatGPT subscription credentials are local user credentials. `eve deploy` blocks agents whose active model is `chatgpt()` because those credentials are not uploaded to a deployment. Use an environment branch with a deployable model, or switch to an AI Gateway model before deploying.
+
+Troubleshooting:
+
+- **`chatgpt-sub login`**: run `codex login`.
+- **`chatgpt-sub unavailable`**: ensure `codex` is installed, current, and available on `PATH`; then restart the command.
+- **Model rejected by the backend**: model availability depends on the signed-in ChatGPT account. Pick another supported OpenAI model.
+- **SSH/headless login**: run `codex login --device-auth` in another terminal, then return to the still-running `eve dev` session.
 
 ## What to read next
 

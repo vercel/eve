@@ -13,6 +13,7 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import {
   MODEL_MENU_MESSAGE,
+  readModelProviderState,
   runModelFlow,
   type ModelFlowDeps,
   type ModelSettingsRequest,
@@ -75,10 +76,13 @@ function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps
     ),
     selectModel: { fetchModels: async () => CATALOG },
     pickModelSettings: vi.fn(async () => undefined),
-    detectProviderStatus: vi.fn(
-      async () => ({ kind: "gateway-project", projectName: "my-agent" }) as const,
-    ),
+    readProviderState: vi.fn(async () => ({
+      available: { gatewayProject: { projectName: "my-agent" } },
+      preferredGatewayCredential: undefined,
+    })),
     runProviderFlow: vi.fn(async () => ({ kind: "done" }) as const),
+    ensureChatGptAuth: vi.fn(async () => {}),
+    writeGatewayCredentialPreference: vi.fn(async () => {}),
     ...overrides,
   };
 }
@@ -120,6 +124,21 @@ function scriptedPrompter(input: { menu: (PrompterValue | "esc")[] }) {
   return { ...fake, menuPaints };
 }
 
+describe("readModelProviderState", () => {
+  it("keeps available credentials separate from persisted selection", async () => {
+    const state = await readModelProviderState(
+      APP_ROOT,
+      {},
+      {
+        AI_GATEWAY_API_KEY: "available-key",
+      },
+    );
+
+    expect(state.available.gatewayKey).toEqual({ source: { kind: "shell" } });
+    expect(state.preferredGatewayCredential).toBeUndefined();
+  });
+});
+
 describe("runModelFlow", () => {
   it("paints a stacked menu with the running model and configured provider", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
@@ -150,6 +169,146 @@ describe("runModelFlow", () => {
         initialValue: "model",
       },
     ]);
+  });
+
+  it("derives ChatGPT from authored routing even when Gateway credentials and a preference exist", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
+    const deps = flowDeps({
+      readCurrentModel: vi.fn(async () => ({
+        id: "chatgpt/gpt-5.6-sol",
+        routing: { kind: "external", provider: "codex" } as const,
+        reasoning: null,
+        serviceTier: { kind: "standard" } as const,
+        editable: true,
+        settingsEditable: true,
+      })),
+      readProviderState: vi.fn(async () => ({
+        available: { gatewayProject: { projectName: "my-agent" } },
+        preferredGatewayCredential: "project" as const,
+      })),
+    });
+
+    await runModelFlow({
+      appRoot: APP_ROOT,
+      prompter,
+      chatGptAccountLabel: "person@example.com",
+      deps,
+    });
+
+    expect(menuPaints[0]?.options[1]).toMatchObject({
+      value: "provider",
+      label: "ChatGPT login",
+      hint: "ChatGPT subscription (person@example.com)",
+      description: "Authenticate through the Codex CLI",
+    });
+    expect(menuPaints[0]?.notices).toEqual([]);
+  });
+
+  it("selects ChatGPT under Change model through exclusive terminal auth", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["model", "done"] });
+    const ensureChatGptAuth = vi.fn(async () => {});
+    const deps = flowDeps({
+      ensureChatGptAuth,
+      pickModelSettings: vi.fn(async () => ({ model: "chatgpt/gpt-5.6-sol" })),
+    });
+    const exclusiveCalls: string[] = [];
+    const withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
+      exclusiveCalls.push("called");
+      return task();
+    };
+
+    await expect(
+      runModelFlow({ appRoot: APP_ROOT, prompter, deps, withExclusiveTerminal }),
+    ).resolves.toEqual({
+      kind: "done",
+      modelMessage: `Model changed to ${pc.bold("chatgpt/gpt-5.6-sol")}. Live on your next prompt.`,
+    });
+
+    expect(menuPaints[0]?.options.map((option) => option.value)).toEqual([
+      "model",
+      "provider",
+      "done",
+    ]);
+    expect(menuPaints[1]?.options[0]?.hint).toBe("chatgpt/gpt-5.6-sol");
+    expect(menuPaints[1]?.options[1]?.label).toBe("ChatGPT login");
+    expect(menuPaints[1]?.initialValue).toBe("done");
+    expect(exclusiveCalls).toEqual(["called"]);
+    expect(ensureChatGptAuth).toHaveBeenCalledWith({ interactive: true });
+    expect(deps.applySettings).toHaveBeenCalledWith({
+      appRoot: APP_ROOT,
+      patch: {
+        model: { kind: "set", value: "chatgpt/gpt-5.6-sol" },
+        reasoning: { kind: "keep" },
+        gatewayServiceTier: { kind: "remove" },
+      },
+    });
+    expect(deps.runProviderFlow).not.toHaveBeenCalled();
+    expect(deps.writeGatewayCredentialPreference).not.toHaveBeenCalled();
+  });
+
+  it("switches ChatGPT back to Gateway through the model selection", async () => {
+    const { prompter } = scriptedPrompter({ menu: ["model", "done"] });
+    const applySettings = vi.fn<ModelFlowDeps["applySettings"]>(async ({ patch }) => ({
+      kind: "changed",
+      changed: ["model"],
+      model: patch.model.kind === "set" ? patch.model.value : undefined,
+    }));
+    const deps = flowDeps({
+      readCurrentModel: vi.fn(async () => ({
+        id: "chatgpt/gpt-5.6-sol",
+        routing: { kind: "external", provider: "codex" } as const,
+        reasoning: null,
+        serviceTier: { kind: "standard" } as const,
+        editable: true,
+        settingsEditable: true,
+      })),
+      readProviderState: vi.fn(async () => ({
+        available: { gatewayProject: { projectName: "my-agent" } },
+        preferredGatewayCredential: "project" as const,
+      })),
+      pickModelSettings: vi.fn(async () => ({ model: "openai/gpt-5.5" })),
+      applySettings,
+    });
+
+    await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
+
+    expect(applySettings).toHaveBeenCalledWith({
+      appRoot: APP_ROOT,
+      patch: {
+        model: { kind: "set", value: "openai/gpt-5.5" },
+        reasoning: { kind: "keep" },
+        gatewayServiceTier: { kind: "keep" },
+      },
+    });
+    expect(deps.ensureChatGptAuth).not.toHaveBeenCalled();
+    expect(deps.writeGatewayCredentialPreference).not.toHaveBeenCalled();
+  });
+
+  it("keeps ChatGPT authentication on the login row instead of the Gateway picker", async () => {
+    const { prompter } = scriptedPrompter({ menu: ["provider", "done"] });
+    const deps = flowDeps({
+      readCurrentModel: vi.fn(async () => ({
+        id: "chatgpt/gpt-5.6-sol",
+        routing: { kind: "external", provider: "codex" } as const,
+        reasoning: null,
+        serviceTier: { kind: "standard" } as const,
+        editable: true,
+        settingsEditable: true,
+      })),
+      readProviderState: vi.fn(async () => ({
+        available: { gatewayKey: { source: { kind: "shell" as const } } },
+        preferredGatewayCredential: "api-key" as const,
+      })),
+    });
+
+    await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
+      kind: "done",
+      modelMessage: "ChatGPT login ready.",
+    });
+
+    expect(deps.ensureChatGptAuth).toHaveBeenCalledWith({ interactive: true });
+    expect(deps.runProviderFlow).not.toHaveBeenCalled();
+    expect(deps.applySettings).not.toHaveBeenCalled();
   });
 
   it("summarizes authored reasoning and Fast mode on the model row hint", async () => {
@@ -183,7 +342,10 @@ describe("runModelFlow", () => {
       })),
       // Even though detection finds nothing, external routing must NOT surface
       // the "Configure model access" gateway UX.
-      detectProviderStatus: vi.fn(async () => ({ kind: "unset" }) as const),
+      readProviderState: vi.fn(async () => ({
+        available: {},
+        preferredGatewayCredential: undefined,
+      })),
     });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
@@ -293,14 +455,10 @@ describe("runModelFlow", () => {
         captured = request;
         return undefined;
       }),
-      detectProviderStatus: vi.fn(
-        async () =>
-          ({
-            kind: "gateway-key",
-            envKey: "AI_GATEWAY_API_KEY",
-            source: { kind: "env-file", path: ".env.local" },
-          }) as const,
-      ),
+      readProviderState: vi.fn(async () => ({
+        available: { gatewayKey: { source: { kind: "env-file" as const, path: ".env.local" } } },
+        preferredGatewayCredential: "api-key" as const,
+      })),
     });
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
@@ -326,10 +484,10 @@ describe("runModelFlow", () => {
   it("names the linked project on the provider row once a provider is set", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
-      detectProviderStatus: vi.fn(
-        async () =>
-          ({ kind: "gateway-project", projectName: "my-agent", teamName: "my-team" }) as const,
-      ),
+      readProviderState: vi.fn(async () => ({
+        available: { gatewayProject: { projectName: "my-agent", teamName: "my-team" } },
+        preferredGatewayCredential: "project" as const,
+      })),
     });
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
@@ -345,14 +503,10 @@ describe("runModelFlow", () => {
   it("names the credential env file when a gateway key is set without a link", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
-      detectProviderStatus: vi.fn(
-        async () =>
-          ({
-            kind: "gateway-key",
-            envKey: "AI_GATEWAY_API_KEY",
-            source: { kind: "env-file", path: ".env.local" },
-          }) as const,
-      ),
+      readProviderState: vi.fn(async () => ({
+        available: { gatewayKey: { source: { kind: "env-file" as const, path: ".env.local" } } },
+        preferredGatewayCredential: "api-key" as const,
+      })),
     });
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
@@ -524,10 +678,13 @@ describe("runModelFlow", () => {
 
   it("opens provider setup directly when none is configured", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: [] });
-    const detectProviderStatus = vi
-      .fn<ModelFlowDeps["detectProviderStatus"]>()
-      .mockResolvedValueOnce({ kind: "unset" })
-      .mockResolvedValueOnce({ kind: "gateway-project", projectName: "my-agent" });
+    const readProviderState = vi
+      .fn<ModelFlowDeps["readProviderState"]>()
+      .mockResolvedValueOnce({ available: {}, preferredGatewayCredential: undefined })
+      .mockResolvedValueOnce({
+        available: { gatewayKey: { source: { kind: "env-file" as const, path: ".env.local" } } },
+        preferredGatewayCredential: undefined,
+      });
     const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(
       async () =>
         ({
@@ -538,32 +695,44 @@ describe("runModelFlow", () => {
           },
         }) as const,
     );
-    const deps = flowDeps({ detectProviderStatus, runProviderFlow });
+    const deps = flowDeps({ readProviderState, runProviderFlow });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
       providerOutcome: {
+        selected: "gateway-key",
         resolution: {
           credential: "api-key",
           source: { kind: "env-file", path: ".env.local" },
         },
-        status: { kind: "gateway-project", projectName: "my-agent" },
+        status: {
+          kind: "gateway-key",
+          envKey: "AI_GATEWAY_API_KEY",
+          source: { kind: "env-file", path: ".env.local" },
+        },
       },
     });
 
     // The sub-flow learns the detected provider so its menu can mark the active row.
     expect(runProviderFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ appRoot: APP_ROOT, currentProvider: { kind: "unset" } }),
+      expect.objectContaining({
+        appRoot: APP_ROOT,
+        providerState: { available: {}, preferredGatewayCredential: undefined },
+      }),
     );
-    expect(detectProviderStatus).toHaveBeenCalledTimes(2);
+    expect(readProviderState).toHaveBeenCalledTimes(2);
     expect(menuPaints).toHaveLength(0);
+    expect(deps.writeGatewayCredentialPreference).toHaveBeenCalledWith(APP_ROOT, "api-key");
   });
 
   it("honors confirmed provider entry when link metadata looks configured", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: [] });
     const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(
       async () =>
-        ({ kind: "done", resolution: { credential: "oidc", file: ".env.local" } }) as const,
+        ({
+          kind: "project",
+          result: { kind: "done", resolution: { credential: "oidc", file: ".env.local" } },
+        }) as const,
     );
     const deps = flowDeps({ runProviderFlow });
 
@@ -577,6 +746,7 @@ describe("runModelFlow", () => {
     ).resolves.toEqual({
       kind: "done",
       providerOutcome: {
+        selected: "gateway-project",
         resolution: { credential: "oidc", file: ".env.local" },
         status: { kind: "gateway-project", projectName: "my-agent" },
       },
@@ -584,18 +754,21 @@ describe("runModelFlow", () => {
 
     expect(runProviderFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
     expect(menuPaints).toHaveLength(0);
+    expect(deps.writeGatewayCredentialPreference).toHaveBeenCalledWith(APP_ROOT, "project");
   });
 
   it("refreshes provider state after a committed setup is interrupted", async () => {
     const { prompter } = scriptedPrompter({ menu: [] });
     const controller = new AbortController();
-    const detectProviderStatus = vi
-      .fn<ModelFlowDeps["detectProviderStatus"]>()
-      .mockResolvedValueOnce({ kind: "gateway-project", projectName: "my-agent" })
+    const readProviderState = vi
+      .fn<ModelFlowDeps["readProviderState"]>()
       .mockResolvedValueOnce({
-        kind: "gateway-key",
-        envKey: "AI_GATEWAY_API_KEY",
-        source: { kind: "env-file", path: ".env.local" },
+        available: { gatewayProject: { projectName: "my-agent" } },
+        preferredGatewayCredential: "project",
+      })
+      .mockResolvedValueOnce({
+        available: { gatewayKey: { source: { kind: "env-file" as const, path: ".env.local" } } },
+        preferredGatewayCredential: "project",
       });
     const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(async () => {
       controller.abort();
@@ -604,7 +777,7 @@ describe("runModelFlow", () => {
         resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
       };
     });
-    const deps = flowDeps({ detectProviderStatus, runProviderFlow });
+    const deps = flowDeps({ readProviderState, runProviderFlow });
 
     await expect(
       runModelFlow({
@@ -617,6 +790,7 @@ describe("runModelFlow", () => {
     ).resolves.toEqual({
       kind: "done",
       providerOutcome: {
+        selected: "gateway-key",
         resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
         status: {
           kind: "gateway-key",
@@ -625,7 +799,7 @@ describe("runModelFlow", () => {
         },
       },
     });
-    expect(detectProviderStatus.mock.calls[1]?.[1]).toEqual({});
+    expect(readProviderState.mock.calls[1]?.[1]).toEqual({});
   });
 
   it("treats the external-provider branch as informational — no notice, no outcome", async () => {
@@ -640,7 +814,7 @@ describe("runModelFlow", () => {
       kind: "cancelled",
     });
 
-    expect(deps.detectProviderStatus).toHaveBeenCalledTimes(1);
+    expect(deps.readProviderState).toHaveBeenCalledTimes(1);
     expect(menuPaints[1]?.notices).toEqual([]);
   });
 
@@ -655,7 +829,7 @@ describe("runModelFlow", () => {
     });
 
     // A cancelled sub-flow changed nothing, so the status is not re-read.
-    expect(deps.detectProviderStatus).toHaveBeenCalledTimes(1);
+    expect(deps.readProviderState).toHaveBeenCalledTimes(1);
     expect(menuPaints).toHaveLength(2);
     expect(menuPaints[1]?.notices).toEqual([]);
     expect(deps.applySettings).not.toHaveBeenCalled();
@@ -665,9 +839,10 @@ describe("runModelFlow", () => {
     it("opens on the model row when a provider is already set", async () => {
       const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
       const deps = flowDeps({
-        detectProviderStatus: vi.fn(
-          async () => ({ kind: "gateway-project", projectName: "my-agent" }) as const,
-        ),
+        readProviderState: vi.fn(async () => ({
+          available: { gatewayProject: { projectName: "my-agent" } },
+          preferredGatewayCredential: "project" as const,
+        })),
       });
 
       await runModelFlow({ appRoot: APP_ROOT, prompter, deps });

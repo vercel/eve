@@ -1,5 +1,5 @@
 import type { ModelRouting } from "#shared/agent-definition.js";
-import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
+import type { ChatGptEndpointState, ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 /**
  * Presence of the two gateway credentials, read from wherever the caller can
@@ -91,8 +91,16 @@ export function resolveGatewayCredential(
 export function resolveModelEndpointStatus(
   routing: ModelRouting,
   credentials: GatewayCredentialPresence,
+  chatgpt?: {
+    readonly state: ChatGptEndpointState;
+    readonly accountId?: string;
+    readonly accountLabel?: string;
+  },
 ): ModelEndpointStatus {
   if (routing.kind === "external") {
+    if (routing.provider === "codex" && chatgpt !== undefined) {
+      return { kind: "chatgpt", ...chatgpt };
+    }
     return { kind: "external", provider: routing.provider };
   }
   const resolution = resolveGatewayCredential({

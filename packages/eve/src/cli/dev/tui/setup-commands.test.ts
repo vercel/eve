@@ -76,6 +76,7 @@ function run(input: {
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
   upgradeChoice?: "upgrade" | "later";
+  withExclusiveTerminal?: TuiSetupCommandInput["withExclusiveTerminal"];
 }) {
   const { upgradeChoice } = input;
   const fake = createFakePrompter(
@@ -90,6 +91,9 @@ function run(input: {
   };
   if (input.initialModelStep !== undefined) {
     commandInput.initialModelStep = input.initialModelStep;
+  }
+  if (input.withExclusiveTerminal !== undefined) {
+    commandInput.withExclusiveTerminal = input.withExclusiveTerminal;
   }
   return runTuiSetupCommand(commandInput);
 }
@@ -137,6 +141,41 @@ describe("runTuiSetupCommand", () => {
     );
   });
 
+  it("hands model-owned subprocesses both the terminal and suspended runtime", async () => {
+    const calls: string[] = [];
+    const renderer = fakePanelRenderer();
+    renderer.withInheritedStdio = async (task) => {
+      calls.push("terminal:release");
+      const result = await task();
+      calls.push("terminal:restore");
+      return result;
+    };
+    const withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
+      calls.push("runtime:suspend");
+      const result = await task();
+      calls.push("runtime:resume");
+      return result;
+    };
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async (input) => {
+        await input.withExclusiveTerminal?.(async () => {
+          calls.push("codex");
+        });
+        return { kind: "cancelled" };
+      }),
+    });
+
+    await run({ command: "model", flows, renderer, withExclusiveTerminal });
+
+    expect(calls).toEqual([
+      "terminal:release",
+      "runtime:suspend",
+      "codex",
+      "runtime:resume",
+      "terminal:restore",
+    ]);
+  });
+
   it("forwards an automatic provider entry to the model flow", async () => {
     const flows = fakeFlows();
 
@@ -153,6 +192,7 @@ describe("runTuiSetupCommand", () => {
         kind: "done",
         modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
         providerOutcome: {
+          selected: "gateway-project",
           resolution: {
             credential: "api-key",
             source: { kind: "env-file", path: ".env.local" },
@@ -164,7 +204,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message:
         "Model changed to openai/gpt-5.5. Live on your next prompt.\n" +
-        "Project linked. Connected to AI Gateway via AI_GATEWAY_API_KEY.",
+        "Project linked. Connected to AI Gateway via Project OIDC.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
@@ -175,23 +215,25 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         providerOutcome: {
+          selected: "gateway-project",
           resolution: { credential: "oidc", file: ".env.local" },
           status: { kind: "gateway-project", projectName: "my-agent", teamName: "my-team" },
         },
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.",
+      message: "Project linked. Connected to AI Gateway via Project OIDC.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
   });
 
-  it("names the shadow when a gateway key outranks the freshly linked OIDC token", async () => {
+  it("keeps Project OIDC selected when a gateway key is also available", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         providerOutcome: {
+          selected: "gateway-project",
           resolution: {
             credential: "api-key",
             source: { kind: "shell" },
@@ -202,10 +244,7 @@ describe("runTuiSetupCommand", () => {
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
-      message:
-        "Project linked. AI_GATEWAY_API_KEY (shell) outranks the project's " +
-        "VERCEL_OIDC_TOKEN and stays the active credential — unset it in your shell to run " +
-        "on the project.",
+      message: "Project linked. Connected to AI Gateway via Project OIDC.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
@@ -216,6 +255,7 @@ describe("runTuiSetupCommand", () => {
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         providerOutcome: {
+          selected: "gateway-key",
           resolution: {
             credential: "api-key",
             source: { kind: "env-file", path: ".env.local" },
@@ -463,6 +503,7 @@ describe("runTuiSetupCommand", () => {
                 resolve({
                   kind: "done",
                   providerOutcome: {
+                    selected: "gateway-key",
                     resolution: {
                       credential: "api-key",
                       source: { kind: "env-file", path: ".env.local" },

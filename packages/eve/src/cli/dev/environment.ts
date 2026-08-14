@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 
 import { isObject } from "#shared/guards.js";
+import { gatewayCredentialPreferencePath } from "#setup/gateway-credential-preference.js";
 
 /**
  * Development environment files loaded by local CLI commands such as
@@ -63,8 +64,12 @@ export function readDevelopmentEnvironmentHostValues(
 ): Readonly<Record<string, string | null>> {
   const values: Record<string, string | null> = {};
   const fileValues = readDevelopmentEnvironmentValues(resolve(appRoot));
+  const hostKeys = new Set(fileValues.keys());
+  // Project selection can suppress a shell-only key. Keep that transition in
+  // the host fingerprint so the worker that inherited the key is replaced.
+  hostKeys.add("AI_GATEWAY_API_KEY");
 
-  for (const key of [...fileValues.keys()].sort((left, right) => left.localeCompare(right))) {
+  for (const key of [...hostKeys].sort((left, right) => left.localeCompare(right))) {
     values[key] = process.env[key] ?? null;
   }
 
@@ -85,18 +90,28 @@ function getDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnvironmen
 }
 
 function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnvironmentLoader {
-  const protectedKeys = new Set(Object.keys(process.env));
+  const protectedValues = new Map(Object.entries(process.env));
+  const protectedKeys = new Set(protectedValues.keys());
   const managedValues = new Map<string, string>();
 
   const stageReload = (): DevelopmentEnvironmentReload => {
     const previousManagedValues = new Map(managedValues);
     const nextValues = readDevelopmentEnvironmentValues(appRoot);
+    const preferProjectOidc = applyGatewayCredentialPreference(appRoot, nextValues);
     const affectedKeys = new Set([...managedValues.keys(), ...nextValues.keys()]);
+    if (preferProjectOidc) {
+      affectedKeys.add("AI_GATEWAY_API_KEY");
+      protectedKeys.delete("AI_GATEWAY_API_KEY");
+    } else if (protectedValues.has("AI_GATEWAY_API_KEY")) {
+      protectedKeys.add("AI_GATEWAY_API_KEY");
+      process.env.AI_GATEWAY_API_KEY = protectedValues.get("AI_GATEWAY_API_KEY");
+    }
     const previousEnvironment = new Map(
       [...affectedKeys].map((key) => [key, process.env[key]] as const),
     );
     let settled = false;
 
+    if (preferProjectOidc) delete process.env.AI_GATEWAY_API_KEY;
     applyDevelopmentEnvironmentValues({
       managedValues,
       nextValues,
@@ -133,6 +148,21 @@ function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnviron
     },
     stageReload,
   };
+}
+
+function applyGatewayCredentialPreference(appRoot: string, values: Map<string, string>): boolean {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(gatewayCredentialPreferencePath(appRoot), "utf8"),
+    );
+    if (isObject(parsed) && parsed.preferred === "project") {
+      values.delete("AI_GATEWAY_API_KEY");
+      return true;
+    }
+  } catch {
+    // Missing or invalid local settings preserve the AI SDK's normal precedence.
+  }
+  return false;
 }
 
 function applyDevelopmentEnvironmentValues(input: {

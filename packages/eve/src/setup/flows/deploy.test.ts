@@ -89,6 +89,31 @@ function createLoginFlow(result: LoginFlowResult = { kind: "already" }) {
 }
 
 describe("runDeployFlow", () => {
+  it("blocks a local ChatGPT subscription model before Vercel effects", async () => {
+    const fake = createFakePrompter({});
+    const detectDeployment = vi.fn(async () => LINKED);
+
+    await expect(
+      runDeployFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        interactive: true,
+        deps: {
+          detectDeployment,
+          inspectApplication: vi.fn(async () => ({
+            compiledState: {
+              manifest: {
+                config: { model: { routing: { kind: "external", provider: "codex" } } },
+              },
+            },
+          })) as never,
+        },
+      }),
+    ).resolves.toEqual({ kind: "local-model" });
+
+    expect(detectDeployment).not.toHaveBeenCalled();
+  });
+
   it("deploys an already-linked project without asking anything", async () => {
     const fake = createFakePrompter({});
     const deployDeps = createDeployProjectDeps();

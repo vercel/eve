@@ -15,6 +15,16 @@ describe("resolveModelEndpointStatus", () => {
     ).toEqual({ kind: "external", provider: "anthropic" });
   });
 
+  it("reports brokered ChatGPT readiness for the Codex provider", () => {
+    expect(
+      resolveModelEndpointStatus(
+        { kind: "external", provider: "codex" },
+        { apiKey: false, oidc: false },
+        { state: "reauth-required" },
+      ),
+    ).toEqual({ kind: "chatgpt", state: "reauth-required" });
+  });
+
   it("reports gateway connected via api-key, which outranks oidc", () => {
     expect(
       resolveModelEndpointStatus(

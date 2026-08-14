@@ -71,6 +71,7 @@ function dependencies(
     typeof vi.fn<InitCommandDependencies["detectInvokingPackageManager"]>
   >;
   isCodingAgentLaunch: ReturnType<typeof vi.fn<InitCommandDependencies["isCodingAgentLaunch"]>>;
+  ensureChatGptAuth: ReturnType<typeof vi.fn<InitCommandDependencies["ensureChatGptAuth"]>>;
   now: ReturnType<typeof vi.fn<InitCommandDependencies["now"]>>;
   runPackageManagerInstall: ReturnType<
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
@@ -110,6 +111,7 @@ function dependencies(
         ...options,
         webPackageVersions: { ...WEB_VERSIONS, ...options.webPackageVersions },
       }),
+    ensureChatGptAuth: vi.fn(async () => {}),
     runPackageManagerInstall: vi.fn(async () => true),
     selectInitHandoff: vi.fn(async () => "eve-dev"),
     spawnCodingAgentRepl: vi.fn(async () => true),
@@ -193,6 +195,28 @@ describe("runInitCommand", () => {
     expect(output.messages[2]).toContain("Installed dependencies");
     expect(output.messages[2]).toContain("in 13.2s");
     expect(output.messages[3]).toContain("$ eve dev");
+  });
+
+  it("authenticates before starting the live row, then authors a ChatGPT model", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-chatgpt-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.ensureChatGptAuth.mockImplementationOnce(async () => {
+      expect(output.messages).toEqual([]);
+    });
+
+    await runInitCommand(
+      output,
+      parentDirectory,
+      "my-agent",
+      { model: "chatgpt/gpt-5.6-sol" },
+      deps,
+    );
+
+    expect(deps.ensureChatGptAuth).toHaveBeenCalledOnce();
+    const source = await readFile(join(parentDirectory, "my-agent/agent/agent.ts"), "utf8");
+    expect(source).toContain('import { chatgpt } from "eve/models/openai"');
+    expect(source).toContain('model: chatgpt("gpt-5.6-sol")');
   });
 
   it("creates a new agent with model settings selected by init options", async () => {

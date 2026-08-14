@@ -1,5 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 import { AI_GATEWAY_MODELS_URL, vercelGatewayFetch } from "#internal/gateway.js";
+import { DEFAULT_CHATGPT_MODEL_SELECTION } from "#shared/chatgpt-model.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 import { select, type Asker, type SelectOption } from "../ask.js";
@@ -53,6 +54,12 @@ const FEATURED_MODEL_IDS: readonly string[] = [
   "anthropic/claude-opus-4.8",
   "openai/gpt-5.5",
 ];
+
+const CHATGPT_MODEL = modelOption(
+  DEFAULT_CHATGPT_MODEL_SELECTION,
+  "GPT-5.6 Sol (ChatGPT subscription)",
+  "Local via Codex CLI",
+);
 
 const FALLBACK_MODELS: SelectOption<string>[] = [
   modelOption(DEFAULT_AGENT_MODEL_ID, "GLM 5.2", "Z.AI"),
@@ -214,7 +221,7 @@ export function selectModel(options: SelectModelOptions): SetupBox<SetupState, s
     async gather({ signal }): Promise<string> {
       const preset = options.presetModel;
       if (preset !== undefined && preset.length > 0) return preset;
-      const models = await buildModelOptions(deps.fetchModels, signal);
+      const models = [CHATGPT_MODEL, ...(await buildModelOptions(deps.fetchModels, signal))];
       const recommended =
         options.defaultModel !== undefined && models.some((m) => m.value === options.defaultModel)
           ? options.defaultModel

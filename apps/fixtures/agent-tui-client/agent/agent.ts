@@ -1,5 +1,8 @@
 import { defineAgent } from "eve";
 
+import { chatgpt } from "eve/models/openai";
 export default defineAgent({
-  model: "anthropic/claude-opus-4.6",
+  model: chatgpt("gpt-5.6-sol"),
+  reasoning: "xhigh",
+  modelOptions: { providerOptions: { gateway: { serviceTier: "priority" } } },
 });

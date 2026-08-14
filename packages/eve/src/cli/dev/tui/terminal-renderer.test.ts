@@ -1657,6 +1657,20 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("\u23bf  /model dismissed.");
   });
 
+  it("strips complete ANSI styles from command outcomes", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandResult(
+      "Model changed to \u001b[1mchatgpt/gpt-5.6-sol\u001b[22m. Live on your next prompt.",
+    );
+    renderer.shutdown();
+
+    expect(screen.snapshot()).toContain(
+      "\u23bf  Model changed to chatgpt/gpt-5.6-sol. Live on your next prompt.",
+    );
+    expect(screen.snapshot()).not.toContain("[1m");
+    expect(screen.snapshot()).not.toContain("[22m");
+  });
+
   it("hangs a successful command outcome from an elbow into a full-intensity rail", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandResult(

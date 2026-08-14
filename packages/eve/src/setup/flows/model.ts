@@ -1,10 +1,22 @@
 import {
   hasEnvValue,
-  resolveGatewayCredential,
   type GatewayCredentialResolution,
 } from "#internal/resolve-model-endpoint-status.js";
 
 import { inspectApplication } from "#services/inspect-application.js";
+import {
+  readGatewayCredentialPreference,
+  writeGatewayCredentialPreference,
+  type GatewayCredentialPreference,
+} from "#setup/gateway-credential-preference.js";
+import {
+  resolveSelectedModelProvider,
+  resolveSelectedModelProviderStatus,
+  type ModelProviderState,
+  type SelectedGatewayProvider,
+  type SelectedModelProvider,
+  type SelectedModelProviderStatus,
+} from "#setup/model-provider-state.js";
 import type {
   AgentModelSettingsPatch,
   FieldPatch,
@@ -31,6 +43,10 @@ import {
 } from "../project-resolution.js";
 import type { AgentReasoningDefinition, ModelRouting } from "#shared/agent-definition.js";
 import {
+  DEFAULT_CHATGPT_MODEL_SELECTION,
+  parseChatGptModelSelection,
+} from "#shared/chatgpt-model.js";
+import {
   readGatewayServiceTier,
   type GatewayServiceTierState,
 } from "#shared/gateway-service-tier.js";
@@ -43,7 +59,8 @@ import {
   formatApplyModelSettingsOutcome,
   type ApplyModelSettingsOutcome,
 } from "./model-source-change.js";
-import { runProviderFlow, type ModelProviderStatus } from "./provider.js";
+import { ensureChatGptAuth } from "./chatgpt-auth.js";
+import { runProviderFlow } from "./provider.js";
 
 /** The current model id, its routing, and whether `/model` can rewrite it. */
 export interface CurrentAgentModel {
@@ -115,13 +132,16 @@ export interface ModelFlowDeps {
   selectModel?: SelectModelDeps;
   /** The composite Change-model screen; the dev TUI renderer implements it. */
   pickModelSettings?: ModelSettingsPicker;
-  /** Reads how the model is backed right now, for the menu's provider row. */
-  detectProviderStatus: typeof detectModelProviderStatus;
+  /** Reads all available providers independently from persisted selection. */
+  readProviderState: typeof readModelProviderState;
   /** The provider sub-flow behind the menu's provider row. */
   runProviderFlow: typeof runProviderFlow;
+  /** Ensures Codex owns a usable login before selecting ChatGPT. */
+  ensureChatGptAuth: typeof ensureChatGptAuth;
+  writeGatewayCredentialPreference: typeof writeGatewayCredentialPreference;
 }
 
-export type { ModelProviderStatus };
+export type ModelProviderStatus = SelectedModelProviderStatus;
 
 /**
  * A provider sub-flow run that actually moved the provider: the credential
@@ -132,8 +152,10 @@ export type { ModelProviderStatus };
  * disk — so it never surfaces as an outcome.
  */
 export interface ModelProviderOutcome {
-  /** The credential resolution the runtime will honor; see {@link LinkFlowResult}. */
+  /** The credential resolution observed while setup completed. */
   resolution?: GatewayCredentialResolution;
+  /** The explicit provider choice that the runtime will honor after reload. */
+  selected: SelectedGatewayProvider;
   status: ModelProviderStatus;
 }
 
@@ -163,16 +185,27 @@ type ModelMenuRow = "model" | "provider" | "done";
  * plain form feeds notice and outcome copy.
  */
 function providerStatusHint(
-  provider: Exclude<ModelProviderStatus, { kind: "unset" }>,
+  selected: SelectedModelProvider,
+  provider: ModelProviderStatus,
+  chatGptAccountLabel: string | undefined,
   emphasis: (text: string) => string = (text) => text,
 ): string {
-  if (provider.kind === "gateway-project") {
+  if (selected === "chatgpt") {
+    return chatGptAccountLabel === undefined
+      ? "ChatGPT subscription"
+      : `ChatGPT subscription (${chatGptAccountLabel})`;
+  }
+  if (selected === "gateway-project") {
+    if (provider.kind !== "gateway-project" || provider.projectName === undefined) {
+      return "AI Gateway via Project";
+    }
     const where =
       provider.teamName === undefined
         ? emphasis(provider.projectName)
         : `${emphasis(provider.projectName)} in ${emphasis(provider.teamName)}`;
     return `AI Gateway (Linked to ${where})`;
   }
+  if (provider.kind !== "gateway-key") return `AI Gateway via ${AI_GATEWAY_API_KEY_ENV_VAR}`;
   const where = provider.source.kind === "shell" ? "your shell" : provider.source.path;
   return `AI Gateway (${provider.envKey} in ${where})`;
 }
@@ -185,7 +218,14 @@ function providerStatusHint(
 function modelListRows(
   catalog: readonly GatewayCatalogModel[] | undefined,
 ): SelectOption<string>[] {
-  return modelOptionsFromCatalog(catalog).map((option) => {
+  return [
+    {
+      value: DEFAULT_CHATGPT_MODEL_SELECTION,
+      label: DEFAULT_CHATGPT_MODEL_SELECTION,
+      featured: true,
+    },
+    ...modelOptionsFromCatalog(catalog),
+  ].map((option) => {
     const row: SelectOption<string> = { value: option.value, label: option.value };
     if (option.featured === true) row.featured = true;
     return row;
@@ -227,6 +267,8 @@ function modelMenuRows(
   reasoning: ReasoningLevel | null,
   serviceTier: GatewayServiceTierState,
   provider: ModelProviderStatus,
+  selectedProvider: SelectedModelProvider,
+  chatGptAccountLabel: string | undefined,
   routing: ModelRouting | null,
   editable: boolean,
   settingsEditable: boolean,
@@ -253,14 +295,14 @@ function modelMenuRows(
   }
 
   let providerRow: SelectOption<ModelMenuRow>;
-  if (routing?.kind === "external") {
+  if (routing?.kind === "external" && routing.provider !== "codex") {
     providerRow = {
       disabled: true,
       value: "provider",
       label: "Change provider",
       description: "Disabled in external endpoint mode",
     };
-  } else if (provider.kind === "unset") {
+  } else if (selectedProvider !== "chatgpt" && provider.kind === "unset") {
     providerRow = {
       value: "provider",
       label: pc.bold("Configure model access"),
@@ -271,9 +313,12 @@ function modelMenuRows(
   } else {
     providerRow = {
       value: "provider",
-      label: "Change provider",
-      hint: providerStatusHint(provider, pc.bold),
-      description: "How your agent reaches the model provider",
+      label: selectedProvider === "chatgpt" ? "ChatGPT login" : "Change provider",
+      hint: providerStatusHint(selectedProvider, provider, chatGptAccountLabel, pc.bold),
+      description:
+        selectedProvider === "chatgpt"
+          ? "Authenticate through the Codex CLI"
+          : "How your agent reaches the model provider",
     };
   }
 
@@ -282,46 +327,38 @@ function modelMenuRows(
   return [modelRow, providerRow, { value: "done", label: "Done" }];
 }
 
-/**
- * Reads the provider status the menu shows. Detection order matters: a linked
- * project subsumes any pulled credential (the link is what the user manages),
- * and `AI_GATEWAY_API_KEY` outranks `VERCEL_OIDC_TOKEN` because it is the one
- * the provider sub-flow's own-key branch writes.
- */
-export async function detectModelProviderStatus(
+/** Reads Gateway credential availability and the user's Gateway-only preference. */
+export async function readModelProviderState(
   appRoot: string,
   options: VercelProjectOperationOptions = {},
   env: Record<string, string | undefined> = process.env,
-): Promise<ModelProviderStatus> {
-  const [identity, gatewayKeyFile, oidcFile] = await Promise.all([
+): Promise<ModelProviderState> {
+  const [identity, gatewayKeyFile, oidcFile, preferredGatewayCredential] = await Promise.all([
     detectProjectIdentity(appRoot, options),
     findEnvFileWithKey(appRoot, AI_GATEWAY_API_KEY_ENV_VAR),
     findEnvFileWithKey(appRoot, "VERCEL_OIDC_TOKEN"),
+    readGatewayCredentialPreference(appRoot),
   ]);
-  if (identity !== undefined) {
-    const status: ModelProviderStatus = {
-      kind: "gateway-project",
-      projectName: identity.projectName,
-    };
-    if (identity.teamName !== undefined) status.teamName = identity.teamName;
-    return status;
+  const available: ModelProviderState["available"] = {};
+  if (identity !== undefined || oidcFile !== undefined) {
+    const gatewayProject: {
+      projectName?: string;
+      teamName?: string;
+      oidcFile?: string;
+    } = {};
+    if (identity !== undefined) {
+      gatewayProject.projectName = identity.projectName;
+      gatewayProject.teamName = identity.teamName;
+    }
+    if (oidcFile !== undefined) gatewayProject.oidcFile = oidcFile;
+    available.gatewayProject = gatewayProject;
   }
-  const evidence: { apiKeyInEnv: boolean; apiKeyFile?: string; oidcFile?: string } = {
-    apiKeyInEnv: hasEnvValue(env[AI_GATEWAY_API_KEY_ENV_VAR]),
-  };
-  if (gatewayKeyFile !== undefined) evidence.apiKeyFile = gatewayKeyFile;
-  if (oidcFile !== undefined) evidence.oidcFile = oidcFile;
-  const resolution = resolveGatewayCredential(evidence);
-  if (resolution === undefined) return { kind: "unset" };
-  if (resolution.credential === "api-key") {
-    return { kind: "gateway-key", envKey: AI_GATEWAY_API_KEY_ENV_VAR, source: resolution.source };
+  if (gatewayKeyFile !== undefined) {
+    available.gatewayKey = { source: { kind: "env-file", path: gatewayKeyFile } };
+  } else if (hasEnvValue(env[AI_GATEWAY_API_KEY_ENV_VAR])) {
+    available.gatewayKey = { source: { kind: "shell" } };
   }
-  return {
-    kind: "gateway-key",
-    envKey: "VERCEL_OIDC_TOKEN",
-    // The resolver only reports an OIDC file we handed it, so it is set here.
-    source: { kind: "env-file", path: resolution.file! },
-  };
+  return { available, preferredGatewayCredential };
 }
 
 /**
@@ -339,14 +376,20 @@ export async function runModelFlow(input: {
   /** Opens provider setup before the root menu when runtime evidence requires it. */
   initialStep?: "provider";
   signal?: AbortSignal;
+  /** Gives Codex uncontested inherited stdio while it performs login. */
+  withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
+  /** Live ChatGPT identity shown in this configuration flow only. */
+  chatGptAccountLabel?: string;
   deps?: Partial<ModelFlowDeps>;
 }): Promise<ModelFlowResult> {
   const { appRoot, prompter, signal } = input;
   const deps: ModelFlowDeps = {
     readCurrentModel: readCurrentAgentModel,
     applySettings: changeAgentModelSettings,
-    detectProviderStatus: detectModelProviderStatus,
+    readProviderState: readModelProviderState,
     runProviderFlow,
+    ensureChatGptAuth,
+    writeGatewayCredentialPreference,
     ...input.deps,
   };
 
@@ -354,16 +397,20 @@ export async function runModelFlow(input: {
   // trips. One ephemeral spinner covers all three so the menu paints with no
   // persisted loading lines and already knows what the model supports. A
   // failed catalog fetch degrades to unknown capabilities, never to an error.
-  const detectProvider = (useFlowSignal = true): Promise<ModelProviderStatus> =>
-    deps.detectProviderStatus(appRoot, useFlowSignal && signal !== undefined ? { signal } : {});
+  const readProviderState = (useFlowSignal = true): Promise<ModelProviderState> =>
+    deps.readProviderState(
+      appRoot,
+      useFlowSignal && signal !== undefined ? { signal } : {},
+      process.env,
+    );
   const fetchCatalog = deps.selectModel?.fetchModels ?? fetchGatewayCatalog;
-  const [currentModel, initialProvider, catalog] = await withSpinner(
+  const [currentModel, initialProviderState, catalog] = await withSpinner(
     prompter,
     "Checking the project…",
     () =>
       Promise.all([
         deps.readCurrentModel(appRoot),
-        detectProvider(),
+        readProviderState(),
         fetchCatalog(signal).catch((): GatewayCatalogModel[] | undefined => undefined),
       ]),
   );
@@ -373,7 +420,10 @@ export async function runModelFlow(input: {
   // An authored "provider-default" is the absent-setting sentinel, not a level.
   let reasoning: ReasoningLevel | null =
     currentModel.reasoning === "provider-default" ? null : currentModel.reasoning;
-  let provider = initialProvider;
+  let providerState = initialProviderState;
+  let selectedProvider = resolveSelectedModelProvider(providerState, routing);
+  let provider = resolveSelectedModelProviderStatus(providerState, selectedProvider);
+  let nextGatewayCredentialPreference: GatewayCredentialPreference | undefined;
   const patch: {
     model: FieldPatch<string>;
     reasoning: FieldPatch<AgentReasoningDefinition>;
@@ -386,14 +436,15 @@ export async function runModelFlow(input: {
 
   let lastApply: ApplyModelSettingsOutcome | undefined;
   let providerOutcome: ModelProviderOutcome | undefined;
+  let chatGptLoginReady = false;
   let commitDraft = false;
-  const externalNotice: SelectNotice | undefined =
-    routing?.kind === "external"
-      ? {
-          tone: "warning",
-          text: "`agent.ts` specifies the model provider directly. Model, provider, and service-tier changes stay source-owned; reasoning remains configurable here.",
-        }
-      : undefined;
+  const sourceOwnedExternalRouting = routing?.kind === "external" && routing.provider !== "codex";
+  const externalNotice: SelectNotice | undefined = sourceOwnedExternalRouting
+    ? {
+        tone: "warning",
+        text: "`agent.ts` specifies the model provider directly. Model, provider, and service-tier changes stay source-owned; reasoning remains configurable here.",
+      }
+    : undefined;
 
   // Start at the first useful row. Cancellation keeps the current row.
   let nextSelection: ModelMenuRow =
@@ -419,8 +470,10 @@ export async function runModelFlow(input: {
           options: modelMenuRows(
             current,
             reasoning,
-            serviceTier,
+            selectedProvider === "chatgpt" ? { kind: "standard" } : serviceTier,
             provider,
+            selectedProvider,
+            input.chatGptAccountLabel,
             routing,
             editable,
             settingsEditable,
@@ -457,9 +510,9 @@ export async function runModelFlow(input: {
               reason: "Set via an SDK model call in agent.ts; edit the source to change it",
             },
         reasoning,
-        serviceTier,
+        serviceTier: selectedProvider === "chatgpt" ? { kind: "standard" } : serviceTier,
         settingsEditable,
-        externalRouting: routing?.kind === "external",
+        externalRouting: sourceOwnedExternalRouting,
         capabilitiesFor: (modelId) => gatewayModelCapabilities(catalog, modelId),
       };
       const result = await pickModelSettings(request);
@@ -470,7 +523,9 @@ export async function runModelFlow(input: {
       }
       if (result.model !== undefined) {
         current = result.model;
-        routing = { kind: "gateway", target: result.model.split("/")[0] ?? "" };
+        routing = routingForModelSelection(result.model);
+        selectedProvider = resolveSelectedModelProvider(providerState, routing);
+        provider = resolveSelectedModelProviderStatus(providerState, selectedProvider);
         patch.model = { kind: "set", value: result.model };
       }
       if (result.reasoning !== undefined) {
@@ -478,7 +533,7 @@ export async function runModelFlow(input: {
         patch.reasoning =
           reasoning === null ? { kind: "remove" } : { kind: "set", value: reasoning };
       }
-      if (result.serviceTier !== undefined) {
+      if (result.serviceTier !== undefined && selectedProvider !== "chatgpt") {
         serviceTier =
           result.serviceTier === "priority" ? { kind: "priority" } : { kind: "standard" };
         patch.gatewayServiceTier =
@@ -490,11 +545,19 @@ export async function runModelFlow(input: {
       continue;
     }
 
+    if (selectedProvider === "chatgpt") {
+      await authenticateChatGpt(deps, input.withExclusiveTerminal);
+      chatGptLoginReady = true;
+      nextSelection = "done";
+      continue;
+    }
+
     const result = await deps.runProviderFlow({
       appRoot,
       prompter,
       signal,
-      currentProvider: provider,
+      providerState,
+      selectedProvider,
     });
     // Backing out of the provider sub-flow changed nothing; the cursor stays on
     // the provider row so a retry is one keypress away.
@@ -509,31 +572,67 @@ export async function runModelFlow(input: {
       nextSelection = "done";
       continue;
     }
+    const gatewaySelection: SelectedGatewayProvider =
+      result.kind === "project" ? "gateway-project" : "gateway-key";
+    const gatewayResult = result.kind === "project" ? result.result : result;
+    selectedProvider = gatewaySelection;
+    nextGatewayCredentialPreference =
+      gatewaySelection === "gateway-project" ? "project" : "api-key";
     // Only a completed link/own-key sub-flow can move the link or
     // credentials, so this is the one place the status is re-read. Once that
     // sub-flow commits, finish without the aborted interaction signal so the
     // TUI can refresh the state that is already on disk.
-    provider = await withSpinner(prompter, "Checking the project…", () => detectProvider(false));
-    providerOutcome = { status: provider };
-    if (result.kind === "done" && result.resolution !== undefined) {
-      providerOutcome.resolution = result.resolution;
+    providerState = await withSpinner(prompter, "Checking the project…", () =>
+      readProviderState(false),
+    );
+    provider = resolveSelectedModelProviderStatus(providerState, gatewaySelection);
+    providerOutcome = { selected: gatewaySelection, status: provider };
+    if (gatewayResult.kind === "done" && gatewayResult.resolution !== undefined) {
+      providerOutcome.resolution = gatewayResult.resolution;
     }
     commitDraft = true;
     break;
   }
 
   if (commitDraft && hasModelSettingsChanges(patch)) {
+    if (patch.model.kind === "set" && parseChatGptModelSelection(patch.model.value) !== undefined) {
+      patch.gatewayServiceTier = { kind: "remove" };
+      await authenticateChatGpt(deps, input.withExclusiveTerminal);
+    }
     lastApply = await deps.applySettings({ appRoot, patch });
-    signal?.throwIfAborted();
+    if (lastApply.kind !== "rejected" && nextGatewayCredentialPreference !== undefined) {
+      await deps.writeGatewayCredentialPreference(appRoot, nextGatewayCredentialPreference);
+    }
+    if (providerOutcome === undefined) signal?.throwIfAborted();
+  } else if (commitDraft && nextGatewayCredentialPreference !== undefined) {
+    await deps.writeGatewayCredentialPreference(appRoot, nextGatewayCredentialPreference);
   }
 
-  if (lastApply === undefined && providerOutcome === undefined) {
+  if (lastApply === undefined && providerOutcome === undefined && !chatGptLoginReady) {
     return { kind: "cancelled" };
   }
   const done: Extract<ModelFlowResult, { kind: "done" }> = { kind: "done" };
   if (lastApply !== undefined) done.modelMessage = formatApplyModelSettingsOutcome(lastApply);
+  else if (chatGptLoginReady) done.modelMessage = "ChatGPT login ready.";
   if (providerOutcome !== undefined) done.providerOutcome = providerOutcome;
   return done;
+}
+
+function routingForModelSelection(selection: string): ModelRouting {
+  if (parseChatGptModelSelection(selection) !== undefined) {
+    return { kind: "external", provider: "codex" };
+  }
+  return { kind: "gateway", target: selection.split("/")[0] ?? "" };
+}
+
+async function authenticateChatGpt(
+  deps: ModelFlowDeps,
+  withExclusiveTerminal: (<T>(task: () => Promise<T>) => Promise<T>) | undefined,
+): Promise<void> {
+  const authenticate = (): Promise<void> => deps.ensureChatGptAuth({ interactive: true });
+  await (withExclusiveTerminal === undefined
+    ? authenticate()
+    : withExclusiveTerminal(authenticate));
 }
 
 function hasModelSettingsChanges(patch: AgentModelSettingsPatch): boolean {
@@ -556,12 +655,13 @@ async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel
     const model = config?.model;
     // A source-backed model (an SDK model call) carries `source`; a string id
     // does not, and only a string is a literal the editor can rewrite.
+    const chatgpt = model?.routing.kind === "external" && model.routing.provider === "codex";
     return {
-      id: model?.id ?? null,
+      id: chatgpt && model !== undefined ? `chatgpt/${model.id}` : (model?.id ?? null),
       routing: model?.routing ?? null,
       reasoning: config?.reasoning ?? null,
       serviceTier: readGatewayServiceTier(model?.providerOptions),
-      editable: model !== undefined && model.source === undefined,
+      editable: model !== undefined && (model.source === undefined || chatgpt),
       settingsEditable: config?.source !== undefined,
     };
   } catch {
@@ -586,7 +686,7 @@ export async function modelChangeRefusalForUneditableModel(
   appRoot: string,
 ): Promise<string | null> {
   const { editable, routing } = await readCurrentAgentModel(appRoot);
-  if (editable) {
+  if (editable || (routing?.kind === "external" && routing.provider === "codex")) {
     return null;
   }
   const detail =

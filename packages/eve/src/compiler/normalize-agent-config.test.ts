@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAgentSourceManifest, createModuleSourceRef } from "#discover/manifest.js";
 import { defineDynamic } from "#public/definitions/tool.js";
+import { chatgpt } from "#public/models/openai/index.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
 
@@ -49,6 +50,29 @@ describe("compileAgentConfig", () => {
       sourceId: "agent-config",
       sourceKind: "module",
     });
+    expect(modelCatalog.getModelLimits).not.toHaveBeenCalled();
+  });
+
+  it("compiles an eve-owned Codex model without AI Gateway metadata", async () => {
+    mocks.loadModuleBackedDefinition.mockResolvedValue({ model: chatgpt("gpt-5.6-sol") });
+    const manifest = createAgentSourceManifest({
+      agentId: "app",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({ logicalPath: "agent.ts", sourceId: "agent-config" }),
+    });
+    const modelCatalog = createModelCatalog();
+
+    const compiled = await compileAgentConfig(manifest, { modelCatalog });
+
+    expect(compiled.model).toEqual(
+      expect.objectContaining({
+        id: "codex/gpt-5.6-sol",
+        routing: { kind: "external", provider: "codex" },
+        contextWindowTokens: 200_000,
+      }),
+    );
+    expect(modelCatalog.getByProviderModelId).not.toHaveBeenCalled();
     expect(modelCatalog.getModelLimits).not.toHaveBeenCalled();
   });
 

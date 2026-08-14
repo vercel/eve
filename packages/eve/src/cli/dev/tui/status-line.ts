@@ -62,8 +62,8 @@ function renderServerPort(
 
 /** Provider slugs whose display name differs from the AI SDK's identifier. */
 const EXTERNAL_PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
-  // `experimental_chatgpt` wraps the Codex backend; what the user connected
-  // is their ChatGPT subscription, so the bar names that, not the transport.
+  // `chatgpt()` wraps the Codex backend; what the user connected is their
+  // ChatGPT subscription, so the bar names that, not the transport.
   codex: "chatgpt-sub",
 };
 
@@ -93,6 +93,19 @@ function renderEndpoint(
     // The `⌝` mark stays at the terminal's default foreground — full
     // intensity on any theme — while the clause around it is dim.
     return { text: `${c.dim(`via ${provider}`)}${g.external}`, standalone: false };
+  }
+  if (input.endpoint.kind === "chatgpt") {
+    switch (input.endpoint.state) {
+      case "ready":
+        return { text: `${c.dim("via chatgpt-sub")}${g.external}`, standalone: false };
+      case "checking":
+        return { text: c.dim("chatgpt-sub checking…"), standalone: true };
+      case "signed-out":
+      case "reauth-required":
+        return { text: c.yellow(`${g.warning} chatgpt-sub login · codex login`), standalone: true };
+      case "unavailable":
+        return { text: c.yellow(`${g.warning} chatgpt-sub unavailable`), standalone: true };
+    }
   }
   if (!input.endpoint.connected) {
     return { text: c.yellow(`${g.warning} ai-gateway`), standalone: true };

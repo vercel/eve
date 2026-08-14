@@ -43,6 +43,10 @@ describe("runProviderFlow", () => {
         "own-key",
         "external",
       ]);
+      expect(request.options[2]).toMatchObject({
+        value: "external",
+        label: "Other providers",
+      });
       expect(request.initialValue).toBe("project");
       return { kind: "project" };
     };
@@ -55,8 +59,11 @@ describe("runProviderFlow", () => {
     });
 
     expect(result).toEqual({
-      kind: "done",
-      resolution: { credential: "oidc", file: ".env.local" },
+      kind: "project",
+      result: {
+        kind: "done",
+        resolution: { credential: "oidc", file: ".env.local" },
+      },
     });
     expect(deps.runLinkFlow).toHaveBeenCalledExactlyOnceWith({
       appRoot: APP_ROOT,
@@ -82,10 +89,9 @@ describe("runProviderFlow", () => {
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker: linked,
-      currentProvider: {
-        kind: "gateway-project",
-        projectName: "my-agent",
-        teamName: "my-team",
+      providerState: {
+        available: { gatewayProject: { projectName: "my-agent", teamName: "my-team" } },
+        preferredGatewayCredential: "project",
       },
       deps,
     });
@@ -103,10 +109,34 @@ describe("runProviderFlow", () => {
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker: keyed,
-      currentProvider: {
-        kind: "gateway-key",
-        envKey: "AI_GATEWAY_API_KEY",
-        source: { kind: "env-file", path: ".env.local" },
+      providerState: {
+        available: { gatewayKey: { source: { kind: "env-file", path: ".env.local" } } },
+        preferredGatewayCredential: "api-key",
+      },
+      deps,
+    });
+  });
+
+  it("uses the persisted Gateway preference when credentials compete", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+    const picker: ProviderPicker = async (request) => {
+      expect(request.initialValue).toBe("project");
+      expect(request.options.find((option) => option.value === "project")?.checked).toBe(true);
+      expect(request.options.find((option) => option.value === "own-key")?.checked).toBeUndefined();
+      return undefined;
+    };
+
+    await runProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker,
+      providerState: {
+        available: {
+          gatewayProject: { projectName: "my-agent" },
+          gatewayKey: { source: { kind: "shell" } },
+        },
+        preferredGatewayCredential: "project",
       },
       deps,
     });

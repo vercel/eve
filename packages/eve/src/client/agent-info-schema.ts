@@ -17,6 +17,12 @@ const modelRouting = z.discriminatedUnion("kind", [
 const modelEndpoint = z.union([
   z.object({ kind: z.literal("external"), provider: z.string() }),
   z.object({
+    kind: z.literal("chatgpt"),
+    state: z.enum(["checking", "ready", "signed-out", "reauth-required", "unavailable"]),
+    accountId: z.string().optional(),
+    accountLabel: z.string().optional(),
+  }),
+  z.object({
     kind: z.literal("gateway"),
     connected: z.literal(true),
     credential: z.enum(["api-key", "oidc"]),

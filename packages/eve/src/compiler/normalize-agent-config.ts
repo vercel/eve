@@ -272,6 +272,17 @@ async function normalizeAuthoredModelReference(input: {
   };
 
   if (input.contextWindowTokens === undefined) {
+    // `chatgpt()` is an eve-owned direct Codex transport, not an AI Gateway
+    // model. Its provider namespace intentionally has no Gateway catalog row,
+    // so keep its compile-time limits with the transport instead of falling
+    // through to a lookup that can only reject it.
+    if (languageModel.provider.split(".")[0] === "codex") {
+      return {
+        ...sourceBackedModel,
+        contextWindowTokens: 200_000,
+      };
+    }
+
     try {
       const providerResult = await input.modelCatalog.getByProviderModelId(
         languageModel.provider,

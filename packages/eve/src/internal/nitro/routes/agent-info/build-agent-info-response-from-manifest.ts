@@ -27,12 +27,24 @@ import {
   type GatewayCredentialPresence,
   resolveModelEndpointStatus,
 } from "#internal/resolve-model-endpoint-status.js";
+import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
+
+function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
+  if (state === undefined) return undefined;
+  return {
+    state: state.kind,
+    ...(state.kind === "ready" && state.accountId !== undefined && { accountId: state.accountId }),
+    ...(state.kind === "ready" &&
+      state.accountLabel !== undefined && { accountLabel: state.accountLabel }),
+  };
+}
 
 export function buildAgentInfoResponseFromManifest(
   data: AgentInfoManifestData,
   input: {
     readonly mode: AgentInfoResponse["mode"];
     readonly gatewayCredentials: GatewayCredentialPresence;
+    readonly chatgptAuth?: ChatGptAuthState;
   },
 ): AgentInfoResponse {
   const manifest = data.manifest;
@@ -100,6 +112,7 @@ export function buildAgentInfoResponseFromManifest(
               endpoint: resolveModelEndpointStatus(
                 manifest.config.model.routing,
                 input.gatewayCredentials,
+                toChatGptEndpoint(input.chatgptAuth),
               ),
             }
           : {

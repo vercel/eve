@@ -161,6 +161,7 @@ describe("selectModel box", () => {
     expect(captured?.search).toBe(true);
     // The featured default remains first; the rest are newest release first.
     expect(captured?.options.map((option) => option.value)).toEqual([
+      "chatgpt/gpt-5.6-sol",
       "zai/glm-5.2",
       "zai/glm-4.6",
       "openai/gpt-5-mini",
@@ -194,6 +195,7 @@ describe("selectModel box", () => {
     expect(result.kind).toBe("done");
     if (result.kind !== "done") return;
     expect(captured?.options.map((option) => option.value)).toEqual([
+      "chatgpt/gpt-5.6-sol",
       "zai/glm-5.2",
       "anthropic/claude-opus-4.8",
       "zai/glm-4.6",
@@ -202,6 +204,7 @@ describe("selectModel box", () => {
     // Only the curated entries are featured: the picker's default view shows
     // them alone, and scrolling or search surfaces the rest of the catalog.
     expect(captured?.options.filter((option) => option.featured).map((o) => o.value)).toEqual([
+      "chatgpt/gpt-5.6-sol",
       "zai/glm-5.2",
       "anthropic/claude-opus-4.8",
     ]);
@@ -255,6 +258,7 @@ describe("selectModel box", () => {
     );
 
     expect(captured?.options.map((option) => option.value)).toEqual([
+      "chatgpt/gpt-5.6-sol",
       "acme/newer",
       "acme/alpha",
       "acme/zeta",

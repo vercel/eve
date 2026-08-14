@@ -16,27 +16,17 @@ import {
 } from "../vercel-project.js";
 import { withSpinner } from "../with-spinner.js";
 
-import type { GatewayCredentialSource } from "#internal/resolve-model-endpoint-status.js";
+import type {
+  ModelProviderState,
+  SelectedGatewayProvider,
+  SelectedModelProviderStatus,
+} from "#setup/model-provider-state.js";
 
 import { runLinkFlow, type LinkFlowResult } from "./link.js";
 
 export type ProviderConnection = "project" | "own-key" | "external";
 
-/**
- * How the agent's model is backed right now, as far as the local directory
- * shows: a linked Vercel project, a gateway credential in an env file, or
- * nothing detectable. An external provider (own ANTHROPIC_API_KEY etc.)
- * leaves no marker eve owns, so it reads as `unset`.
- */
-export type ModelProviderStatus =
-  | { kind: "unset" }
-  | { kind: "gateway-project"; projectName: string; teamName?: string }
-  | {
-      kind: "gateway-key";
-      envKey: typeof AI_GATEWAY_API_KEY_ENV_VAR | "VERCEL_OIDC_TOKEN";
-      /** Where the credential lives — an env file, or the shell for a key. */
-      source: GatewayCredentialSource;
-    };
+export type ModelProviderStatus = SelectedModelProviderStatus;
 
 export const PROVIDER_QUESTION = "Which model provider do you want to use?";
 
@@ -58,6 +48,7 @@ export interface ProviderFlowDeps {
 
 export type ProviderFlowResult =
   | LinkFlowResult
+  | { kind: "project"; result: LinkFlowResult }
   | {
       kind: "external-provider";
       /** The user runs a non-gateway provider; nothing was linked or written. */
@@ -104,15 +95,22 @@ function projectConnectionOption(
 
 function providerOptions(
   authStatus: VercelAuthStatus | undefined,
-  current: ModelProviderStatus | undefined,
+  state: ModelProviderState,
+  selected: SelectedGatewayProvider | undefined,
 ): SelectOption<ProviderConnection>[] {
+  const currentProject = state.available.gatewayProject;
+  const currentKey = state.available.gatewayKey;
   let project = projectConnectionOption(authStatus);
-  if (current?.kind === "gateway-project") {
-    const where =
-      current.teamName === undefined
-        ? pc.bold(current.projectName)
-        : `${pc.bold(current.projectName)} in team ${pc.bold(current.teamName)}`;
-    project = { ...project, checked: true, hint: `Linked to ${where}` };
+  if (selected === "gateway-project") {
+    const hint =
+      currentProject?.projectName !== undefined
+        ? `Linked to ${
+            currentProject.teamName === undefined
+              ? pc.bold(currentProject.projectName)
+              : `${pc.bold(currentProject.projectName)} in team ${pc.bold(currentProject.teamName)}`
+          }`
+        : "Current";
+    project = { ...project, checked: true, hint };
   }
 
   let ownKey: SelectOption<ProviderConnection> = {
@@ -120,9 +118,12 @@ function providerOptions(
     label: `AI Gateway via ${AI_GATEWAY_API_KEY_ENV_VAR}`,
     hint: "⎿ type your key",
   };
-  if (current?.kind === "gateway-key") {
-    const where = current.source.kind === "shell" ? "your shell" : current.source.path;
-    ownKey = { ...ownKey, checked: true, hint: `${current.envKey} set in ${where}` };
+  if (selected === "gateway-key") {
+    const hint =
+      currentKey !== undefined
+        ? `${AI_GATEWAY_API_KEY_ENV_VAR} set in ${currentKey.source.kind === "shell" ? "your shell" : currentKey.source.path}`
+        : "Current";
+    ownKey = { ...ownKey, checked: true, hint };
   }
 
   return [
@@ -159,18 +160,21 @@ async function selectProvider(input: {
 /**
  * THE PROVIDER FLOW behind the dev TUI `/model` menu's provider row
  * (`eve link` keeps {@link runLinkFlow}'s shape). One question chooses a
- * project-backed AI Gateway connection, an `AI_GATEWAY_API_KEY`, or an
- * external provider. The project branch runs the link flow in create-or-link
- * mode, so a project-less agent can create its first project rather than
- * dead-end on an empty list.
+ * project-backed AI Gateway connection, an `AI_GATEWAY_API_KEY`, or a direct
+ * provider. Model selection owns ChatGPT versus Gateway; this flow only owns
+ * the credential used after a Gateway model is selected. The project branch
+ * runs the link flow in create-or-link mode, so a project-less agent can
+ * create its first project rather than dead-end on an empty list.
  */
 export async function runProviderFlow(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
   picker?: ProviderPicker;
-  /** The detected provider, so the chooser can mark and describe the active row. */
-  currentProvider?: ModelProviderStatus;
+  /** Independently detected capabilities plus the persisted human selection. */
+  providerState?: ModelProviderState;
+  /** Draft Gateway credential selection while the parent flow is still open. */
+  selectedProvider?: SelectedGatewayProvider;
   deps?: Partial<ProviderFlowDeps>;
 }): Promise<ProviderFlowResult> {
   const { appRoot, prompter, signal } = input;
@@ -183,17 +187,36 @@ export async function runProviderFlow(input: {
   };
 
   let authStatus: VercelAuthStatus | undefined;
+  const persistedSelection: SelectedGatewayProvider | undefined =
+    input.providerState?.preferredGatewayCredential === "project"
+      ? "gateway-project"
+      : input.providerState?.preferredGatewayCredential === "api-key"
+        ? "gateway-key"
+        : undefined;
+  const detectedSelection: SelectedGatewayProvider | undefined =
+    input.providerState?.available.gatewayKey !== undefined
+      ? "gateway-key"
+      : input.providerState?.available.gatewayProject !== undefined
+        ? "gateway-project"
+        : undefined;
+  const selectedProvider = input.selectedProvider ?? persistedSelection ?? detectedSelection;
   // The cursor opens on the active provider; a Vercel auth blocker still
   // re-homes it onto the key row below.
-  let initialValue: ProviderConnection =
-    input.currentProvider?.kind === "gateway-key" ? "own-key" : "project";
+  let initialValue: ProviderConnection = selectedProvider === "gateway-key" ? "own-key" : "project";
   let keyChoice: Extract<ProviderPickerChoice, { kind: "inline-key" }>;
 
   try {
     while (true) {
       const choice = await selectProvider({
         picker: input.picker,
-        options: providerOptions(authStatus, input.currentProvider),
+        options: providerOptions(
+          authStatus,
+          input.providerState ?? {
+            available: {},
+            preferredGatewayCredential: undefined,
+          },
+          selectedProvider,
+        ),
         initialValue,
         validateInlineKey: (key, validationSignal) =>
           deps.validateGatewayApiKey(
@@ -231,12 +254,15 @@ export async function runProviderFlow(input: {
         initialValue = "own-key";
         continue;
       }
-      return await deps.runLinkFlow({
-        appRoot,
-        prompter,
-        signal,
-        projectSelection: "create-or-link",
-      });
+      return {
+        kind: "project",
+        result: await deps.runLinkFlow({
+          appRoot,
+          prompter,
+          signal,
+          projectSelection: "create-or-link",
+        }),
+      };
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };

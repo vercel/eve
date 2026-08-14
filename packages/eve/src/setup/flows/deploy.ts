@@ -1,3 +1,5 @@
+import { inspectApplication } from "#services/inspect-application.js";
+
 import { interactiveAsker, withAnswers } from "../ask.js";
 import { deployProject, type DeployProjectDeps } from "../boxes/deploy-project.js";
 import { linkVercelProject, type LinkProjectDeps } from "../boxes/link-project.js";
@@ -22,6 +24,7 @@ import { runLoginFlow } from "./login.js";
 /** Injected for tests; defaults to the real detection and box effects. */
 export interface DeployFlowDeps {
   detectDeployment: typeof detectDeployment;
+  inspectApplication: typeof inspectApplication;
   runLoginFlow: typeof runLoginFlow;
   resolveProvisioning?: ResolveProvisioningDeps;
   linkProject?: LinkProjectDeps;
@@ -31,6 +34,7 @@ export interface DeployFlowDeps {
 export type DeployFlowResult =
   | { kind: "deployed"; productionUrl?: string }
   | { kind: "cancelled" }
+  | { kind: "local-model" }
   /** Unlinked directory in a non-interactive run: refused before any effect. */
   | { kind: "needs-link" };
 
@@ -58,7 +62,22 @@ export async function runDeployFlow(input: {
   deps?: Partial<DeployFlowDeps>;
 }): Promise<DeployFlowResult> {
   const { appRoot, prompter, interactive, signal } = input;
-  const deps: DeployFlowDeps = { detectDeployment, runLoginFlow, ...input.deps };
+  const deps: DeployFlowDeps = {
+    detectDeployment,
+    inspectApplication,
+    runLoginFlow,
+    ...input.deps,
+  };
+
+  try {
+    const application = await deps.inspectApplication(appRoot);
+    const routing = application.compiledState?.manifest.config.model?.routing;
+    if (routing?.kind === "external" && routing.provider === "codex") {
+      return { kind: "local-model" };
+    }
+  } catch {
+    // Existing deploy behavior remains authoritative when the app has not compiled yet.
+  }
 
   const project = await withSpinner(prompter, "Checking the current Vercel link...", async () => {
     const deployment = await deps.detectDeployment(appRoot, { signal });

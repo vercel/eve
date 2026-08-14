@@ -107,6 +107,7 @@ export { parsePromptCommand, type PromptCommand } from "./prompt-commands.js";
 
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 const idleRuntimeArtifactPollMs = 500;
+const idleChatGptAuthPollMs = 5_000;
 /**
  * Cooperative-cancel retry cadence: 8 × 250ms covers the turn-dispatch
  * window (locally the cancel hook is claimed well under a second after the
@@ -371,6 +372,8 @@ export interface PromptCommandHandlerContext {
   readonly title: string;
   /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
+  /** Live ChatGPT identity shown only inside model configuration UI. */
+  readonly chatGptAccountLabel?: string;
   /**
    * Leaves the current setup panel mounted for the next automatic onboarding
    * command. The runner closes it if no next command can proceed.
@@ -1194,6 +1197,7 @@ export class EveTUIRunner {
     let stopped = false;
     let refreshing = false;
     let inFlightRefresh: Promise<void> | undefined;
+    let lastChatGptAuthRefresh = 0;
     const refresh = async () => {
       if (stopped || refreshing) {
         return;
@@ -1204,6 +1208,13 @@ export class EveTUIRunner {
         await runtimeArtifacts.refreshIdle({
           onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
         });
+        const endpoint = this.#agentInfo?.agent.model.endpoint;
+        const now = Date.now();
+        if (endpoint?.kind === "chatgpt" && now - lastChatGptAuthRefresh >= idleChatGptAuthPollMs) {
+          lastChatGptAuthRefresh = now;
+          const refreshedInfo = await this.#readAgentInfo();
+          if (refreshedInfo !== undefined) this.#replaceAgentInfo(refreshedInfo);
+        }
       } finally {
         refreshing = false;
       }
@@ -1582,10 +1593,15 @@ export class EveTUIRunner {
     if (handler === undefined)
       return { message: `/${command.name} is not available in this session.` };
 
+    const endpoint = this.#agentInfo?.agent.model.endpoint;
     const baseContext: PromptCommandHandlerContext = {
       renderer: this.#renderer,
       title: input.title,
       initialModelStep: input.initialModelStep,
+      chatGptAccountLabel:
+        endpoint?.kind === "chatgpt" && endpoint.state === "ready"
+          ? endpoint.accountLabel
+          : undefined,
       remoteConnection: this.#remoteConnection,
       withExclusiveTerminal: this.#withExclusiveTerminal,
     };
