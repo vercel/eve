@@ -183,6 +183,7 @@ export class ClientSession {
     try {
       for await (const event of this.#readStream({
         headers: input.headers,
+        keepAlive: shouldKeepActiveTurnAlive(input.streamReconnectPolicy),
         signal: input.signal,
         startIndex: initialStreamIndex,
         streamReconnectPolicy: input.streamReconnectPolicy,
@@ -225,6 +226,7 @@ export class ClientSession {
   #readStream(input: {
     readonly follow?: boolean;
     readonly headers?: Readonly<Record<string, string>>;
+    readonly keepAlive?: boolean;
     readonly signal?: AbortSignal;
     readonly startIndex: number;
     readonly streamReconnectPolicy?: StreamOptions["streamReconnectPolicy"];
@@ -232,6 +234,7 @@ export class ClientSession {
     return followStreamIterable({
       follow: input.follow,
       host: this.#context.host,
+      keepAlive: input.keepAlive,
       resolveHeaders: () => this.#context.resolveHeaders(input.headers),
       redirect: this.#context.redirect,
       sessionId: this.#state.sessionId,
@@ -240,6 +243,14 @@ export class ClientSession {
       streamReconnectPolicy: input.streamReconnectPolicy,
     });
   }
+}
+
+function shouldKeepActiveTurnAlive(policy: StreamOptions["streamReconnectPolicy"]): boolean {
+  if (policy && "reconnect" in policy) {
+    return false;
+  }
+
+  return policy?.streamIdleReconnectPolicy?.maxAttempts === undefined;
 }
 
 async function postTurn(

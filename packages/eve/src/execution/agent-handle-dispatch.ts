@@ -10,8 +10,18 @@
 
 import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
-import type { AgentAddress, AgentHandle, ContinueOperation } from "#harness/handles/store.js";
-import { prepareAgentContinuation, rejectAgentEffect } from "#harness/handles/transitions.js";
+import {
+  getAgentHandleStore,
+  type AgentAddress,
+  type AgentHandle,
+  type AgentIdentity,
+  type ContinueOperation,
+} from "#harness/handles/store.js";
+import {
+  prepareAgentContinuation,
+  rejectAgentEffect,
+  removeTaskAgentAddress,
+} from "#harness/handles/transitions.js";
 import type {
   RuntimeActionRequest,
   RuntimeRemoteAgentCallActionRequest,
@@ -21,6 +31,7 @@ import type {
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import {
   continueRemoteAgentSession,
+  isAmbiguousRemoteAgentContinueError,
   isRetryableRemoteAgentContinueError,
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
@@ -32,6 +43,7 @@ import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { err, ok, type Result } from "#shared/result.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
 
 const log = createLogger("execution.agent-handle-dispatch");
 
@@ -70,6 +82,7 @@ export type DispatchOutcome =
       readonly toolName: string;
     }
   | {
+      readonly deliveryAmbiguous?: boolean;
       readonly kind: "error";
       readonly result: RuntimeSubagentDispatchFailure;
       readonly session: RuntimeSession;
@@ -164,10 +177,11 @@ export async function dispatchToAgentHandle(input: {
   // accepted for child starts. The callee has no receiver-side dedup for
   // this; `prepareAgentContinuation` treating the recorded operation as a
   // replay only makes the parent-side transition idempotent.
-  const delivery = await deliverToAgentHandle({
+  const delivery = await deliverToAgentAddress({
     action,
+    address: handle.address,
     bundle,
-    handle,
+    identity: handle.identity,
     parentToken: input.parentToken,
   });
   if (!delivery.ok) {
@@ -183,6 +197,7 @@ export async function dispatchToAgentHandle(input: {
     // child's accumulated conversation); a transiently unreachable agent is
     // restored to `parked` so the model can retry the same agentId.
     return {
+      deliveryAmbiguous: delivery.error.deliveryAmbiguous,
       kind: "error",
       result: createAgentErrorResult({
         action,
@@ -208,6 +223,86 @@ export async function dispatchToAgentHandle(input: {
   };
 }
 
+/** Delivers a tasks-mode continuation without creating a second lifecycle claim. */
+export async function dispatchToTaskAgentAddress(input: {
+  readonly action: RuntimeAgentHandleAction;
+  readonly agentId: string;
+  readonly bundle: CompiledBundle;
+  readonly currentSession: RuntimeSession;
+  readonly parentToken: string;
+}): Promise<DispatchOutcome> {
+  const { action, agentId } = input;
+  const invokedName =
+    action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
+  const record = (getAgentHandleStore(input.currentSession.state)?.handles ?? []).find(
+    (handle): handle is Extract<AgentHandle, { phase: "addressed" }> =>
+      handle.phase === "addressed" && handle.identity.id === agentId,
+  );
+  if (record === undefined) {
+    return {
+      kind: "error",
+      result: createAgentErrorResult({
+        action,
+        code: AGENT_UNREACHABLE,
+        message: `Agent with id "${agentId}" is no longer reachable.`,
+      }),
+      session: input.currentSession,
+    };
+  }
+  if (record.identity.name !== invokedName) {
+    return {
+      kind: "error",
+      result: createAgentErrorResult({
+        action,
+        code: AGENT_MISMATCH,
+        message: `Agent "${agentId}" from the <agents> list does not belong to "${invokedName}".`,
+      }),
+      session: input.currentSession,
+    };
+  }
+
+  const delivery = await deliverToAgentAddress({
+    action,
+    address: record.address,
+    bundle: input.bundle,
+    identity: record.identity,
+    parentToken: input.parentToken,
+  });
+  if (!delivery.ok) {
+    const { cause, permanent } = delivery.error;
+    logError(log, "task agent delivery failed", cause, {
+      agentId,
+      callId: action.callId,
+      nodeId: record.identity.nodeId,
+      permanent,
+      subagentName: record.identity.name,
+    });
+    return {
+      deliveryAmbiguous: delivery.error.deliveryAmbiguous,
+      kind: "error",
+      result: createAgentErrorResult({
+        action,
+        code: AGENT_UNREACHABLE,
+        message: permanent
+          ? `Agent "${record.identity.name}" with id "${agentId}" is no longer reachable.`
+          : `Agent "${record.identity.name}" with id "${agentId}" is temporarily unreachable. Try again.`,
+      }),
+      session: permanent
+        ? removeTaskAgentAddress(input.currentSession, agentId)
+        : input.currentSession,
+    };
+  }
+
+  return {
+    address: record.address,
+    callId: action.callId,
+    kind: "called",
+    name: action.name,
+    session: input.currentSession,
+    toolName: record.identity.name,
+  };
+}
+
 /**
  * Attempts the continuation delivery once and classifies the failure.
  *
@@ -218,14 +313,19 @@ export async function dispatchToAgentHandle(input: {
  * Throwing is equally unsafe — a durable-step retry would re-dispatch
  * already-started siblings.
  */
-async function deliverToAgentHandle(input: {
+async function deliverToAgentAddress(input: {
   readonly action: RuntimeAgentHandleAction;
+  readonly address: AgentAddress;
   readonly bundle: CompiledBundle;
-  readonly handle: Extract<AgentHandle, { phase: "running" }>;
+  readonly identity: AgentIdentity;
   readonly parentToken: string;
-}): Promise<Result<void, { readonly cause: unknown; readonly permanent: boolean }>> {
-  const { action, bundle, handle } = input;
-  const { address, identity } = handle;
+}): Promise<
+  Result<
+    void,
+    { readonly cause: unknown; readonly deliveryAmbiguous: boolean; readonly permanent: boolean }
+  >
+> {
+  const { action, address, bundle, identity } = input;
 
   if (address.kind === "agent/remote") {
     let resolvedRemote;
@@ -238,13 +338,14 @@ async function deliverToAgentHandle(input: {
     } catch (error) {
       // The agent's node is gone from the compiled bundle; no retry can
       // reach this handle again.
-      return err({ cause: error, permanent: true });
+      return err({ cause: error, deliveryAmbiguous: false, permanent: true });
     }
     try {
       await continueRemoteAgentSession({
         callback: {
           callId: action.callId,
           subagentName: identity.name,
+          taskId: readTaskIdFromInboxToken(input.parentToken),
           token: input.parentToken,
           url: createWorkflowCallbackUrl(
             address.callbackBaseUrl,
@@ -259,6 +360,7 @@ async function deliverToAgentHandle(input: {
     } catch (error) {
       return err({
         cause: error,
+        deliveryAmbiguous: isAmbiguousRemoteAgentContinueError(error),
         permanent: !isRetryableRemoteAgentContinueError(error),
       });
     }
@@ -276,6 +378,7 @@ async function deliverToAgentHandle(input: {
           callId: action.callId,
           replyTo: { kind: "hook", token: input.parentToken },
           subagentName: identity.name,
+          taskId: readTaskIdFromInboxToken(input.parentToken),
         },
         kind: "send",
         payload: {
@@ -288,16 +391,18 @@ async function deliverToAgentHandle(input: {
     if (result.status === "session_not_active") {
       return err({
         cause: new Error(`Agent session "${address.sessionId}" is no longer active.`),
+        deliveryAmbiguous: false,
         permanent: true,
       });
     }
   } catch (error) {
-    return err({ cause: error, permanent: isRuntimeNoActiveSessionError(error) });
+    const permanent = isRuntimeNoActiveSessionError(error);
+    return err({ cause: error, deliveryAmbiguous: !permanent, permanent });
   }
   return ok(undefined);
 }
 
-function createAgentErrorResult(input: {
+export function createAgentErrorResult(input: {
   readonly action: RuntimeAgentHandleAction;
   readonly code: string;
   readonly message: string;

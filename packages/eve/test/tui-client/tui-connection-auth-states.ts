@@ -61,6 +61,9 @@ class FakeSession extends ClientSession {
   }
 
   override stream(): AsyncIterable<MessageStreamEvent> {
+    // A durable session tail cannot expose a callback continuation before
+    // the turn that parked for that callback has been accepted.
+    if (this.#continuationIndex >= this.#turnIndex) return pacedEvents([]);
     const events = this.#continuations[this.#continuationIndex] ?? [];
     this.#continuationIndex += 1;
     return pacedEvents(events);

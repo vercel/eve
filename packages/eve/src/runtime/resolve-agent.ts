@@ -202,6 +202,7 @@ function createResolvedAgentConfig(
     config.experimental = {
       instrumentationProviders: manifest.config.experimental.instrumentationProviders,
       subagentPersistentSessions: manifest.config.experimental.subagentPersistentSessions,
+      tasks: manifest.config.experimental.tasks,
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined

@@ -9,10 +9,12 @@ allowBuilds:
   "@parcel/watcher": false # Builds from source only when explicitly requested.
   braintrust: false # Installs an optional CLI binary; the SDK does not need it.
   bufferutil: false # The package already includes the supported prebuilt bindings.
+  cpu-features: false # Optional ssh2 acceleration; JavaScript fallback is sufficient.
   esbuild: true # Verifies the installed platform binary.
   phase: false # Would install its own Git hooks.
   protobufjs: false # Only checks the package version.
   sharp: false # Prebuilt platform packages need no install script.
+  ssh2: false # Optional native acceleration; JavaScript fallback is sufficient.
   unrs-resolver: false # Prebuilt platform packages need no repair script.
   webgpu: true # Clears macOS quarantine from its packaged native binding.
 

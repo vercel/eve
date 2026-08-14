@@ -21,16 +21,16 @@ interface ExtensionCapabilityContract {
 
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
-  tool: { current: 12, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dropped: {} },
+  tool: { current: 13, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], dropped: {} },
   dynamicTool: {
-    current: 16,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+    current: 17,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
     dropped: {},
   },
   connection: { current: 5, supported: [1, 2, 3, 4, 5], dropped: {} },
   hook: {
-    current: 12,
-    supported: [10, 11, 12],
+    current: 13,
+    supported: [10, 11, 12, 13],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -44,11 +44,11 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   skill: { current: 1, supported: [1], dropped: {} },
-  dynamicSkill: { current: 10, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dropped: {} },
+  dynamicSkill: { current: 11, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dropped: {} },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 11,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    current: 12,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     dropped: {},
   },
   config: { current: 1, supported: [1], dropped: {} },

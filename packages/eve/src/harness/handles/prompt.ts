@@ -9,6 +9,16 @@ import type { AgentHandle, AgentHandleStore } from "#harness/handles/store.js";
  */
 export const AGENTS_SNIPPET_LABEL = "[Agents]";
 
+/** Model-safe projection of one persistent task-mode agent. */
+export interface AgentView {
+  readonly availability: "available" | "busy";
+  readonly id: string;
+  readonly name: string;
+  readonly statusLine?: string;
+  readonly taskId?: string;
+  readonly taskStatus?: "working" | "input_required";
+}
+
 /** Returns the resumable handles: the only phase the model may continue. */
 export function projectParkedAgentHandles(
   store: AgentHandleStore,
@@ -26,6 +36,19 @@ export function renderAgentsSnippet(store: AgentHandleStore): string {
     (handle) =>
       `<agent id="${escapeXml(handle.identity.id)}" name="${escapeXml(handle.identity.name)}">${escapeXml(handle.lastStatus === "" ? "(no status)" : handle.lastStatus)}</agent>`,
   );
+  return [AGENTS_SNIPPET_LABEL, "<agents>", ...agents, "</agents>"].join("\n");
+}
+
+/** Renders task-derived availability without exposing private addresses. */
+export function renderAgentViewsSnippet(views: readonly AgentView[]): string {
+  const agents = views.map((view) => {
+    const task =
+      view.taskId === undefined || view.taskStatus === undefined
+        ? ""
+        : ` taskId="${escapeXml(view.taskId)}" taskStatus="${view.taskStatus}"`;
+    const status = view.statusLine ?? (view.availability === "busy" ? "(busy)" : "(available)");
+    return `<agent id="${escapeXml(view.id)}" name="${escapeXml(view.name)}" availability="${view.availability}"${task}>${escapeXml(status)}</agent>`;
+  });
   return [AGENTS_SNIPPET_LABEL, "<agents>", ...agents, "</agents>"].join("\n");
 }
 
@@ -48,6 +71,7 @@ export function renderAgentsSnippet(store: AgentHandleStore): string {
  * eve-injected so the model does not attribute it to the user.
  */
 export function resolveAgentsAnnouncement(input: {
+  readonly agentViews?: readonly AgentView[];
   readonly messages: readonly ModelMessage[];
   readonly store: AgentHandleStore | undefined;
 }): string | undefined {
@@ -58,12 +82,16 @@ export function resolveAgentsAnnouncement(input: {
       message.content.startsWith(AGENTS_SNIPPET_LABEL),
   );
   const store = input.store ?? { handles: [] };
+  const visibleCount = input.agentViews?.length ?? projectParkedAgentHandles(store).length;
 
-  if (latest === undefined && projectParkedAgentHandles(store).length === 0) {
+  if (latest === undefined && visibleCount === 0) {
     return undefined;
   }
 
-  const rendered = renderAgentsSnippet(store);
+  const rendered =
+    input.agentViews === undefined
+      ? renderAgentsSnippet(store)
+      : renderAgentViewsSnippet(input.agentViews);
   return latest?.content === rendered ? undefined : rendered;
 }
 

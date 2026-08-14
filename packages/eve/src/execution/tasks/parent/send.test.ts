@@ -1,0 +1,284 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  dispatchToTaskAgentAddress,
+  type RuntimeSession,
+} from "#execution/agent-handle-dispatch.js";
+import {
+  beginDelegatedTask,
+  failDelegatedDispatch,
+  settleDelegatedDispatch,
+} from "#execution/tasks/parent/delegate.js";
+import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
+import { executeTaskSend } from "#execution/tasks/parent/send.js";
+import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
+import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
+import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
+import type { TaskStatus, TaskView } from "#tasks/types.js";
+
+vi.mock("#execution/agent-handle-dispatch.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/agent-handle-dispatch.js")>()),
+  dispatchToTaskAgentAddress: vi.fn(),
+}));
+
+vi.mock("#execution/tasks/parent/delegate.js", () => ({
+  beginDelegatedTask: vi.fn(),
+  failDelegatedDispatch: vi.fn(),
+  settleDelegatedDispatch: vi.fn(),
+}));
+
+vi.mock("#execution/tasks/parent/run-parent.js", () => ({
+  readLatestTaskView: vi.fn(),
+  sendTaskCommand: vi.fn(),
+}));
+
+const agentId = "ag_research:abcdef123456";
+const metadata = { agentId, kind: "subagent" as const, mode: "local" as const, name: "research" };
+
+function task(taskId: string, status: TaskStatus): TaskView {
+  // Cast on purpose: mock views omit the per-status payload fields the
+  // TaskView union requires (e.g. lastOutput on completed).
+  return { metadata, status, taskId } as TaskView;
+}
+
+function createSession(includeActive = false, activeCreatedByTurnId = "turn-1"): RuntimeSession {
+  const tasks = [
+    {
+      taskInboxToken: "task-token-terminal",
+      createdByTurnId: "turn-1",
+      metadata,
+      operationId: "operation-terminal",
+      taskId: "task_terminal",
+      taskRunId: "run-terminal",
+    },
+    ...(includeActive
+      ? [
+          {
+            taskInboxToken: "task-token-active",
+            createdByTurnId: activeCreatedByTurnId,
+            metadata,
+            operationId: "operation-active",
+            taskId: "task_active",
+            taskRunId: "run-active",
+          },
+        ]
+      : []),
+  ];
+  return {
+    agent: { modelReference: { id: "model" }, system: "", tools: [] },
+    compaction: { recentWindowSize: 4, threshold: 1_000_000 },
+    continuationToken: "parent-token",
+    history: [],
+    sessionId: "parent-session",
+    state: {
+      [AGENT_HANDLES_STATE_KEY]: {
+        handles: [
+          {
+            address: {
+              continuationToken: "child-token",
+              kind: "agent/local",
+              sessionId: "child-session",
+            },
+            identity: { id: agentId, name: "research", nodeId: "node-research" },
+            phase: "addressed",
+          },
+        ],
+      },
+      [SESSION_TASKS_STATE_KEY]: { tasks },
+    },
+  } as RuntimeSession;
+}
+
+const action: RuntimeToolCallActionRequest = {
+  callId: "call-send",
+  input: { message: "continue", taskId: "task_terminal" },
+  kind: "tool-call",
+  toolName: "task_send",
+};
+
+describe("task_send persistent-agent availability", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("starts a new task on the same address after terminal work", async () => {
+    const session = createSession();
+    vi.mocked(readLatestTaskView).mockResolvedValue(task("task_terminal", "completed"));
+    vi.mocked(beginDelegatedTask).mockResolvedValue({
+      taskInboxToken: "task-token-new",
+      createdByTurnId: "turn-2",
+      metadata,
+      operationId: "operation-new",
+      taskId: "task_new",
+      taskRunId: "run-new",
+    });
+    vi.mocked(dispatchToTaskAgentAddress).mockResolvedValue({
+      address: {
+        continuationToken: "child-token",
+        kind: "agent/local",
+        sessionId: "child-session",
+      },
+      callId: action.callId,
+      kind: "called",
+      name: "research",
+      session,
+      toolName: "research",
+    });
+    vi.mocked(settleDelegatedDispatch).mockResolvedValue({
+      receipt: {} as never,
+      session,
+    });
+
+    const result = await executeTaskSend({
+      action,
+      bundle: {} as CompiledBundle,
+      parentTurnId: "turn-2",
+      session,
+    });
+
+    expect(beginDelegatedTask).toHaveBeenCalledWith(expect.objectContaining({ agentId }));
+    expect(dispatchToTaskAgentAddress).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId, currentSession: session }),
+    );
+    expect(result.result).toMatchObject({
+      output: { agentId, status: "working", taskId: "task_new" },
+    });
+  });
+
+  it("rejects a follow-up while another nonterminal task owns the agent", async () => {
+    const session = createSession(true);
+    vi.mocked(readLatestTaskView).mockImplementation(async ({ taskRunId }) =>
+      taskRunId === "run-active"
+        ? task("task_active", "input_required")
+        : task("task_terminal", "completed"),
+    );
+
+    const result = await executeTaskSend({
+      action,
+      bundle: {} as CompiledBundle,
+      parentTurnId: "turn-2",
+      session,
+    });
+
+    expect(result.result).toMatchObject({
+      isError: true,
+      output: { message: expect.stringContaining("task_active") },
+    });
+    expect(beginDelegatedTask).not.toHaveBeenCalled();
+    expect(dispatchToTaskAgentAddress).not.toHaveBeenCalled();
+    expect(failDelegatedDispatch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a second same-batch follow-up even if the first task already completed", async () => {
+    const session = createSession(true, "turn-2");
+    vi.mocked(readLatestTaskView).mockImplementation(async ({ taskRunId }) =>
+      taskRunId === "run-active"
+        ? task("task_active", "completed")
+        : task("task_terminal", "completed"),
+    );
+
+    const result = await executeTaskSend({
+      action,
+      bundle: {} as CompiledBundle,
+      parentTurnId: "turn-2",
+      session,
+    });
+
+    expect(result.result).toMatchObject({
+      isError: true,
+      output: { message: expect.stringContaining("AGENT_BUSY") },
+    });
+    expect(beginDelegatedTask).not.toHaveBeenCalled();
+    expect(dispatchToTaskAgentAddress).not.toHaveBeenCalled();
+  });
+
+  it("persists the continuation task before an ambiguous delivery", async () => {
+    const current = createSession();
+    const persisted = createSession(true, "turn-2");
+    vi.mocked(readLatestTaskView).mockResolvedValue(task("task_terminal", "completed"));
+    vi.mocked(beginDelegatedTask).mockResolvedValue({
+      taskInboxToken: "task-token-new",
+      createdByTurnId: "turn-2",
+      metadata,
+      operationId: "operation-new",
+      taskId: "task_active",
+      taskRunId: "run-active",
+    });
+    vi.mocked(settleDelegatedDispatch).mockResolvedValue({
+      receipt: {} as never,
+      session: persisted,
+    });
+    vi.mocked(dispatchToTaskAgentAddress).mockResolvedValue({
+      deliveryAmbiguous: true,
+      kind: "error",
+      result: {
+        callId: action.callId,
+        isError: true,
+        kind: "subagent-result",
+        origin: "dispatch",
+        output: { code: "AGENT_UNREACHABLE", message: "response lost" },
+        subagentName: "research",
+      },
+      session: persisted,
+    });
+
+    const result = await executeTaskSend({
+      action,
+      bundle: {} as CompiledBundle,
+      parentTurnId: "turn-2",
+      session: current,
+    });
+
+    expect(vi.mocked(settleDelegatedDispatch).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(dispatchToTaskAgentAddress).mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(dispatchToTaskAgentAddress).toHaveBeenCalledWith(
+      expect.objectContaining({ currentSession: persisted }),
+    );
+    expect(result.result).toMatchObject({ isError: true, output: { taskId: "task_active" } });
+    expect(result.session).toBe(persisted);
+    expect(failDelegatedDispatch).not.toHaveBeenCalled();
+  });
+
+  it("fails a persisted continuation after a definitive remote rejection", async () => {
+    const current = createSession();
+    const persisted = createSession(true, "turn-2");
+    vi.mocked(readLatestTaskView).mockResolvedValue(task("task_terminal", "completed"));
+    vi.mocked(beginDelegatedTask).mockResolvedValue({
+      taskInboxToken: "task-token-new",
+      createdByTurnId: "turn-2",
+      metadata,
+      operationId: "operation-new",
+      taskId: "task_active",
+      taskRunId: "run-active",
+    });
+    vi.mocked(settleDelegatedDispatch).mockResolvedValue({
+      receipt: {} as never,
+      session: persisted,
+    });
+    vi.mocked(dispatchToTaskAgentAddress).mockResolvedValue({
+      deliveryAmbiguous: false,
+      kind: "error",
+      result: {
+        callId: action.callId,
+        isError: true,
+        kind: "subagent-result",
+        origin: "dispatch",
+        output: { code: "AGENT_UNREACHABLE", message: "HTTP 401" },
+        subagentName: "research",
+      },
+      session: persisted,
+    });
+
+    await executeTaskSend({
+      action,
+      bundle: {} as CompiledBundle,
+      parentTurnId: "turn-2",
+      session: current,
+    });
+
+    expect(failDelegatedDispatch).toHaveBeenCalledWith({
+      error: { code: "AGENT_UNREACHABLE", message: "HTTP 401" },
+      task: expect.objectContaining({ taskId: "task_active" }),
+    });
+  });
+});

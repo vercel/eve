@@ -12,6 +12,7 @@
   ],
   "type": "module",
   "scripts": {
+    "benchmark": "pnpm --filter @eve-internal/benchmarks benchmark",
     "build": "turbo run build --filter='./packages/*'",
     "changeset": "changeset",
     "check:deps": "syncpack lint",

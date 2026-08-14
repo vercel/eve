@@ -38,8 +38,8 @@ export interface Session {
     inputResponses: readonly InputResponse[],
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
-  /** Requests cancellation of this exact session's active turn. */
-  cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
+  /** Requests cancellation of this exact session's active turn or one owned task. */
+  cancel(options?: { taskId?: string; turnId?: string }): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
   compact(): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
@@ -135,9 +135,9 @@ export function createSession(
         sessionId: id,
       });
     },
-    async cancel(options?: { turnId?: string }) {
+    async cancel(options?: { taskId?: string; turnId?: string }) {
       return await runtime.dispatchSession({
-        command: { kind: "cancel", turnId: options?.turnId },
+        command: { kind: "cancel", taskId: options?.taskId, turnId: options?.turnId },
         sessionId: id,
       });
     },
@@ -233,7 +233,8 @@ export function sessionCallbackToTurnCaller(
     ? undefined
     : {
         callId: callback.callId,
-        replyTo: { kind: "callback", url: callback.url },
+        replyTo: { kind: "callback", token: callback.token, url: callback.url },
         subagentName: callback.subagentName,
+        taskId: callback.taskId,
       };
 }

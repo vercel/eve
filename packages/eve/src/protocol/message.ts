@@ -7,6 +7,10 @@ import {
 } from "#internal/attachments/url-refs.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createEventId } from "#protocol/event-id.js";
+import {
+  createEveSessionStreamRoutePath,
+  createEveSubagentStreamRoutePath,
+} from "#protocol/routes.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type {
   RuntimeActionRequest,
@@ -308,10 +312,22 @@ export interface SubagentCalledStreamEvent {
   data: {
     callId: string;
     childSessionId: string;
+    childStreamPath: string;
     sessionId: string;
     sequence: number;
     name: string;
     remote?: {
+      /**
+       * Key to the authored credential functions (`auth`/`headers`) for this
+       * remote child, resolved at stream-proxy time by
+       * `resolveRemoteAgentStreamHeaders`. Static subagent → the node id in
+       * `subagentRegistry.subagentsByNodeId`; dynamic subagent → its
+       * `credentialsStepId` in the step registry. The event stores this key —
+       * never resolved header values — because tokens expire and this event
+       * is persisted and streamed to clients. Absent when the remote child
+       * has no authored credentials.
+       */
+      resolverId?: string;
       url: string;
     };
     toolName: string;
@@ -351,6 +367,15 @@ export interface SubagentChildEventStreamEvent {
  */
 export interface SubagentCompletedStreamEvent {
   data: {
+    /**
+     * Present when the originating call completed with a background-task
+     * receipt while the child itself kept running. Consumers must not treat
+     * this as the child's terminal boundary; the child stream owns that.
+     */
+    backgroundTask?: {
+      taskId: string;
+      status: "working";
+    };
     callId: string;
     output: string;
     subagentName: string;
@@ -571,6 +596,8 @@ export interface CompactionCompletedStreamEvent {
  */
 export interface AuthorizationRequiredStreamEvent {
   data: {
+    /** Stable identity of this exact authorization attempt. */
+    attemptId?: string;
     authorization?: ConnectionAuthorizationChallenge;
     candidateId?: string;
     description: string;
@@ -604,6 +631,8 @@ export type ConnectionAuthorizationOutcome = AuthorizationOutcome;
  */
 export interface AuthorizationCompletedStreamEvent {
   data: {
+    /** Stable identity shared with the matching required event. */
+    attemptId?: string;
     candidateId?: string;
     /**
      * The challenge from the matching `authorization.required` event,
@@ -1035,6 +1064,7 @@ export function createActionsRequestedEvent(input: {
  * for `getToken`-only authorization sources that authorize out of band.
  */
 export function createAuthorizationRequiredEvent(input: {
+  readonly attemptId?: string;
   readonly authorization?: ConnectionAuthorizationChallenge;
   readonly candidateId?: string;
   readonly description: string;
@@ -1051,6 +1081,9 @@ export function createAuthorizationRequiredEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.attemptId !== undefined) {
+    data.attemptId = input.attemptId;
+  }
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
   }
@@ -1072,6 +1105,7 @@ export function createAuthorizationRequiredEvent(input: {
  * authorization deadline has expired.
  */
 export function createAuthorizationCompletedEvent(input: {
+  readonly attemptId?: string;
   readonly authorization?: ConnectionAuthorizationChallenge;
   readonly candidateId?: string;
   readonly name: string;
@@ -1088,6 +1122,9 @@ export function createAuthorizationCompletedEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.attemptId !== undefined) {
+    data.attemptId = input.attemptId;
+  }
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
   }
@@ -1197,6 +1234,7 @@ export function createSubagentCalledEvent(input: {
   readonly sequence: number;
   readonly name: string;
   readonly remote?: {
+    readonly resolverId?: string;
     readonly url: string;
   };
   readonly toolName: string;
@@ -1207,6 +1245,14 @@ export function createSubagentCalledEvent(input: {
     data: {
       callId: input.callId,
       childSessionId: input.childSessionId,
+      childStreamPath:
+        input.remote === undefined
+          ? createEveSessionStreamRoutePath(input.childSessionId)
+          : createEveSubagentStreamRoutePath({
+              callId: input.callId,
+              childSessionId: input.childSessionId,
+              parentSessionId: input.sessionId,
+            }),
       sessionId: input.sessionId,
       sequence: input.sequence,
       name: input.name,

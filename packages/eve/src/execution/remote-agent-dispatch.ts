@@ -10,6 +10,7 @@ import type { CancelTurnResult, SessionAuthContext, SessionTraceContext } from "
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import type { HeadersValue } from "#client/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
+import { createRemoteAgentRouteUrl } from "#execution/remote-agent-route-url.js";
 import { formatTraceparent } from "#protocol/traceparent.js";
 import {
   formatSubagentInput,
@@ -19,9 +20,11 @@ import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
+import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),
@@ -52,6 +55,12 @@ export async function startRemoteAgentSession(input: {
   /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
   /**
+   * Replay-stable identity of this create attempt. A retried dispatch step
+   * re-sends the same value, letting the receiver return the child it already
+   * created instead of starting a second one.
+   */
+  readonly operationId?: string;
+  /**
    * Whether the dispatching agent opted into
    * `experimental.subagentPersistentSessions`. Persistent remote children run
    * in conversation mode so their sessions accept follow-up messages.
@@ -75,18 +84,21 @@ export async function startRemoteAgentSession(input: {
     callback: {
       callId: string;
       subagentName: string;
+      taskId?: string;
       token: string;
       url: string;
     };
     forwardedPrincipal?: ForwardedPrincipal;
     message: string;
     mode: "conversation" | "task";
+    operationId?: string;
     outputSchema?: object;
   } = {
     capabilities: {},
     callback: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
+      taskId: readTaskIdFromInboxToken(callbackToken),
       token: callbackToken,
       url: createWorkflowCallbackUrl(
         input.callbackBaseUrl,
@@ -104,6 +116,9 @@ export async function startRemoteAgentSession(input: {
   };
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
+  }
+  if (input.operationId !== undefined) {
+    requestBody.operationId = input.operationId;
   }
 
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
@@ -153,6 +168,7 @@ export async function continueRemoteAgentSession(input: {
   readonly callback: {
     readonly callId: string;
     readonly subagentName: string;
+    readonly taskId?: string;
     readonly token: string;
     readonly url: string;
   };
@@ -182,7 +198,10 @@ export async function continueRemoteAgentSession(input: {
       `Remote agent "${input.remote.name}" continue-session request failed${
         permanent ? " permanently" : ""
       } with HTTP ${response.status}.`,
-      { retryable: !permanent },
+      {
+        deliveryAmbiguous: isAmbiguousRemoteContinueStatus(response.status),
+        retryable: !permanent,
+      },
     );
   }
 }
@@ -193,11 +212,16 @@ export async function continueRemoteAgentSession(input: {
  * with real instances instead of re-encoding the classification.
  */
 export class RemoteAgentContinueRequestError extends Error {
+  readonly deliveryAmbiguous: boolean;
   readonly retryable: boolean;
 
-  constructor(message: string, options: { readonly retryable: boolean }) {
+  constructor(
+    message: string,
+    options: { readonly deliveryAmbiguous: boolean; readonly retryable: boolean },
+  ) {
     super(message);
     this.name = "RemoteAgentContinueRequestError";
+    this.deliveryAmbiguous = options.deliveryAmbiguous;
     this.retryable = options.retryable;
   }
 }
@@ -213,6 +237,15 @@ export class RemoteAgentContinueRequestError extends Error {
  */
 export function isRetryableRemoteAgentContinueError(error: unknown): boolean {
   return !(error instanceof RemoteAgentContinueRequestError) || error.retryable;
+}
+
+/** Whether the callee may have accepted the continuation before delivery failed. */
+export function isAmbiguousRemoteAgentContinueError(error: unknown): boolean {
+  return !(error instanceof RemoteAgentContinueRequestError) || error.deliveryAmbiguous;
+}
+
+function isAmbiguousRemoteContinueStatus(status: number): boolean {
+  return status === 408 || status === 425 || status >= 500;
 }
 
 async function readRemoteAgentErrorCode(response: Response): Promise<string | undefined> {
@@ -254,9 +287,15 @@ function buildForwardedPrincipalField(input: {
 export async function cancelRemoteAgentTurn(input: {
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly sessionId: string;
+  readonly taskId?: string;
+  readonly turnId?: string;
 }): Promise<CancelTurnResult> {
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
   const response = await fetch(createRemoteAgentCancelTurnUrl(input.remote, input.sessionId), {
+    body:
+      input.turnId === undefined && input.taskId === undefined
+        ? undefined
+        : JSON.stringify({ taskId: input.taskId, turnId: input.turnId }),
     headers,
     method: "POST",
   });
@@ -355,6 +394,51 @@ export function resolveRemoteAgentForAction(input: {
   return definition;
 }
 
+/**
+ * Resolves authored outbound headers for a server-authored remote child event.
+ *
+ * `resolverId` is the key persisted on the `subagent.called` event (see
+ * `SubagentCalledStreamEvent`): it identifies the authored credential
+ * functions, never their resolved values. Lookup order mirrors how dispatch
+ * chose the key — first as a subagent node id (static remote definition),
+ * then as a `credentialsStepId` in the step registry (dynamic remote
+ * definition). The matched static definition must still agree with the
+ * event's `name`/`url`, so a stale or mismatched key fails closed rather
+ * than minting headers for the wrong upstream.
+ */
+export async function resolveRemoteAgentStreamHeaders(input: {
+  readonly bundle: CompiledRuntimeAgentBundle;
+  readonly name: string;
+  readonly resolverId?: string;
+  readonly url: string;
+}): Promise<Record<string, string>> {
+  if (input.resolverId === undefined) {
+    return {};
+  }
+
+  const nodes = new Set([input.bundle.graph.root, ...input.bundle.graph.nodesByNodeId.values()]);
+  for (const node of nodes) {
+    const definition = node.subagentRegistry.subagentsByNodeId.get(input.resolverId)?.definition;
+    if (definition === undefined) continue;
+    if (
+      definition.kind !== "remote" ||
+      definition.name !== input.name ||
+      definition.url !== input.url
+    ) {
+      throw new Error("Remote child stream resolver does not match the authored remote agent.");
+    }
+    return await resolveRemoteAgentRequestHeaders(definition);
+  }
+
+  const credentials = resolveDynamicRemoteAgentCredentials({
+    credentialsStepId: input.resolverId,
+    description: "",
+    path: "",
+    url: input.url,
+  });
+  return await resolveRemoteAgentRequestHeaders(credentials);
+}
+
 function resolveDynamicRemoteAgentCredentials(config: DynamicRemoteAgentConfig): {
   readonly auth?: ResolvedRuntimeRemoteAgentNode["auth"];
   readonly headers?: HeadersValue;
@@ -424,16 +508,12 @@ function createRemoteAgentContinueUrl(
   return createRemoteAgentRouteUrl(remote.url, createEveSessionRoutePath(sessionId));
 }
 
-function createRemoteAgentRouteUrl(baseUrl: string, routePath: string): string {
-  return new URL(routePath.replace(/^\/+/, ""), `${trimTrailingSlash(baseUrl)}/`).toString();
-}
-
 function isRetryableRemoteCancelStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 async function resolveRemoteAgentRequestHeaders(
-  remote: ResolvedRuntimeRemoteAgentNode,
+  remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers">,
 ): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};
   if (remote.headers !== undefined) {
@@ -461,8 +541,4 @@ function formatRemoteAgentCallInputMessage(input: {
     persistentSession: input.persistentSession,
     type: "remote",
   }).message;
-}
-
-function trimTrailingSlash(value: string): string {
-  return value.endsWith("/") ? value.slice(0, -1) : value;
 }

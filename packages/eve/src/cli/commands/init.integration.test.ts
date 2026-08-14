@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -437,6 +437,48 @@ describe("runInitCommand", () => {
       expect.any(Object),
     );
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(subdirectory);
+  });
+
+  it("refuses a selected existing nonempty subdirectory without changing it", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-selected-existing-"));
+    await writeFile(join(projectPath, "notes.md"), "parent\n", "utf8");
+    const subdirectory = join(projectPath, "research-agent");
+    await mkdir(subdirectory);
+    await writeFile(join(subdirectory, "keep.txt"), "keep me\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.confirmInitInNonEmptyDirectory.mockResolvedValue({
+      kind: "subdirectory",
+      name: "research-agent",
+    });
+
+    await expect(runInitCommand(output, projectPath, undefined, {}, deps)).rejects.toThrow(
+      "no package.json",
+    );
+
+    await expect(readFile(join(subdirectory, "keep.txt"), "utf8")).resolves.toBe("keep me\n");
+    await expect(pathExists(join(subdirectory, "agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+  });
+
+  it("restores a selected existing empty subdirectory after install failure", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-selected-fresh-"));
+    await writeFile(join(projectPath, "notes.md"), "parent\n", "utf8");
+    const subdirectory = join(projectPath, "research-agent");
+    await mkdir(subdirectory);
+    const output = logger();
+    const deps = dependencies();
+    deps.confirmInitInNonEmptyDirectory.mockResolvedValue({
+      kind: "subdirectory",
+      name: "research-agent",
+    });
+    deps.runPackageManagerInstall.mockResolvedValue(false);
+
+    await expect(runInitCommand(output, projectPath, undefined, {}, deps)).rejects.toThrow(
+      "restored",
+    );
+
+    await expect(readdir(subdirectory)).resolves.toEqual([]);
   });
 
   it("leaves a non-empty current directory unchanged when location selection is cancelled", async () => {
@@ -981,10 +1023,11 @@ describe("runInitCommand", () => {
     );
   });
 
-  it("refuses a target directory without package.json before writing anything", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-no-pkg-"));
+  it("refuses a preexisting Git-only named directory without changing it", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-git-only-"));
     const projectRoot = join(parentDirectory, "host-app");
-    await mkdir(projectRoot, { recursive: true });
+    await mkdir(join(projectRoot, ".git"), { recursive: true });
+    await writeFile(join(projectRoot, ".git/HEAD"), "ref: refs/heads/main\n", "utf8");
     const output = logger();
     const deps = dependencies();
 
@@ -992,9 +1035,56 @@ describe("runInitCommand", () => {
       "no package.json",
     );
 
+    await expect(readdir(projectRoot)).resolves.toEqual([".git"]);
+    await expect(readFile(join(projectRoot, ".git/HEAD"), "utf8")).resolves.toBe(
+      "ref: refs/heads/main\n",
+    );
     await expect(pathExists(join(projectRoot, "agent"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("uses a preexisting empty named directory for a fresh project", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-empty-"));
+    const projectRoot = join(parentDirectory, "host-app");
+    await mkdir(projectRoot, { recursive: true });
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(output, parentDirectory, "host-app", {}, deps);
+
+    await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectRoot);
+  });
+
+  it("restores a preexisting empty named directory when installation fails", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-empty-fail-"));
+    const projectRoot = join(parentDirectory, "host-app");
+    await mkdir(projectRoot, { recursive: true });
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockResolvedValue(false);
+
+    await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
+      "restored",
+    );
+
+    await expect(readdir(projectRoot)).resolves.toEqual([]);
+  });
+
+  it("refuses an invalid host package.json before writing agent files", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-invalid-pkg-"));
+    const projectRoot = join(parentDirectory, "host-app");
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(join(projectRoot, "package.json"), '{ "name": }\n', "utf8");
+    const output = logger();
+    const deps = dependencies();
+
+    await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
+      "not valid JSON",
+    );
+
+    await expect(pathExists(join(projectRoot, "agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1211,10 +1301,42 @@ describe("runInitCommand", () => {
       "Failed to install dependencies",
     );
 
-    await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(true);
+    await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(false);
     expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("preserves a chosen nonempty in-place target after install failure", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "eve-init-nonempty-install-fail-"));
+    await writeFile(join(projectRoot, "notes.md"), "keep me\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockResolvedValue(false);
+
+    await expect(runInitCommand(output, projectRoot, ".", {}, deps)).rejects.toThrow(
+      `install dependencies with pnpm in "${projectRoot}"`,
+    );
+
+    await expect(readFile(join(projectRoot, "notes.md"), "utf8")).resolves.toBe("keep me\n");
+    await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
+  });
+
+  it("preserves an existing host after install failure and prints the retry command", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-host-install-fail-"));
+    const projectRoot = await createHostProject(parentDirectory);
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockResolvedValue(false);
+
+    await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
+      `install dependencies with pnpm in "${projectRoot}"`,
+    );
+
+    await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
+    expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
+      dependencies: { eve: "^0.6.0" },
+    });
   });
 
   it("replays only the actionable npm error, dropping silly/verbose/http/timing noise", async () => {

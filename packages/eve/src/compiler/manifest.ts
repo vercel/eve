@@ -316,10 +316,12 @@ const compiledDynamicModelDefinitionSchema: z.ZodType<CompiledDynamicModelDefini
 
 const channelMethodSchema = z.union([
   z.literal("GET"),
+  z.literal("HEAD"),
   z.literal("POST"),
   z.literal("PUT"),
   z.literal("PATCH"),
   z.literal("DELETE"),
+  z.literal("OPTIONS"),
   z.literal("WEBSOCKET"),
 ]);
 
@@ -441,6 +443,7 @@ const compiledAgentConfigBaseFields = {
     .object({
       instrumentationProviders: z.boolean().optional(),
       subagentPersistentSessions: z.boolean().optional(),
+      tasks: z.boolean().optional(),
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),
     })
     .strict()
@@ -918,6 +921,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
         : {
             instrumentationProviders: config.experimental.instrumentationProviders,
             subagentPersistentSessions: config.experimental.subagentPersistentSessions,
+            tasks: config.experimental.tasks,
             workflow:
               config.experimental.workflow === undefined
                 ? undefined

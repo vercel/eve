@@ -76,6 +76,8 @@ function resolveStreamReconnectPolicy(
  */
 interface FollowStreamInput {
   readonly host: string;
+  /** Keep reconnecting after empty streams until the consumer aborts or stops iteration. */
+  readonly keepAlive?: boolean;
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
   readonly resolveHeaders: () => Promise<Headers>;
   readonly redirect?: ClientRedirectPolicy;
@@ -177,6 +179,7 @@ export async function* followStreamIterable(
     }
 
     if (
+      input.keepAlive !== true &&
       !deliveredEvent &&
       !initialConnection &&
       (idleReconnects += 1) >= idleRetryPolicy.maxAttempts

@@ -13,10 +13,12 @@ import type { ResetResponse } from "#protocol/reset-session.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal, type TrustedForwarders } from "#channel/forwarded-principal.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
+import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   readAgentInfoRouteResponse,
+  readRemoteAgentStreamHeadersResolver,
   readRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 import {
@@ -27,6 +29,8 @@ import {
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
+  type MessageStreamEvent,
+  type SubagentCalledStreamEvent,
 } from "#protocol/message.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
 import {
@@ -38,6 +42,9 @@ import {
   EVE_SESSION_ROUTE_PATTERN,
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
+  EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
+  createEveSessionStreamRoutePath,
+  createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
 import { type InputResponse, isInputResponse } from "#runtime/input/types.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
@@ -252,6 +259,35 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
 
+        if (body.operationId !== undefined && forwarded.auth.principalType === "anonymous") {
+          return Response.json(
+            { error: "operationId requires an authenticated principal.", ok: false },
+            { status: 400 },
+          );
+        }
+        const operationToken =
+          body.operationId === undefined
+            ? undefined
+            : await deriveOperationContinuationToken({
+                auth: forwarded.auth,
+                operationId: body.operationId,
+              });
+        if (operationToken !== undefined) {
+          const owner = await args.resolveSession(operationToken);
+          if (owner !== undefined) {
+            return Response.json(
+              { ok: true, sessionId: owner.id, status: "accepted" },
+              {
+                headers: {
+                  "cache-control": "no-store",
+                  [EVE_SESSION_ID_HEADER]: owner.id,
+                },
+                status: 202,
+              },
+            );
+          }
+        }
+
         const messageResult = await resolveOnMessage({
           auth: forwarded.auth,
           config: input,
@@ -274,6 +310,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             capabilities:
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
             callback: body.callback,
+            continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: {
               message: body.message,
@@ -284,6 +321,20 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             parentTraceContext,
           });
         } catch (error) {
+          // A concurrent create-once request won the token: adopt its session
+          // without delivering this duplicate input.
+          if (operationToken !== undefined && isRuntimeSessionOwnershipConflictError(error)) {
+            return Response.json(
+              { ok: true, sessionId: error.ownerSessionId, status: "accepted" },
+              {
+                headers: {
+                  "cache-control": "no-store",
+                  [EVE_SESSION_ID_HEADER]: error.ownerSessionId,
+                },
+                status: 202,
+              },
+            );
+          }
           const errorId = logError(log, "session-create request failed", error);
           return Response.json(
             { error: "Failed to create the session.", errorId, ok: false },
@@ -385,7 +436,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["cancel"]>>;
         try {
-          result = await attachSession(sessionId).cancel({ turnId: body.turnId });
+          result = await attachSession(sessionId).cancel({
+            taskId: body.taskId,
+            turnId: body.turnId,
+          });
         } catch (error) {
           const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
           return Response.json(
@@ -508,9 +562,147 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (sessionId instanceof Response) return sessionId;
         return await createSessionStreamResponse(req, attachSession(sessionId));
       }),
+
+      GET(EVE_SUBAGENT_STREAM_ROUTE_PATTERN, async (req, args) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const parentSessionId = args.params.parentSessionId;
+        const callId = args.params.callId;
+        const childSessionId = args.params.childSessionId;
+        if (!parentSessionId || !callId || !childSessionId) {
+          return Response.json(
+            { error: "Missing subagent stream coordinates.", ok: false },
+            { status: 400 },
+          );
+        }
+
+        const startIndex = parseStartIndex(req);
+        if (startIndex instanceof Response) return startIndex;
+        const includeTailIndex = parseIncludeTailIndex(req);
+
+        const childStreamPath = createEveSubagentStreamRoutePath({
+          callId,
+          childSessionId,
+          parentSessionId,
+        });
+        let binding: SubagentCalledStreamEvent;
+        try {
+          const parent = args.attachSession(parentSessionId);
+          const found = await findRemoteSubagentBinding({
+            callId,
+            childSessionId,
+            childStreamPath,
+            parentSessionId,
+            parent,
+          });
+          if (found === undefined) {
+            throw new Error("Remote subagent binding not found.");
+          }
+          binding = found;
+        } catch {
+          return Response.json({ error: "Subagent stream not found.", ok: false }, { status: 404 });
+        }
+
+        const resolveHeaders = readRemoteAgentStreamHeadersResolver(args);
+        if (resolveHeaders === undefined) {
+          return Response.json(
+            {
+              error: "Subagent stream proxy requires internal channel dispatch context.",
+              ok: false,
+            },
+            { status: 500 },
+          );
+        }
+
+        let headers: Record<string, string>;
+        try {
+          headers = await resolveHeaders({
+            name: binding.data.toolName,
+            resolverId: binding.data.remote!.resolverId,
+            url: binding.data.remote!.url,
+          });
+        } catch {
+          return Response.json({ error: "Subagent stream not found.", ok: false }, { status: 404 });
+        }
+
+        const upstreamUrl = new URL(
+          createEveSessionStreamRoutePath(childSessionId).replace(/^\/+/, ""),
+          `${binding.data.remote!.url.replace(/\/+$/, "")}/`,
+        );
+        if (startIndex !== undefined) {
+          upstreamUrl.searchParams.set("startIndex", String(startIndex));
+        }
+        if (includeTailIndex) {
+          upstreamUrl.searchParams.set("includeTailIndex", "1");
+        }
+
+        const upstream = await fetch(upstreamUrl, {
+          cache: "no-store",
+          headers,
+          redirect: "manual",
+          signal: req.signal,
+        });
+        const responseHeaders = new Headers();
+        for (const name of [
+          "cache-control",
+          "content-type",
+          "x-accel-buffering",
+          EVE_SESSION_ID_HEADER,
+          EVE_STREAM_FORMAT_HEADER,
+          EVE_STREAM_TAIL_INDEX_HEADER,
+          EVE_STREAM_VERSION_HEADER,
+        ]) {
+          const value = upstream.headers.get(name);
+          if (value !== null) responseHeaders.set(name, value);
+        }
+        return new Response(upstream.body, {
+          headers: responseHeaders,
+          status: upstream.status,
+          statusText: upstream.statusText,
+        });
+      }),
     ],
     events: input.events,
   });
+}
+
+async function findRemoteSubagentBinding(input: {
+  readonly callId: string;
+  readonly childSessionId: string;
+  readonly childStreamPath: string;
+  readonly parentSessionId: string;
+  readonly parent: {
+    getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
+    getStreamTailIndex(): Promise<number>;
+  };
+}): Promise<SubagentCalledStreamEvent | undefined> {
+  const tailIndex = await input.parent.getStreamTailIndex();
+  if (tailIndex < 0) return undefined;
+
+  const events = await input.parent.getEventStream({ startIndex: 0 });
+  const reader = events.getReader();
+  let binding: SubagentCalledStreamEvent | undefined;
+  try {
+    for (let index = 0; index <= tailIndex; index += 1) {
+      const next = await reader.read();
+      if (next.done) break;
+      const event = next.value;
+      if (
+        event.type === "subagent.called" &&
+        event.data.sessionId === input.parentSessionId &&
+        event.data.callId === input.callId &&
+        event.data.childSessionId === input.childSessionId &&
+        event.data.childStreamPath === input.childStreamPath &&
+        event.data.remote !== undefined
+      ) {
+        binding = event;
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return binding;
 }
 
 function normalizeEveCors(cors: EveChannelCors | undefined): ChannelCors {
@@ -621,7 +813,28 @@ interface ParsedCreateBody {
   message: string | UserContent;
   mode?: RunMode;
   context?: readonly string[];
+  operationId?: string;
   outputSchema?: JsonObject;
+}
+
+/** Replay-stable identity for one authenticated create operation. */
+async function deriveOperationContinuationToken(input: {
+  readonly auth: SessionAuthContext;
+  readonly operationId: string;
+}): Promise<string> {
+  const identity = JSON.stringify([
+    "eve:create-session:v1",
+    input.auth.authenticator,
+    input.auth.issuer ?? null,
+    input.auth.principalType,
+    input.auth.principalId,
+    input.operationId,
+  ]);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity));
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+  return `eve:op:${hex.slice(0, 32)}`;
 }
 
 function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | Response {
@@ -656,7 +869,24 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
     );
   }
 
-  return { callback, capabilities, message, mode, context, outputSchema };
+  const rawOperationId = payload.operationId;
+  if (rawOperationId !== undefined && (typeof rawOperationId !== "string" || !rawOperationId)) {
+    return Response.json(
+      { error: "Expected 'operationId' to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  const result: ParsedCreateBody = {
+    callback,
+    capabilities,
+    message,
+    mode,
+    context,
+    outputSchema,
+  };
+  if (typeof rawOperationId === "string") result.operationId = rawOperationId;
+  return result;
 }
 
 interface ParsedSessionMessageBody {
@@ -714,6 +944,7 @@ function parseSessionMessageBody(
 }
 
 interface ParsedCancelTurnBody {
+  taskId?: string;
   turnId?: string;
 }
 
@@ -724,16 +955,23 @@ async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody |
   if (tokenRejection !== null) return tokenRejection;
 
   const turnId = payload.turnId;
-  if (turnId === undefined) {
-    return {};
-  }
-  if (typeof turnId !== "string" || turnId.length === 0) {
+  const taskId = payload.taskId;
+  if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
     return Response.json(
       { error: "Expected 'turnId' to be a non-empty string.", ok: false },
       { status: 400 },
     );
   }
-  return { turnId };
+  if (taskId !== undefined && (typeof taskId !== "string" || taskId.length === 0)) {
+    return Response.json(
+      { error: "Expected 'taskId' to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
+  const result: ParsedCancelTurnBody = {};
+  if (typeof taskId === "string") result.taskId = taskId;
+  if (typeof turnId === "string") result.turnId = turnId;
+  return result;
 }
 
 async function parseJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {

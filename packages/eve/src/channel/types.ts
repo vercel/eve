@@ -8,6 +8,7 @@ import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
+import type { TaskView } from "#tasks/types.js";
 
 export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
@@ -22,6 +23,8 @@ export type RunSessionLimits = Pick<
 /** Identifies the session turn to cancel. */
 export interface CancelTurnInput {
   readonly sessionId: string;
+  /** Framework task whose queued child deliveries should be discarded. */
+  readonly taskId?: string;
   /** Limits the request to the turn the caller observed. */
   readonly turnId?: string;
 }
@@ -135,9 +138,11 @@ export type EventEmitFn = (event: UnstampedMessageStreamEvent) => Promise<void>;
 export interface TurnCaller {
   readonly callId: string;
   readonly subagentName: string;
+  /** Present when this turn is the executor for a durable background task. */
+  readonly taskId?: string;
   readonly replyTo:
     | { readonly kind: "hook"; readonly token: string }
-    | { readonly kind: "callback"; readonly url: string };
+    | { readonly kind: "callback"; readonly token: string; readonly url: string };
 }
 
 /**
@@ -157,6 +162,21 @@ export interface DeliverPayload {
   readonly message?: string | UserContent;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
+  /** Framework-only task envelopes consumed before adapter/model delivery. */
+  readonly task?: {
+    /** Task HITL input-request batches for the parent's pre-model router. */
+    readonly inputRequests?: readonly {
+      readonly hookPayload: SubagentInputRequestHookPayload;
+      readonly taskId: string;
+    }[];
+    /** Task authorization events projected through the parent channel. */
+    readonly authorizationEvents?: readonly {
+      readonly hookPayload: SubagentAuthorizationEventHookPayload;
+      readonly taskId: string;
+    }[];
+    /** Terminal views cached before task-run retention expires. */
+    readonly views?: readonly TaskView[];
+  };
   readonly [key: string]: unknown;
 }
 
@@ -175,9 +195,15 @@ export type SessionCommand =
       readonly payload: DeliverPayload;
       readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
+      /**
+       * Replay-stable identity for one task-owned child delivery; lets the
+       * parent inbox dedupe retried durable-step deliveries. See
+       * {@link DeliverHookPayload.taskDeliveryId}.
+       */
+      readonly taskDeliveryId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
-  | { readonly kind: "cancel"; readonly turnId?: string }
+  | { readonly kind: "cancel"; readonly taskId?: string; readonly turnId?: string }
   | { readonly kind: "compact" }
   | { readonly kind: "clear" }
   | { readonly kind: "reset"; readonly reason?: string };
@@ -230,6 +256,13 @@ export interface DeliverHookPayload {
   readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
   /** Inbound channel request id used only for workflow attributes. */
   readonly requestId?: string;
+  /**
+   * Replay-stable identity for one task-owned child delivery. Task-run steps
+   * derive it from deterministic inputs (task id, event kind, sequence) so the
+   * parent inbox can drop the duplicate when a durable step retries after
+   * `resumeHook` already succeeded.
+   */
+  readonly taskDeliveryId?: string;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
   readonly turnPolicy?: TurnPolicy;
@@ -341,6 +374,7 @@ export type HookPayload =
 export interface SessionCallback {
   readonly callId: string;
   readonly subagentName: string;
+  readonly taskId?: string;
   readonly token: string;
   readonly url: string;
 }
@@ -461,6 +495,11 @@ export interface RunInput {
    * parent depth + 1.
    */
   readonly subagentDepth?: number;
+  /** Framework-owned metadata for a protocol-neutral external invocation. */
+  readonly externalInvocation?: {
+    readonly continuationToken: string;
+    readonly ownerKey: string;
+  };
 }
 
 export interface DeliverInput {

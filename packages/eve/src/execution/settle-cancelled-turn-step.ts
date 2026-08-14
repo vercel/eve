@@ -29,6 +29,7 @@ import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation/native-events.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
   encodeMessageStreamEvent,
@@ -37,10 +38,12 @@ import {
 } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 export interface CancelledTurnSettleResult {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly usage?: TokenUsage;
 }
 
 /**
@@ -147,9 +150,11 @@ export async function settleCancelledTurnStep(input: {
       emissionState,
     ),
   );
+  const totals = getTurnUsageState(session.state)?.session;
 
-  return {
+  const base = {
     serializedContext: serializeContext(ctx),
     sessionState: createDurableSessionState({ session: cancelledSession }),
   };
+  return totals === undefined ? base : { ...base, usage: toUsage(totals) };
 }
