@@ -1,6 +1,7 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { InputRequestKind } from "#runtime/input/types.js";
+import { isLoopbackHostname } from "#shared/network-address.js";
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 
@@ -271,7 +272,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   if ((taskId === undefined) !== (childRequestId === undefined)) return undefined;
   if (
     childResponseUrl !== undefined &&
-    (typeof childResponseUrl !== "string" || !childResponseUrl.startsWith("https://"))
+    (typeof childResponseUrl !== "string" || !isAllowedChildResponseUrl(childResponseUrl))
   ) {
     return undefined;
   }
@@ -303,13 +304,25 @@ function parseProxyInputRequestBatch(value: unknown): ProxyInputRequestBatch | u
   if (
     requestIds.size !== value.requestIds.length ||
     value.approvalRequestIds.some((requestId) => !requestIds.has(requestId))
-  )
+  ) {
     return undefined;
+  }
   return { approvalRequestIds: value.approvalRequestIds, requestIds: value.requestIds };
 }
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function isAllowedChildResponseUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.protocol === "https:") return true;
+  return url.protocol === "http:" && isLoopbackHostname(url.hostname);
 }
 
 function isInputRequestKind(value: unknown): value is InputRequestKind {

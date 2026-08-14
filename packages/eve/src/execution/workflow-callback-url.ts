@@ -6,6 +6,11 @@ import {
 const PRODUCTION_ENVIRONMENT = "production";
 const VERCEL_PROTECTION_BYPASS_QUERY = "x-vercel-protection-bypass";
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
+const VERCEL_CALLBACK_HOST_ENVS = [
+  "VERCEL_URL",
+  "VERCEL_BRANCH_URL",
+  "VERCEL_PROJECT_PRODUCTION_URL",
+] as const;
 
 /**
  * Workflow metadata is deployment-specific, so on Vercel it can point at
@@ -64,5 +69,21 @@ export function createWorkflowCallbackUrl(baseUrl: string, callbackPath: string)
     url.searchParams.set(VERCEL_PROTECTION_BYPASS_QUERY, bypassSecret);
   }
 
+  return url.toString();
+}
+
+/**
+ * Builds a callback to a remote task child without disclosing this deployment's
+ * protection bypass secret to an authored external origin.
+ */
+export function createRemoteTaskInputCallbackUrl(baseUrl: string, callbackPath: string): string {
+  const url = new URL(`${baseUrl.replace(/\/$/, "")}${callbackPath}`);
+  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
+  const isCurrentVercelHost = VERCEL_CALLBACK_HOST_ENVS.some(
+    (name) => process.env[name]?.trim().toLowerCase() === url.hostname.toLowerCase(),
+  );
+  if (bypassSecret && url.protocol === "https:" && isCurrentVercelHost) {
+    url.searchParams.set(VERCEL_PROTECTION_BYPASS_QUERY, bypassSecret);
+  }
   return url.toString();
 }

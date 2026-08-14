@@ -1,9 +1,9 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import { createRemoteAgentRouteUrl } from "#execution/remote-agent-route-url.js";
 import { createTaskInputCapabilityToken } from "#execution/task-input-capability.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
+import { createRemoteTaskInputCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
   createTaskInputRequestId,
   toProxyInputRequestEntries,
@@ -84,7 +84,7 @@ export async function recordTaskInputRequestStep(input: {
     },
   );
   if (handle.address.kind === "agent/remote") {
-    const childResponseUrl = createRemoteAgentRouteUrl(
+    const childResponseUrl = createRemoteTaskInputCallbackUrl(
       handle.address.url,
       createEveTaskInputRoutePath(
         createTaskInputCapabilityToken(input.hookPayload.childContinuationToken),
