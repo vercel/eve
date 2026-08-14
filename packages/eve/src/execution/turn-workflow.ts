@@ -391,9 +391,8 @@ async function waitForRuntimeActionResults(input: {
       pendingDeliveryRequest = undefined;
 
       const routed = await routeDeliverToChildren({
-        auth: value.delivery.auth,
+        delivery: value.delivery,
         parentWritable: input.cursor.parentWritable,
-        payloads: value.delivery.payloads,
         serializedContext: input.cursor.serializedContext,
         sessionState: input.cursor.sessionState,
       });
@@ -405,7 +404,7 @@ async function waitForRuntimeActionResults(input: {
         return routed.kind;
       }
       if (routed.remainder !== undefined) {
-        input.bufferedDeliveries.push({ ...value.delivery, payloads: [routed.remainder] });
+        input.bufferedDeliveries.push(routed.remainder);
       }
     }
   }

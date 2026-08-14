@@ -35,8 +35,7 @@ export type NextTurnInstruction =
   | AuthorizationCallbackInstruction
   | {
       readonly kind: "turn";
-      readonly deliver: DeliverHookPayload;
-      readonly remainder: DeliverPayload;
+      readonly delivery: DeliverHookPayload;
     };
 
 /**
@@ -114,9 +113,8 @@ async function awaitNextTurnDelivery(input: {
     }
 
     const routed = await routeDeliverToChildren({
-      auth: deliver.auth,
+      delivery: deliver,
       parentWritable: input.driverWritable,
-      payloads: deliver.payloads,
       serializedContext: input.stateCursor.serializedContext,
       sessionState: input.stateCursor.sessionState,
     });
@@ -131,7 +129,7 @@ async function awaitNextTurnDelivery(input: {
       continue;
     }
 
-    return { deliver, kind: "turn", remainder: routed.remainder };
+    return { delivery: routed.remainder, kind: "turn" };
   }
 }
 

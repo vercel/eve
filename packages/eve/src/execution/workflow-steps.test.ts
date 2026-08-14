@@ -270,6 +270,101 @@ describe("routeProxiedDeliverStep", () => {
     });
   });
 
+  it("preserves envelope fields and reindexes metadata across routed payloads", async () => {
+    const auth = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "user-1",
+      principalType: "user",
+    };
+    const caller = {
+      callId: "call-parent",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "research",
+    };
+    const session = upsertProxyInputRequests({
+      entries: [
+        ["child-a", { childContinuationToken: "child-token-a", kind: "question" }],
+        ["child-b", { childContinuationToken: "child-token-b", kind: "question" }],
+      ],
+      forChildContinuationToken: "child-token-a",
+      session: upsertProxyInputRequests({
+        entries: [["child-b", { childContinuationToken: "child-token-b", kind: "question" }]],
+        forChildContinuationToken: "child-token-b",
+        session: createStubSession(),
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const delivery = {
+      auth,
+      caller,
+      deliveryMetadata: [
+        { channelKind: "test", channelName: "main", deliveryId: "delivery-0", payloadIndex: 0 },
+        { channelKind: "test", channelName: "main", deliveryId: "delivery-1", payloadIndex: 1 },
+        { channelKind: "test", channelName: "main", deliveryId: "delivery-2", payloadIndex: 2 },
+      ],
+      kind: "deliver" as const,
+      payloads: [
+        { inputResponses: [{ text: "a", requestId: "child-a" }] },
+        {
+          inputResponses: [
+            { text: "b", requestId: "child-b" },
+            { text: "parent", requestId: "parent-response" },
+          ],
+        },
+        { message: "parent message" },
+      ],
+      requestId: "request-1",
+      taskDeliveryId: "task-delivery-1",
+      turnPolicy: "queue" as const,
+    };
+
+    const result = await routeProxiedDeliverStep({
+      delivery,
+      parentWritable: createTestWritable(),
+      sessionState: createStubSessionState({ hasProxyInputRequests: true }),
+    });
+
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "child-token-a",
+      expect.objectContaining({
+        ...delivery,
+        deliveryMetadata: [expect.objectContaining({ deliveryId: "delivery-0", payloadIndex: 0 })],
+        payloads: [{ inputResponses: [{ requestId: "child-a", text: "a" }] }],
+      }),
+    );
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "child-token-b",
+      expect.objectContaining({
+        auth,
+        caller,
+        deliveryMetadata: undefined,
+        requestId: "request-1",
+        taskDeliveryId: "task-delivery-1",
+        turnPolicy: "queue",
+      }),
+    );
+    expect(result).toMatchObject({
+      kind: "continue",
+      remainder: {
+        auth,
+        caller,
+        deliveryMetadata: [
+          { deliveryId: "delivery-1", payloadIndex: 0 },
+          { deliveryId: "delivery-2", payloadIndex: 1 },
+        ],
+        payloads: [
+          { inputResponses: [{ requestId: "parent-response", text: "parent" }] },
+          { message: "parent message" },
+        ],
+        requestId: "request-1",
+        taskDeliveryId: "task-delivery-1",
+        turnPolicy: "queue",
+      },
+    });
+  });
+
   function createTaskRouteSession(options?: { readonly owned?: boolean }): HarnessSession {
     return upsertProxyInputRequests({
       entries: [

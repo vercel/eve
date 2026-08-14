@@ -589,15 +589,10 @@ async function runDriverLoop(input: {
         continue;
       }
 
-      if (next.deliver.caller !== undefined) {
-        input.crashCleanupState.caller = next.deliver.caller;
+      if (next.delivery.caller !== undefined) {
+        input.crashCleanupState.caller = next.delivery.caller;
       }
-      action = await runTurn({
-        auth: next.deliver.auth,
-        kind: "deliver",
-        payloads: [next.remainder],
-        requestId: next.deliver.requestId,
-      });
+      action = await runTurn(next.delivery);
     }
   } finally {
     await disposeSettledTurnControl?.();

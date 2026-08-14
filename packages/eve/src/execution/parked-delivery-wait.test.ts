@@ -197,7 +197,7 @@ describe("nextTurnDelivery", () => {
       })
       .mockResolvedValueOnce({
         kind: "continue",
-        remainder: { message: "parent turn" },
+        remainder: { kind: "deliver", payloads: [{ message: "parent turn" }] },
         serializedContext: {},
         sessionState: retiredState,
       });
@@ -208,7 +208,10 @@ describe("nextTurnDelivery", () => {
     });
 
     expect(vi.mocked(routeDeliverToChildren).mock.calls[1]?.[0].sessionState).toBe(retiredState);
-    expect(next).toMatchObject({ kind: "turn", remainder: { message: "parent turn" } });
+    expect(next).toMatchObject({
+      delivery: { payloads: [{ message: "parent turn" }] },
+      kind: "turn",
+    });
   });
 });
 
@@ -232,7 +235,7 @@ describe("nextTurnDelivery routing", () => {
       })
       .mockResolvedValueOnce({
         kind: "continue",
-        remainder: { message: "ordinary" },
+        remainder: { kind: "deliver", payloads: [{ message: "ordinary" }] },
         serializedContext: {},
         sessionState: routedSessionState,
       });
@@ -263,7 +266,10 @@ describe("nextTurnDelivery routing", () => {
       stateCursor,
     });
 
-    expect(result).toMatchObject({ kind: "turn", remainder: { message: "ordinary" } });
+    expect(result).toMatchObject({
+      delivery: { payloads: [{ message: "ordinary" }] },
+      kind: "turn",
+    });
     expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
     expect(stateCursor.sessionState).toBe(routedSessionState);
   });

@@ -1,4 +1,4 @@
-import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import {
@@ -26,13 +26,12 @@ import {
  * re-export plain helpers into a workflow body).
  */
 export async function routeDeliverToChildren(input: {
-  readonly auth?: SessionAuthContext | null;
+  readonly delivery: DeliverHookPayload;
   readonly parentWritable: WritableStream<Uint8Array>;
-  readonly payloads: readonly DeliverPayload[];
   readonly sessionState: DurableSessionState;
   readonly serializedContext: Record<string, unknown>;
 }): Promise<RoutedDeliverResult> {
-  let payload = coalesceDeliverPayloads(input.payloads);
+  const payload = coalesceDeliverPayloads(input.delivery.payloads);
   let serializedContext = input.serializedContext;
   let sessionState = input.sessionState;
 
@@ -79,24 +78,43 @@ export async function routeDeliverToChildren(input: {
     sessionState = emitted.sessionState;
   }
 
-  if (payload.task !== undefined) {
-    const ordinaryPayload = { ...payload };
+  const ordinaryPayloads: DeliverPayload[] = [];
+  const ordinaryMetadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][] = [];
+  for (const [sourcePayloadIndex, sourcePayload] of input.delivery.payloads.entries()) {
+    const ordinaryPayload = { ...sourcePayload };
     delete ordinaryPayload.task;
-    payload = ordinaryPayload;
+    if (Object.keys(ordinaryPayload).length === 0) continue;
+    const payloadIndex = ordinaryPayloads.length;
+    ordinaryPayloads.push(ordinaryPayload);
+    for (const metadata of input.delivery.deliveryMetadata ?? []) {
+      if (metadata.payloadIndex === sourcePayloadIndex) {
+        ordinaryMetadata.push({ ...metadata, payloadIndex });
+      }
+    }
+  }
+  const delivery: DeliverHookPayload | undefined =
+    ordinaryPayloads.length === 0
+      ? undefined
+      : {
+          ...input.delivery,
+          deliveryMetadata: ordinaryMetadata.length === 0 ? undefined : ordinaryMetadata,
+          payloads: ordinaryPayloads,
+        };
+  if (delivery === undefined) {
+    return { kind: "continue", remainder: undefined, serializedContext, sessionState };
   }
   if (!sessionState.hasProxyInputRequests) {
     return {
       kind: "continue",
-      remainder: Object.keys(payload).length === 0 ? undefined : payload,
+      remainder: delivery,
       serializedContext,
       sessionState,
     };
   }
 
   return await routeProxiedDeliverStep({
-    auth: input.auth,
+    delivery,
     parentWritable: input.parentWritable,
-    payload,
     serializedContext,
     sessionState,
   });

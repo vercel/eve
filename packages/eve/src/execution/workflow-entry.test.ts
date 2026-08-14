@@ -60,9 +60,9 @@ vi.mock("./create-session-step.js", () => ({
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi
     .fn()
-    .mockImplementation(async ({ payloads, serializedContext = {}, sessionState }) => ({
+    .mockImplementation(async ({ delivery, serializedContext = {}, sessionState }) => ({
       kind: "continue",
-      remainder: payloads[0],
+      remainder: delivery,
       serializedContext,
       sessionState,
     })),

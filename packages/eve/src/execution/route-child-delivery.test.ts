@@ -67,8 +67,11 @@ describe("task HITL delivery routing", () => {
     });
 
     const result = await routeDeliverToChildren({
+      delivery: {
+        kind: "deliver",
+        payloads: [{ task: { inputRequests: [{ hookPayload, taskId: "task-1" }] } }],
+      },
       parentWritable: new WritableStream<Uint8Array>(),
-      payloads: [{ task: { inputRequests: [{ hookPayload, taskId: "task-1" }] } }],
       serializedContext: {},
       sessionState: state(false),
     });
@@ -91,8 +94,11 @@ describe("task HITL delivery routing", () => {
     });
 
     const result = await routeDeliverToChildren({
+      delivery: {
+        kind: "deliver",
+        payloads: [{ task: { inputRequests: [{ hookPayload, taskId: "foreign-task" }] } }],
+      },
       parentWritable: new WritableStream<Uint8Array>(),
-      payloads: [{ task: { inputRequests: [{ hookPayload, taskId: "foreign-task" }] } }],
       serializedContext: {},
       sessionState: state(false),
     });
@@ -100,5 +106,52 @@ describe("task HITL delivery routing", () => {
     expect(result).toMatchObject({ kind: "continue", remainder: undefined });
     expect(emitRecordedTaskInputRequestStep).not.toHaveBeenCalled();
     expect(routeProxiedDeliverStep).not.toHaveBeenCalled();
+  });
+
+  it("reindexes ordinary metadata after consuming task-only payloads", async () => {
+    const routedState = state(true);
+    vi.mocked(routeProxiedDeliverStep).mockResolvedValue({
+      kind: "continue",
+      remainder: undefined,
+      serializedContext: {},
+      sessionState: routedState,
+    });
+    const caller = {
+      callId: "call-parent",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "research",
+    };
+
+    await routeDeliverToChildren({
+      delivery: {
+        caller,
+        deliveryMetadata: [
+          { channelKind: "test", channelName: "main", deliveryId: "task", payloadIndex: 0 },
+          { channelKind: "test", channelName: "main", deliveryId: "ordinary", payloadIndex: 1 },
+        ],
+        kind: "deliver",
+        payloads: [{ task: { views: [] } }, { message: "parent message" }],
+        requestId: "request-1",
+        taskDeliveryId: "task-delivery-1",
+        turnPolicy: "queue",
+      },
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: routedState,
+    });
+
+    expect(routeProxiedDeliverStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delivery: {
+          caller,
+          deliveryMetadata: [expect.objectContaining({ deliveryId: "ordinary", payloadIndex: 0 })],
+          kind: "deliver",
+          payloads: [{ message: "parent message" }],
+          requestId: "request-1",
+          taskDeliveryId: "task-delivery-1",
+          turnPolicy: "queue",
+        },
+      }),
+    );
   });
 });
