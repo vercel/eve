@@ -470,7 +470,7 @@ call follows that boundary.
 
 ### Step tools
 
-Before each model call, eve calls `tools` with `phase: "step.started"`. For an
+Before each model step, eve calls `tools` with `phase: "step.started"`. For an
 ordinary step, that result replaces the slot's prior tool set rather than
 merging with it. Returning `null` or an empty record exposes no new tools for
 that slot and step.
