@@ -19,12 +19,13 @@ import { withSpinner } from "../with-spinner.js";
 import type {
   ModelProviderState,
   SelectedGatewayProvider,
+  SelectedModelProvider,
   SelectedModelProviderStatus,
 } from "#setup/model-provider-state.js";
 
 import { runLinkFlow, type LinkFlowResult } from "./link.js";
 
-export type ProviderConnection = "project" | "own-key" | "external";
+export type ProviderConnection = "project" | "own-key" | "chatgpt" | "external";
 
 export type ModelProviderStatus = SelectedModelProviderStatus;
 
@@ -49,6 +50,7 @@ export interface ProviderFlowDeps {
 export type ProviderFlowResult =
   | LinkFlowResult
   | { kind: "project"; result: LinkFlowResult }
+  | { kind: "chatgpt" }
   | {
       kind: "external-provider";
       /** The user runs a non-gateway provider; nothing was linked or written. */
@@ -59,6 +61,7 @@ type AcceptedGatewayKeyValidation = Exclude<GatewayKeyValidation, { kind: "inval
 /** A provider choice, including the accepted evidence for an inline key. */
 export type ProviderPickerChoice =
   | { kind: "project" }
+  | { kind: "chatgpt" }
   | { kind: "external" }
   | {
       kind: "inline-key";
@@ -96,7 +99,7 @@ function projectConnectionOption(
 function providerOptions(
   authStatus: VercelAuthStatus | undefined,
   state: ModelProviderState,
-  selected: SelectedGatewayProvider | undefined,
+  selected: SelectedModelProvider | undefined,
 ): SelectOption<ProviderConnection>[] {
   const currentProject = state.available.gatewayProject;
   const currentKey = state.available.gatewayKey;
@@ -130,6 +133,12 @@ function providerOptions(
     project,
     ownKey,
     {
+      value: "chatgpt",
+      label: "ChatGPT subscription",
+      hint: selected === "chatgpt" ? "Current" : "Authenticate through the Codex CLI",
+      checked: selected === "chatgpt" || undefined,
+    },
+    {
       value: "external",
       label: "Other providers",
       hint: "Connect directly to a model provider\nvia OPENAI_API_KEY or ANTHROPIC_API_KEY.",
@@ -160,11 +169,10 @@ async function selectProvider(input: {
 /**
  * THE PROVIDER FLOW behind the dev TUI `/model` menu's provider row
  * (`eve link` keeps {@link runLinkFlow}'s shape). One question chooses a
- * project-backed AI Gateway connection, an `AI_GATEWAY_API_KEY`, or a direct
- * provider. Model selection owns ChatGPT versus Gateway; this flow only owns
- * the credential used after a Gateway model is selected. The project branch
- * runs the link flow in create-or-link mode, so a project-less agent can
- * create its first project rather than dead-end on an empty list.
+ * project-backed AI Gateway connection, an `AI_GATEWAY_API_KEY`, ChatGPT, or a
+ * direct provider. The project branch runs the link flow in create-or-link
+ * mode, so a project-less agent can create its first project rather than
+ * dead-end on an empty list.
  */
 export async function runProviderFlow(input: {
   appRoot: string;
@@ -173,8 +181,8 @@ export async function runProviderFlow(input: {
   picker?: ProviderPicker;
   /** Independently detected capabilities plus the persisted human selection. */
   providerState?: ModelProviderState;
-  /** Draft Gateway credential selection while the parent flow is still open. */
-  selectedProvider?: SelectedGatewayProvider;
+  /** Draft provider selection while the parent flow is still open. */
+  selectedProvider?: SelectedModelProvider;
   deps?: Partial<ProviderFlowDeps>;
 }): Promise<ProviderFlowResult> {
   const { appRoot, prompter, signal } = input;
@@ -202,7 +210,12 @@ export async function runProviderFlow(input: {
   const selectedProvider = input.selectedProvider ?? persistedSelection ?? detectedSelection;
   // The cursor opens on the active provider; a Vercel auth blocker still
   // re-homes it onto the key row below.
-  let initialValue: ProviderConnection = selectedProvider === "gateway-key" ? "own-key" : "project";
+  let initialValue: ProviderConnection =
+    selectedProvider === "chatgpt"
+      ? "chatgpt"
+      : selectedProvider === "gateway-key"
+        ? "own-key"
+        : "project";
   let keyChoice: Extract<ProviderPickerChoice, { kind: "inline-key" }>;
 
   try {
@@ -239,6 +252,8 @@ export async function runProviderFlow(input: {
         }
         return { kind: "external-provider" };
       }
+
+      if (choice.kind === "chatgpt") return choice;
 
       if (choice.kind === "inline-key") {
         keyChoice = choice;

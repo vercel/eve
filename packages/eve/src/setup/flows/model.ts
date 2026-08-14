@@ -46,6 +46,7 @@ import {
   DEFAULT_CHATGPT_MODEL_SELECTION,
   parseChatGptModelSelection,
 } from "#shared/chatgpt-model.js";
+import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import {
   readGatewayServiceTier,
   type GatewayServiceTierState,
@@ -218,14 +219,7 @@ function providerStatusHint(
 function modelListRows(
   catalog: readonly GatewayCatalogModel[] | undefined,
 ): SelectOption<string>[] {
-  return [
-    {
-      value: DEFAULT_CHATGPT_MODEL_SELECTION,
-      label: DEFAULT_CHATGPT_MODEL_SELECTION,
-      featured: true,
-    },
-    ...modelOptionsFromCatalog(catalog),
-  ].map((option) => {
+  return modelOptionsFromCatalog(catalog).map((option) => {
     const row: SelectOption<string> = { value: option.value, label: option.value };
     if (option.featured === true) row.featured = true;
     return row;
@@ -313,12 +307,9 @@ function modelMenuRows(
   } else {
     providerRow = {
       value: "provider",
-      label: selectedProvider === "chatgpt" ? "ChatGPT login" : "Change provider",
+      label: "Change provider",
       hint: providerStatusHint(selectedProvider, provider, chatGptAccountLabel, pc.bold),
-      description:
-        selectedProvider === "chatgpt"
-          ? "Authenticate through the Codex CLI"
-          : "How your agent reaches the model provider",
+      description: "How your agent reaches the model provider",
     };
   }
 
@@ -545,13 +536,6 @@ export async function runModelFlow(input: {
       continue;
     }
 
-    if (selectedProvider === "chatgpt") {
-      await authenticateChatGpt(deps, input.withExclusiveTerminal);
-      chatGptLoginReady = true;
-      nextSelection = "done";
-      continue;
-    }
-
     const result = await deps.runProviderFlow({
       appRoot,
       prompter,
@@ -572,10 +556,25 @@ export async function runModelFlow(input: {
       nextSelection = "done";
       continue;
     }
+    if (result.kind === "chatgpt") {
+      if (selectedProvider === "chatgpt") {
+        await authenticateChatGpt(deps, input.withExclusiveTerminal);
+        chatGptLoginReady = true;
+      } else {
+        patch.model = { kind: "set", value: DEFAULT_CHATGPT_MODEL_SELECTION };
+        patch.gatewayServiceTier = { kind: "remove" };
+      }
+      commitDraft = true;
+      break;
+    }
+    const switchingFromChatGpt = selectedProvider === "chatgpt";
     const gatewaySelection: SelectedGatewayProvider =
       result.kind === "project" ? "gateway-project" : "gateway-key";
     const gatewayResult = result.kind === "project" ? result.result : result;
     selectedProvider = gatewaySelection;
+    if (switchingFromChatGpt) {
+      patch.model = { kind: "set", value: DEFAULT_AGENT_MODEL_ID };
+    }
     nextGatewayCredentialPreference =
       gatewaySelection === "gateway-project" ? "project" : "api-key";
     // Only a completed link/own-key sub-flow can move the link or

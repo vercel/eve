@@ -33,7 +33,7 @@ function createDeps() {
 }
 
 describe("runProviderFlow", () => {
-  it("hands the Dev TUI one project, inline-key, and direct-provider menu", async () => {
+  it("hands the Dev TUI one provider menu", async () => {
     const fake = createFakePrompter();
     const deps = createDeps();
     const picker: ProviderPicker = async (request) => {
@@ -41,9 +41,14 @@ describe("runProviderFlow", () => {
       expect(request.options.map((option) => option.value)).toEqual([
         "project",
         "own-key",
+        "chatgpt",
         "external",
       ]);
       expect(request.options[2]).toMatchObject({
+        value: "chatgpt",
+        label: "ChatGPT subscription",
+      });
+      expect(request.options[3]).toMatchObject({
         value: "external",
         label: "Other providers",
       });
@@ -70,6 +75,31 @@ describe("runProviderFlow", () => {
       prompter: fake.prompter,
       projectSelection: "create-or-link",
     });
+  });
+
+  it("returns ChatGPT without touching Gateway setup", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+
+    const result = await runProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker: async (request) => {
+        expect(request.options.map((option) => option.value)).toEqual([
+          "project",
+          "own-key",
+          "chatgpt",
+          "external",
+        ]);
+        return { kind: "chatgpt" };
+      },
+      deps,
+    });
+
+    expect(result).toEqual({ kind: "chatgpt" });
+    expect(deps.getVercelAuthStatus).not.toHaveBeenCalled();
+    expect(deps.runLinkFlow).not.toHaveBeenCalled();
+    expect(deps.appendEnv).not.toHaveBeenCalled();
   });
 
   it("checks and describes the active provider, opening the cursor on it", async () => {
@@ -138,6 +168,31 @@ describe("runProviderFlow", () => {
         },
         preferredGatewayCredential: "project",
       },
+      deps,
+    });
+  });
+
+  it("opens on ChatGPT when it is the selected provider", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+    const picker: ProviderPicker = async (request) => {
+      expect(request.initialValue).toBe("chatgpt");
+      expect(request.options.find((option) => option.value === "chatgpt")).toMatchObject({
+        checked: true,
+        hint: "Current",
+      });
+      return undefined;
+    };
+
+    await runProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker,
+      providerState: {
+        available: { gatewayProject: { projectName: "my-agent" } },
+        preferredGatewayCredential: "project",
+      },
+      selectedProvider: "chatgpt",
       deps,
     });
   });

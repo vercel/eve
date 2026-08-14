@@ -3824,6 +3824,29 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
+  it("selects ChatGPT as a provider sibling", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const answer = renderer.setupFlow.readProviderPicker({
+      message: "Provider",
+      options: [
+        { value: "project", label: "AI Gateway via Project" },
+        { value: "own-key", label: "AI Gateway via AI_GATEWAY_API_KEY" },
+        { value: "chatgpt", label: "ChatGPT subscription" },
+        { value: "external", label: "Other providers" },
+      ],
+      initialValue: "project",
+      validateInlineKey: async () => ({ kind: "valid" }),
+    });
+
+    expect(screen.snapshot()).toContain("ChatGPT subscription");
+    input.down();
+    input.down();
+    input.enter();
+    await expect(answer).resolves.toEqual({ kind: "chatgpt" });
+    renderer.shutdown();
+  });
+
   it("validates a masked key without replacing the provider frame", async () => {
     const { screen, input, renderer } = makeRenderer();
     let resolveValidation:

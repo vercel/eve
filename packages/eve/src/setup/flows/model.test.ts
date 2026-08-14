@@ -197,19 +197,19 @@ describe("runModelFlow", () => {
 
     expect(menuPaints[0]?.options[1]).toMatchObject({
       value: "provider",
-      label: "ChatGPT login",
+      label: "Change provider",
       hint: "ChatGPT subscription (person@example.com)",
-      description: "Authenticate through the Codex CLI",
+      description: "How your agent reaches the model provider",
     });
     expect(menuPaints[0]?.notices).toEqual([]);
   });
 
-  it("selects ChatGPT under Change model through exclusive terminal auth", async () => {
-    const { prompter, menuPaints } = scriptedPrompter({ menu: ["model", "done"] });
+  it("selects ChatGPT under Change provider through exclusive terminal auth", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider"] });
     const ensureChatGptAuth = vi.fn(async () => {});
     const deps = flowDeps({
       ensureChatGptAuth,
-      pickModelSettings: vi.fn(async () => ({ model: "chatgpt/gpt-5.6-sol" })),
+      runProviderFlow: vi.fn(async () => ({ kind: "chatgpt" }) as const),
     });
     const exclusiveCalls: string[] = [];
     const withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
@@ -229,9 +229,7 @@ describe("runModelFlow", () => {
       "provider",
       "done",
     ]);
-    expect(menuPaints[1]?.options[0]?.hint).toBe("chatgpt/gpt-5.6-sol");
-    expect(menuPaints[1]?.options[1]?.label).toBe("ChatGPT login");
-    expect(menuPaints[1]?.initialValue).toBe("done");
+    expect(menuPaints).toHaveLength(1);
     expect(exclusiveCalls).toEqual(["called"]);
     expect(ensureChatGptAuth).toHaveBeenCalledWith({ interactive: true });
     expect(deps.applySettings).toHaveBeenCalledWith({
@@ -242,12 +240,14 @@ describe("runModelFlow", () => {
         gatewayServiceTier: { kind: "remove" },
       },
     });
-    expect(deps.runProviderFlow).not.toHaveBeenCalled();
+    expect(deps.runProviderFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ selectedProvider: "gateway-project" }),
+    );
     expect(deps.writeGatewayCredentialPreference).not.toHaveBeenCalled();
   });
 
-  it("switches ChatGPT back to Gateway through the model selection", async () => {
-    const { prompter } = scriptedPrompter({ menu: ["model", "done"] });
+  it("switches ChatGPT back to Gateway through the provider selection", async () => {
+    const { prompter } = scriptedPrompter({ menu: ["provider"] });
     const applySettings = vi.fn<ModelFlowDeps["applySettings"]>(async ({ patch }) => ({
       kind: "changed",
       changed: ["model"],
@@ -266,7 +266,13 @@ describe("runModelFlow", () => {
         available: { gatewayProject: { projectName: "my-agent" } },
         preferredGatewayCredential: "project" as const,
       })),
-      pickModelSettings: vi.fn(async () => ({ model: "openai/gpt-5.5" })),
+      runProviderFlow: vi.fn(
+        async () =>
+          ({
+            kind: "project",
+            result: { kind: "done", resolution: { credential: "oidc", file: ".env.local" } },
+          }) as const,
+      ),
       applySettings,
     });
 
@@ -275,17 +281,17 @@ describe("runModelFlow", () => {
     expect(applySettings).toHaveBeenCalledWith({
       appRoot: APP_ROOT,
       patch: {
-        model: { kind: "set", value: "openai/gpt-5.5" },
+        model: { kind: "set", value: "anthropic/claude-sonnet-5" },
         reasoning: { kind: "keep" },
         gatewayServiceTier: { kind: "keep" },
       },
     });
     expect(deps.ensureChatGptAuth).not.toHaveBeenCalled();
-    expect(deps.writeGatewayCredentialPreference).not.toHaveBeenCalled();
+    expect(deps.writeGatewayCredentialPreference).toHaveBeenCalledWith(APP_ROOT, "project");
   });
 
-  it("keeps ChatGPT authentication on the login row instead of the Gateway picker", async () => {
-    const { prompter } = scriptedPrompter({ menu: ["provider", "done"] });
+  it("reauthenticates when ChatGPT is selected again", async () => {
+    const { prompter } = scriptedPrompter({ menu: ["provider"] });
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
         id: "chatgpt/gpt-5.6-sol",
@@ -299,6 +305,7 @@ describe("runModelFlow", () => {
         available: { gatewayKey: { source: { kind: "shell" as const } } },
         preferredGatewayCredential: "api-key" as const,
       })),
+      runProviderFlow: vi.fn(async () => ({ kind: "chatgpt" }) as const),
     });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
@@ -307,7 +314,9 @@ describe("runModelFlow", () => {
     });
 
     expect(deps.ensureChatGptAuth).toHaveBeenCalledWith({ interactive: true });
-    expect(deps.runProviderFlow).not.toHaveBeenCalled();
+    expect(deps.runProviderFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ selectedProvider: "chatgpt" }),
+    );
     expect(deps.applySettings).not.toHaveBeenCalled();
   });
 
@@ -426,6 +435,10 @@ describe("runModelFlow", () => {
       ]),
       current: "anthropic/claude-sonnet-5",
     });
+    if (captured?.model.kind !== "pick") throw new Error("Expected a model picker.");
+    expect(captured.model.options.map((option) => option.value)).not.toContain(
+      "chatgpt/gpt-5.6-sol",
+    );
     expect(captured?.reasoning).toBeNull();
     expect(captured?.serviceTier).toEqual({ kind: "standard" });
     expect(captured?.settingsEditable).toBe(true);

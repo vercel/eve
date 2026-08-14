@@ -113,7 +113,7 @@ export function transitionProviderPicker(
       };
     case "submit": {
       const value = selectValueAtCursor(options, state.select.cursor);
-      if (value === "project" || value === "external") {
+      if (value === "project" || value === "chatgpt" || value === "external") {
         return { kind: "settle", result: { kind: value } };
       }
       if (value !== "own-key" || state.phase.kind === "inactive") return ignore(state);
