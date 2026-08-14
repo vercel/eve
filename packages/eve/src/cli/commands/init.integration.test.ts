@@ -717,7 +717,7 @@ describe("runInitCommand", () => {
     ]);
   });
 
-  it("reports a Git initialization failure through the logger without failing", async () => {
+  it("reports a recoverable Git commit failure without failing init", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-git-fail-"));
     const output = logger();
     const deps = dependencies({
@@ -729,12 +729,17 @@ describe("runInitCommand", () => {
 
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
-    expect(output.errors.join("\n")).toContain("Git initialization failed: commit refused");
-    expect(deps.spawnPackageManager).toHaveBeenCalledWith(
-      "pnpm",
-      join(parentDirectory, "my-agent"),
-      ["exec", "eve", "dev", "--input", "/model"],
+    const projectPath = join(parentDirectory, "my-agent");
+    expect(output.errors.join("\n")).toContain(
+      `Git initialization failed during commit: commit refused\nThe Git repository and staged files were preserved at "${projectPath}".\n\nResolve the Git error above, then retry:\n  git -C ${JSON.stringify(projectPath)} commit -m "Initial commit from eve"`,
     );
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "exec",
+      "eve",
+      "dev",
+      "--input",
+      "/model",
+    ]);
   });
 
   it("adds Web Chat without Vercel configuration and preserves the invoking eve dependency", async () => {
