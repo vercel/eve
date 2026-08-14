@@ -9,11 +9,18 @@ import semver from "#compiled/semver/index.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
-import { isEveProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { hasInteractiveTerminal, NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
+import { hasInteractiveTerminal } from "./preconditions.js";
 import { runDeclaredSetups } from "./registry-declared-setups.js";
+import {
+  errorMessage,
+  resolveRegistryItemForAdd,
+  runRegistryAction,
+  setupReminder,
+  setupResumeCommand,
+  type RegistryCommandLogger,
+} from "./registry-recovery.js";
 import {
   eveMetadataFromRegistryItem,
   parseOfficialRegistrySearchMetadata,
@@ -30,10 +37,7 @@ import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
 
-export interface RegistryCommandLogger {
-  error(message: string): void;
-  log(message: string): void;
-}
+export type { RegistryCommandLogger } from "./registry-recovery.js";
 
 export interface AddCommandOptions {
   skipInstall?: boolean;
@@ -136,6 +140,7 @@ const SKILLS_REGISTRY = "@skills";
 const SKILLS_REGISTRY_URL = "https://www.skills.sh/r/{name}?agent=eve";
 const CATALOG_PAGE_SIZE = 100;
 const DEFAULT_SEARCH_LIMIT = 10;
+const ADD_SUGGESTION_LIMIT = 5;
 
 function isRegistryAddress(value: string): boolean {
   return value.startsWith("@") || /^https?:\/\//.test(value);
@@ -159,16 +164,6 @@ export async function installOfficialRegistryItem(
   });
 }
 
-function setupResumeCommand(item: string): string {
-  const argument = /^[\w@./:-]+$/.test(item) ? item : `'${item.replaceAll("'", `'\\''`)}'`;
-  return `eve add ${argument} --skip-install`;
-}
-
-function setupReminder(item: string, outcome: "cancelled" | "skipped"): string {
-  const action = outcome === "cancelled" ? "Setup cancelled." : "Setup skipped.";
-  return `${action} Run \`${setupResumeCommand(item)}\` when you're ready.`;
-}
-
 function assertCompatibleEveVersion(requiredVersion: string | undefined): void {
   if (requiredVersion === undefined) return;
   const installedVersion = resolveInstalledPackageInfo().version;
@@ -183,31 +178,6 @@ function assertCompatibleEveVersion(requiredVersion: string | undefined): void {
 
 function isOfficialItemAddress(address: string): boolean {
   return address.startsWith(`${OFFICIAL_REGISTRY}/`);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-async function runRegistryAction<T>(
-  logger: RegistryCommandLogger,
-  appRoot: string,
-  action: () => Promise<T>,
-): Promise<T | undefined> {
-  if (!(await isEveProject(appRoot))) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
-    return undefined;
-  }
-
-  try {
-    return await action();
-  } catch (error) {
-    if (error instanceof WizardCancelledError) return undefined;
-    logger.error(errorMessage(error));
-    process.exitCode = 1;
-    return undefined;
-  }
 }
 
 function withBuiltInRegistries(config: RegistryConfig): RegistryConfig {
@@ -274,6 +244,26 @@ function searchPresentationSections(
           },
         ];
   });
+}
+
+async function printAddSuggestions(
+  logger: RegistryCommandLogger,
+  appRoot: string,
+  query: string,
+): Promise<void> {
+  try {
+    const { resultsBySource, sources, metadataByAddress } = await searchRegistryCatalog(appRoot, {
+      limit: ADD_SUGGESTION_LIMIT,
+      query,
+    });
+    const sections = searchPresentationSections(sources, resultsBySource, metadataByAddress);
+    if (sections.every((section) => section.items.length === 0)) return;
+
+    logger.log("Did you mean?");
+    printRegistrySearchResults(logger, { query, sections });
+  } catch {
+    // The original not-found error remains actionable when catalog search is unavailable.
+  }
 }
 
 async function searchRegistryCatalog(
@@ -492,7 +482,13 @@ export async function runAddCommand(
         );
       }
     }
-    const [registryItem] = await getRegistryItems([address], { config });
+    const registryItemResult = await resolveRegistryItemForAdd(
+      logger,
+      async () => (await getRegistryItems([address], { config }))[0],
+      () => printAddSuggestions(logger, appRoot, item),
+    );
+    if (!registryItemResult.found) return;
+    const registryItem = registryItemResult.item;
     const eveMetadata = isOfficialItemAddress(address)
       ? eveMetadataFromRegistryItem(registryItem)
       : undefined;
