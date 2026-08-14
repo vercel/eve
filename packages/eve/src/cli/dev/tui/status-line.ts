@@ -96,8 +96,14 @@ function renderEndpoint(
   }
   if (input.endpoint.kind === "chatgpt") {
     switch (input.endpoint.state) {
-      case "ready":
-        return { text: `${c.dim("via chatgpt-sub")}${g.external}`, standalone: false };
+      case "ready": {
+        const accountSuffix =
+          input.endpoint.accountLabel === undefined ? "" : `(${input.endpoint.accountLabel})`;
+        return {
+          text: `${c.dim(`via chatgpt-sub${accountSuffix}`)}${g.external}`,
+          standalone: false,
+        };
+      }
       case "checking":
         return { text: c.dim("chatgpt-sub checking…"), standalone: true };
       case "signed-out":

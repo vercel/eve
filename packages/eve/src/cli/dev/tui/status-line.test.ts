@@ -218,11 +218,15 @@ describe("buildStatusLine", () => {
 
     const chatgpt = buildStatusLine({
       model: "openai/gpt-5.6-sol",
-      endpoint: { kind: "chatgpt", state: "ready" },
+      endpoint: {
+        kind: "chatgpt",
+        state: "ready",
+        accountLabel: "person@example.com",
+      },
       theme: plain,
       width: 120,
     });
-    expect(chatgpt).toBe("openai/gpt-5.6-sol via chatgpt-sub⌝");
+    expect(chatgpt).toBe("openai/gpt-5.6-sol via chatgpt-sub(person@example.com)⌝");
 
     const chatgptLogin = buildStatusLine({
       model: "openai/gpt-5.6-sol",
