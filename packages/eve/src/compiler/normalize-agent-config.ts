@@ -272,18 +272,22 @@ async function normalizeAuthoredModelReference(input: {
   };
 
   if (input.contextWindowTokens === undefined) {
-    const providerResult = await input.modelCatalog.getByProviderModelId(
-      languageModel.provider,
-      languageModel.modelId,
-    );
+    try {
+      const providerResult = await input.modelCatalog.getByProviderModelId(
+        languageModel.provider,
+        languageModel.modelId,
+      );
 
-    if (providerResult) {
-      return {
-        ...sourceBackedModel,
-        id: providerResult.slug,
-        contextWindowTokens: providerResult.limits.contextWindowTokens,
-        maxOutputTokens: providerResult.limits.maxOutputTokens,
-      };
+      if (providerResult) {
+        return {
+          ...sourceBackedModel,
+          id: providerResult.slug,
+          contextWindowTokens: providerResult.limits.contextWindowTokens,
+          maxOutputTokens: providerResult.limits.maxOutputTokens,
+        };
+      }
+    } catch {
+      // Slug lookup below still resolves built-in limits and otherwise resurfaces the catalog error.
     }
   }
 

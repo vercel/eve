@@ -341,6 +341,62 @@ describe("compiler model catalog", () => {
     );
   });
 
+  it("preserves catalog request failures for models without built-in metadata", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-model-catalog-unavailable-",
+      APP_ROOT_OPTIONS,
+    );
+
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      ["export default {", '  model: "example/uncached-model",', "};", ""].join("\n"),
+    );
+
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("catalog offline"));
+
+    await expect(
+      compileAgent({
+        startPath: appRoot,
+      }),
+    ).rejects.toThrow(
+      'Failed to load AI Gateway model metadata for the primary compaction trigger model "example/uncached-model". catalog offline',
+    );
+  });
+
+  it("compiles source-backed models with built-in metadata when the catalog is unavailable", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-model-catalog-built-in-source-model-",
+      APP_ROOT_OPTIONS,
+    );
+
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      [
+        "const sourceModel = {",
+        '  specificationVersion: "v3",',
+        '  provider: "openai.responses",',
+        '  modelId: "gpt-5.4",',
+        "  supportedUrls: {},",
+        '  async doGenerate() { throw new Error("not implemented"); },',
+        '  async doStream() { throw new Error("not implemented"); },',
+        "};",
+        "",
+        "export default { model: sourceModel };",
+        "",
+      ].join("\n"),
+    );
+
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("catalog offline"));
+
+    const result = await compileAgent({ startPath: appRoot });
+
+    expect(result.manifest.config.model).toMatchObject({
+      contextWindowTokens: 400_000,
+      id: "openai/gpt-5.4",
+      maxOutputTokens: 128_000,
+    });
+  });
+
   it("uses authored modelContextWindowTokens and skips the AI Gateway lookup", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-model-catalog-authored-window-",
