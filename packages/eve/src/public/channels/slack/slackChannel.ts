@@ -293,6 +293,8 @@ export interface SlackInitialMessage {
 export interface SlackEventSendOptions {
   readonly auth: SessionAuthContext | null;
   readonly target: SlackReceiveTarget;
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 }
 
 /** Options for answering pending input requests from a generic Slack event handler. */
@@ -850,6 +852,7 @@ async function receiveOnSlack(
     readonly auth: SessionAuthContext | null;
     readonly message: string | UserContent;
     readonly target: SlackReceiveTarget;
+    readonly title?: string;
   },
   deps: {
     readonly from: ChannelFrom<SlackChannelState>;
@@ -904,6 +907,7 @@ async function receiveOnSlack(
       teamId: deps.teamId ?? null,
       triggeringUserId: deps.triggeringUserId ?? null,
     },
+    title: input.title,
   });
 }
 
@@ -1198,9 +1202,9 @@ async function dispatchSlackEvent(input: {
       input.resolveSession(slackContinuationToken(target.channelId, target.threadTs)),
     respond: (inputResponses, { auth, target }) =>
       sourceFor(target).respond(inputResponses, { auth }),
-    send: (message, { auth, target }) =>
+    send: (message, { auth, target, title }) =>
       receiveOnSlack(
-        { auth, message, target },
+        { auth, message, target, title },
         {
           from: input.from,
           credentials: input.credentials,
