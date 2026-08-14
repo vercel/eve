@@ -329,11 +329,11 @@ function describeExtensionSource(
 
 /**
  * Merges two composed contribution sets with earlier-set-wins precedence per
- * composed name. Named contributions (tools, connections, skills, dynamic
- * tools) dedup by their model-facing identifier so an override shadows the
- * extension's same-named entry; channel routes and unnamed contributions
- * (hooks, dynamic skills, dynamic instructions, static instructions) simply
- * concatenate.
+ * composed name. Named contributions dedup by their model-facing identifier so
+ * an override shadows the extension's same-named entry. Channel entries dedup
+ * as a group so every route from the winning channel is preserved. Unnamed
+ * contributions (hooks, dynamic skills, dynamic instructions, static
+ * instructions) simply concatenate.
  *
  * Exported for unit testing: passing the consumer overrides as `primary` and
  * the extension's own contributions as `secondary` yields consumer-wins
@@ -343,8 +343,12 @@ export function mergeContributions(
   primary: CompiledExtensionContributions,
   secondary: CompiledExtensionContributions,
 ): CompiledExtensionContributions {
+  const primaryChannelNames = new Set(primary.channels.map((channel) => channel.name));
   return {
-    channels: [...primary.channels, ...secondary.channels],
+    channels: [
+      ...primary.channels,
+      ...secondary.channels.filter((channel) => !primaryChannelNames.has(channel.name)),
+    ],
     tools: dedupeBy([...primary.tools, ...secondary.tools], (tool) => tool.name),
     dynamicTools: dedupeBy(
       [...primary.dynamicTools, ...secondary.dynamicTools],

@@ -275,7 +275,7 @@ import crm from "@acme/crm";
 export default crm({ apiKey: process.env.CRM_API_KEY! });
 ```
 
-A same-named consumer tool, connection, or skill wins. To adjust an extension tool, import it from the package's `./tools` export and define it again:
+A same-named consumer channel, tool, connection, or skill wins. To adjust an extension tool, import it from the package's `./tools` export and define it again:
 
 ```ts title="agent/extensions/crm/tools/search.ts"
 import { search } from "@acme/crm/tools";
