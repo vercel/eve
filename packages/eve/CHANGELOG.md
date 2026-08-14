@@ -1,5 +1,12 @@
 # eve
 
+## 0.38.1
+
+### Patch Changes
+
+- d23467d: Allow extensions to contribute namespaced subagents, including their tools, configuration access, nested subagents, and directory-mount overrides.
+- cb2fa2a: Configure MCP channel endpoints with `route`, default them to `/eve/v1/mcp`, and derive OAuth protected-resource metadata paths from the MCP resource identifier.
+
 ## 0.38.0
 
 ### Minor Changes
