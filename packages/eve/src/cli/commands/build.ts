@@ -43,7 +43,7 @@ export function registerBuildCommand(input: {
 
       await loadDevelopmentEnvironmentFiles(input.applicationContext.root);
 
-      const projectContext = await resolveEveProjectContext(input.appRoot);
+      const projectContext = await resolveEveProjectContext(input.applicationContext.root);
       if (projectContext.kind === "workspace") {
         if (options.profile !== undefined || options.skipSandboxPrewarm === true) {
           throw new Error(
