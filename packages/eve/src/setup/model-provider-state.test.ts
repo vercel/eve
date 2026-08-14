@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   resolveSelectedModelProvider,
   resolveSelectedModelProviderStatus,
-  type ModelProviderState,
+  type GatewayProviderState,
 } from "./model-provider-state.js";
 
-const competingState: ModelProviderState = {
+const competingState: GatewayProviderState = {
   available: {
     gatewayProject: { projectName: "my-agent", teamName: "my-team" },
     gatewayKey: { source: { kind: "shell" } },
@@ -19,6 +19,9 @@ describe("model provider state", () => {
     expect(
       resolveSelectedModelProvider(competingState, { kind: "external", provider: "codex" }),
     ).toBe("chatgpt");
+    expect(resolveSelectedModelProviderStatus(competingState, "chatgpt")).toEqual({
+      kind: "chatgpt",
+    });
   });
 
   it("uses the explicit Gateway preference when credentials compete", () => {
@@ -44,7 +47,7 @@ describe("model provider state", () => {
   });
 
   it("does not silently change an unavailable explicit Gateway preference", () => {
-    const state: ModelProviderState = {
+    const state: GatewayProviderState = {
       available: { gatewayKey: { source: { kind: "shell" } } },
       preferredGatewayCredential: "project",
     };
@@ -52,6 +55,8 @@ describe("model provider state", () => {
     expect(resolveSelectedModelProvider(state, { kind: "gateway", target: "anthropic" })).toBe(
       "gateway-project",
     );
-    expect(resolveSelectedModelProviderStatus(state, "gateway-project")).toEqual({ kind: "unset" });
+    expect(resolveSelectedModelProviderStatus(state, "gateway-project")).toEqual({
+      kind: "unconfigured",
+    });
   });
 });

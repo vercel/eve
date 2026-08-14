@@ -7,7 +7,7 @@ import {
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
-  resolveModelProviderState,
+  normalizeLocalModelEndpoint,
   type BootDetectionContext,
 } from "./setup-issues.js";
 
@@ -109,7 +109,7 @@ describe("BOOT_DETECTIONS", () => {
       { kind: "external", provider: "anthropic" },
     );
 
-    expect(resolveModelProviderState(info, { AI_GATEWAY_API_KEY: "key" })).toMatchObject({
+    expect(normalizeLocalModelEndpoint(info, { AI_GATEWAY_API_KEY: "key" })).toMatchObject({
       agent: {
         model: {
           endpoint: { kind: "gateway", connected: true, credential: "api-key" },

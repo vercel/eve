@@ -54,6 +54,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
     runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "logged-in" })),
     runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
       kind: "done",
+      accessChanged: true,
       modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
     })),
     runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
@@ -142,6 +143,21 @@ describe("runTuiSetupCommand", () => {
     );
   });
 
+  it("does not rebuild model access after a rejected edit", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
+        kind: "done",
+        accessChanged: false,
+        modelMessage: "Couldn't confirm the id.",
+      })),
+    });
+
+    await expect(run({ command: "model", flows })).resolves.toEqual({
+      message: "Couldn't confirm the id.",
+      preserveFlowDiagnostics: false,
+    });
+  });
+
   it("hands model-owned subprocesses both the terminal and suspended runtime", async () => {
     const calls: string[] = [];
     const renderer = fakePanelRenderer();
@@ -191,13 +207,11 @@ describe("runTuiSetupCommand", () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
+        accessChanged: true,
         modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
         providerOutcome: {
           selected: "gateway-project",
-          resolution: {
-            credential: "api-key",
-            source: { kind: "env-file", path: ".env.local" },
-          },
+          resolution: { credential: "oidc", file: ".env.local" },
           status: { kind: "gateway-project", projectName: "my-agent" },
         },
       })),
@@ -215,6 +229,7 @@ describe("runTuiSetupCommand", () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
+        accessChanged: true,
         providerOutcome: {
           selected: "gateway-project",
           resolution: { credential: "oidc", file: ".env.local" },
@@ -233,6 +248,7 @@ describe("runTuiSetupCommand", () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
+        accessChanged: true,
         providerOutcome: {
           selected: "gateway-project",
           resolution: {
@@ -251,10 +267,31 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
+  it("does not claim Project OIDC when linking produced no credential", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
+        kind: "done",
+        accessChanged: true,
+        providerOutcome: {
+          selected: "gateway-project",
+          status: { kind: "gateway-project", projectName: "my-agent" },
+        },
+      })),
+    });
+
+    await expect(run({ command: "model", flows })).resolves.toEqual({
+      message:
+        "Project linked, but no Project OIDC credential was found. Run `vercel env pull` after enabling AI Gateway.",
+      preserveFlowDiagnostics: false,
+      effect: { kind: "model-access-changed" },
+    });
+  });
+
   it("does not claim a link for a pasted key — the outcome names the env file", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
+        accessChanged: true,
         providerOutcome: {
           selected: "gateway-key",
           resolution: {
@@ -503,6 +540,7 @@ describe("runTuiSetupCommand", () => {
               () =>
                 resolve({
                   kind: "done",
+                  accessChanged: true,
                   providerOutcome: {
                     selected: "gateway-key",
                     resolution: {

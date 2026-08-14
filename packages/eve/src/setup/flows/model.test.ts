@@ -10,10 +10,10 @@ import type {
   SingleSelectOptions,
 } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
+import { readGatewayProviderState } from "#setup/model-provider-state.js";
 
 import {
   MODEL_MENU_MESSAGE,
-  readModelProviderState,
   runModelFlow,
   type ModelFlowDeps,
   type ModelSettingsRequest,
@@ -80,7 +80,7 @@ function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps
       available: { gatewayProject: { projectName: "my-agent" } },
       preferredGatewayCredential: undefined,
     })),
-    runProviderFlow: vi.fn(async () => ({ kind: "done" }) as const),
+    runProviderFlow: vi.fn(async () => ({ kind: "gateway-project" }) as const),
     ensureChatGptAuth: vi.fn(async () => {}),
     writeGatewayCredentialPreference: vi.fn(async () => {}),
     ...overrides,
@@ -124,9 +124,9 @@ function scriptedPrompter(input: { menu: (PrompterValue | "esc")[] }) {
   return { ...fake, menuPaints };
 }
 
-describe("readModelProviderState", () => {
+describe("readGatewayProviderState", () => {
   it("keeps available credentials separate from persisted selection", async () => {
-    const state = await readModelProviderState(
+    const state = await readGatewayProviderState(
       APP_ROOT,
       {},
       {
@@ -221,6 +221,7 @@ describe("runModelFlow", () => {
       runModelFlow({ appRoot: APP_ROOT, prompter, deps, withExclusiveTerminal }),
     ).resolves.toEqual({
       kind: "done",
+      accessChanged: true,
       modelMessage: `Model changed to ${pc.bold("chatgpt/gpt-5.6-sol")}. Live on your next prompt.`,
     });
 
@@ -269,8 +270,8 @@ describe("runModelFlow", () => {
       runProviderFlow: vi.fn(
         async () =>
           ({
-            kind: "project",
-            result: { kind: "done", resolution: { credential: "oidc", file: ".env.local" } },
+            kind: "gateway-project",
+            resolution: { credential: "oidc", file: ".env.local" },
           }) as const,
       ),
       applySettings,
@@ -310,6 +311,7 @@ describe("runModelFlow", () => {
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
+      accessChanged: true,
       modelMessage: "ChatGPT login ready.",
     });
 
@@ -542,6 +544,7 @@ describe("runModelFlow", () => {
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
+      accessChanged: true,
       modelMessage: `Model changed to ${pc.bold("openai/gpt-5.5")}. Live on your next prompt.`,
     });
 
@@ -572,6 +575,7 @@ describe("runModelFlow", () => {
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
+      accessChanged: false,
       modelMessage: "Couldn't confirm the id.",
     });
 
@@ -595,6 +599,7 @@ describe("runModelFlow", () => {
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
+      accessChanged: true,
       modelMessage:
         "Model settings updated: reasoning high, Fast mode on. Live on your next prompt.",
     });
@@ -701,7 +706,7 @@ describe("runModelFlow", () => {
     const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(
       async () =>
         ({
-          kind: "done",
+          kind: "gateway-key",
           resolution: {
             credential: "api-key",
             source: { kind: "env-file", path: ".env.local" },
@@ -712,6 +717,7 @@ describe("runModelFlow", () => {
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
+      accessChanged: true,
       providerOutcome: {
         selected: "gateway-key",
         resolution: {
@@ -743,8 +749,8 @@ describe("runModelFlow", () => {
     const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(
       async () =>
         ({
-          kind: "project",
-          result: { kind: "done", resolution: { credential: "oidc", file: ".env.local" } },
+          kind: "gateway-project",
+          resolution: { credential: "oidc", file: ".env.local" },
         }) as const,
     );
     const deps = flowDeps({ runProviderFlow });
@@ -758,6 +764,7 @@ describe("runModelFlow", () => {
       }),
     ).resolves.toEqual({
       kind: "done",
+      accessChanged: true,
       providerOutcome: {
         selected: "gateway-project",
         resolution: { credential: "oidc", file: ".env.local" },
@@ -786,7 +793,7 @@ describe("runModelFlow", () => {
     const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(async () => {
       controller.abort();
       return {
-        kind: "done",
+        kind: "gateway-key",
         resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
       };
     });
@@ -802,6 +809,7 @@ describe("runModelFlow", () => {
       }),
     ).resolves.toEqual({
       kind: "done",
+      accessChanged: true,
       providerOutcome: {
         selected: "gateway-key",
         resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },

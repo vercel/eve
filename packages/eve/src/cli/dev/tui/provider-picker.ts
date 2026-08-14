@@ -44,7 +44,7 @@ function keyPhase(
   select: SelectState,
   options: readonly PromptOption<ProviderConnection>[],
 ): ProviderPickerPhase {
-  return selectValueAtCursor(options, select.cursor) === "own-key"
+  return selectValueAtCursor(options, select.cursor) === "gateway-key"
     ? { kind: "editing", editor: EMPTY_LINE }
     : { kind: "inactive" };
 }
@@ -95,7 +95,7 @@ export function transitionProviderPicker(
     }
     return {
       kind: "settle",
-      result: { kind: "inline-key", key: state.phase.key, validation: event.validation },
+      result: { kind: "gateway-key", key: state.phase.key, validation: event.validation },
     };
   }
 
@@ -113,10 +113,10 @@ export function transitionProviderPicker(
       };
     case "submit": {
       const value = selectValueAtCursor(options, state.select.cursor);
-      if (value === "project" || value === "chatgpt" || value === "external") {
+      if (value === "gateway-project" || value === "chatgpt" || value === "external") {
         return { kind: "settle", result: { kind: value } };
       }
-      if (value !== "own-key" || state.phase.kind === "inactive") return ignore(state);
+      if (value !== "gateway-key" || state.phase.kind === "inactive") return ignore(state);
       const key = state.phase.editor.text.trim();
       if (key.length === 0) {
         return {

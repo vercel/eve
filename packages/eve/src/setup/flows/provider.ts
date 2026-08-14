@@ -1,5 +1,7 @@
 import pc from "picocolors";
 
+import type { GatewayCredentialResolution } from "#internal/resolve-model-endpoint-status.js";
+
 import { appendEnv } from "../append-env.js";
 import {
   AI_GATEWAY_API_KEY_ENV_FILE,
@@ -16,18 +18,11 @@ import {
 } from "../vercel-project.js";
 import { withSpinner } from "../with-spinner.js";
 
-import type {
-  ModelProviderState,
-  SelectedGatewayProvider,
-  SelectedModelProvider,
-  SelectedModelProviderStatus,
-} from "#setup/model-provider-state.js";
+import type { GatewayProviderState, SelectedModelProvider } from "#setup/model-provider-state.js";
 
-import { runLinkFlow, type LinkFlowResult } from "./link.js";
+import { runLinkFlow } from "./link.js";
 
-export type ProviderConnection = "project" | "own-key" | "chatgpt" | "external";
-
-export type ModelProviderStatus = SelectedModelProviderStatus;
+export type ProviderConnection = SelectedModelProvider | "external";
 
 export const PROVIDER_QUESTION = "Which model provider do you want to use?";
 
@@ -48,23 +43,21 @@ export interface ProviderFlowDeps {
 }
 
 export type ProviderFlowResult =
-  | LinkFlowResult
-  | { kind: "project"; result: LinkFlowResult }
+  | { kind: "cancelled" }
+  | { kind: "gateway-project"; resolution?: GatewayCredentialResolution }
+  | { kind: "gateway-key"; resolution: GatewayCredentialResolution }
   | { kind: "chatgpt" }
-  | {
-      kind: "external-provider";
-      /** The user runs a non-gateway provider; nothing was linked or written. */
-    };
+  | { kind: "external-provider" };
 
 type AcceptedGatewayKeyValidation = Exclude<GatewayKeyValidation, { kind: "invalid" }>;
 
 /** A provider choice, including the accepted evidence for an inline key. */
 export type ProviderPickerChoice =
-  | { kind: "project" }
+  | { kind: "gateway-project" }
   | { kind: "chatgpt" }
   | { kind: "external" }
   | {
-      kind: "inline-key";
+      kind: "gateway-key";
       key: string;
       validation: AcceptedGatewayKeyValidation;
     };
@@ -86,7 +79,7 @@ function projectConnectionOption(
   authStatus: VercelAuthStatus | undefined,
 ): SelectOption<ProviderConnection> {
   const option: SelectOption<ProviderConnection> = {
-    value: "project",
+    value: "gateway-project",
     label: "AI Gateway via Project",
     hint: "Authenticates with AI Gateway automatically\nin a new or existing project. No keys to manage.",
   };
@@ -98,8 +91,8 @@ function projectConnectionOption(
 
 function providerOptions(
   authStatus: VercelAuthStatus | undefined,
-  state: ModelProviderState,
-  selected: SelectedModelProvider | undefined,
+  state: GatewayProviderState,
+  selected: SelectedModelProvider,
 ): SelectOption<ProviderConnection>[] {
   const currentProject = state.available.gatewayProject;
   const currentKey = state.available.gatewayKey;
@@ -116,8 +109,8 @@ function providerOptions(
     project = { ...project, checked: true, hint };
   }
 
-  let ownKey: SelectOption<ProviderConnection> = {
-    value: "own-key",
+  let gatewayKey: SelectOption<ProviderConnection> = {
+    value: "gateway-key",
     label: `AI Gateway via ${AI_GATEWAY_API_KEY_ENV_VAR}`,
     hint: "⎿ type your key",
   };
@@ -126,12 +119,12 @@ function providerOptions(
       currentKey !== undefined
         ? `${AI_GATEWAY_API_KEY_ENV_VAR} set in ${currentKey.source.kind === "shell" ? "your shell" : currentKey.source.path}`
         : "Current";
-    ownKey = { ...ownKey, checked: true, hint };
+    gatewayKey = { ...gatewayKey, checked: true, hint };
   }
 
   return [
     project,
-    ownKey,
+    gatewayKey,
     {
       value: "chatgpt",
       label: "ChatGPT subscription",
@@ -179,10 +172,10 @@ export async function runProviderFlow(input: {
   prompter: Prompter;
   signal?: AbortSignal;
   picker?: ProviderPicker;
-  /** Independently detected capabilities plus the persisted human selection. */
-  providerState?: ModelProviderState;
+  /** Gateway evidence and preference detected by the parent model flow. */
+  providerState: GatewayProviderState;
   /** Draft provider selection while the parent flow is still open. */
-  selectedProvider?: SelectedModelProvider;
+  selectedProvider: SelectedModelProvider;
   deps?: Partial<ProviderFlowDeps>;
 }): Promise<ProviderFlowResult> {
   const { appRoot, prompter, signal } = input;
@@ -195,41 +188,17 @@ export async function runProviderFlow(input: {
   };
 
   let authStatus: VercelAuthStatus | undefined;
-  const persistedSelection: SelectedGatewayProvider | undefined =
-    input.providerState?.preferredGatewayCredential === "project"
-      ? "gateway-project"
-      : input.providerState?.preferredGatewayCredential === "api-key"
-        ? "gateway-key"
-        : undefined;
-  const detectedSelection: SelectedGatewayProvider | undefined =
-    input.providerState?.available.gatewayKey !== undefined
-      ? "gateway-key"
-      : input.providerState?.available.gatewayProject !== undefined
-        ? "gateway-project"
-        : undefined;
-  const selectedProvider = input.selectedProvider ?? persistedSelection ?? detectedSelection;
+  const { providerState, selectedProvider } = input;
   // The cursor opens on the active provider; a Vercel auth blocker still
   // re-homes it onto the key row below.
-  let initialValue: ProviderConnection =
-    selectedProvider === "chatgpt"
-      ? "chatgpt"
-      : selectedProvider === "gateway-key"
-        ? "own-key"
-        : "project";
-  let keyChoice: Extract<ProviderPickerChoice, { kind: "inline-key" }>;
+  let initialValue: ProviderConnection = selectedProvider;
+  let keyChoice: Extract<ProviderPickerChoice, { kind: "gateway-key" }>;
 
   try {
     while (true) {
       const choice = await selectProvider({
         picker: input.picker,
-        options: providerOptions(
-          authStatus,
-          input.providerState ?? {
-            available: {},
-            preferredGatewayCredential: undefined,
-          },
-          selectedProvider,
-        ),
+        options: providerOptions(authStatus, providerState, selectedProvider),
         initialValue,
         validateInlineKey: (key, validationSignal) =>
           deps.validateGatewayApiKey(
@@ -255,7 +224,7 @@ export async function runProviderFlow(input: {
 
       if (choice.kind === "chatgpt") return choice;
 
-      if (choice.kind === "inline-key") {
+      if (choice.kind === "gateway-key") {
         keyChoice = choice;
         break;
       }
@@ -266,18 +235,19 @@ export async function runProviderFlow(input: {
       signal?.throwIfAborted();
       authStatus = auth;
       if (vercelAuthBlockerReason(authStatus) !== undefined) {
-        initialValue = "own-key";
+        initialValue = "gateway-key";
         continue;
       }
-      return {
-        kind: "project",
-        result: await deps.runLinkFlow({
-          appRoot,
-          prompter,
-          signal,
-          projectSelection: "create-or-link",
-        }),
-      };
+      const result = await deps.runLinkFlow({
+        appRoot,
+        prompter,
+        signal,
+        projectSelection: "create-or-link",
+      });
+      if (result.kind === "cancelled") return result;
+      return result.resolution === undefined
+        ? { kind: "gateway-project" }
+        : { kind: "gateway-project", resolution: result.resolution };
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };
@@ -304,7 +274,7 @@ export async function runProviderFlow(input: {
   // that is now on disk.
   prompter.log.success(`${location.envKey} set.`);
   return {
-    kind: "done",
+    kind: "gateway-key",
     resolution: { credential: "api-key", source: { kind: "env-file", path: location.envFile } },
   };
 }

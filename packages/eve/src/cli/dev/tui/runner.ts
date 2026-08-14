@@ -71,7 +71,7 @@ import {
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
-  resolveModelProviderState,
+  normalizeLocalModelEndpoint,
   type BootDetection,
   type BootDetectionContext,
   type SetupIssue,
@@ -674,7 +674,7 @@ export class EveTUIRunner {
 
   #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
     const headerInfo =
-      this.#appRoot === undefined ? info : resolveModelProviderState(info, process.env);
+      this.#appRoot === undefined ? info : normalizeLocalModelEndpoint(info, process.env);
     this.#agentInfo = headerInfo;
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) return headerInfo;
@@ -1666,7 +1666,7 @@ export class EveTUIRunner {
    * Fresh `eve init` launches the TUI with `/model` prefilled. Project-backed
    * model access depends on the Vercel CLI and a Vercel session, so resolve
    * only those missing prerequisites before entering the model picker. A probe
-   * failure still opens `/model`: its own-key and external-provider paths do
+   * failure still opens `/model`: its API-key and external-provider paths do
    * not require Vercel. After model setup, open the categorized registry hub so
    * a new user has concrete next steps before reaching the chat prompt.
    */

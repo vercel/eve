@@ -32,6 +32,19 @@ function createDeps() {
   };
 }
 
+type ProviderFlowInput = Parameters<typeof runProviderFlow>[0];
+
+function runTestProviderFlow(
+  input: Omit<ProviderFlowInput, "providerState" | "selectedProvider"> &
+    Partial<Pick<ProviderFlowInput, "providerState" | "selectedProvider">>,
+) {
+  return runProviderFlow({
+    providerState: { available: {}, preferredGatewayCredential: undefined },
+    selectedProvider: "gateway-project",
+    ...input,
+  });
+}
+
 describe("runProviderFlow", () => {
   it("hands the Dev TUI one provider menu", async () => {
     const fake = createFakePrompter();
@@ -39,8 +52,8 @@ describe("runProviderFlow", () => {
     const picker: ProviderPicker = async (request) => {
       expect(request.message).toBe(PROVIDER_QUESTION);
       expect(request.options.map((option) => option.value)).toEqual([
-        "project",
-        "own-key",
+        "gateway-project",
+        "gateway-key",
         "chatgpt",
         "external",
       ]);
@@ -52,11 +65,11 @@ describe("runProviderFlow", () => {
         value: "external",
         label: "Other providers",
       });
-      expect(request.initialValue).toBe("project");
-      return { kind: "project" };
+      expect(request.initialValue).toBe("gateway-project");
+      return { kind: "gateway-project" };
     };
 
-    const result = await runProviderFlow({
+    const result = await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker,
@@ -64,11 +77,8 @@ describe("runProviderFlow", () => {
     });
 
     expect(result).toEqual({
-      kind: "project",
-      result: {
-        kind: "done",
-        resolution: { credential: "oidc", file: ".env.local" },
-      },
+      kind: "gateway-project",
+      resolution: { credential: "oidc", file: ".env.local" },
     });
     expect(deps.runLinkFlow).toHaveBeenCalledExactlyOnceWith({
       appRoot: APP_ROOT,
@@ -81,13 +91,13 @@ describe("runProviderFlow", () => {
     const fake = createFakePrompter();
     const deps = createDeps();
 
-    const result = await runProviderFlow({
+    const result = await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker: async (request) => {
         expect(request.options.map((option) => option.value)).toEqual([
-          "project",
-          "own-key",
+          "gateway-project",
+          "gateway-key",
           "chatgpt",
           "external",
         ]);
@@ -106,16 +116,16 @@ describe("runProviderFlow", () => {
     const fake = createFakePrompter();
     const deps = createDeps();
     const linked: ProviderPicker = async (request) => {
-      expect(request.initialValue).toBe("project");
+      expect(request.initialValue).toBe("gateway-project");
       expect(request.options[0]).toMatchObject({
-        value: "project",
+        value: "gateway-project",
         checked: true,
         hint: `Linked to ${pc.bold("my-agent")} in team ${pc.bold("my-team")}`,
       });
       expect(request.options[1]?.checked).toBeUndefined();
       return undefined;
     };
-    await runProviderFlow({
+    await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker: linked,
@@ -123,19 +133,20 @@ describe("runProviderFlow", () => {
         available: { gatewayProject: { projectName: "my-agent", teamName: "my-team" } },
         preferredGatewayCredential: "project",
       },
+      selectedProvider: "gateway-project",
       deps,
     });
 
     const keyed: ProviderPicker = async (request) => {
-      expect(request.initialValue).toBe("own-key");
+      expect(request.initialValue).toBe("gateway-key");
       expect(request.options[1]).toMatchObject({
-        value: "own-key",
+        value: "gateway-key",
         checked: true,
         hint: "AI_GATEWAY_API_KEY set in .env.local",
       });
       return undefined;
     };
-    await runProviderFlow({
+    await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker: keyed,
@@ -143,21 +154,26 @@ describe("runProviderFlow", () => {
         available: { gatewayKey: { source: { kind: "env-file", path: ".env.local" } } },
         preferredGatewayCredential: "api-key",
       },
+      selectedProvider: "gateway-key",
       deps,
     });
   });
 
-  it("uses the persisted Gateway preference when credentials compete", async () => {
+  it("uses the resolved Gateway selection when credentials compete", async () => {
     const fake = createFakePrompter();
     const deps = createDeps();
     const picker: ProviderPicker = async (request) => {
-      expect(request.initialValue).toBe("project");
-      expect(request.options.find((option) => option.value === "project")?.checked).toBe(true);
-      expect(request.options.find((option) => option.value === "own-key")?.checked).toBeUndefined();
+      expect(request.initialValue).toBe("gateway-project");
+      expect(request.options.find((option) => option.value === "gateway-project")?.checked).toBe(
+        true,
+      );
+      expect(
+        request.options.find((option) => option.value === "gateway-key")?.checked,
+      ).toBeUndefined();
       return undefined;
     };
 
-    await runProviderFlow({
+    await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker,
@@ -168,8 +184,24 @@ describe("runProviderFlow", () => {
         },
         preferredGatewayCredential: "project",
       },
+      selectedProvider: "gateway-project",
       deps,
     });
+  });
+
+  it("preserves cancellation from the project link flow", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+    deps.runLinkFlow.mockResolvedValueOnce({ kind: "cancelled" });
+
+    await expect(
+      runTestProviderFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        picker: async () => ({ kind: "gateway-project" }),
+        deps,
+      }),
+    ).resolves.toEqual({ kind: "cancelled" });
   });
 
   it("opens on ChatGPT when it is the selected provider", async () => {
@@ -184,7 +216,7 @@ describe("runProviderFlow", () => {
       return undefined;
     };
 
-    await runProviderFlow({
+    await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker,
@@ -201,10 +233,14 @@ describe("runProviderFlow", () => {
     const fake = createFakePrompter();
     const deps = createDeps();
 
-    await runProviderFlow({
+    await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
-      picker: async () => ({ kind: "inline-key", key: "sk-inline", validation: { kind: "valid" } }),
+      picker: async () => ({
+        kind: "gateway-key",
+        key: "sk-inline",
+        validation: { kind: "valid" },
+      }),
       deps,
     });
 
@@ -218,10 +254,10 @@ describe("runProviderFlow", () => {
       const signal = new AbortController().signal;
       const validation = await request.validateInlineKey("sk-inline", signal);
       if (validation.kind === "invalid") throw new Error(validation.message);
-      return { kind: "inline-key", key: "sk-inline", validation };
+      return { kind: "gateway-key", key: "sk-inline", validation };
     };
 
-    const result = await runProviderFlow({
+    const result = await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker,
@@ -229,7 +265,7 @@ describe("runProviderFlow", () => {
     });
 
     expect(result).toEqual({
-      kind: "done",
+      kind: "gateway-key",
       resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
     });
     expect(deps.validateGatewayApiKey).toHaveBeenCalledExactlyOnceWith(
@@ -247,7 +283,7 @@ describe("runProviderFlow", () => {
     const fake = createFakePrompter();
     const deps = createDeps();
     const picker: ProviderPicker = async () => ({
-      kind: "inline-key",
+      kind: "gateway-key",
       key: "sk-committed",
       validation: { kind: "valid" },
     });
@@ -260,7 +296,7 @@ describe("runProviderFlow", () => {
     });
     const controller = new AbortController();
 
-    const execution = runProviderFlow({
+    const execution = runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker,
@@ -272,7 +308,7 @@ describe("runProviderFlow", () => {
     releaseWrite.resolve();
 
     await expect(execution).resolves.toEqual({
-      kind: "done",
+      kind: "gateway-key",
       resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
     });
   });
@@ -281,7 +317,7 @@ describe("runProviderFlow", () => {
     const fake = createFakePrompter();
     const deps = createDeps();
 
-    const result = await runProviderFlow({
+    const result = await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker: async () => ({ kind: "external" }),
@@ -301,7 +337,7 @@ describe("runProviderFlow", () => {
     const deps = createDeps();
 
     await expect(
-      runProviderFlow({
+      runTestProviderFlow({
         appRoot: APP_ROOT,
         prompter: fake.prompter,
         picker: async () => undefined,

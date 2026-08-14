@@ -251,7 +251,7 @@ async function executeSetupCommand(
         };
         // A model edit can also move routing between AI Gateway and ChatGPT.
         // The runner rebuilds authored artifacts before refreshing model access.
-        if (result.modelMessage !== undefined || result.providerOutcome !== undefined) {
+        if (result.accessChanged) {
           outcome.effect = { kind: "model-access-changed" };
         }
         return outcome;
@@ -513,14 +513,23 @@ function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
  * panel's success lines vanish with it, so the outcome carries the substance:
  * what the directory now reads (the same detection the menu shows) and which
  * credential is ready, or what to do next. "Project linked" is only claimed
- * when a link is actually detected — the own-key branch pastes a credential
+ * when a link is actually detected — the API-key branch pastes a credential
  * without linking anything.
  */
 function providerOutcomeMessage(outcome: ModelProviderOutcome): string {
   const { status } = outcome;
   if (outcome.selected === "gateway-project") {
-    return status.kind === "gateway-project"
-      ? "Project linked. Connected to AI Gateway via Project OIDC."
+    const oidcDetected =
+      outcome.resolution?.credential === "oidc" ||
+      (outcome.resolution?.credential === "api-key" &&
+        outcome.resolution.shadowedOidc !== undefined);
+    if (oidcDetected) {
+      return status.kind === "gateway-project" && status.projectName !== undefined
+        ? "Project linked. Connected to AI Gateway via Project OIDC."
+        : "Connected to AI Gateway via Project OIDC.";
+    }
+    return status.kind === "gateway-project" && status.projectName !== undefined
+      ? "Project linked, but no Project OIDC credential was found. Run `vercel env pull` after enabling AI Gateway."
       : "AI Gateway via Project selected. Complete project linking to connect.";
   }
   if (status.kind === "gateway-key") {

@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 
 import { isObject } from "#shared/guards.js";
-import { gatewayCredentialPreferencePath } from "#setup/gateway-credential-preference.js";
+import { readGatewayCredentialPreferenceSync } from "#setup/gateway-credential-preference.js";
 
 /**
  * Development environment files loaded by local CLI commands such as
@@ -151,18 +151,9 @@ function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnviron
 }
 
 function applyGatewayCredentialPreference(appRoot: string, values: Map<string, string>): boolean {
-  try {
-    const parsed: unknown = JSON.parse(
-      readFileSync(gatewayCredentialPreferencePath(appRoot), "utf8"),
-    );
-    if (isObject(parsed) && parsed.preferred === "project") {
-      values.delete("AI_GATEWAY_API_KEY");
-      return true;
-    }
-  } catch {
-    // Missing or invalid local settings preserve the AI SDK's normal precedence.
-  }
-  return false;
+  if (readGatewayCredentialPreferenceSync(appRoot) !== "project") return false;
+  values.delete("AI_GATEWAY_API_KEY");
+  return true;
 }
 
 function applyDevelopmentEnvironmentValues(input: {

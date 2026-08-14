@@ -51,7 +51,7 @@ type ModelProviderAccess =
  * loaded credential is usable even when an earlier `/info` response says
  * disconnected.
  */
-export function resolveModelProviderState(
+export function normalizeLocalModelEndpoint(
   info: AgentInfoResult | undefined,
   env: Record<string, string | undefined>,
 ): AgentInfoResult | undefined {

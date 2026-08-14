@@ -1,21 +1,19 @@
-import {
-  hasEnvValue,
-  type GatewayCredentialResolution,
-} from "#internal/resolve-model-endpoint-status.js";
+import type { GatewayCredentialResolution } from "#internal/resolve-model-endpoint-status.js";
 
 import { inspectApplication } from "#services/inspect-application.js";
 import {
-  readGatewayCredentialPreference,
   writeGatewayCredentialPreference,
   type GatewayCredentialPreference,
 } from "#setup/gateway-credential-preference.js";
 import {
+  readGatewayProviderState,
+  resolveSelectedGatewayProviderStatus,
   resolveSelectedModelProvider,
   resolveSelectedModelProviderStatus,
-  type ModelProviderState,
+  type GatewayProviderState,
+  type GatewayProviderStatus,
+  type ModelProviderStatus,
   type SelectedGatewayProvider,
-  type SelectedModelProvider,
-  type SelectedModelProviderStatus,
 } from "#setup/model-provider-state.js";
 import type {
   AgentModelSettingsPatch,
@@ -25,7 +23,6 @@ import type {
 import pc from "picocolors";
 
 import { AI_GATEWAY_API_KEY_ENV_VAR } from "../ai-gateway-api-key.js";
-import { findEnvFileWithKey } from "../boxes/detect-ai-gateway.js";
 import {
   fetchGatewayCatalog,
   modelOptionsFromCatalog,
@@ -37,10 +34,6 @@ import {
   type GatewayModelCapabilities,
   type ReasoningLevel,
 } from "../boxes/model-capabilities.js";
-import {
-  detectProjectIdentity,
-  type VercelProjectOperationOptions,
-} from "../project-resolution.js";
 import type { AgentReasoningDefinition, ModelRouting } from "#shared/agent-definition.js";
 import {
   DEFAULT_CHATGPT_MODEL_SELECTION,
@@ -134,15 +127,13 @@ export interface ModelFlowDeps {
   /** The composite Change-model screen; the dev TUI renderer implements it. */
   pickModelSettings?: ModelSettingsPicker;
   /** Reads all available providers independently from persisted selection. */
-  readProviderState: typeof readModelProviderState;
+  readProviderState: typeof readGatewayProviderState;
   /** The provider sub-flow behind the menu's provider row. */
   runProviderFlow: typeof runProviderFlow;
   /** Ensures Codex owns a usable login before selecting ChatGPT. */
   ensureChatGptAuth: typeof ensureChatGptAuth;
   writeGatewayCredentialPreference: typeof writeGatewayCredentialPreference;
 }
-
-export type ModelProviderStatus = SelectedModelProviderStatus;
 
 /**
  * A provider sub-flow run that actually moved the provider: the credential
@@ -157,7 +148,7 @@ export interface ModelProviderOutcome {
   resolution?: GatewayCredentialResolution;
   /** The explicit provider choice that the runtime will honor after reload. */
   selected: SelectedGatewayProvider;
-  status: ModelProviderStatus;
+  status: GatewayProviderStatus;
 }
 
 export type ModelFlowResult =
@@ -168,6 +159,8 @@ export type ModelFlowResult =
     }
   | {
       kind: "done";
+      /** Whether authored source, auth, or Gateway selection committed. */
+      accessChanged: boolean;
       /** The last apply line, when the model was changed this session. */
       modelMessage?: string;
       /** The last provider sub-flow outcome, when one ran to completion. */
@@ -186,18 +179,17 @@ type ModelMenuRow = "model" | "provider" | "done";
  * plain form feeds notice and outcome copy.
  */
 function providerStatusHint(
-  selected: SelectedModelProvider,
   provider: ModelProviderStatus,
   chatGptAccountLabel: string | undefined,
   emphasis: (text: string) => string = (text) => text,
 ): string {
-  if (selected === "chatgpt") {
+  if (provider.kind === "chatgpt") {
     return chatGptAccountLabel === undefined
       ? "ChatGPT subscription"
       : `ChatGPT subscription (${chatGptAccountLabel})`;
   }
-  if (selected === "gateway-project") {
-    if (provider.kind !== "gateway-project" || provider.projectName === undefined) {
+  if (provider.kind === "gateway-project") {
+    if (provider.projectName === undefined) {
       return "AI Gateway via Project";
     }
     const where =
@@ -261,7 +253,6 @@ function modelMenuRows(
   reasoning: ReasoningLevel | null,
   serviceTier: GatewayServiceTierState,
   provider: ModelProviderStatus,
-  selectedProvider: SelectedModelProvider,
   chatGptAccountLabel: string | undefined,
   routing: ModelRouting | null,
   editable: boolean,
@@ -296,7 +287,7 @@ function modelMenuRows(
       label: "Change provider",
       description: "Disabled in external endpoint mode",
     };
-  } else if (selectedProvider !== "chatgpt" && provider.kind === "unset") {
+  } else if (provider.kind === "unconfigured") {
     providerRow = {
       value: "provider",
       label: pc.bold("Configure model access"),
@@ -308,7 +299,7 @@ function modelMenuRows(
     providerRow = {
       value: "provider",
       label: "Change provider",
-      hint: providerStatusHint(selectedProvider, provider, chatGptAccountLabel, pc.bold),
+      hint: providerStatusHint(provider, chatGptAccountLabel, pc.bold),
       description: "How your agent reaches the model provider",
     };
   }
@@ -316,40 +307,6 @@ function modelMenuRows(
   // An explicit exit row, like the channels list — Esc works too, but the menu
   // must not make Esc the only way out.
   return [modelRow, providerRow, { value: "done", label: "Done" }];
-}
-
-/** Reads Gateway credential availability and the user's Gateway-only preference. */
-export async function readModelProviderState(
-  appRoot: string,
-  options: VercelProjectOperationOptions = {},
-  env: Record<string, string | undefined> = process.env,
-): Promise<ModelProviderState> {
-  const [identity, gatewayKeyFile, oidcFile, preferredGatewayCredential] = await Promise.all([
-    detectProjectIdentity(appRoot, options),
-    findEnvFileWithKey(appRoot, AI_GATEWAY_API_KEY_ENV_VAR),
-    findEnvFileWithKey(appRoot, "VERCEL_OIDC_TOKEN"),
-    readGatewayCredentialPreference(appRoot),
-  ]);
-  const available: ModelProviderState["available"] = {};
-  if (identity !== undefined || oidcFile !== undefined) {
-    const gatewayProject: {
-      projectName?: string;
-      teamName?: string;
-      oidcFile?: string;
-    } = {};
-    if (identity !== undefined) {
-      gatewayProject.projectName = identity.projectName;
-      gatewayProject.teamName = identity.teamName;
-    }
-    if (oidcFile !== undefined) gatewayProject.oidcFile = oidcFile;
-    available.gatewayProject = gatewayProject;
-  }
-  if (gatewayKeyFile !== undefined) {
-    available.gatewayKey = { source: { kind: "env-file", path: gatewayKeyFile } };
-  } else if (hasEnvValue(env[AI_GATEWAY_API_KEY_ENV_VAR])) {
-    available.gatewayKey = { source: { kind: "shell" } };
-  }
-  return { available, preferredGatewayCredential };
 }
 
 /**
@@ -377,7 +334,7 @@ export async function runModelFlow(input: {
   const deps: ModelFlowDeps = {
     readCurrentModel: readCurrentAgentModel,
     applySettings: changeAgentModelSettings,
-    readProviderState: readModelProviderState,
+    readProviderState: readGatewayProviderState,
     runProviderFlow,
     ensureChatGptAuth,
     writeGatewayCredentialPreference,
@@ -388,7 +345,7 @@ export async function runModelFlow(input: {
   // trips. One ephemeral spinner covers all three so the menu paints with no
   // persisted loading lines and already knows what the model supports. A
   // failed catalog fetch degrades to unknown capabilities, never to an error.
-  const readProviderState = (useFlowSignal = true): Promise<ModelProviderState> =>
+  const readProviderState = (useFlowSignal = true): Promise<GatewayProviderState> =>
     deps.readProviderState(
       appRoot,
       useFlowSignal && signal !== undefined ? { signal } : {},
@@ -439,7 +396,7 @@ export async function runModelFlow(input: {
 
   // Start at the first useful row. Cancellation keeps the current row.
   let nextSelection: ModelMenuRow =
-    provider.kind === "unset" && routing?.kind !== "external"
+    provider.kind === "unconfigured" && routing?.kind !== "external"
       ? "provider"
       : editable || settingsEditable
         ? "model"
@@ -447,7 +404,8 @@ export async function runModelFlow(input: {
   // A gateway model with no provider cannot run. Skip the menu's extra Enter
   // and open provider setup as soon as that state is confirmed.
   let openProviderFirst =
-    routing?.kind !== "external" && (input.initialStep === "provider" || provider.kind === "unset");
+    routing?.kind !== "external" &&
+    (input.initialStep === "provider" || provider.kind === "unconfigured");
 
   while (true) {
     let pick: ModelMenuRow;
@@ -463,7 +421,6 @@ export async function runModelFlow(input: {
             reasoning,
             selectedProvider === "chatgpt" ? { kind: "standard" } : serviceTier,
             provider,
-            selectedProvider,
             input.chatGptAccountLabel,
             routing,
             editable,
@@ -568,26 +525,24 @@ export async function runModelFlow(input: {
       break;
     }
     const switchingFromChatGpt = selectedProvider === "chatgpt";
-    const gatewaySelection: SelectedGatewayProvider =
-      result.kind === "project" ? "gateway-project" : "gateway-key";
-    const gatewayResult = result.kind === "project" ? result.result : result;
+    const gatewaySelection: SelectedGatewayProvider = result.kind;
     selectedProvider = gatewaySelection;
     if (switchingFromChatGpt) {
       patch.model = { kind: "set", value: DEFAULT_AGENT_MODEL_ID };
     }
     nextGatewayCredentialPreference =
       gatewaySelection === "gateway-project" ? "project" : "api-key";
-    // Only a completed link/own-key sub-flow can move the link or
+    // Only a completed project/key sub-flow can move the link or
     // credentials, so this is the one place the status is re-read. Once that
     // sub-flow commits, finish without the aborted interaction signal so the
     // TUI can refresh the state that is already on disk.
     providerState = await withSpinner(prompter, "Checking the project…", () =>
       readProviderState(false),
     );
-    provider = resolveSelectedModelProviderStatus(providerState, gatewaySelection);
+    provider = resolveSelectedGatewayProviderStatus(providerState, gatewaySelection);
     providerOutcome = { selected: gatewaySelection, status: provider };
-    if (gatewayResult.kind === "done" && gatewayResult.resolution !== undefined) {
-      providerOutcome.resolution = gatewayResult.resolution;
+    if (result.resolution !== undefined) {
+      providerOutcome.resolution = result.resolution;
     }
     commitDraft = true;
     break;
@@ -610,7 +565,11 @@ export async function runModelFlow(input: {
   if (lastApply === undefined && providerOutcome === undefined && !chatGptLoginReady) {
     return { kind: "cancelled" };
   }
-  const done: Extract<ModelFlowResult, { kind: "done" }> = { kind: "done" };
+  const done: Extract<ModelFlowResult, { kind: "done" }> = {
+    kind: "done",
+    accessChanged:
+      lastApply?.kind === "changed" || providerOutcome !== undefined || chatGptLoginReady,
+  };
   if (lastApply !== undefined) done.modelMessage = formatApplyModelSettingsOutcome(lastApply);
   else if (chatGptLoginReady) done.modelMessage = "ChatGPT login ready.";
   if (providerOutcome !== undefined) done.providerOutcome = providerOutcome;

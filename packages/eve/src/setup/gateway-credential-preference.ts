@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -13,12 +14,22 @@ export async function readGatewayCredentialPreference(
   appRoot: string,
 ): Promise<GatewayCredentialPreference | undefined> {
   try {
-    const value: unknown = JSON.parse(
-      await readFile(gatewayCredentialPreferencePath(appRoot), "utf8"),
+    return parseGatewayCredentialPreference(
+      JSON.parse(await readFile(gatewayCredentialPreferencePath(appRoot), "utf8")),
     );
-    return isObject(value) && isGatewayCredentialPreference(value.preferred)
-      ? value.preferred
-      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Synchronous counterpart for the synchronous dev-environment loader. */
+export function readGatewayCredentialPreferenceSync(
+  appRoot: string,
+): GatewayCredentialPreference | undefined {
+  try {
+    return parseGatewayCredentialPreference(
+      JSON.parse(readFileSync(gatewayCredentialPreferencePath(appRoot), "utf8")),
+    );
   } catch {
     return undefined;
   }
@@ -31,6 +42,12 @@ export async function writeGatewayCredentialPreference(
   const path = gatewayCredentialPreferencePath(appRoot);
   await mkdir(join(appRoot, ".eve"), { recursive: true });
   await writeFile(path, `${JSON.stringify({ preferred }, null, 2)}\n`, "utf8");
+}
+
+function parseGatewayCredentialPreference(value: unknown): GatewayCredentialPreference | undefined {
+  return isObject(value) && isGatewayCredentialPreference(value.preferred)
+    ? value.preferred
+    : undefined;
 }
 
 function isGatewayCredentialPreference(value: unknown): value is GatewayCredentialPreference {
