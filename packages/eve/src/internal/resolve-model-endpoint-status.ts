@@ -42,19 +42,10 @@ export type GatewayCredentialResolution =
       credential: "api-key";
       /** Where the winning key lives; a shell export is not eve's to remove. */
       source: GatewayCredentialSource;
-      /** Present when an OIDC token exists that the key shadows. */
-      shadowedOidc?: { file?: string };
     }
   | { credential: "oidc"; file?: string };
 
-/**
- * THE one encoding of gateway credential precedence: `AI_GATEWAY_API_KEY`
- * (env file first for attribution, then the shell) outranks the OIDC token,
- * exactly as the AI SDK gateway provider resolves them. Every surface that
- * reports or ranks gateway credentials — the endpoint status, the /model
- * provider row, the link outcome, boot detection — must route through this
- * function so they can never disagree.
- */
+/** Ranks Gateway credentials using runtime precedence. */
 export function resolveGatewayCredential(
   evidence: GatewayCredentialEvidence,
 ): GatewayCredentialResolution | undefined {
@@ -67,11 +58,7 @@ export function resolveGatewayCredential(
   const hasOidc = evidence.oidcFile !== undefined || evidence.oidcAvailable === true;
 
   if (source !== undefined) {
-    const resolution: GatewayCredentialResolution = { credential: "api-key", source };
-    if (hasOidc) {
-      resolution.shadowedOidc = evidence.oidcFile === undefined ? {} : { file: evidence.oidcFile };
-    }
-    return resolution;
+    return { credential: "api-key", source };
   }
   if (hasOidc) {
     return evidence.oidcFile === undefined

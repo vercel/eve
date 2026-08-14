@@ -60,15 +60,13 @@ describe("resolveGatewayCredential", () => {
     ).toEqual({
       credential: "api-key",
       source: { kind: "env-file", path: ".env.local" },
-      shadowedOidc: { file: ".env" },
     });
   });
 
-  it("ranks a shell key over the OIDC token it shadows", () => {
+  it("ranks a shell key over an OIDC token", () => {
     expect(resolveGatewayCredential({ apiKeyInEnv: true, oidcAvailable: true })).toEqual({
       credential: "api-key",
       source: { kind: "shell" },
-      shadowedOidc: {},
     });
   });
 
