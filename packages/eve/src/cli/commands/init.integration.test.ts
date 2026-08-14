@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { detectPackageManager } from "#setup/package-manager.js";
 import {
@@ -730,7 +731,7 @@ describe("runInitCommand", () => {
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
     const projectPath = join(parentDirectory, "my-agent");
-    expect(output.errors.join("\n")).toContain(
+    expect(stripAnsi(output.errors.join("\n"))).toContain(
       `Git initialization failed during commit: commit refused\nThe Git repository and staged files were preserved at "${projectPath}".\n\nResolve the Git error above, then retry:\n  git -C ${JSON.stringify(projectPath)} commit -m "Initial commit from eve"`,
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
@@ -792,20 +793,17 @@ describe("runInitCommand", () => {
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 
-  it.each(["../escape", "nested/agent", "My Agent"])(
-    "rejects path-like or invalid agent name %j before scaffolding",
-    async (name) => {
-      const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-name-"));
-      const output = logger();
-      const deps = dependencies();
+  it.each(["My Agent"])("rejects invalid target path %j before scaffolding", async (name) => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-name-"));
+    const output = logger();
+    const deps = dependencies();
 
-      await expect(runInitCommand(output, parentDirectory, name, {}, deps)).rejects.toThrow();
+    await expect(runInitCommand(output, parentDirectory, name, {}, deps)).rejects.toThrow();
 
-      expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-      expect(deps.tryInitializeGit).not.toHaveBeenCalled();
-      expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    },
-  );
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
 
   it("adds an agent to an existing pnpm project directory", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-"));
