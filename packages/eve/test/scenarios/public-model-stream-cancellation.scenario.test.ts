@@ -18,6 +18,7 @@ type ProviderEvent =
   | "completed"
   | "listener-settled"
   | "stream-settled"
+  | "underlying-cancel"
   | "watchdog";
 
 interface Rendezvous {
@@ -85,6 +86,7 @@ describe("public model-stream cancellation", () => {
     expectCancelledLifecycle(result.events);
     expect(result.rendezvous.events).toContain("listener-settled");
     expect(result.rendezvous.events).toContain("stream-settled");
+    expect(result.rendezvous.events.filter((event) => event === "interrupted")).toHaveLength(1);
   }, 120_000);
 
   it("keeps the id-less public compatibility path cancellable after the provider delta", async () => {
@@ -476,6 +478,7 @@ const model = new MockLanguageModelV3({
       cancel() {
         // Reader cancellation owns terminalization, so do not call
         // controller.error() on an already-cancelled underlying stream.
+        void report("underlying-cancel");
         settle("interrupted", undefined, false);
       },
     });
