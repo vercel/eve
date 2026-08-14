@@ -228,6 +228,21 @@ describe("CLI command registration", () => {
     expect(help).not.toContain("show <trace>");
     expect(help).toContain("ls");
   });
+
+  it("keeps info JSON output machine-readable", async () => {
+    const output: string[] = [];
+    const printApplicationInfo = vi.fn(async (logger: { log(message: string): void }) => {
+      logger.log(JSON.stringify({ status: "ready" }));
+    });
+
+    await runCli(
+      ["info", "--json"],
+      { error: vi.fn(), log: (message) => output.push(message) },
+      { printApplicationInfo },
+    );
+
+    expect(JSON.parse(output.join("\n"))).toEqual({ status: "ready" });
+  });
 });
 
 describe("bare eve command", () => {

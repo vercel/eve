@@ -166,7 +166,10 @@ function createCliProgram(
     .showHelpAfterError()
     .exitOverride()
     .hook("preAction", (_program, actionCommand) => {
-      if (["info", "dev", "init"].includes(actionCommand.name())) {
+      if (
+        ["info", "dev", "init"].includes(actionCommand.name()) &&
+        !actionCommand.opts<{ json?: boolean }>().json
+      ) {
         logger.log(eveCliBanner());
       }
     })
