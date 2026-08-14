@@ -55,6 +55,7 @@ class FakeSession extends ClientSession {
     const events = this.#turns[this.#turnIndex] ?? [];
     this.#turnIndex += 1;
     return new MessageResponse<TOutput>({
+      cancelTurn: async () => ({ status: "no_active_turn" }),
       sessionId: "fake-session",
       createStream: () => pacedEvents(events),
     });

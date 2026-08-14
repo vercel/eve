@@ -2,6 +2,7 @@ import { createSubscriber } from "svelte/reactivity";
 import type { UserContent } from "ai";
 
 import {
+  detachEveAgentStore,
   EveAgentStore,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
@@ -13,6 +14,7 @@ import { defaultMessageReducer, type EveMessageData } from "#client/message-redu
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import type {
+  CancelSessionResult,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -45,6 +47,8 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
  * new events.
  */
 export interface UseEveAgentReturn<TData> {
+  /** Request durable cancellation of the active turn while continuing to receive its events. */
+  readonly cancel: () => Promise<CancelSessionResult>;
   /** Projected state built by reducing every stream event through the reducer. */
   readonly data: TData;
   /** Last transport-level error, or `undefined` when healthy. */
@@ -67,8 +71,6 @@ export interface UseEveAgentReturn<TData> {
   readonly session: ClientSessionState | undefined;
   /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
   readonly status: UseEveAgentStatus;
-  /** Abort the in-flight request. */
-  readonly stop: () => void;
 }
 
 /**
@@ -148,7 +150,7 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
 
       return () => {
         unsubscribe();
-        store.stop();
+        detachEveAgentStore(store);
       };
     });
   }
@@ -178,6 +180,10 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
     return this.#snapshot.status;
   }
 
+  cancel = (): Promise<CancelSessionResult> => {
+    return this.#store.cancel();
+  };
+
   reset = (): void => {
     this.#store.reset();
   };
@@ -194,10 +200,6 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
     options?: SendTurnOptions<TOutput>,
   ): Promise<void> => {
     return this.#store.send({ ...options, message });
-  };
-
-  stop = (): void => {
-    this.#store.stop();
   };
 }
 

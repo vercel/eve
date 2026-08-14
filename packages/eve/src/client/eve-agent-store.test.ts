@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { EveAgentStore } from "#client/eve-agent-store.js";
+import { detachEveAgentStore, EveAgentStore } from "#client/eve-agent-store.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createSessionWaitingEvent,
+  createTurnCancelledEvent,
+  createTurnStartedEvent,
   EVE_SESSION_ID_HEADER,
   type UnstampedMessageStreamEvent,
   type MessageStreamEvent,
@@ -45,6 +47,34 @@ function streamResponse(events: readonly MessageStreamEvent[]): Response {
       },
     }),
   );
+}
+
+function controlledStreamResponse() {
+  const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      start(nextController) {
+        controller = nextController;
+      },
+    }),
+  );
+
+  return {
+    close: () => controller?.close(),
+    emit: (event: MessageStreamEvent) => {
+      controller?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+    },
+    response,
+  };
+}
+
+function acceptedCancellationResponse(): Response {
+  return Response.json({
+    ok: true,
+    sessionId: "session_1",
+    status: "accepted",
+  });
 }
 
 function preV20MessageCompletedEvent(): MessageStreamEvent {
@@ -169,5 +199,96 @@ describe("EveAgentStore stream overlap", () => {
     expect(store.snapshot.events.map((event) => event.meta.id)).toEqual(
       events.map((event) => event.meta.id),
     );
+  });
+});
+
+describe("EveAgentStore cancellation", () => {
+  it("queues cancellation until the turn id arrives and keeps streaming", async () => {
+    const stream = controlledStreamResponse();
+    const [turnStarted, turnCancelled, boundary] = stampTestEvents([
+      createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+      createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(stream.response)
+      .mockResolvedValueOnce(acceptedCancellationResponse());
+    const store = new EveAgentStore({ optimistic: false, reducer: defaultMessageReducer() });
+
+    const sending = store.send({ message: "Hello" });
+    const cancellation = store.cancel();
+    const duplicateCancellation = store.cancel();
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    stream.emit(turnStarted!);
+    await expect(cancellation).resolves.toEqual({
+      sessionId: "session_1",
+      status: "accepted",
+    });
+    await expect(duplicateCancellation).resolves.toEqual({
+      sessionId: "session_1",
+      status: "accepted",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/eve/v1/session/session_1/cancel");
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+      turnId: "turn_1",
+    });
+    expect(store.snapshot.status).toBe("streaming");
+
+    stream.emit(turnCancelled!);
+    stream.emit(boundary!);
+    stream.close();
+    await sending;
+
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events).toEqual([turnStarted, turnCancelled, boundary]);
+  });
+
+  it("returns no_active_turn when idle", async () => {
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    await expect(store.cancel()).resolves.toEqual({ status: "no_active_turn" });
+  });
+
+  it("resolves a queued cancellation when reset wins before dispatch", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    const sending = store.send({ message: "Hello" });
+    const cancellation = store.cancel();
+    store.reset();
+
+    await expect(cancellation).resolves.toEqual({ status: "no_active_turn" });
+    await sending;
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(store.snapshot.status).toBe("ready");
+  });
+
+  it("detaches local transport without cancelling durable server work", async () => {
+    let signal: AbortSignal | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementationOnce((_input, init) => {
+      signal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("The operation was aborted.", "AbortError")),
+          { once: true },
+        );
+      });
+    });
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    const sending = store.send({ message: "Hello" });
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    detachEveAgentStore(store);
+    await sending;
+
+    expect(signal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(store.snapshot.status).toBe("ready");
   });
 });
