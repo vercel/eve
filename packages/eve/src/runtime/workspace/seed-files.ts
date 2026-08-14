@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, posix as pathPosix } from "node:path";
 
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
-import { resolveSkillStoreModelRoot, type SkillStoreLocation } from "#runtime/skills/store.js";
+import { MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
 
 const RESOURCE_WORKSPACE_DIRECTORY = "workspace";
 const RESOURCE_SKILLS_DIRECTORY = "skills";
@@ -18,25 +18,12 @@ interface MaterializedWorkspaceFile {
 
 /**
  * Walks a directory tree on disk and returns one entry per file rooted at
- * the agent's seeded workspace root, sorted by path.
- *
- * The sandbox-owning agent seeds into the shared `/workspace`. An agent
- * with a dedicated home seeds into `{home}/workspace` instead, so its
- * authored files are additive to that agent only and never appear in
- * the tree other agents share. The live `bash` cwd stays the shared
- * `/workspace` for every agent; a homed agent reaches its seeded files
- * at `$HOME/workspace`.
+ * `/workspace/...`, sorted by path. The directory is treated as the
+ * `/workspace` root for the resulting seed file paths.
  */
 export async function materializeWorkspaceDirectory(
   sourceDirectoryPath: string,
-  options: {
-    readonly skillStoreLocation?: SkillStoreLocation;
-  } = {},
 ): Promise<readonly MaterializedWorkspaceFile[]> {
-  const workspaceSeedRoot =
-    options.skillStoreLocation?.home === undefined
-      ? WORKSPACE_ROOT
-      : `${options.skillStoreLocation.home}/workspace`;
   const files: MaterializedWorkspaceFile[] = [];
   const entries = await readdir(sourceDirectoryPath, {
     withFileTypes: true,
@@ -54,7 +41,7 @@ export async function materializeWorkspaceDirectory(
         files,
         logicalDirectoryPath: ".",
         sourceDirectoryPath: join(sourceDirectoryPath, RESOURCE_WORKSPACE_DIRECTORY),
-        targetRoot: workspaceSeedRoot,
+        targetRoot: WORKSPACE_ROOT,
       });
     }
 
@@ -63,7 +50,7 @@ export async function materializeWorkspaceDirectory(
         files,
         logicalDirectoryPath: ".",
         sourceDirectoryPath: join(sourceDirectoryPath, RESOURCE_SKILLS_DIRECTORY),
-        targetRoot: resolveSkillStoreModelRoot(options.skillStoreLocation ?? {}),
+        targetRoot: MODEL_SKILL_ROOT,
       });
     }
   } else {
@@ -71,7 +58,7 @@ export async function materializeWorkspaceDirectory(
       files,
       logicalDirectoryPath: ".",
       sourceDirectoryPath,
-      targetRoot: workspaceSeedRoot,
+      targetRoot: WORKSPACE_ROOT,
     });
   }
 

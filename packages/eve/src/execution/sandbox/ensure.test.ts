@@ -362,7 +362,6 @@ describe("ensureSandboxAccess", () => {
         ...registry.sandbox,
         inheritance: {
           definition: parentDefinition,
-          inheritedWorkspaceResourceRoots: [],
           nodeId: "__root__",
           workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
         },

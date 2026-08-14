@@ -11,6 +11,7 @@ import { MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
 const DEFAULT_GLOB_LIMIT = 100;
 const MAX_GLOB_LIMIT = 1000;
+const DEFAULT_PATH = "/workspace";
 
 // ---------------------------------------------------------------------------
 // Input / result shapes
@@ -46,9 +47,7 @@ export async function executeGlobOnSandbox(
   sandbox: SandboxSession,
   args: GlobInput,
 ): Promise<GlobResult> {
-  // The session is already anchored at the active agent workspace, so the
-  // default search root is whatever "." resolves to on this session.
-  const effectivePath = args.path ?? sandbox.resolvePath(".");
+  const effectivePath = args.path ?? DEFAULT_PATH;
 
   const resolvedPath = await resolveAbsoluteFilePath(sandbox, effectivePath);
   const normalizedPath = normalizeModelPath(resolvedPath);

@@ -27,7 +27,6 @@ import { createRuntimeSandboxTemplateKey } from "#runtime/sandbox/keys.js";
 import type { RuntimeRegisteredSandbox } from "#runtime/sandbox/registry.js";
 import { createRuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.js";
 import { materializeWorkspaceDirectory } from "#runtime/workspace/seed-files.js";
-import type { SkillStoreLocation } from "#runtime/skills/store.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { withSandboxTemplatePrewarmLock } from "./template-prewarm-lock.js";
 
@@ -249,45 +248,38 @@ async function collectPrewarmTargets(input: {
   const targets: PrewarmTarget[] = [];
 
   await Promise.all(
-    collectNodeSandboxes(input.graph).map(
-      async ({ definition, inheritedWorkspaceResourceRoots, nodeId, workspaceResourceRoot }) => {
-        const workspaceResourceRoots = [
-          { resourceRoot: workspaceResourceRoot },
-          ...(inheritedWorkspaceResourceRoots ?? []),
-        ];
-        const templatePlan = createRuntimeSandboxTemplatePlan({
-          definition,
-          inheritedWorkspaceResourceRoots: inheritedWorkspaceResourceRoots ?? [],
-          workspaceResourceRoot,
-        });
-        const templateKey = await createRuntimeSandboxTemplateKey({
-          backendName: definition.backend.name,
-          compiledArtifactsSource: input.compiledArtifactsSource,
-          nodeId,
-          sourceId: definition.sourceId,
-          templatePlan,
-        });
+    collectNodeSandboxes(input.graph).map(async ({ definition, nodeId, workspaceResourceRoot }) => {
+      const templatePlan = createRuntimeSandboxTemplatePlan({
+        definition,
+        workspaceResourceRoot,
+      });
+      const templateKey = await createRuntimeSandboxTemplateKey({
+        backendName: definition.backend.name,
+        compiledArtifactsSource: input.compiledArtifactsSource,
+        nodeId,
+        sourceId: definition.sourceId,
+        templatePlan,
+      });
 
-        if (templateKey === null) {
-          return;
-        }
+      if (templateKey === null) {
+        return;
+      }
 
-        targets.push({
-          backend: definition.backend,
-          label: formatLabel(nodeId),
-          input: {
-            bootstrap: definition.bootstrap,
-            seedFiles: await loadResourceRootSeedFiles({
-              compileDirectoryPath: input.compileDirectoryPath,
-              workspaceResourceRoots,
-            }),
-            runtimeContext,
-            templateKey,
-          },
-          signature: `${definition.backend.name}:${nodeId}:${templateKey}`,
-        });
-      },
-    ),
+      targets.push({
+        backend: definition.backend,
+        label: formatLabel(nodeId),
+        input: {
+          bootstrap: definition.bootstrap,
+          seedFiles: await loadResourceRootSeedFiles({
+            compileDirectoryPath: input.compileDirectoryPath,
+            workspaceResourceRoot,
+          }),
+          runtimeContext,
+          templateKey,
+        },
+        signature: `${definition.backend.name}:${nodeId}:${templateKey}`,
+      });
+    }),
   );
 
   // Template keys factor in nodeId (see runtime/sandbox/keys.ts), so each
@@ -305,39 +297,18 @@ async function collectPrewarmTargets(input: {
  */
 async function loadResourceRootSeedFiles(input: {
   readonly compileDirectoryPath: string;
-  readonly workspaceResourceRoots: readonly {
-    readonly resourceRoot: CompiledWorkspaceResourceRoot;
-    readonly skillStoreLocation?: SkillStoreLocation;
-  }[];
+  readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
 }): Promise<readonly SandboxSeedFile[]> {
-  const filesByPath = new Map<string, SandboxSeedFile>();
-
-  for (const {
-    resourceRoot: workspaceResourceRoot,
-    skillStoreLocation,
-  } of input.workspaceResourceRoots) {
-    if (
-      workspaceResourceRoot.contentHash === undefined &&
-      workspaceResourceRoot.rootEntries.length === 0
-    ) {
-      continue;
-    }
-    const materialized = await materializeWorkspaceDirectory(
-      `${input.compileDirectoryPath}/${workspaceResourceRoot.logicalPath}`,
-      { skillStoreLocation },
-    );
-    for (const file of materialized) {
-      const existing = filesByPath.get(file.path);
-      if (existing !== undefined && !Buffer.from(existing.content).equals(file.content)) {
-        throw new Error(
-          `Cannot share a sandbox when agent workspace resources conflict at "${file.path}".`,
-        );
-      }
-      filesByPath.set(file.path, { content: file.content, path: file.path });
-    }
+  if (
+    input.workspaceResourceRoot.contentHash === undefined &&
+    input.workspaceResourceRoot.rootEntries.length === 0
+  ) {
+    return [];
   }
-
-  return [...filesByPath.values()].sort((left, right) => left.path.localeCompare(right.path));
+  const materialized = await materializeWorkspaceDirectory(
+    `${input.compileDirectoryPath}/${input.workspaceResourceRoot.logicalPath}`,
+  );
+  return materialized.map((file) => ({ content: file.content, path: file.path }));
 }
 
 async function loadGraphFromArtifacts(input: {

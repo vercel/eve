@@ -19,6 +19,7 @@ import {
   ChannelInstrumentationKey,
   InitiatorAuthKey,
 } from "#context/keys.js";
+import { contextStorage } from "#context/container.js";
 import {
   BundleKey,
   ChannelKey,
@@ -59,6 +60,7 @@ import {
 import { startLocalSubagent } from "#execution/subagent-start-local.js";
 import { startRemoteSubagent } from "#execution/subagent-start-remote.js";
 import { hydrateDurableSession } from "#execution/session.js";
+import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -152,6 +154,7 @@ export interface PreparedRuntimeActionDispatch {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly DispatchPlanEntry[];
   readonly session: RuntimeSession;
@@ -183,7 +186,7 @@ export async function prepareRuntimeActionDispatch(input: {
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const session = hydrateDurableSession({
+  let session = hydrateDurableSession({
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
     },
@@ -191,6 +194,20 @@ export async function prepareRuntimeActionDispatch(input: {
     turnAgent: effectiveAgent.turnAgent,
   });
   const adapter = ctx.require(ChannelKey);
+
+  const sandboxSessionId = resolveActiveSandboxSessionId(adapter.state, session.sessionId);
+  if (planSharesSandbox({ actions: batch.actions, bundle })) {
+    const sandboxAccess = await ensureSandboxAccess({
+      compiledArtifactsSource: bundle.compiledArtifactsSource,
+      nodeId: bundle.graph.root.nodeId,
+      registry: bundle.graph.root.sandboxRegistry,
+      runOnSession: async (callback) => await contextStorage.run(ctx, callback),
+      sessionId: sandboxSessionId,
+      state: session.sandboxState ?? null,
+    });
+    await sandboxAccess.get();
+    session = { ...session, sandboxState: await sandboxAccess.captureState() };
+  }
 
   // A corrupt handle store throws; surface that before anything dispatches.
   // A mid-loop throw after a sibling started would durably replay the whole
@@ -217,9 +234,31 @@ export async function prepareRuntimeActionDispatch(input: {
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
+    sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
   };
+}
+
+function planSharesSandbox(input: {
+  readonly actions: readonly RuntimeActionRequest[];
+  readonly bundle: CompiledBundle;
+}): boolean {
+  const graph = (input.bundle as Partial<CompiledBundle>).graph;
+  if (graph === undefined) return false;
+  return input.actions.some(
+    (action) =>
+      action.kind === "subagent-call" &&
+      (action.subagentName === "agent" ||
+        graph.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox.definition
+          .inheritsParent === true),
+  );
+}
+
+function resolveActiveSandboxSessionId(adapterState: unknown, sessionId: string): string {
+  if (typeof adapterState !== "object" || adapterState === null) return sessionId;
+  const value = (adapterState as Record<string, unknown>).sandboxSessionId;
+  return typeof value === "string" && value.length > 0 ? value : sessionId;
 }
 
 /**
@@ -454,6 +493,7 @@ export async function startSubagent(input: {
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly persistentSessions: boolean;
+  readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly session: RuntimeSession;
   readonly taskOwned: boolean;
@@ -483,6 +523,7 @@ export async function startSubagent(input: {
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
         persistentSessions: input.persistentSessions,
+        sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
         taskOwned: input.taskOwned,

@@ -118,6 +118,25 @@ export default defineSandbox({
 
 `defineSandbox` and `defaultBackend` live on `eve/sandbox`. Omit `backend` and the runtime falls back to `defaultBackend()` (see [Backends](#backends)).
 
+### Sharing a parent's sandbox
+
+A declared subagent can return `parent.sandbox` to use the dispatching agent's exact live sandbox:
+
+```ts title="agent/subagents/reviewer/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+
+export default defineSandbox(({ parent }) => {
+  if (parent === null) throw new Error("reviewer must run as a child");
+  return parent.sandbox;
+});
+```
+
+The parent and child then see the same files, processes, `/workspace`, and sandbox home. Nested children that also select `parent.sandbox` keep using the same owning sandbox rather than creating another one. The owning sandbox's `bootstrap` and `onSession` hooks remain authoritative; the child cannot add its own sandbox hooks or backend configuration.
+
+An inheriting child must not declare managed files under its own `sandbox/workspace/` or `skills/` directories, including dynamic skills. Eve rejects that configuration before execution. Remove the child resources when the shared workspace is sufficient, or give the child its own sandbox when it needs independently seeded files or skills.
+
+The built-in `agent` self-delegation path continues to share the root agent's sandbox automatically.
+
 ## Backends
 
 The backend decides where the sandbox runs. eve ships four pinned factories from nested `eve/sandbox/*` imports plus an availability-aware default from `eve/sandbox`:

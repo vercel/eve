@@ -58,10 +58,7 @@ function createFakeAccess(
         async setNetworkPolicy() {},
         async removePath() {},
         resolvePath(path: string) {
-          // Mirror the documented contract: relative paths resolve from /workspace.
-          const anchored =
-            path.startsWith("/") || path.startsWith("$HOME") ? path : `/workspace/${path}`;
-          return options.pathResolver ? options.pathResolver(anchored) : anchored;
+          return options.pathResolver ? options.pathResolver(path) : path;
         },
         async run({ command }: { command: string }) {
           if (command === HOME_PROBE_COMMAND) {

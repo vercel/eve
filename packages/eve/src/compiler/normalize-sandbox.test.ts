@@ -11,7 +11,7 @@ describe("resolveParentSandboxSelector", () => {
 
   it("rejects callbacks that return anything else", async () => {
     await expect(
-      resolveParentSandboxSelector(() => ({ nope: true }), "invalid sandbox"),
+      resolveParentSandboxSelector((_context: unknown) => ({ nope: true }), "invalid sandbox"),
     ).rejects.toThrow("The sandbox callback must return parent.sandbox");
   });
 

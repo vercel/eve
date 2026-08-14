@@ -1,7 +1,6 @@
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { defaultSandbox } from "#public/sandbox/backends/default.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
-import type { SkillStoreLocation } from "#runtime/skills/store.js";
 
 /**
  * Stable internal source id for the framework-owned default sandbox.
@@ -28,26 +27,11 @@ export const DEFAULT_SANDBOX_SOURCE_ID = "eve:default-sandbox";
 export interface RuntimeRegisteredSandbox {
   readonly definition: ResolvedSandboxDefinition;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
-  /**
-   * Resource trees owned by descendant agents that select this live sandbox.
-   * They are folded into this sandbox's template so each child's workspace
-   * files land in the shared `/workspace` tree and its skill packages land
-   * under that child's agent home (`/agents/{slug}/.agents/skills`) before
-   * the child starts running.
-   */
-  readonly inheritedWorkspaceResourceRoots?: readonly {
-    readonly resourceRoot: CompiledWorkspaceResourceRoot;
-    readonly skillStoreLocation: SkillStoreLocation;
-  }[];
   /** Parent-owned sandbox identity used by a child that selects parent.sandbox. */
   readonly inheritance?: {
     readonly definition: ResolvedSandboxDefinition;
     readonly nodeId: string;
     readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
-    readonly inheritedWorkspaceResourceRoots: readonly {
-      readonly resourceRoot: CompiledWorkspaceResourceRoot;
-      readonly skillStoreLocation: SkillStoreLocation;
-    }[];
   };
 }
 
@@ -75,10 +59,18 @@ export function createRuntimeSandboxRegistry(input: {
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
 }): RuntimeSandboxRegistry {
   const definition = input.authoredSandbox ?? createFrameworkSandboxDefinition();
+  if (
+    definition.inheritsParent === true &&
+    (input.workspaceResourceRoot.contentHash !== undefined ||
+      input.workspaceResourceRoot.rootEntries.length > 0)
+  ) {
+    throw new Error(
+      `Sandbox "${definition.logicalPath}" selects parent.sandbox but has managed workspace resources. Remove the child workspace or give the child its own sandbox.`,
+    );
+  }
   return {
     sandbox: {
       definition,
-      inheritedWorkspaceResourceRoots: [],
       workspaceResourceRoot: input.workspaceResourceRoot,
     },
   };

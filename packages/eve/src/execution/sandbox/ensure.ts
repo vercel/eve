@@ -19,13 +19,7 @@ import { buildCallbackContext } from "#context/build-callback-context.js";
 import { createRuntimeSandboxKeys } from "#runtime/sandbox/keys.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { createRuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.js";
-import type {
-  SandboxAccess,
-  SandboxSessionState,
-  SandboxSkillStoreLocation,
-  SandboxState,
-} from "#sandbox/state.js";
-import { scopeSandboxSessionToAgentHome } from "#execution/sandbox/workspace-scope.js";
+import type { SandboxAccess, SandboxSessionState, SandboxState } from "#sandbox/state.js";
 
 /**
  * Input for creating or reattaching the live sandbox for one step execution.
@@ -36,18 +30,8 @@ export interface EnsureSandboxAccessInput {
   readonly registry: RuntimeSandboxRegistry;
   readonly sessionId: string;
   readonly runOnSession?: (callback: () => Promise<void>) => Promise<void>;
-  readonly skillStoreLocation?: SandboxSkillStoreLocation;
   readonly state: SandboxState | null;
   readonly tags?: SandboxBackendTags;
-  /**
-   * Agent home directory (`/agents/{slug}`) for a subagent sharing a
-   * parent sandbox. Sessions returned from `get()` are anchored at
-   * `{home}/workspace` with `HOME={home}`, so every consumer (framework
-   * tools, authored tools, skill storage) observes the same per-agent
-   * filesystem view without workspace-specific plumbing. Undefined for
-   * the sandbox-owning agent, which keeps the shared roots.
-   */
-  readonly agentHome?: string;
 }
 
 /**
@@ -89,10 +73,6 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     const backend = definition.backend;
     const templatePlan = createRuntimeSandboxTemplatePlan({
       definition,
-      inheritedWorkspaceResourceRoots:
-        inheritance?.inheritedWorkspaceResourceRoots ??
-        registered.inheritedWorkspaceResourceRoots ??
-        [],
       workspaceResourceRoot: inheritance?.workspaceResourceRoot ?? registered.workspaceResourceRoot,
     });
 
@@ -200,9 +180,8 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     async get(): Promise<SandboxSession | null> {
       const handle = await getHandle();
       if (handle === null) return null;
-      return scopeSandboxSessionToAgentHome(handle.session, input.agentHome);
+      return handle.session;
     },
-    skillStoreLocation: input.skillStoreLocation ?? {},
     async stop(): Promise<void> {
       const handle = await getHandle();
       if (handle === null) {

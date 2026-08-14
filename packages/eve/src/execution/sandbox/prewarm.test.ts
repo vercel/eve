@@ -16,13 +16,7 @@ vi.mock("#execution/sandbox/template-prewarm-lock.js", () => ({
 }));
 const mocks = vi.hoisted(() => ({
   materializeWorkspaceDirectory: vi.fn<
-    (
-      path: string,
-      options?: {
-        readonly skillStoreLocation?: { readonly home?: string };
-        readonly workspaceRoot?: string;
-      },
-    ) => Promise<readonly { readonly content: Buffer; readonly path: string }[]>
+    (path: string) => Promise<readonly { readonly content: Buffer; readonly path: string }[]>
   >(async () => []),
 }));
 
@@ -95,100 +89,6 @@ describe("prewarmAppSandboxes", () => {
     expect(signatures).toHaveLength(1);
   });
 
-  it("folds inherited child workspace and skill resources into the parent template", async () => {
-    const appRoot = process.cwd();
-    const inputs: SandboxBackendPrewarmInput[] = [];
-    mocks.materializeWorkspaceDirectory.mockImplementation(async (path: string, options) => {
-      if (path.endsWith("/parent")) {
-        return [{ content: Buffer.from("parent"), path: "/workspace/parent.txt" }];
-      }
-      return [
-        {
-          content: Buffer.from("child"),
-          path: `${options?.skillStoreLocation?.home}/workspace/child.txt`,
-        },
-        {
-          content: Buffer.from("# Child skill\n"),
-          path: `${options?.skillStoreLocation?.home}/.agents/skills/child/SKILL.md`,
-        },
-      ];
-    });
-
-    await prewarmAppSandboxes({
-      appRoot,
-      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
-      dispatch: recordPrewarmInputs(inputs),
-      loadAgentGraph: async () =>
-        createGraph({
-          inheritedWorkspaceResourceRoots: [
-            {
-              resourceRoot: {
-                contentHash: "child-content-hash",
-                logicalPath: "child",
-                rootEntries: ["child.txt", ".agents/skills/child"],
-              },
-              skillStoreLocation: { home: "/agents/worker-00000000" },
-            },
-          ],
-          workspaceResourceRoot: {
-            contentHash: "parent-content-hash",
-            logicalPath: "parent",
-            rootEntries: ["parent.txt"],
-          },
-        }),
-    });
-
-    expect(inputs).toHaveLength(1);
-    expect(inputs[0]?.seedFiles.map((file) => file.path)).toEqual([
-      "/agents/worker-00000000/.agents/skills/child/SKILL.md",
-      "/agents/worker-00000000/workspace/child.txt",
-      "/workspace/parent.txt",
-    ]);
-  });
-
-  it("keeps same-named parent and child workspace seeds in separate roots", async () => {
-    const appRoot = process.cwd();
-    const inputs: SandboxBackendPrewarmInput[] = [];
-    mocks.materializeWorkspaceDirectory.mockImplementation(async (path, options) => [
-      {
-        content: Buffer.from(path.endsWith("/parent") ? "parent" : "child"),
-        path:
-          options?.skillStoreLocation?.home === undefined
-            ? "/workspace/shared.txt"
-            : `${options.skillStoreLocation.home}/workspace/shared.txt`,
-      },
-    ]);
-
-    await prewarmAppSandboxes({
-      appRoot,
-      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
-      dispatch: recordPrewarmInputs(inputs),
-      loadAgentGraph: async () =>
-        createGraph({
-          inheritedWorkspaceResourceRoots: [
-            {
-              resourceRoot: {
-                contentHash: "child-content-hash",
-                logicalPath: "child",
-                rootEntries: ["shared.txt"],
-              },
-              skillStoreLocation: { home: "/agents/worker-00000000" },
-            },
-          ],
-          workspaceResourceRoot: {
-            contentHash: "parent-content-hash",
-            logicalPath: "parent",
-            rootEntries: ["shared.txt"],
-          },
-        }),
-    });
-
-    expect(inputs[0]?.seedFiles.map((file) => file.path)).toEqual([
-      "/agents/worker-00000000/workspace/shared.txt",
-      "/workspace/shared.txt",
-    ]);
-  });
-
   it.each(["docker", "microsandbox"])(
     "explains that %s is unavailable during Vercel prewarm",
     async (backendName) => {
@@ -245,14 +145,6 @@ function recordPrewarmInputs(inputs: SandboxBackendPrewarmInput[]) {
 function createGraph(
   input: {
     readonly backendName?: string;
-    readonly inheritedWorkspaceResourceRoots?: readonly {
-      readonly resourceRoot: {
-        readonly contentHash?: string;
-        readonly logicalPath: string;
-        readonly rootEntries: readonly string[];
-      };
-      readonly skillStoreLocation: { readonly home?: string };
-    }[];
     readonly workspaceResourceRoot?: {
       readonly contentHash?: string;
       readonly logicalPath: string;
@@ -283,7 +175,6 @@ function createGraph(
     sandboxRegistry: {
       sandbox: {
         definition,
-        inheritedWorkspaceResourceRoots: input.inheritedWorkspaceResourceRoots ?? [],
         workspaceResourceRoot: input.workspaceResourceRoot ?? {
           logicalPath: "",
           rootEntries: [],

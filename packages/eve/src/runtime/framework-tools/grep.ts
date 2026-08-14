@@ -43,7 +43,7 @@ export const GREP_INPUT_SCHEMA = z.strictObject({
   path: z
     .string()
     .describe(
-      "The directory or file to search in. Defaults to the current agent workspace. " +
+      "The directory or file to search in. Defaults to /workspace. " +
         "Must be an absolute path or begin with $HOME/. Omit to use the default.",
     )
     .optional(),

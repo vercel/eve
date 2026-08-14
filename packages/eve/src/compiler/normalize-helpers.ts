@@ -53,7 +53,7 @@ export async function loadModuleBackedDefinition(input: {
   // Sandbox callbacks receive runtime ancestry and must reach the sandbox
   // compiler intact. Every other authored primitive keeps the historical
   // zero-argument definition-factory materialization behavior.
-  if (input.kind === "sandbox" && typeof exportValue === "function") {
+  if (input.kind === "sandbox" && typeof exportValue === "function" && exportValue.length > 0) {
     return exportValue;
   }
 

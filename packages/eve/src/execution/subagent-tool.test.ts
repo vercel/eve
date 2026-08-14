@@ -362,6 +362,22 @@ describe("buildSubagentRunInput", () => {
     });
   });
 
+  it("preserves the root sandbox identity through nested inheritance", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      graph: makeInheritingGraph(makeAction().nodeId),
+      initiatorAuth: null,
+      sandboxSessionId: "root-sandbox-session",
+      session: { ...makeSession(), sessionId: "intermediate-child-session" },
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      sandboxSessionId: "root-sandbox-session",
+    });
+  });
+
   it("carries the parent session id before the inherited sandbox has been opened", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),

@@ -4,7 +4,6 @@ import type {
   CompiledAgentResources,
   CompiledRemoteAgentNode,
   CompiledSubagentNode,
-  CompiledWorkspaceResourceRoot,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
@@ -30,8 +29,7 @@ import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
-import { createSkillStoreLocation } from "#runtime/skills/store.js";
-import { resolveAgentHome } from "#runtime/workspace/types.js";
+import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import type {
   ResolvedChannelDefinition,
   ResolvedDynamicSubagentDefinition,
@@ -95,14 +93,12 @@ export async function resolveRuntimeAgentGraph(
   const subagentNodesById = new Map(
     input.manifest.subagents.map((subagentNode) => [subagentNode.nodeId, subagentNode]),
   );
-  const skillStoreLocationsByNodeId = createSkillStoreLocationsByNodeId(input.manifest);
   const root = await resolveRuntimeAgentNode({
     childNodeIdsByParentNodeId,
     manifest: input.manifest,
     moduleMap: input.moduleMap,
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     nodesByNodeId,
-    skillStoreLocationsByNodeId,
     subagentNodesById,
   });
   attachInheritedSandboxWorkspaceResources({
@@ -124,10 +120,6 @@ interface ResolveRuntimeAgentNodeInput {
   readonly nodeId: string;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly sourceId?: string;
-  readonly skillStoreLocationsByNodeId: ReadonlyMap<
-    string,
-    ReturnType<typeof createSkillStoreLocation>
-  >;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }
 
@@ -151,7 +143,6 @@ async function resolveRuntimeAgentNode(
     moduleMap: input.moduleMap,
     nodeId: input.nodeId,
   });
-  const skillStoreLocation = input.skillStoreLocationsByNodeId.get(input.nodeId) ?? {};
   const frameworkTools = getFrameworkToolDefinitions({
     authoredSkills: agent.skills,
   });
@@ -244,7 +235,6 @@ async function resolveRuntimeAgentNode(
       moduleMap: input.moduleMap,
       nodesByNodeId: input.nodesByNodeId,
       parentNodeId: input.nodeId,
-      skillStoreLocationsByNodeId: input.skillStoreLocationsByNodeId,
       subagentNodesById: input.subagentNodesById,
     }),
   });
@@ -266,7 +256,6 @@ async function resolveRuntimeAgentNode(
       agent: resolvedAgent,
       id: input.agentId,
       nodeId,
-      skillStoreLocation,
       tools: [...toolRegistry.preparedTools, ...subagentRegistry.preparedTools],
     }),
   };
@@ -282,10 +271,6 @@ async function resolveRuntimeSubagents(input: {
   readonly moduleMap: CompiledModuleMap;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly parentNodeId: string;
-  readonly skillStoreLocationsByNodeId: ReadonlyMap<
-    string,
-    ReturnType<typeof createSkillStoreLocation>
-  >;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<readonly ResolvedRuntimeDelegationNode[]> {
   const resolvedSubagents: ResolvedRuntimeDelegationNode[] = [];
@@ -309,7 +294,6 @@ async function resolveRuntimeSubagents(input: {
         childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
         moduleMap: input.moduleMap,
         nodesByNodeId: input.nodesByNodeId,
-        skillStoreLocationsByNodeId: input.skillStoreLocationsByNodeId,
         sourceRef,
         subagentNodesById: input.subagentNodesById,
       }),
@@ -333,10 +317,6 @@ async function resolveRuntimeSubagent(input: {
   readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
   readonly moduleMap: CompiledModuleMap;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
-  readonly skillStoreLocationsByNodeId: ReadonlyMap<
-    string,
-    ReturnType<typeof createSkillStoreLocation>
-  >;
   readonly sourceRef: CompiledSubagentNode;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<ResolvedRuntimeSubagentNode> {
@@ -368,7 +348,6 @@ async function resolveRuntimeSubagent(input: {
     moduleMap: input.moduleMap,
     nodeId: input.sourceRef.nodeId,
     nodesByNodeId: input.nodesByNodeId,
-    skillStoreLocationsByNodeId: input.skillStoreLocationsByNodeId,
     sourceId: input.sourceRef.sourceId,
     subagentNodesById: input.subagentNodesById,
   });
@@ -496,6 +475,12 @@ function attachInheritedSandboxWorkspaceResources(input: {
 
   for (const [nodeId, node] of input.nodesByNodeId) {
     if (node.sandboxRegistry.sandbox.definition.inheritsParent !== true) continue;
+    if (node.agent.dynamicSkillResolvers.length > 0) {
+      throw new ResolveRuntimeAgentGraphError(
+        `Sandbox "${node.sandboxRegistry.sandbox.definition.logicalPath}" selects parent.sandbox but agent node "${nodeId}" defines dynamic skills. Remove the child dynamic skills or give the child its own sandbox.`,
+        { nodeId },
+      );
+    }
 
     const parentNodeId = parentNodeIdByChildNodeId.get(nodeId);
     if (parentNodeId === undefined) {
@@ -509,28 +494,18 @@ function attachInheritedSandboxWorkspaceResources(input: {
       nodesByNodeId: input.nodesByNodeId,
       parentNodeIdByChildNodeId,
     });
-    const inheritedRoots = owner.sandboxRegistry.sandbox.inheritedWorkspaceResourceRoots;
-    if (inheritedRoots === undefined) {
-      throw new ResolveRuntimeAgentGraphError(
-        `Sandbox owner node "${owner.nodeId}" cannot accept inherited workspace resources.`,
-        { nodeId: owner.nodeId },
-      );
-    }
-    (
-      inheritedRoots as Array<{
-        resourceRoot: CompiledWorkspaceResourceRoot;
-        skillStoreLocation: ReturnType<typeof createSkillStoreLocation>;
-      }>
-    ).push({
-      resourceRoot: node.sandboxRegistry.sandbox.workspaceResourceRoot,
-      skillStoreLocation: createSkillStoreLocation({ home: resolveAgentHome(nodeId) }),
-    });
     (node.sandboxRegistry.sandbox as { inheritance?: unknown }).inheritance = {
       definition: owner.sandboxRegistry.sandbox.definition,
-      inheritedWorkspaceResourceRoots: inheritedRoots,
       nodeId: owner.nodeId,
       workspaceResourceRoot: owner.sandboxRegistry.sandbox.workspaceResourceRoot,
     };
+    const workspacePrompt = createWorkspacePromptSection(owner.agent.workspaceSpec);
+    if (workspacePrompt !== undefined) {
+      (node.turnAgent as { instructions: readonly string[] }).instructions = [
+        ...node.turnAgent.instructions,
+        workspacePrompt,
+      ];
+    }
   }
 }
 
@@ -557,37 +532,6 @@ function resolveSandboxOwnerNode(input: {
     );
   }
   return resolveSandboxOwnerNode({ ...input, nodeId: parentNodeId });
-}
-
-function createSkillStoreLocationsByNodeId(
-  manifest: CompiledAgentManifest,
-): ReadonlyMap<string, ReturnType<typeof createSkillStoreLocation>> {
-  const nodes = new Map<string, CompiledAgentNodeManifest | CompiledAgentResources>([
-    [ROOT_COMPILED_AGENT_NODE_ID, manifest],
-    ...manifest.subagents.map((subagent) => [subagent.nodeId, subagent.agent] as const),
-  ]);
-  const parentByChild = new Map(
-    manifest.subagentEdges.map((edge) => [edge.childNodeId, edge.parentNodeId]),
-  );
-  const locations = new Map<string, ReturnType<typeof createSkillStoreLocation>>();
-
-  function resolve(nodeId: string): ReturnType<typeof createSkillStoreLocation> {
-    const cached = locations.get(nodeId);
-    if (cached !== undefined) return cached;
-    const node = nodes.get(nodeId);
-    if (node === undefined) return createSkillStoreLocation({});
-    const inheritsParent = node.sandbox?.inheritsParent === true;
-    const parentId = inheritsParent ? parentByChild.get(nodeId) : undefined;
-    if (parentId !== undefined) resolve(parentId);
-    const location = createSkillStoreLocation({
-      home: inheritsParent ? resolveAgentHome(nodeId) : undefined,
-    });
-    locations.set(nodeId, location);
-    return location;
-  }
-
-  for (const nodeId of nodes.keys()) resolve(nodeId);
-  return locations;
 }
 
 function createChildNodeIdsByParentNodeId(

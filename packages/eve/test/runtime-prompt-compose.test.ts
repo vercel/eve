@@ -117,7 +117,7 @@ describe("composeRuntimeBasePrompt", () => {
     ).toEqual([
       [
         "Workspace",
-        "- You have access to authored files mounted at `/workspace` for this run.",
+        "- You have access to authored files mounted at the workspace root for this run.",
         "- The live workspace root visible to `bash` in this run is `/workspace`.",
         "- Root entries under /workspace/:",
         "  - skills/",
@@ -143,7 +143,7 @@ describe("composeRuntimeBasePrompt", () => {
     ).toEqual([
       [
         "Workspace",
-        "- You have access to authored files mounted at `/workspace` for this run.",
+        "- You have access to authored files mounted at the workspace root for this run.",
         "- The live workspace root visible to `bash` in this run is `/workspace`.",
         "- Root entries under /workspace/:",
         "  - skills/",
