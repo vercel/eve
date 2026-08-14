@@ -22,7 +22,10 @@ import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
-import { compileExtensionContributions } from "#compiler/normalize-extension.js";
+import {
+  composeAgentSubagentSources,
+  compileExtensionContributions,
+} from "#compiler/normalize-extension.js";
 import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
@@ -48,8 +51,9 @@ export async function compileAgentManifest(
     compileAgentResources,
     context,
     externalDependencies: compiledNode.config.build?.externalDependencies ?? [],
+    parentAgentRoot: manifest.agentRoot,
     parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
-    subagents: manifest.subagents,
+    subagents: composeAgentSubagentSources(manifest),
   });
 
   return createCompiledAgentManifest({

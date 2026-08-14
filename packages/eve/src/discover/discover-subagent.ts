@@ -294,7 +294,12 @@ async function discoverLocalSubagentPackage(input: {
     ...detectRootNamespaceCollisions({
       agentRoot: input.subagentRoot,
       namespaces: extensionsResult.mounts.map((mount) => mount.namespace),
-      sources: [...toolsResult.sources, ...connectionsResult.connections, ...skillsResult.skills],
+      sources: [
+        ...toolsResult.sources,
+        ...connectionsResult.connections,
+        ...skillsResult.skills,
+        ...subagentsResult.subagents,
+      ],
     }),
   );
 

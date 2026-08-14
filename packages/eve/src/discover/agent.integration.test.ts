@@ -976,7 +976,7 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.resolvedExtensions).toEqual([]);
   });
 
-  it("rejects an agent-root tool that overrides a mounted extension's namespace", async () => {
+  it("rejects agent-root contributions that override a mounted extension's namespace", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
@@ -991,6 +991,7 @@ describe("discoverAgent (memory)", () => {
         // A root tool using the mounted `crm__` prefix would shadow the
         // extension from outside its mount directory.
         "tools/crm__search.ts": "export default {};\n",
+        "subagents/crm__reviewer.ts": "export default {};\n",
         "instructions.md": "You are a precise assistant.",
       },
     });
@@ -1001,11 +1002,11 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    const collision = result.diagnostics.find(
+    const collisions = result.diagnostics.filter(
       (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
     );
-    expect(collision).toBeDefined();
-    expect(collision?.message).toContain("extensions/crm/");
+    expect(collisions).toHaveLength(2);
+    expect(collisions[0]?.message).toContain("extensions/crm/");
   });
 
   it("rejects a mounted extension that requires an unsupported capability version", async () => {
