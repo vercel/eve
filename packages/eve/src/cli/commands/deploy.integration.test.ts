@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { packageInstallResult } from "#internal/testing/package-process.js";
 import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
 import type { DeploymentInfo } from "#setup/project-resolution.js";
 
@@ -49,8 +50,8 @@ function createDeployProjectDeps() {
       kind: "pnpm",
       source: "default",
     })),
-    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(
-      async () => true,
+    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(async () =>
+      packageInstallResult(),
     ),
     detectDeployment: vi.fn<DeployProjectDeps["detectDeployment"]>(async () => DEPLOYED),
     syncHostFrameworkPreset: vi.fn<DeployProjectDeps["syncHostFrameworkPreset"]>(async () => {}),

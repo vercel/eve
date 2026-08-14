@@ -1,6 +1,6 @@
 import { createPromptCommandOutput } from "#setup/cli/index.js";
 import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
-import { runVercel, spawnPackageManager } from "#setup/primitives/index.js";
+import { resultSucceeded, runVercel, spawnPackageManager } from "#setup/primitives/index.js";
 import { getVercelAuthStatus } from "#setup/vercel-project.js";
 
 import type { Prompter } from "../prompter.js";
@@ -119,14 +119,21 @@ export async function runInstallVercelCliFlow(input: {
     });
   } else {
     const manager = await deps.detectPackageManager(appRoot);
-    ok = await withSpinner(prompter, `Installing the Vercel CLI with ${manager.kind}…`, () =>
-      deps.spawnPackageManager(manager.kind, appRoot, globalInstallArguments(manager.kind), {
-        onOutput,
-        signal,
-        // A global install never prompts; closing stdin keeps it from contending
-        // with the TUI's raw-mode key consumer.
-        nonInteractive: true,
-      }),
+    ok = await withSpinner(prompter, `Installing the Vercel CLI with ${manager.kind}…`, async () =>
+      resultSucceeded(
+        await deps.spawnPackageManager(
+          manager.kind,
+          appRoot,
+          globalInstallArguments(manager.kind),
+          {
+            onOutput,
+            signal,
+            // A global install never prompts; closing stdin keeps it from contending
+            // with the TUI's raw-mode key consumer.
+            nonInteractive: true,
+          },
+        ),
+      ),
     );
   }
   if (signal?.aborted === true) return { kind: "cancelled" };

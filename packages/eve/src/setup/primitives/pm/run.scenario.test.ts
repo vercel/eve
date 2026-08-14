@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { pathExists } from "#setup/path-exists.js";
 
-import { runPackageManagerInstall } from "./run.js";
+import { packageManagerInstallSucceeded, runPackageManagerInstall } from "./run.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -53,10 +53,12 @@ describe("runPackageManagerInstall (real pnpm)", () => {
     });
 
     const { lines, onOutput } = collectOutput();
-    await expect(
-      runPackageManagerInstall("pnpm", memberRoot, { onOutput }),
+    expect(
+      packageManagerInstallSucceeded(
+        await runPackageManagerInstall("pnpm", memberRoot, { onOutput }),
+      ),
       lines.join("\n"),
-    ).resolves.toBe(true);
+    ).toBe(true);
 
     await expect(pathExists(join(memberRoot, "node_modules", "scratch-lib"))).resolves.toBe(true);
     // The workspace owns the lockfile; a standalone (`--ignore-workspace`)
@@ -93,10 +95,12 @@ describe("runPackageManagerInstall (real pnpm)", () => {
     await mkdir(join(nestedRoot, "node_modules"), { recursive: true });
 
     const { lines, onOutput } = collectOutput();
-    await expect(
-      runPackageManagerInstall("pnpm", nestedRoot, { onOutput }),
+    expect(
+      packageManagerInstallSucceeded(
+        await runPackageManagerInstall("pnpm", nestedRoot, { onOutput }),
+      ),
       lines.join("\n"),
-    ).resolves.toBe(true);
+    ).toBe(true);
 
     await expect(pathExists(join(nestedRoot, "node_modules", "scratch-local-dep"))).resolves.toBe(
       true,

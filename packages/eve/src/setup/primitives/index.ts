@@ -1,13 +1,22 @@
 export {
   eveDevArguments,
+  packageManagerInstallSucceeded,
   runPackageManagerInstall,
   runPnpmInstall,
   spawnPackageManager,
   spawnPnpm,
+  type PackageManagerInstallResult,
   type RunInstallOptions,
   type RunPackageManagerOptions,
   type RunPnpmOptions,
 } from "./pm/run.js";
+export {
+  MAX_STREAMING_SECRET_LENGTH,
+  resultSucceeded,
+  type PackageManagerProcessResult,
+  type PackageManagerProcessTermination,
+  type ProcessOutputChunk,
+} from "./pm/process-result.js";
 export {
   getPackageManagerStrategy,
   type PackageManagerConfigurationResult,
