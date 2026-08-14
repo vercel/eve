@@ -1,4 +1,4 @@
-export const rgbLogoSvgString = `<svg width="169" height="53" viewBox="0 0 169 53" fill="none" xmlns="http://www.w3.org/2000/svg">
+export const rgbLogoSvgString = `<svg width="169" height="53" viewBox="0 0 169 53" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg">
   <rect width="169" height="53" fill="black"/>
   <g fill="url(#eve-fill)" stroke="url(#eve-outline)" stroke-width="0.8" stroke-linejoin="round" transform="translate(2 2) scale(0.976331 0.924528)">
     <path d="M169 8.47h-51.39L81.73 53H70.36L113 0H169zM169 44.51v8.47h-45.87V44.5zM45.87 52.98H0V44.5h45.87zM38.66 30.55H0v-8.47h38.66z"/>

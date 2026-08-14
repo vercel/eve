@@ -35,17 +35,17 @@ export const viewport: Viewport = {
 
 const events = [
   {
-    city: "san francisco",
+    city: "San Francisco",
     date: "thursday, august 27, 17:30 pdt",
     href: "https://luma.com/eveSF",
   },
   {
-    city: "new york",
+    city: "New York",
     date: "tuesday, september 8, 17:30 edt",
     href: "https://luma.com/eveNY",
   },
   {
-    city: "london",
+    city: "London",
     date: "tuesday, september 15, 17:30 bst",
     href: "https://luma.com/eveLDN",
   },
@@ -81,7 +81,7 @@ const NightsPage = () => (
             data-nights-animated
             className="grid w-full grid-cols-3 items-center animate-[eve-nights-rise_700ms_ease-out_both]"
           >
-            <span className="justify-self-start font-mono text-[14px] text-white/40">eve eves</span>
+            <span className="justify-self-start font-mono text-[14px] text-white/60">eve eves</span>
             <Link
               aria-label="back to eve.dev"
               className="justify-self-center text-white transition-opacity hover:opacity-70"
@@ -89,7 +89,7 @@ const NightsPage = () => (
             >
               <LogoIconVercel size={18} />
             </Link>
-            <span className="justify-self-end font-mono text-[14px] text-white/40">2026</span>
+            <span className="justify-self-end font-mono text-[14px] text-white/60">2026</span>
           </div>
 
           <div className="-mx-3 flex w-[calc(100%+24px)] flex-col gap-2">
@@ -104,11 +104,11 @@ const NightsPage = () => (
               >
                 <span className="flex min-w-0 flex-col gap-0.5 pr-4">
                   <span className="font-mono text-[14px] font-medium text-white">{event.city}</span>
-                  <span className="font-mono text-[11px] text-white/50 min-[440px]:text-[13px]">
+                  <span className="font-mono text-[12px] text-white/60 transition-colors group-hover:text-white group-focus-visible:text-white min-[440px]:text-[13px]">
                     {event.date}
                   </span>
                 </span>
-                <span className="shrink-0 font-mono text-[14px] text-white/50 transition-colors group-hover:text-white group-focus-visible:text-white group-focus-visible:underline group-focus-visible:underline-offset-4">
+                <span className="shrink-0 font-mono text-[14px] text-white/60 transition-colors group-hover:text-white group-focus-visible:text-white group-focus-visible:underline group-focus-visible:underline-offset-4">
                   RSVP<span aria-hidden="true">›</span>
                 </span>
               </a>
