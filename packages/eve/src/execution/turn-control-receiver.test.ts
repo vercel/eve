@@ -170,8 +170,8 @@ describe("TurnControlReceiver", () => {
     });
 
     expect(forwardTurnCancellationStep).toHaveBeenCalledWith({
-      payload: {},
-      token: "turn-control:cancel",
+      payload: { reason: expect.objectContaining({ name: "TurnCancelledError" }) },
+      token: "abrt_turn-control_cancel",
     });
   });
 
@@ -206,14 +206,25 @@ describe("TurnControlReceiver", () => {
 
     expect(action.kind).toBe("park");
     expect(forwardTurnCancellationStep).toHaveBeenNthCalledWith(1, {
-      payload: { turnId: "turn_3" },
-      token: "turn-control:cancel",
+      payload: { reason: expect.objectContaining({ name: "TurnCancelledError" }) },
+      token: "abrt_turn-control_cancel",
     });
     expect(forwardTurnCancellationStep).toHaveBeenNthCalledWith(2, {
-      payload: {},
-      token: "turn-control:cancel",
+      payload: { reason: expect.objectContaining({ name: "TurnCancelledError" }) },
+      token: "abrt_turn-control_cancel",
     });
     expect(bufferedSessionControls).toEqual(["reset"]);
+  });
+
+  it("does not forward a cancellation for another turn", async () => {
+    installControlHook([parkResult()], true);
+
+    await runReceiver([], {
+      commandInbox: createCommandInbox([{ kind: "cancel", turnId: "turn_other" }]),
+      expectedTurnId: "turn_active",
+    });
+
+    expect(forwardTurnCancellationStep).not.toHaveBeenCalled();
   });
 });
 
@@ -222,12 +233,14 @@ function runReceiver(
   options: {
     readonly bufferedSessionControls?: Array<"clear" | "compact" | "expired" | "reset">;
     readonly commandInbox?: SessionCommandInbox;
+    readonly expectedTurnId?: string;
   } = {},
 ): ReturnType<TurnControlReceiver["waitForAction"]> {
   const receiver = new TurnControlReceiver({
     bufferedDeliveries,
     bufferedSessionControls: options.bufferedSessionControls ?? [],
     commandInbox: options.commandInbox ?? createCommandInbox(),
+    expectedTurnId: options.expectedTurnId ?? "turn_3",
     token: "turn-control",
   });
   return receiver.waitForAction().finally(() => receiver.dispose());

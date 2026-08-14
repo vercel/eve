@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { sleep } from "#internal/workflow-bundle/workflow-core-shim.js";
+import {
+  createActiveStepAbortController,
+  sleep,
+} from "#internal/workflow-bundle/workflow-core-shim.js";
 
+const WORKFLOW_CREATE_ACTIVE_STEP_ABORT_CONTROLLER = Symbol.for(
+  "WORKFLOW_CREATE_ACTIVE_STEP_ABORT_CONTROLLER",
+);
 const WORKFLOW_SLEEP = Symbol.for("WORKFLOW_SLEEP");
 const workflowGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
+const originalCreateActiveStepAbortController =
+  workflowGlobal[WORKFLOW_CREATE_ACTIVE_STEP_ABORT_CONTROLLER];
 const originalSleep = workflowGlobal[WORKFLOW_SLEEP];
 
 afterEach(() => {
@@ -12,6 +20,27 @@ afterEach(() => {
   } else {
     workflowGlobal[WORKFLOW_SLEEP] = originalSleep;
   }
+  if (originalCreateActiveStepAbortController === undefined) {
+    delete workflowGlobal[WORKFLOW_CREATE_ACTIVE_STEP_ABORT_CONTROLLER];
+  } else {
+    workflowGlobal[WORKFLOW_CREATE_ACTIVE_STEP_ABORT_CONTROLLER] =
+      originalCreateActiveStepAbortController;
+  }
+});
+
+describe("workflow core shim active-step abort controller", () => {
+  it("forwards a deterministic cancellation token to the workflow VM", () => {
+    const controller = {
+      dispose: vi.fn(),
+      signal: new AbortController().signal,
+      token: "abrt_turn",
+    };
+    const createController = vi.fn(() => controller);
+    workflowGlobal[WORKFLOW_CREATE_ACTIVE_STEP_ABORT_CONTROLLER] = createController;
+
+    expect(createActiveStepAbortController({ token: "abrt_turn" })).toBe(controller);
+    expect(createController).toHaveBeenCalledExactlyOnceWith({ token: "abrt_turn" });
+  });
 });
 
 describe("workflow core shim sleep", () => {

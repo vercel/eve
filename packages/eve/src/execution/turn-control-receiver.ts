@@ -9,6 +9,7 @@ import type { NextDriverAction } from "#execution/next-driver-action.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { sendCommandToDelivery } from "#execution/session-command-wire.js";
 import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
 
 type DeliveryRequest = Extract<TurnControlPayload, { readonly kind: "turn-delivery-request" }>;
@@ -22,17 +23,20 @@ export class TurnControlReceiver {
   private readonly commandInbox: SessionCommandInbox;
   private readonly control: Hook<TurnControlPayload>;
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
+  private readonly expectedTurnId: string;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
 
   constructor(input: {
     readonly bufferedDeliveries: DeliverHookPayload[];
     readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
     readonly commandInbox: SessionCommandInbox;
+    readonly expectedTurnId: string;
     readonly token: string;
   }) {
     this.bufferedDeliveries = input.bufferedDeliveries;
     this.bufferedSessionControls = input.bufferedSessionControls;
     this.commandInbox = input.commandInbox;
+    this.expectedTurnId = input.expectedTurnId;
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
   }
@@ -89,17 +93,11 @@ export class TurnControlReceiver {
       return undefined;
     }
     if (command.kind === "cancel") {
-      await forwardTurnCancellationStep({
-        payload: command.turnId === undefined ? {} : { turnId: command.turnId },
-        token: turnCancellationHookToken(this.control.token),
-      });
+      await this.forwardCancellation(command.turnId);
       return undefined;
     }
     if (command.kind === "reset") {
-      await forwardTurnCancellationStep({
-        payload: {},
-        token: turnCancellationHookToken(this.control.token),
-      });
+      await this.forwardCancellation();
       this.bufferedSessionControls.push("reset");
       return undefined;
     }
@@ -110,8 +108,13 @@ export class TurnControlReceiver {
     this.bufferedDeliveries.push(delivery);
     if (delivery.turnPolicy !== "steer" || !deliveryHasMessage(delivery)) return;
 
+    await this.forwardCancellation();
+  }
+
+  private async forwardCancellation(turnId?: string): Promise<void> {
+    if (turnId !== undefined && turnId !== this.expectedTurnId) return;
     await forwardTurnCancellationStep({
-      payload: {},
+      payload: { reason: new TurnCancelledError() },
       token: turnCancellationHookToken(this.control.token),
     });
   }

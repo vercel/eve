@@ -1,4 +1,7 @@
 const WORKFLOW_CONTEXT_SYMBOL = Symbol.for("WORKFLOW_CONTEXT");
+const WORKFLOW_CREATE_ACTIVE_STEP_ABORT_CONTROLLER = Symbol.for(
+  "WORKFLOW_CREATE_ACTIVE_STEP_ABORT_CONTROLLER",
+);
 const WORKFLOW_CREATE_HOOK = Symbol.for("WORKFLOW_CREATE_HOOK");
 const WORKFLOW_GET_STREAM_ID = Symbol.for("WORKFLOW_GET_STREAM_ID");
 const WORKFLOW_SLEEP = Symbol.for("WORKFLOW_SLEEP");
@@ -13,6 +16,27 @@ export class FatalError extends Error {}
 interface WorkflowHook<T> extends AsyncIterable<T> {
   readonly token: string;
   getConflict(): Promise<{ readonly runId: string } | null>;
+}
+
+export interface ActiveStepAbortController {
+  readonly signal: AbortSignal;
+  readonly token: string;
+  dispose(): void;
+}
+
+/** Creates the workflow VM's deterministic, stream-backed active-step abort controller. */
+export function createActiveStepAbortController(options: {
+  readonly token: string;
+}): ActiveStepAbortController {
+  const createController = workflowGlobal[WORKFLOW_CREATE_ACTIVE_STEP_ABORT_CONTROLLER] as
+    | ((input: { readonly token: string }) => ActiveStepAbortController)
+    | undefined;
+  if (createController === undefined) {
+    throw new Error(
+      "`createActiveStepAbortController()` can only be called inside a workflow function",
+    );
+  }
+  return createController(options);
 }
 
 /**

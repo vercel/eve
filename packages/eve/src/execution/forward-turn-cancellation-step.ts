@@ -1,11 +1,11 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 
-import type { TurnCancelPayload } from "#execution/turn-cancellation-token.js";
+import type { TurnCancellationPayload } from "#execution/turn-cancellation-token.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 /** Forwards an inbox cancellation command to one private active-turn hook. */
 export async function forwardTurnCancellationStep(input: {
-  readonly payload: TurnCancelPayload;
+  readonly payload: TurnCancellationPayload;
   readonly token: string;
 }): Promise<boolean> {
   "use step";

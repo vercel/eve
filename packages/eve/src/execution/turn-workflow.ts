@@ -27,7 +27,6 @@ import { TurnExecutionCursor } from "#execution/turn-execution-cursor.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { turnStep } from "#execution/workflow-steps.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
@@ -92,7 +91,6 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     if (input.driverCapabilities?.cancelledTurnSettle === true) {
       cancellation = await createTurnCancellationControl({
         controlToken: input.completionToken,
-        expectedTurnId: activeTurnId(input.stepInput.sessionState.emissionState),
       });
     }
 

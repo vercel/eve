@@ -5,6 +5,7 @@ import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import { dispatchTurnStep } from "#execution/workflow-steps.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 
 /** One settled turn: its terminal driver action plus deferred hook cleanup. */
 export interface DispatchedTurn {
@@ -37,6 +38,7 @@ export async function dispatchAndAwaitTurn(input: {
     bufferedDeliveries: input.bufferedDeliveries,
     bufferedSessionControls: input.bufferedSessionControls,
     commandInbox: input.commandInbox,
+    expectedTurnId: activeTurnId(input.sessionState.emissionState),
     token: input.controlToken,
   });
 

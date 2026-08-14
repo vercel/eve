@@ -33,6 +33,8 @@ export interface RunningEveDev {
 
 export interface StartEveDevOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Keeps an in-app test model active instead of the deterministic test adapter. */
+  readonly useAuthoredModel?: boolean;
   /** Runtime executing the CLI. Defaults to the current Node executable. */
   readonly runtime?: "bun" | "node";
 }
@@ -225,7 +227,7 @@ function spawnEveDev(
     env: {
       ...process.env,
       ...options.env,
-      NODE_ENV: "test",
+      NODE_ENV: options.useAuthoredModel === true ? "development" : "test",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

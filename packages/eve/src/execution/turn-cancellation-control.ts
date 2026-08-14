@@ -1,15 +1,9 @@
-import { createHook } from "#compiled/@workflow/core/index.js";
-
-import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
-import {
-  turnCancellationHookToken,
-  type TurnCancelPayload,
-} from "#execution/turn-cancellation-token.js";
-import { TurnCancelledError } from "#harness/turn-cancellation.js";
+import { createActiveStepAbortController } from "#compiled/@workflow/core/index.js";
+import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 
 /**
  * Owns one turn's cancellation surface inside the turn workflow: the
- * turn-private cancel hook and the durable `AbortController` whose
+ * turn-private cancel hook and the durable controller whose
  * signal is serialized into every `turnStep`. Must be created inside a
  * `"use workflow"` body.
  */
@@ -22,77 +16,36 @@ export interface TurnCancellationControl {
    * `await` it alone.
    */
   readonly requested: Promise<"cancel">;
-  /** Disposes the hook, abandoning any outstanding read. Idempotent. */
-  dispose(): Promise<void>;
+  /** Disposes the internal hook. Idempotent. */
+  dispose(): void;
 }
 
 /**
- * Creates and claims the private cancel hook for one turn workflow run.
- * Returns `undefined` when the token is still claimed by a crashed prior
- * run — the turn then runs uncancellable rather than failing.
+ * Creates the private, stream-backed cancel controller for one turn workflow
+ * run. `resumeHook()` writes this controller's signal stream before the
+ * workflow replay that settles the cancellation.
  */
-export async function createTurnCancellationControl(input: {
+export function createTurnCancellationControl(input: {
   readonly controlToken: string;
-  readonly expectedTurnId: string;
-}): Promise<TurnCancellationControl | undefined> {
-  const hook = createHook<TurnCancelPayload>({
+}): TurnCancellationControl {
+  const controller = createActiveStepAbortController({
     token: turnCancellationHookToken(input.controlToken),
   });
-  // Hook promises and iterators share one durable cursor. Create the
-  // iterator before claiming so conflict replay is consumed by
-  // getConflict(), not a later iterator read.
-  const iterator = hook[Symbol.asyncIterator]();
-
-  try {
-    await claimHookOwnership(hook);
-  } catch (error) {
-    if (isHookConflictError(error)) return undefined;
-    throw error;
-  }
-
-  const controller = new AbortController();
-  // The abort must fire inside the read continuation — not a chained
-  // `.then` — so the signal is already flipped when a same-drain
-  // continuation (the turn loop's settle check) reads it; one microtask
-  // later and an ordinary completion swallows the cancel.
-  const requested = consumeMatchingCancel(iterator, input.expectedTurnId, () => {
-    controller.abort(new TurnCancelledError());
-  }).then(() => "cancel" as const);
-
+  const requested = new Promise<"cancel">((resolve) => {
+    if (controller.signal.aborted) {
+      resolve("cancel");
+      return;
+    }
+    controller.signal.addEventListener("abort", () => resolve("cancel"), { once: true });
+  });
   let disposed = false;
   return {
     signal: controller.signal,
     requested,
-    async dispose(): Promise<void> {
+    dispose: () => {
       if (disposed) return;
       disposed = true;
-      // Never `iterator.return()`: it would await the pending durable
-      // read forever, leaving the run `running` and its hooks unswept.
-      await disposeHook(hook);
+      controller.dispose();
     },
   };
-}
-
-// Mismatched turn guards are consumed as no-ops; each read is durable,
-// so the skip sequence replays deterministically. `onCancel` fires inside
-// the matching read's continuation (see the abort ordering note above).
-async function consumeMatchingCancel(
-  iterator: AsyncIterator<TurnCancelPayload>,
-  expectedTurnId: string,
-  onCancel: () => void,
-): Promise<void> {
-  while (true) {
-    const next = await iterator.next();
-    if (next.done) return await new Promise<never>(() => {});
-    if (matchesActiveTurn(next.value, expectedTurnId)) {
-      onCancel();
-      return;
-    }
-  }
-}
-
-function matchesActiveTurn(payload: unknown, expectedTurnId: string): boolean {
-  if (typeof payload !== "object" || payload === null) return true;
-  const guard = (payload as TurnCancelPayload).turnId;
-  return guard === undefined || guard === expectedTurnId;
 }
