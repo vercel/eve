@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isSelectedModelProviderConfigured,
   resolveSelectedModelProvider,
-  resolveSelectedModelProviderStatus,
   type GatewayProviderState,
 } from "./model-provider-state.js";
 
@@ -19,9 +19,7 @@ describe("model provider state", () => {
     expect(
       resolveSelectedModelProvider(competingState, { kind: "external", provider: "codex" }),
     ).toBe("chatgpt");
-    expect(resolveSelectedModelProviderStatus(competingState, "chatgpt")).toEqual({
-      kind: "chatgpt",
-    });
+    expect(isSelectedModelProviderConfigured(competingState, "chatgpt")).toBe(true);
   });
 
   it("uses the explicit Gateway preference when credentials compete", () => {
@@ -30,11 +28,7 @@ describe("model provider state", () => {
     expect(
       resolveSelectedModelProvider(competingState, { kind: "gateway", target: "anthropic" }),
     ).toBe("gateway-project");
-    expect(resolveSelectedModelProviderStatus(competingState, "gateway-project")).toEqual({
-      kind: "gateway-project",
-      projectName: "my-agent",
-      teamName: "my-team",
-    });
+    expect(isSelectedModelProviderConfigured(competingState, "gateway-project")).toBe(true);
   });
 
   it("matches API-key-first runtime precedence when no preference exists", () => {
@@ -55,8 +49,6 @@ describe("model provider state", () => {
     expect(resolveSelectedModelProvider(state, { kind: "gateway", target: "anthropic" })).toBe(
       "gateway-project",
     );
-    expect(resolveSelectedModelProviderStatus(state, "gateway-project")).toEqual({
-      kind: "unconfigured",
-    });
+    expect(isSelectedModelProviderConfigured(state, "gateway-project")).toBe(false);
   });
 });

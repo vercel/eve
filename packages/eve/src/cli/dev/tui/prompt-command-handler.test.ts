@@ -129,7 +129,7 @@ describe("createPromptCommandHandler", () => {
 
   it("forwards automatic provider entry and model-access changes", async () => {
     const runTuiSetupCommand = vi.fn(async () => ({
-      message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+      message: "AI Gateway via API key selected.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" } as const,
     }));
@@ -150,7 +150,7 @@ describe("createPromptCommandHandler", () => {
           { ...context({ setupFlow }), initialModelStep: "provider" },
         ),
       ).resolves.toEqual({
-        message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+        message: "AI Gateway via API key selected.",
         effect: { kind: "model-access-changed" },
       });
       expect(runTuiSetupCommand).toHaveBeenCalledWith(

@@ -1,19 +1,14 @@
-import type { GatewayCredentialResolution } from "#internal/resolve-model-endpoint-status.js";
-
 import { inspectApplication } from "#services/inspect-application.js";
 import {
   writeGatewayCredentialPreference,
   type GatewayCredentialPreference,
 } from "#setup/gateway-credential-preference.js";
 import {
+  isSelectedModelProviderConfigured,
   readGatewayProviderState,
-  resolveSelectedGatewayProviderStatus,
   resolveSelectedModelProvider,
-  resolveSelectedModelProviderStatus,
-  type GatewayProviderState,
-  type GatewayProviderStatus,
-  type ModelProviderStatus,
   type SelectedGatewayProvider,
+  type SelectedModelProvider,
 } from "#setup/model-provider-state.js";
 import type {
   AgentModelSettingsPatch,
@@ -135,22 +130,6 @@ export interface ModelFlowDeps {
   writeGatewayCredentialPreference: typeof writeGatewayCredentialPreference;
 }
 
-/**
- * A provider sub-flow run that actually moved the provider: the credential
- * the link flow verified landed in an env file (when one did), paired with
- * the re-detected {@link ModelProviderStatus} — the same read the menu's
- * provider row shows, so every surface reports one truth. The sub-flow's
- * external-provider branch only shows instructions — nothing changes on
- * disk — so it never surfaces as an outcome.
- */
-export interface ModelProviderOutcome {
-  /** The credential resolution observed while setup completed. */
-  resolution?: GatewayCredentialResolution;
-  /** The explicit provider choice that the runtime will honor after reload. */
-  selected: SelectedGatewayProvider;
-  status: GatewayProviderStatus;
-}
-
 export type ModelFlowResult =
   | {
       kind: "cancelled";
@@ -163,8 +142,8 @@ export type ModelFlowResult =
       accessChanged: boolean;
       /** The last apply line, when the model was changed this session. */
       modelMessage?: string;
-      /** The last provider sub-flow outcome, when one ran to completion. */
-      providerOutcome?: ModelProviderOutcome;
+      /** The Gateway provider selected in a completed provider sub-flow. */
+      providerSelection?: SelectedGatewayProvider;
     };
 
 // The bordered panel's title ("Configure the agent model") is the menu's header,
@@ -173,34 +152,18 @@ export const MODEL_MENU_MESSAGE = "";
 
 type ModelMenuRow = "model" | "provider" | "done";
 
-/**
- * The provider row's value line. `emphasis` bolds the project and team names
- * for the menu (the stacked hint line renders embedded bold safely); the
- * plain form feeds notice and outcome copy.
- */
-function providerStatusHint(
-  provider: ModelProviderStatus,
+function providerSelectionHint(
+  provider: SelectedModelProvider,
   chatGptAccountLabel: string | undefined,
-  emphasis: (text: string) => string = (text) => text,
 ): string {
-  if (provider.kind === "chatgpt") {
+  if (provider === "chatgpt") {
     return chatGptAccountLabel === undefined
       ? "ChatGPT subscription"
       : `ChatGPT subscription (${chatGptAccountLabel})`;
   }
-  if (provider.kind === "gateway-project") {
-    if (provider.projectName === undefined) {
-      return "AI Gateway via Project";
-    }
-    const where =
-      provider.teamName === undefined
-        ? emphasis(provider.projectName)
-        : `${emphasis(provider.projectName)} in ${emphasis(provider.teamName)}`;
-    return `AI Gateway (Linked to ${where})`;
-  }
-  if (provider.kind !== "gateway-key") return `AI Gateway via ${AI_GATEWAY_API_KEY_ENV_VAR}`;
-  const where = provider.source.kind === "shell" ? "your shell" : provider.source.path;
-  return `AI Gateway (${provider.envKey} in ${where})`;
+  return provider === "gateway-project"
+    ? "AI Gateway via Project"
+    : `AI Gateway via ${AI_GATEWAY_API_KEY_ENV_VAR}`;
 }
 
 /**
@@ -246,13 +209,14 @@ function formatModelDraftHint(
  * disables it (gateway credentials don't apply); a gateway endpoint gates it
  * bold-yellow "Configure model access" until a link or credential is
  * detectable (the genuine "no provider connected" state), then "Change
- * provider" naming it.
+ * provider" with the selected provider.
  */
 function modelMenuRows(
   current: string | null,
   reasoning: ReasoningLevel | null,
   serviceTier: GatewayServiceTierState,
-  provider: ModelProviderStatus,
+  selectedProvider: SelectedModelProvider,
+  providerConfigured: boolean,
   chatGptAccountLabel: string | undefined,
   routing: ModelRouting | null,
   editable: boolean,
@@ -287,7 +251,7 @@ function modelMenuRows(
       label: "Change provider",
       description: "Disabled in external endpoint mode",
     };
-  } else if (provider.kind === "unconfigured") {
+  } else if (!providerConfigured) {
     providerRow = {
       value: "provider",
       label: pc.bold("Configure model access"),
@@ -299,7 +263,7 @@ function modelMenuRows(
     providerRow = {
       value: "provider",
       label: "Change provider",
-      hint: providerStatusHint(provider, chatGptAccountLabel, pc.bold),
+      hint: providerSelectionHint(selectedProvider, chatGptAccountLabel),
       description: "How your agent reaches the model provider",
     };
   }
@@ -345,12 +309,6 @@ export async function runModelFlow(input: {
   // trips. One ephemeral spinner covers all three so the menu paints with no
   // persisted loading lines and already knows what the model supports. A
   // failed catalog fetch degrades to unknown capabilities, never to an error.
-  const readProviderState = (useFlowSignal = true): Promise<GatewayProviderState> =>
-    deps.readProviderState(
-      appRoot,
-      useFlowSignal && signal !== undefined ? { signal } : {},
-      process.env,
-    );
   const fetchCatalog = deps.selectModel?.fetchModels ?? fetchGatewayCatalog;
   const [currentModel, initialProviderState, catalog] = await withSpinner(
     prompter,
@@ -358,7 +316,7 @@ export async function runModelFlow(input: {
     () =>
       Promise.all([
         deps.readCurrentModel(appRoot),
-        readProviderState(),
+        deps.readProviderState(appRoot, signal === undefined ? {} : { signal }, process.env),
         fetchCatalog(signal).catch((): GatewayCatalogModel[] | undefined => undefined),
       ]),
   );
@@ -368,9 +326,9 @@ export async function runModelFlow(input: {
   // An authored "provider-default" is the absent-setting sentinel, not a level.
   let reasoning: ReasoningLevel | null =
     currentModel.reasoning === "provider-default" ? null : currentModel.reasoning;
-  let providerState = initialProviderState;
+  const providerState = initialProviderState;
   let selectedProvider = resolveSelectedModelProvider(providerState, routing);
-  let provider = resolveSelectedModelProviderStatus(providerState, selectedProvider);
+  let providerConfigured = isSelectedModelProviderConfigured(providerState, selectedProvider);
   let nextGatewayCredentialPreference: GatewayCredentialPreference | undefined;
   const patch: {
     model: FieldPatch<string>;
@@ -383,7 +341,7 @@ export async function runModelFlow(input: {
   };
 
   let lastApply: ApplyModelSettingsOutcome | undefined;
-  let providerOutcome: ModelProviderOutcome | undefined;
+  let providerSelection: SelectedGatewayProvider | undefined;
   let chatGptLoginReady = false;
   let commitDraft = false;
   const sourceOwnedExternalRouting = routing?.kind === "external" && routing.provider !== "codex";
@@ -396,7 +354,7 @@ export async function runModelFlow(input: {
 
   // Start at the first useful row. Cancellation keeps the current row.
   let nextSelection: ModelMenuRow =
-    provider.kind === "unconfigured" && routing?.kind !== "external"
+    !providerConfigured && routing?.kind !== "external"
       ? "provider"
       : editable || settingsEditable
         ? "model"
@@ -404,8 +362,7 @@ export async function runModelFlow(input: {
   // A gateway model with no provider cannot run. Skip the menu's extra Enter
   // and open provider setup as soon as that state is confirmed.
   let openProviderFirst =
-    routing?.kind !== "external" &&
-    (input.initialStep === "provider" || provider.kind === "unconfigured");
+    routing?.kind !== "external" && (input.initialStep === "provider" || !providerConfigured);
 
   while (true) {
     let pick: ModelMenuRow;
@@ -420,7 +377,8 @@ export async function runModelFlow(input: {
             current,
             reasoning,
             selectedProvider === "chatgpt" ? { kind: "standard" } : serviceTier,
-            provider,
+            selectedProvider,
+            providerConfigured,
             input.chatGptAccountLabel,
             routing,
             editable,
@@ -473,7 +431,7 @@ export async function runModelFlow(input: {
         current = result.model;
         routing = routingForModelSelection(result.model);
         selectedProvider = resolveSelectedModelProvider(providerState, routing);
-        provider = resolveSelectedModelProviderStatus(providerState, selectedProvider);
+        providerConfigured = isSelectedModelProviderConfigured(providerState, selectedProvider);
         patch.model = { kind: "set", value: result.model };
       }
       if (result.reasoning !== undefined) {
@@ -532,18 +490,7 @@ export async function runModelFlow(input: {
     }
     nextGatewayCredentialPreference =
       gatewaySelection === "gateway-project" ? "project" : "api-key";
-    // Only a completed project/key sub-flow can move the link or
-    // credentials, so this is the one place the status is re-read. Once that
-    // sub-flow commits, finish without the aborted interaction signal so the
-    // TUI can refresh the state that is already on disk.
-    providerState = await withSpinner(prompter, "Checking the project…", () =>
-      readProviderState(false),
-    );
-    provider = resolveSelectedGatewayProviderStatus(providerState, gatewaySelection);
-    providerOutcome = { selected: gatewaySelection, status: provider };
-    if (result.resolution !== undefined) {
-      providerOutcome.resolution = result.resolution;
-    }
+    providerSelection = gatewaySelection;
     commitDraft = true;
     break;
   }
@@ -557,22 +504,22 @@ export async function runModelFlow(input: {
     if (lastApply.kind !== "rejected" && nextGatewayCredentialPreference !== undefined) {
       await deps.writeGatewayCredentialPreference(appRoot, nextGatewayCredentialPreference);
     }
-    if (providerOutcome === undefined) signal?.throwIfAborted();
+    if (providerSelection === undefined) signal?.throwIfAborted();
   } else if (commitDraft && nextGatewayCredentialPreference !== undefined) {
     await deps.writeGatewayCredentialPreference(appRoot, nextGatewayCredentialPreference);
   }
 
-  if (lastApply === undefined && providerOutcome === undefined && !chatGptLoginReady) {
+  if (lastApply === undefined && providerSelection === undefined && !chatGptLoginReady) {
     return { kind: "cancelled" };
   }
   const done: Extract<ModelFlowResult, { kind: "done" }> = {
     kind: "done",
     accessChanged:
-      lastApply?.kind === "changed" || providerOutcome !== undefined || chatGptLoginReady,
+      lastApply?.kind === "changed" || providerSelection !== undefined || chatGptLoginReady,
   };
   if (lastApply !== undefined) done.modelMessage = formatApplyModelSettingsOutcome(lastApply);
   else if (chatGptLoginReady) done.modelMessage = "ChatGPT login ready.";
-  if (providerOutcome !== undefined) done.providerOutcome = providerOutcome;
+  if (providerSelection !== undefined) done.providerSelection = providerSelection;
   return done;
 }
 

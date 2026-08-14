@@ -646,7 +646,7 @@ describe("renderSelectQuestion", () => {
   it("stacks hints under labels with separators and trailing notices", () => {
     const options = [
       { value: "model", label: "Change model", hint: "anthropic/claude-sonnet-5" },
-      { value: "provider", label: "Change provider", hint: "AI Gateway (Linked to my-agent)" },
+      { value: "provider", label: "Change provider", hint: "AI Gateway via Project" },
     ];
     const rows = renderSelectQuestion(
       {
@@ -667,7 +667,7 @@ describe("renderSelectQuestion", () => {
       "     anthropic/claude-sonnet-5",
       "",
       "   ◦ Change provider",
-      "     AI Gateway (Linked to my-agent)",
+      "     AI Gateway via Project",
       "",
       "  ✓ Model changed to openai/gpt-5.5",
       "",
@@ -710,7 +710,7 @@ describe("renderSelectQuestion", () => {
       {
         value: "provider",
         label: "Change provider",
-        hint: "AI Gateway (Linked to \x1b[1mmy-agent\x1b[22m)",
+        hint: "Selected (\x1b[1mvalue\x1b[22m)",
       },
     ];
     const text = renderSelectQuestion(
@@ -726,7 +726,7 @@ describe("renderSelectQuestion", () => {
 
     // Bold's close (SGR 22) also ends dim — the renderer re-opens dim so the
     // hint's tail does not pop to full brightness.
-    expect(text).toContain("\x1b[1mmy-agent\x1b[22m\x1b[2m)");
+    expect(text).toContain("\x1b[1mvalue\x1b[22m\x1b[2m)");
   });
 
   it("uses the terminal foreground for a selected yellow hint and dims it otherwise", () => {

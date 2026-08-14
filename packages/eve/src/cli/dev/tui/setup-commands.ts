@@ -5,7 +5,8 @@ import {
   type InstallVercelCliResult,
 } from "#setup/flows/install-vercel-cli.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
-import { runModelFlow, type ModelProviderOutcome } from "#setup/flows/model.js";
+import { runModelFlow } from "#setup/flows/model.js";
+import type { SelectedGatewayProvider } from "#setup/model-provider-state.js";
 import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
 import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.js";
 import type { Prompter } from "#setup/prompter.js";
@@ -239,11 +240,11 @@ async function executeSetupCommand(
         }
         // One line per completed menu action: the apply line (it already
         // distinguishes success from a rejected slug), then the provider
-        // outcome when that sub-flow also ran.
+        // selection when that sub-flow also ran.
         const lines: string[] = [];
         if (result.modelMessage !== undefined) lines.push(result.modelMessage);
-        if (result.providerOutcome !== undefined) {
-          lines.push(providerOutcomeMessage(result.providerOutcome));
+        if (result.providerSelection !== undefined) {
+          lines.push(providerSelectionMessage(result.providerSelection));
         }
         const outcome: TuiSetupCommandResult = {
           message: lines.join("\n"),
@@ -508,33 +509,8 @@ function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
   }
 }
 
-/**
- * The persistent outcome line for /model's completed provider sub-flow. The
- * panel's success lines vanish with it, so the outcome carries the substance:
- * what the directory now reads (the same detection the menu shows) and which
- * credential is ready, or what to do next. "Project linked" is only claimed
- * when a link is actually detected — the API-key branch pastes a credential
- * without linking anything.
- */
-function providerOutcomeMessage(outcome: ModelProviderOutcome): string {
-  const { status } = outcome;
-  if (outcome.selected === "gateway-project") {
-    const oidcDetected =
-      outcome.resolution?.credential === "oidc" ||
-      (outcome.resolution?.credential === "api-key" &&
-        outcome.resolution.shadowedOidc !== undefined);
-    if (oidcDetected) {
-      return status.kind === "gateway-project" && status.projectName !== undefined
-        ? "Project linked. Connected to AI Gateway via Project OIDC."
-        : "Connected to AI Gateway via Project OIDC.";
-    }
-    return status.kind === "gateway-project" && status.projectName !== undefined
-      ? "Project linked, but no Project OIDC credential was found. Run `vercel env pull` after enabling AI Gateway."
-      : "AI Gateway via Project selected. Complete project linking to connect.";
-  }
-  if (status.kind === "gateway-key") {
-    const where = status.source.kind === "shell" ? "your shell" : status.source.path;
-    return `Connected to AI Gateway via ${status.envKey} in ${where}.`;
-  }
-  return "AI Gateway via API key selected — set AI_GATEWAY_API_KEY to connect.";
+function providerSelectionMessage(selection: SelectedGatewayProvider): string {
+  return selection === "gateway-project"
+    ? "AI Gateway via Project selected."
+    : "AI Gateway via API key selected.";
 }

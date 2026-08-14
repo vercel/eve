@@ -159,7 +159,7 @@ describe("runModelFlow", () => {
           {
             value: "provider",
             label: "Change provider",
-            hint: `AI Gateway (Linked to ${pc.bold("my-agent")})`,
+            hint: "AI Gateway via Project",
             description: "How your agent reaches the model provider",
           },
           { value: "done", label: "Done" },
@@ -267,13 +267,7 @@ describe("runModelFlow", () => {
         available: { gatewayProject: { projectName: "my-agent" } },
         preferredGatewayCredential: "project" as const,
       })),
-      runProviderFlow: vi.fn(
-        async () =>
-          ({
-            kind: "gateway-project",
-            resolution: { credential: "oidc", file: ".env.local" },
-          }) as const,
-      ),
+      runProviderFlow: vi.fn(async () => ({ kind: "gateway-project" }) as const),
       applySettings,
     });
 
@@ -496,7 +490,7 @@ describe("runModelFlow", () => {
     expect(menuPaints).toHaveLength(1);
   });
 
-  it("names the linked project on the provider row once a provider is set", async () => {
+  it("names the selected Project provider on the provider row", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
       readProviderState: vi.fn(async () => ({
@@ -510,12 +504,12 @@ describe("runModelFlow", () => {
     expect(menuPaints[0]?.options[1]).toEqual({
       value: "provider",
       label: "Change provider",
-      hint: `AI Gateway (Linked to ${pc.bold("my-agent")} in ${pc.bold("my-team")})`,
+      hint: "AI Gateway via Project",
       description: "How your agent reaches the model provider",
     });
   });
 
-  it("names the credential env file when a gateway key is set without a link", async () => {
+  it("names the selected API-key provider on the provider row", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
       readProviderState: vi.fn(async () => ({
@@ -529,7 +523,7 @@ describe("runModelFlow", () => {
     expect(menuPaints[0]?.options[1]).toEqual({
       value: "provider",
       label: "Change provider",
-      hint: "AI Gateway (AI_GATEWAY_API_KEY in .env.local)",
+      hint: "AI Gateway via AI_GATEWAY_API_KEY",
       description: "How your agent reaches the model provider",
     });
   });
@@ -696,40 +690,19 @@ describe("runModelFlow", () => {
 
   it("opens provider setup directly when none is configured", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: [] });
-    const readProviderState = vi
-      .fn<ModelFlowDeps["readProviderState"]>()
-      .mockResolvedValueOnce({ available: {}, preferredGatewayCredential: undefined })
-      .mockResolvedValueOnce({
-        available: { gatewayKey: { source: { kind: "env-file" as const, path: ".env.local" } } },
-        preferredGatewayCredential: undefined,
-      });
-    const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(
-      async () =>
-        ({
-          kind: "gateway-key",
-          resolution: {
-            credential: "api-key",
-            source: { kind: "env-file", path: ".env.local" },
-          },
-        }) as const,
-    );
+    const readProviderState = vi.fn<ModelFlowDeps["readProviderState"]>(async () => ({
+      available: {},
+      preferredGatewayCredential: undefined,
+    }));
+    const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(async () => ({
+      kind: "gateway-key",
+    }));
     const deps = flowDeps({ readProviderState, runProviderFlow });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
       accessChanged: true,
-      providerOutcome: {
-        selected: "gateway-key",
-        resolution: {
-          credential: "api-key",
-          source: { kind: "env-file", path: ".env.local" },
-        },
-        status: {
-          kind: "gateway-key",
-          envKey: "AI_GATEWAY_API_KEY",
-          source: { kind: "env-file", path: ".env.local" },
-        },
-      },
+      providerSelection: "gateway-key",
     });
 
     // The sub-flow learns the detected provider so its menu can mark the active row.
@@ -739,20 +712,16 @@ describe("runModelFlow", () => {
         providerState: { available: {}, preferredGatewayCredential: undefined },
       }),
     );
-    expect(readProviderState).toHaveBeenCalledTimes(2);
+    expect(readProviderState).toHaveBeenCalledTimes(1);
     expect(menuPaints).toHaveLength(0);
     expect(deps.writeGatewayCredentialPreference).toHaveBeenCalledWith(APP_ROOT, "api-key");
   });
 
   it("honors confirmed provider entry when link metadata looks configured", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: [] });
-    const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(
-      async () =>
-        ({
-          kind: "gateway-project",
-          resolution: { credential: "oidc", file: ".env.local" },
-        }) as const,
-    );
+    const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(async () => ({
+      kind: "gateway-project",
+    }));
     const deps = flowDeps({ runProviderFlow });
 
     await expect(
@@ -765,11 +734,7 @@ describe("runModelFlow", () => {
     ).resolves.toEqual({
       kind: "done",
       accessChanged: true,
-      providerOutcome: {
-        selected: "gateway-project",
-        resolution: { credential: "oidc", file: ".env.local" },
-        status: { kind: "gateway-project", projectName: "my-agent" },
-      },
+      providerSelection: "gateway-project",
     });
 
     expect(runProviderFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
@@ -777,25 +742,16 @@ describe("runModelFlow", () => {
     expect(deps.writeGatewayCredentialPreference).toHaveBeenCalledWith(APP_ROOT, "project");
   });
 
-  it("refreshes provider state after a committed setup is interrupted", async () => {
+  it("preserves a committed provider selection when interrupted", async () => {
     const { prompter } = scriptedPrompter({ menu: [] });
     const controller = new AbortController();
-    const readProviderState = vi
-      .fn<ModelFlowDeps["readProviderState"]>()
-      .mockResolvedValueOnce({
-        available: { gatewayProject: { projectName: "my-agent" } },
-        preferredGatewayCredential: "project",
-      })
-      .mockResolvedValueOnce({
-        available: { gatewayKey: { source: { kind: "env-file" as const, path: ".env.local" } } },
-        preferredGatewayCredential: "project",
-      });
+    const readProviderState = vi.fn<ModelFlowDeps["readProviderState"]>(async () => ({
+      available: { gatewayProject: { projectName: "my-agent" } },
+      preferredGatewayCredential: "project",
+    }));
     const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(async () => {
       controller.abort();
-      return {
-        kind: "gateway-key",
-        resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
-      };
+      return { kind: "gateway-key" };
     });
     const deps = flowDeps({ readProviderState, runProviderFlow });
 
@@ -810,17 +766,9 @@ describe("runModelFlow", () => {
     ).resolves.toEqual({
       kind: "done",
       accessChanged: true,
-      providerOutcome: {
-        selected: "gateway-key",
-        resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
-        status: {
-          kind: "gateway-key",
-          envKey: "AI_GATEWAY_API_KEY",
-          source: { kind: "env-file", path: ".env.local" },
-        },
-      },
+      providerSelection: "gateway-key",
     });
-    expect(readProviderState.mock.calls[1]?.[1]).toEqual({});
+    expect(readProviderState).toHaveBeenCalledTimes(1);
   });
 
   it("treats the external-provider branch as informational — no notice, no outcome", async () => {

@@ -1,7 +1,5 @@
 import pc from "picocolors";
 
-import type { GatewayCredentialResolution } from "#internal/resolve-model-endpoint-status.js";
-
 import { appendEnv } from "../append-env.js";
 import {
   AI_GATEWAY_API_KEY_ENV_FILE,
@@ -44,8 +42,8 @@ export interface ProviderFlowDeps {
 
 export type ProviderFlowResult =
   | { kind: "cancelled" }
-  | { kind: "gateway-project"; resolution?: GatewayCredentialResolution }
-  | { kind: "gateway-key"; resolution: GatewayCredentialResolution }
+  | { kind: "gateway-project" }
+  | { kind: "gateway-key" }
   | { kind: "chatgpt" }
   | { kind: "external-provider" };
 
@@ -245,9 +243,7 @@ export async function runProviderFlow(input: {
         projectSelection: "create-or-link",
       });
       if (result.kind === "cancelled") return result;
-      return result.resolution === undefined
-        ? { kind: "gateway-project" }
-        : { kind: "gateway-project", resolution: result.resolution };
+      return { kind: "gateway-project" };
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };
@@ -273,8 +269,5 @@ export async function runProviderFlow(input: {
   // remaining UI, but the caller must still refresh model access for the key
   // that is now on disk.
   prompter.log.success(`${location.envKey} set.`);
-  return {
-    kind: "gateway-key",
-    resolution: { credential: "api-key", source: { kind: "env-file", path: location.envFile } },
-  };
+  return { kind: "gateway-key" };
 }

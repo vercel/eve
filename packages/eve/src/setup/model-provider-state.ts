@@ -1,6 +1,5 @@
 import {
   hasEnvValue,
-  resolveGatewayCredential,
   type GatewayCredentialSource,
 } from "#internal/resolve-model-endpoint-status.js";
 import type { ModelRouting } from "#shared/agent-definition.js";
@@ -48,17 +47,8 @@ export async function readGatewayProviderState(
     findEnvFileWithKey(appRoot, "VERCEL_OIDC_TOKEN"),
     readGatewayCredentialPreference(appRoot),
   ]);
-  const credential = resolveGatewayCredential({
-    apiKeyFile: gatewayKeyFile,
-    apiKeyInEnv: hasEnvValue(env[AI_GATEWAY_API_KEY_ENV_VAR]),
-    oidcFile,
-    oidcAvailable: identity !== undefined,
-  });
   const available: GatewayProviderAvailability = {};
-  if (
-    credential?.credential === "oidc" ||
-    (credential?.credential === "api-key" && credential.shadowedOidc !== undefined)
-  ) {
+  if (identity !== undefined || oidcFile !== undefined) {
     const project: { projectName?: string; teamName?: string } = {};
     if (identity !== undefined) {
       project.projectName = identity.projectName;
@@ -66,8 +56,10 @@ export async function readGatewayProviderState(
     }
     available.gatewayProject = project;
   }
-  if (credential?.credential === "api-key") {
-    available.gatewayKey = { source: credential.source };
+  if (gatewayKeyFile !== undefined) {
+    available.gatewayKey = { source: { kind: "env-file", path: gatewayKeyFile } };
+  } else if (hasEnvValue(env[AI_GATEWAY_API_KEY_ENV_VAR])) {
+    available.gatewayKey = { source: { kind: "shell" } };
   }
   return { available, preferredGatewayCredential };
 }
@@ -80,56 +72,16 @@ export function resolveSelectedModelProvider(
   if (routing?.kind === "external" && routing.provider === "codex") return "chatgpt";
   if (state.preferredGatewayCredential === "project") return "gateway-project";
   if (state.preferredGatewayCredential === "api-key") return "gateway-key";
-  const credential = resolveGatewayCredential({
-    apiKeyInEnv: state.available.gatewayKey !== undefined,
-    oidcAvailable: state.available.gatewayProject !== undefined,
-  });
-  return credential?.credential === "api-key" ? "gateway-key" : "gateway-project";
+  if (state.available.gatewayKey !== undefined) return "gateway-key";
+  return "gateway-project";
 }
 
-export type GatewayProviderStatus =
-  | { readonly kind: "unconfigured" }
-  | {
-      readonly kind: "gateway-project";
-      readonly projectName?: string;
-      readonly teamName?: string;
-    }
-  | {
-      readonly kind: "gateway-key";
-      readonly envKey: "AI_GATEWAY_API_KEY";
-      readonly source: GatewayCredentialSource;
-    };
-
-export type ModelProviderStatus = { readonly kind: "chatgpt" } | GatewayProviderStatus;
-
-/** Projects a resolved Gateway selection onto the evidence detected for it. */
-export function resolveSelectedGatewayProviderStatus(
-  state: GatewayProviderState,
-  selected: SelectedGatewayProvider,
-): GatewayProviderStatus {
-  if (selected === "gateway-project") {
-    const project = state.available.gatewayProject;
-    if (project === undefined) return { kind: "unconfigured" };
-    const status: {
-      kind: "gateway-project";
-      projectName?: string;
-      teamName?: string;
-    } = { kind: "gateway-project" };
-    if (project.projectName !== undefined) status.projectName = project.projectName;
-    if (project.teamName !== undefined) status.teamName = project.teamName;
-    return status;
-  }
-  const key = state.available.gatewayKey;
-  return key === undefined
-    ? { kind: "unconfigured" }
-    : { kind: "gateway-key", envKey: "AI_GATEWAY_API_KEY", source: key.source };
-}
-
-/** Projects the selected provider onto the evidence displayed by `/model`. */
-export function resolveSelectedModelProviderStatus(
+export function isSelectedModelProviderConfigured(
   state: GatewayProviderState,
   selected: SelectedModelProvider,
-): ModelProviderStatus {
-  if (selected === "chatgpt") return { kind: "chatgpt" };
-  return resolveSelectedGatewayProviderStatus(state, selected);
+): boolean {
+  if (selected === "chatgpt") return true;
+  return selected === "gateway-project"
+    ? state.available.gatewayProject !== undefined
+    : state.available.gatewayKey !== undefined;
 }

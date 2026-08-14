@@ -3206,7 +3206,7 @@ describe("EveTUIRunner boot setup detection", () => {
         handle: async (command) =>
           command.name === "model"
             ? {
-                message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+                message: "AI Gateway via API key selected.",
                 effect: { kind: "model-access-changed" },
               }
             : { message: "/add dismissed." },

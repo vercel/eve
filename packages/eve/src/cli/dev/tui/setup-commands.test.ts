@@ -203,111 +203,49 @@ describe("runTuiSetupCommand", () => {
     );
   });
 
-  it("stacks the model and provider outcome lines when both menu actions ran", async () => {
+  it("stacks the model and provider selection lines when both menu actions ran", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         accessChanged: true,
         modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
-        providerOutcome: {
-          selected: "gateway-project",
-          resolution: { credential: "oidc", file: ".env.local" },
-          status: { kind: "gateway-project", projectName: "my-agent" },
-        },
+        providerSelection: "gateway-project",
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message:
         "Model changed to openai/gpt-5.5. Live on your next prompt.\n" +
-        "Project linked. Connected to AI Gateway via Project OIDC.",
+        "AI Gateway via Project selected.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
   });
 
-  it("reports a provider-only model session with the provider outcome", async () => {
+  it("reports a provider-only model session with the provider selection", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         accessChanged: true,
-        providerOutcome: {
-          selected: "gateway-project",
-          resolution: { credential: "oidc", file: ".env.local" },
-          status: { kind: "gateway-project", projectName: "my-agent", teamName: "my-team" },
-        },
+        providerSelection: "gateway-project",
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "Project linked. Connected to AI Gateway via Project OIDC.",
+      message: "AI Gateway via Project selected.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
   });
 
-  it("keeps Project OIDC selected when a gateway key is also available", async () => {
+  it("reports the selected API-key provider without claiming a connection", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
         accessChanged: true,
-        providerOutcome: {
-          selected: "gateway-project",
-          resolution: {
-            credential: "api-key",
-            source: { kind: "shell" },
-            shadowedOidc: {},
-          },
-          status: { kind: "gateway-project", projectName: "my-agent", teamName: "my-team" },
-        },
+        providerSelection: "gateway-key",
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "Project linked. Connected to AI Gateway via Project OIDC.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
-    });
-  });
-
-  it("does not claim Project OIDC when linking produced no credential", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: true,
-        providerOutcome: {
-          selected: "gateway-project",
-          status: { kind: "gateway-project", projectName: "my-agent" },
-        },
-      })),
-    });
-
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message:
-        "Project linked, but no Project OIDC credential was found. Run `vercel env pull` after enabling AI Gateway.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
-    });
-  });
-
-  it("does not claim a link for a pasted key — the outcome names the env file", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: true,
-        providerOutcome: {
-          selected: "gateway-key",
-          resolution: {
-            credential: "api-key",
-            source: { kind: "env-file", path: ".env.local" },
-          },
-          status: {
-            kind: "gateway-key",
-            envKey: "AI_GATEWAY_API_KEY",
-            source: { kind: "env-file", path: ".env.local" },
-          },
-        },
-      })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+      message: "AI Gateway via API key selected.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
@@ -541,18 +479,7 @@ describe("runTuiSetupCommand", () => {
                 resolve({
                   kind: "done",
                   accessChanged: true,
-                  providerOutcome: {
-                    selected: "gateway-key",
-                    resolution: {
-                      credential: "api-key",
-                      source: { kind: "env-file", path: ".env.local" },
-                    },
-                    status: {
-                      kind: "gateway-key",
-                      envKey: "AI_GATEWAY_API_KEY",
-                      source: { kind: "env-file", path: ".env.local" },
-                    },
-                  },
+                  providerSelection: "gateway-key",
                 }),
               { once: true },
             );

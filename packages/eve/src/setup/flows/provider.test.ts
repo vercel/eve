@@ -20,7 +20,6 @@ function createDeps() {
     getVercelAuthStatus: vi.fn(async (): Promise<VercelAuthStatus> => "authenticated"),
     runLinkFlow: vi.fn<ProviderFlowDeps["runLinkFlow"]>(async () => ({
       kind: "done",
-      resolution: { credential: "oidc", file: ".env.local" },
     })),
     appendEnv: vi.fn<ProviderFlowDeps["appendEnv"]>(async () => ({
       written: ["AI_GATEWAY_API_KEY"],
@@ -76,10 +75,7 @@ describe("runProviderFlow", () => {
       deps,
     });
 
-    expect(result).toEqual({
-      kind: "gateway-project",
-      resolution: { credential: "oidc", file: ".env.local" },
-    });
+    expect(result).toEqual({ kind: "gateway-project" });
     expect(deps.runLinkFlow).toHaveBeenCalledExactlyOnceWith({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
@@ -264,10 +260,7 @@ describe("runProviderFlow", () => {
       deps,
     });
 
-    expect(result).toEqual({
-      kind: "gateway-key",
-      resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
-    });
+    expect(result).toEqual({ kind: "gateway-key" });
     expect(deps.validateGatewayApiKey).toHaveBeenCalledExactlyOnceWith(
       "sk-inline",
       expect.any(AbortSignal),
@@ -307,10 +300,7 @@ describe("runProviderFlow", () => {
     controller.abort();
     releaseWrite.resolve();
 
-    await expect(execution).resolves.toEqual({
-      kind: "gateway-key",
-      resolution: { credential: "api-key", source: { kind: "env-file", path: ".env.local" } },
-    });
+    await expect(execution).resolves.toEqual({ kind: "gateway-key" });
   });
 
   it("shows direct-provider instructions without changing credentials", async () => {
