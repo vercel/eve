@@ -8,7 +8,7 @@ import { equals, satisfies } from "eve/evals/expect";
 export default defineEval({
   tags: ["real-model"],
   description:
-    "Messages sent during an active turn produce one limit prompt, and approve resets the budget.",
+    "Messages queued during an active turn preserve one limit prompt, and approve resets the budget.",
   timeoutMs: 90_000,
   async test(t) {
     const active = await t.start(
@@ -54,14 +54,13 @@ export default defineEval({
     queued.event("message.received", { count: 1 });
     queued.notEvent("input.requested");
     queued.eventsSatisfy(
-      "delivers both queued messages coalesced while preserving the pending prompt",
+      "coalesces messages A and B in order while preserving the pending prompt",
       (events) => {
         const received = events.find((event) => event.type === "message.received");
-        return (
-          received !== undefined &&
-          received.data.message.includes("Queued message A") &&
-          received.data.message.includes("Queued message B")
-        );
+        if (received === undefined) return false;
+        const messageAIndex = received.data.message.indexOf("Queued message A");
+        const messageBIndex = received.data.message.indexOf("Queued message B");
+        return messageAIndex !== -1 && messageBIndex > messageAIndex;
       },
     );
     t.check(
