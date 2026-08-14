@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
+export { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 /**
  * Derives the stable task id for one originating subagent call.
@@ -41,10 +42,4 @@ export function deriveTaskInboxToken(input: {
     .update(`${input.taskId}\0${input.parentContinuationToken}`)
     .digest("hex")
     .slice(0, 32)}`;
-}
-
-/** Reads the non-secret task id embedded in a private task inbox token. */
-export function readTaskIdFromInboxToken(token: string): string | undefined {
-  const match = /^task:(task_[^:]+):[a-f0-9]{32}$/.exec(token);
-  return match?.[1];
 }

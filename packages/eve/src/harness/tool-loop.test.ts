@@ -22,7 +22,6 @@ import {
   ParentSessionKey,
   SandboxKey,
   SessionKey,
-  SessionCallbackKey,
   SessionIdKey,
   SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
@@ -37,7 +36,6 @@ import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
-import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
 import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
 import {
@@ -10968,64 +10966,6 @@ describe("createToolLoopHarness", () => {
       const { instructions } = getLastAgentSettings();
       expect(instructions).toBe("You are a test assistant.");
     });
-
-    it.each(["local", "remote"] as const)(
-      "instructs a task-owned %s child to send concrete updates",
-      async (transport) => {
-        setupMockAgent(defaultModelResult());
-        const runStep = createToolLoopHarness(
-          createTestConfig("conversation", undefined, {
-            tools: new Map([
-              [
-                "task_update",
-                {
-                  description: "Update the parent.",
-                  inputSchema: jsonSchema({ type: "object" }),
-                  name: "task_update",
-                  runtimeAction: { kind: "task-control" },
-                },
-              ],
-            ]),
-          }),
-        );
-        const ctx = new ContextContainer();
-        if (transport === "local") {
-          ctx.set(ChannelKey, {
-            kind: "subagent",
-            state: {
-              callId: "parent-call",
-              parentContinuationToken: "task:task_abc:0123456789abcdef0123456789abcdef",
-              parentSessionId: "parent-session",
-              subagentName: "worker",
-            },
-          });
-        } else {
-          ctx.set(SessionCallbackKey, {
-            callId: "parent-call",
-            subagentName: "worker",
-            taskId: "task_abc",
-            token: "task-token",
-            url: "https://parent.example/eve/v1/callback/task-token",
-          });
-        }
-
-        const first = await contextStorage.run(ctx, () =>
-          runStep(createTestSession(), { message: "Research this." }),
-        );
-
-        const { instructions } = getLastAgentSettings();
-        expect(JSON.stringify(instructions)).toContain("Background task updates");
-        expect(JSON.stringify(instructions)).toContain("what you are currently doing");
-        expect(JSON.stringify(instructions)).toContain("do not include preliminary findings");
-
-        await contextStorage.run(ctx, () =>
-          runStep(first.session, { message: "Continue the research." }),
-        );
-        expect(JSON.stringify(getLastAgentSettings().instructions)).not.toContain(
-          "Background task updates",
-        );
-      },
-    );
 
     it.each(["conversation", "task"] as const)(
       "adds conditional-delivery guidance to a top-level scheduled %s turn",

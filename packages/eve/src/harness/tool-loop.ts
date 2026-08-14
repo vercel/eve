@@ -148,7 +148,7 @@ import { resolveParentLineage } from "#harness/parent-lineage.js";
 import { prepareTurnTraceContext } from "#harness/prepare-trace-context.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import {
   consumeDeferredStepInput,
   getApprovedTools,
@@ -473,7 +473,6 @@ function updateCompactionThresholdForModelReference(input: {
 // ---------------------------------------------------------------------------
 
 const TURN_TRACE_STATE_KEY = "eve.harness.turnTrace";
-const TASK_UPDATE_INSTRUCTION_STATE_KEY = "eve.tasks.updateInstructionAnnounced";
 
 /**
  * Serializable subset of `SpanContext` stored on `session.state` so
@@ -632,8 +631,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       callback?.taskId !== undefined ||
       readTaskIdFromInboxToken(String(channel?.state?.parentContinuationToken ?? "")) !== undefined;
     const taskUpdatesEnabled = taskOwned && config.tools.has(TASK_UPDATE_TOOL_NAME);
-    const announceTaskUpdates =
-      taskUpdatesEnabled && session.state?.[TASK_UPDATE_INSTRUCTION_STATE_KEY] !== true;
     const parentLineage = resolveParentLineage(parent, channel);
     const parentTraceContext = store?.get(ParentTraceContextKey);
     let activeAttemptScope: InstrumentationAttemptScope | undefined;
@@ -1266,13 +1263,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (emptyDeliveryEnabled) {
       systemMessages.push({ role: "system", content: CONDITIONAL_DELIVERY_INSTRUCTION });
     }
-    if (announceTaskUpdates) {
-      systemMessages.push({
-        role: "system",
-        content:
-          "Background task updates\nYou are running as a background task. For multi-step work, use `task_update` at meaningful milestones to briefly state what you are currently doing. Keep updates terse and activity-focused; do not include preliminary findings or results. Do not wait for a response, and return your final result normally.",
-      });
-    }
 
     const modelMessages = nonSystemMessages;
 
@@ -1836,15 +1826,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           settledTurn,
         };
       }
-    }
-
-    // This one-time note has now reached a successful model call. Persist the
-    // marker on the child session so later turns keep the stable base prompt.
-    if (announceTaskUpdates) {
-      session = {
-        ...session,
-        state: { ...session.state, [TASK_UPDATE_INSTRUCTION_STATE_KEY]: true },
-      };
     }
 
     // --- Step-side observability tags ---------------------------------------

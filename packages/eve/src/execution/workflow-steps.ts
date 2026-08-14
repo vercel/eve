@@ -85,6 +85,10 @@ import {
 import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views.js";
+import {
+  isTaskOwnedSerializedContext,
+  TASK_UPDATE_SESSION_INSTRUCTION,
+} from "#execution/tasks/child/instructions.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
@@ -92,6 +96,7 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { isTaskToolAvailable, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -174,6 +179,16 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const bundle = ctx.require(BundleKey);
   const tasksEnabled = bundle.resolvedAgent.config?.experimental?.tasks === true;
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+  const taskUpdatesEnabled =
+    isTaskOwnedSerializedContext(input.serializedContext) &&
+    isTaskToolAvailable({
+      disabledFrameworkTools: bundle.resolvedAgent.disabledFrameworkTools ?? [],
+      hasAuthoredTool: effectiveAgent.turnAgent.tools.some(
+        (tool) => tool.name === TASK_UPDATE_TOOL_NAME,
+      ),
+      tasksEnabled,
+      toolName: TASK_UPDATE_TOOL_NAME,
+    });
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -509,6 +524,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             thresholdPercent: effectiveAgent.thresholdPercent,
           },
           session: lifecycleSession,
+          systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
           turnAgent: effectiveAgent.turnAgent,
         });
         const modelSession = tasksEnabled

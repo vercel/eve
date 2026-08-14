@@ -73,6 +73,7 @@ export interface CreateSessionInput {
   readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
   readonly subagentDepth?: number;
+  readonly systemPromptAdditions?: readonly string[];
   readonly workflowMaxSubagents?: number;
 }
 
@@ -84,7 +85,11 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   const session: {
     -readonly [K in keyof HarnessSession]: HarnessSession[K];
   } = {
-    agent: createSessionAgent(turnAgent, createSessionSystemPrompt({ turnAgent }), tools),
+    agent: createSessionAgent(
+      turnAgent,
+      createSessionSystemPrompt({ additions: input.systemPromptAdditions, turnAgent }),
+      tools,
+    ),
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
@@ -139,6 +144,7 @@ function createSessionAgent(
  */
 export function refreshSessionFromTurnAgent(input: {
   readonly session: HarnessSession;
+  readonly systemPromptAdditions?: readonly string[];
   readonly turnAgent: RuntimeTurnAgent;
   readonly compactionOverrides?: {
     readonly thresholdPercent?: number;
@@ -148,7 +154,10 @@ export function refreshSessionFromTurnAgent(input: {
     ...input.session,
     agent: createSessionAgent(
       input.turnAgent,
-      createSessionSystemPrompt({ turnAgent: input.turnAgent }),
+      createSessionSystemPrompt({
+        additions: input.systemPromptAdditions,
+        turnAgent: input.turnAgent,
+      }),
       createSessionToolDefinitions(input.turnAgent),
     ),
     compaction: createCompactionConfig({
@@ -160,13 +169,16 @@ export function refreshSessionFromTurnAgent(input: {
   };
 }
 
-function createSessionSystemPrompt(input: { readonly turnAgent: RuntimeTurnAgent }): string {
+function createSessionSystemPrompt(input: {
+  readonly additions?: readonly string[];
+  readonly turnAgent: RuntimeTurnAgent;
+}): string {
   const skillSection = formatAvailableSkillsSection(input.turnAgent.availableSkills ?? []);
   const blocks =
     skillSection === null
       ? input.turnAgent.instructions
       : [...input.turnAgent.instructions, skillSection];
-  return blocks.join("\n\n");
+  return [...blocks, ...(input.additions ?? [])].join("\n\n");
 }
 
 /**

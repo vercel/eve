@@ -46,6 +46,7 @@ import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instructions.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -174,6 +175,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       rootSessionId: rootSessionIdFromParent,
       sessionId,
       subagentDepth,
+      taskOwned: isTaskOwnedSerializedContext(input.serializedContext),
     });
     crashCleanupState.lastSessionState = sessionState;
     // Resolved for every session so the cell's population never depends
