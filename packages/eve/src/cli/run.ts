@@ -86,7 +86,7 @@ interface CliRuntimeDependencies {
     appRoot: string,
   ): Promise<void>;
   startHost(appRoot: string, options?: DevelopmentServerOptions): DevelopmentServer;
-  resolveApplicationRoot(cwd: string, options: { readonly interactive: boolean }): Promise<string>;
+  resolveApplicationRoot(cwd: string): Promise<string>;
   startProductionHost(
     appRoot: string,
     options?: {
@@ -657,7 +657,6 @@ export async function runCli(
     async resolve() {
       applicationContext.root = await (runtime.resolveApplicationRoot ?? resolveCliApplicationRoot)(
         applicationContext.root,
-        { interactive: hasInteractiveTerminal() },
       );
     },
   };
