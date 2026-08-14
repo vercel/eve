@@ -2,6 +2,7 @@ import { join as joinPath, relative as relativePath } from "node:path";
 
 import type { AgentSourceManifest, ResolvedExtensionMount } from "#discover/manifest.js";
 import type {
+  CompiledChannelEntry,
   CompiledConnectionDefinition,
   CompiledDynamicInstructionsDefinition,
   CompiledDynamicSkillDefinition,
@@ -11,6 +12,7 @@ import type {
   CompiledSkillDefinition,
   CompiledToolDefinition,
 } from "#compiler/manifest.js";
+import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
 import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
@@ -23,6 +25,7 @@ import { compileToolEntry } from "#compiler/normalize-tool.js";
  * already namespaced by the mount and rebased onto the consumer's agent root.
  */
 export interface CompiledExtensionContributions {
+  readonly channels: CompiledChannelEntry[];
   readonly tools: CompiledToolDefinition[];
   readonly dynamicTools: CompiledDynamicToolDefinition[];
   readonly hooks: CompiledHookDefinition[];
@@ -172,6 +175,27 @@ async function composeManifestContributions(input: {
   const rebase = (logicalPath: string): string =>
     relativePath(consumerAgentRoot, joinPath(sourceRoot, logicalPath)).replaceAll("\\", "/");
 
+  const channels = (
+    await Promise.all(
+      manifest.channels.map((source) => compileChannelDefinition(sourceRoot, source, options)),
+    )
+  )
+    .flat()
+    .map((channel): CompiledChannelEntry =>
+      channel.kind === "disabled"
+        ? {
+            ...channel,
+            name: `${prefix}${channel.name}`,
+            logicalPath: rebase(channel.logicalPath),
+          }
+        : {
+            ...channel,
+            name: `${prefix}${channel.name}`,
+            sourceId: scopeSourceId(channel.sourceId),
+            logicalPath: rebase(channel.logicalPath),
+          },
+    );
+
   const tools: CompiledToolDefinition[] = [];
   const dynamicTools: CompiledDynamicToolDefinition[] = [];
   const disabledToolTargets: DisabledToolTarget[] = [];
@@ -279,6 +303,7 @@ async function composeManifestContributions(input: {
 
   return {
     contributions: {
+      channels,
       tools,
       dynamicTools,
       hooks,
@@ -306,8 +331,9 @@ function describeExtensionSource(
  * Merges two composed contribution sets with earlier-set-wins precedence per
  * composed name. Named contributions (tools, connections, skills, dynamic
  * tools) dedup by their model-facing identifier so an override shadows the
- * extension's same-named entry; unnamed contributions (hooks, dynamic skills,
- * dynamic instructions, static instructions) simply concatenate.
+ * extension's same-named entry; channel routes and unnamed contributions
+ * (hooks, dynamic skills, dynamic instructions, static instructions) simply
+ * concatenate.
  *
  * Exported for unit testing: passing the consumer overrides as `primary` and
  * the extension's own contributions as `secondary` yields consumer-wins
@@ -318,6 +344,7 @@ export function mergeContributions(
   secondary: CompiledExtensionContributions,
 ): CompiledExtensionContributions {
   return {
+    channels: [...primary.channels, ...secondary.channels],
     tools: dedupeBy([...primary.tools, ...secondary.tools], (tool) => tool.name),
     dynamicTools: dedupeBy(
       [...primary.dynamicTools, ...secondary.dynamicTools],

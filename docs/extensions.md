@@ -3,7 +3,7 @@ title: "Extensions"
 description: "Package reusable eve capabilities and mount them from npm or a monorepo workspace."
 ---
 
-Extensions package eve tools, connections, skills, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
+Extensions package eve tools, channels, connections, skills, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
 
 Ready-made extensions can also be distributed through an eve integration registry. See [Add Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
 
@@ -29,6 +29,7 @@ An extension uses the same file conventions as an agent for its contributions:
   extension/
     extension.ts
     tools/search.ts
+    channels/webhook.ts
     connections/api.ts
     skills/triage/SKILL.md
     instructions.md
@@ -38,7 +39,7 @@ An extension uses the same file conventions as an agent for its contributions:
 
 Each listed slot accepts the same authored forms as its agent counterpart. Static and dynamic tools, skills, and instructions all work in an extension: `extension/instructions.ts` is as valid as `extension/instructions.md`, and `extension/tools/` can contain `defineDynamic(...)`.
 
-Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. Keep shared code in `extension/lib/`.
+Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. The same prefix applies to channel IDs, while channel route paths stay unchanged. Keep shared code in `extension/lib/`.
 
 Keep agent configuration, sandboxes, schedules, and nested extensions in the consumer's agent.
 
@@ -168,7 +169,7 @@ export default crm({ apiKey: process.env.CRM_API_KEY! });
 
 Set `CRM_API_KEY` in the consumer's environment, such as `.env.local` for local development.
 
-The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, and `connections/api.ts` becomes `crm__api`.
+The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, and `connections/api.ts` becomes `crm__api`. A channel keeps the route paths declared in its `defineChannel(...)` definition.
 
 For an extension with no configuration, mount its default export directly:
 
@@ -329,4 +330,5 @@ At build time, eve checks the extension's generated capability metadata. If the 
 - [Instructions](/docs/instructions): static and TypeScript instructions
 - [Skills](/docs/skills): package procedures and supporting files
 - [Connections](/docs/connections): integrate external services
+- [Channels](/docs/channels/overview): receive messages and expose routes
 - [Hooks](/docs/guides/hooks): observe agent events

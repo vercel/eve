@@ -76,6 +76,16 @@ const EXT_TREE: Readonly<Record<string, string>> = {
     "});",
     "",
   ].join("\n"),
+  "extension/channels/status.ts": [
+    'import { defineChannel, GET } from "eve/channels";',
+    'import extension from "../extension.js";',
+    "export default defineChannel({",
+    "  routes: [",
+    '    GET("/crm/status", async () => new Response(extension.config.apiKey)),',
+    "  ],",
+    "});",
+    "",
+  ].join("\n"),
   "extension/skills/notes.ts": [
     'import { defineSkill } from "eve/skills";',
     "export default defineSkill({",
@@ -197,6 +207,9 @@ describe("mounted extension installed under node_modules", () => {
     expect(Object.keys(extensionFiles)).toContain(
       `node_modules/${PACKAGE_NAME}/dist/extension/_manifest.json`,
     );
+    expect(
+      JSON.parse(extensionFiles[`node_modules/${PACKAGE_NAME}/dist/extension/_manifest.json`]!),
+    ).toMatchObject({ requires: { channel: 1 } });
     const app = await scenarioApp({
       name: "mounted-extension-installed",
       installDependencies: true,
@@ -231,6 +244,20 @@ describe("mounted extension installed under node_modules", () => {
     await expect(shout?.execute?.({}, { messages: [], toolCallId: "call_2" })).resolves.toEqual({
       apiKey: "SK-INSTALLED",
     });
+
+    const status = graph.root.agent.channels.find((entry) => entry.name === "crm__status");
+    expect(status).toMatchObject({
+      method: "GET",
+      sourceId: "ext:crm:channels/status.mjs",
+      urlPath: "/crm/status",
+    });
+    if (status === undefined) throw new Error("Expected the extension channel to resolve.");
+    const response = await status.fetch(new Request("https://example.com/crm/status"), {
+      params: {},
+      requestIp: null,
+      waitUntil() {},
+    });
+    await expect(response.text()).resolves.toBe("sk-installed");
 
     expect(graph.root.agent.skills.map((skill) => skill.name)).toEqual(
       expect.arrayContaining(["crm__notes", "crm__research", "crm__guide"]),

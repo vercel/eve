@@ -12,6 +12,7 @@ function contributions(
   overrides: Partial<CompiledExtensionContributions>,
 ): CompiledExtensionContributions {
   return {
+    channels: [],
     tools: [],
     dynamicTools: [],
     hooks: [],

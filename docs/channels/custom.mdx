@@ -7,7 +7,7 @@ When eve doesn't ship a channel for your surface, you build one. Custom channels
 
 ## File location and identity
 
-Custom channels live in `agent/channels/` at the root agent. Local subagents do not declare channels today.
+Custom channels live in `agent/channels/` at the root agent or in an [extension](../extensions) mounted there. Local subagents do not declare channels today.
 
 The channel file stem becomes the channel id, so `agent/channels/internal-webhook.ts` is addressed as `internal-webhook`. Export the channel definition as the module's default export.
 

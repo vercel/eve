@@ -205,6 +205,7 @@ async function compileAgentResources(
       consumerAgentRoot: manifest.agentRoot,
       externalDependencies,
     });
+    compiledChannels.push(...contributions.channels);
     for (const tool of contributions.tools) {
       if (!toolNames.has(tool.name)) {
         toolNames.add(tool.name);
