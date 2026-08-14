@@ -5,23 +5,24 @@ description: "Consume eve client stream events live, reconnect by event index, a
 
 Every `ClientSession.send()` call posts the turn, then reads the session's NDJSON (newline-delimited JSON) event stream. `MessageResponse` gives you two ways to consume that stream, aggregating it with `result()` or iterating it live.
 
-Once `send()` is accepted, the session exposes its assigned `sessionId` and can request cooperative cancellation with `session.cancel()`, even while the response stream is still running. The result status is `accepted` when the live session durably queued the command, including when a parked session consumes it as a no-op. An unknown or terminal session returns `no_active_turn`:
+Once `send()` is accepted, `response.cancel()` requests cooperative cancellation of that exact turn. Start consuming the response first; cancellation waits for the stream to identify the turn, guards the request with its ID, and never targets a later turn. The result status is `accepted` when the live session durably queues the command. A response that settles before a turn starts returns `no_active_turn`:
 
 ```ts
-const { session, response } = await client.sessions.create({ message: "Run the long operation." });
+const { response } = await client.sessions.create({ message: "Run the long operation." });
 
-const cancellation = await session.cancel();
+const resultPromise = response.result();
+const cancellation = await response.cancel();
 if (cancellation.status === "accepted") {
   console.log(cancellation.sessionId);
 }
 
-const result = await response.result();
+const result = await resultPromise;
 ```
 
 The cancellation result is discriminated by `status`: only `accepted` includes
 `sessionId`; `no_active_turn` has no session identity field.
 
-Cancellation does not replace stream consumption. Continue reading the response to observe its terminal `turn.cancelled` and `session.waiting` boundary and to advance the client session cursor normally.
+Cancellation does not replace stream consumption. Continue reading the response to observe its terminal `turn.cancelled` and `session.waiting` boundary and to advance the client session cursor normally. Use `session.cancel({ turnId })` instead when you have only a fixed session handle and an observed turn ID.
 
 Between turns, `session.compact()` queues context compaction without sending model input. An accepted request reports the session id; consume the durable stream through the following `session.waiting` boundary before sending the next turn. `compaction.completed` confirms that summarization succeeded; without it, eve preserves the previous history. A never-started session returns `no_active_session` as a successful no-op.
 

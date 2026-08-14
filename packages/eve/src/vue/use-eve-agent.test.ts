@@ -378,7 +378,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
     scope.stop();
   });
 
-  it("unsubscribes and stops the session when the scope is disposed", async () => {
+  it("unsubscribes and detaches the local stream when the scope is disposed", async () => {
     vi.stubGlobal("window", {});
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))

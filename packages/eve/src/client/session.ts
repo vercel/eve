@@ -170,6 +170,7 @@ export class ClientSession {
   ): MessageResponse<TOutput> {
     response.body?.cancel().catch(() => {});
     return new MessageResponse<TOutput>({
+      cancelTurn: async (turnId) => await this.cancel({ turnId }),
       createStream: () => this.#createEventStream(initialStreamIndex, input),
       sessionId: this.#state.sessionId,
     });

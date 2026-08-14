@@ -277,6 +277,47 @@ describe("useEveAgent", () => {
     );
   });
 
+  it("detaches locally on unmount without cancelling the durable turn", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementationOnce((_input, init) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener("abort", () => reject(createAbortError()), {
+          once: true,
+        });
+      });
+    });
+
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+
+    function TestComponent() {
+      helpers = useEveAgent();
+      return null;
+    }
+
+    let renderer: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      renderer = create(createElement(TestComponent));
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = helpers?.send("Hello");
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+    await act(async () => {
+      await sendPromise;
+    });
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("prepares fresh clientContext before sending without projecting it optimistically", async () => {
     const startResponse = createDeferred<Response>();
     const fetchMock = vi

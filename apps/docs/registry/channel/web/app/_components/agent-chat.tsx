@@ -1,10 +1,9 @@
 "use client";
 
 import type { UserContent } from "ai";
-import { Client, type MessageStreamEvent } from "eve/client";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useState } from "react";
 import {
   Conversation,
   ConversationContent,
@@ -22,103 +21,26 @@ import { AgentMessage } from "./agent-message";
 const AGENT_NAME = "eve-agent";
 
 type AgentStatus = ReturnType<typeof useEveAgent>["status"];
-type CancellationState = "idle" | "requested" | "cancelling";
-
-type Cancellation = {
-  requested: boolean;
-  sentTurnId?: string;
-  turnId?: string;
-};
 
 export function AgentChat() {
-  const [client] = useState(() => new Client({ host: "" }));
-  const sessionIdRef = useRef<string | undefined>(undefined);
-  const cancellationRef = useRef<Cancellation>({ requested: false });
   const [cancellationError, setCancellationError] = useState<string>();
-  const [cancellationState, setCancellationState] = useState<CancellationState>("idle");
-
-  const cancelTurn = useCallback(
-    (turnId: string) => {
-      const cancellation = cancellationRef.current;
-      if (!cancellation.requested || cancellation.sentTurnId === turnId) {
-        return;
-      }
-
-      cancellation.sentTurnId = turnId;
-      setCancellationState("cancelling");
-
-      const sessionId = sessionIdRef.current;
-      if (sessionId === undefined) {
-        return;
-      }
-
-      void client.sessions
-        .attach(sessionId)
-        .cancel({ turnId })
-        .catch((error: unknown) => {
-          if (cancellationRef.current !== cancellation) {
-            return;
-          }
-
-          cancellation.requested = false;
-          cancellation.sentTurnId = undefined;
-          setCancellationError(toErrorMessage(error));
-          setCancellationState("idle");
-        });
-    },
-    [client],
-  );
-
-  const handleEvent = useCallback(
-    (event: MessageStreamEvent) => {
-      if (event.type !== "turn.started") {
-        return;
-      }
-
-      const cancellation = cancellationRef.current;
-      cancellation.turnId = event.data.turnId;
-      cancelTurn(event.data.turnId);
-    },
-    [cancelTurn],
-  );
-
-  const agent = useEveAgent({
-    onEvent: handleEvent,
-    onSessionChange(session) {
-      sessionIdRef.current = session?.sessionId;
-    },
-  });
+  const agent = useEveAgent();
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
   const isEmpty = agent.data.messages.length === 0;
   const errorMessage = cancellationError ?? agent.error?.message;
-  const submitStatus = isBusy && cancellationState !== "idle" ? "submitted" : agent.status;
-
-  const prepareTurn = () => {
-    cancellationRef.current = { requested: false };
-    setCancellationError(undefined);
-    setCancellationState("idle");
-  };
 
   const requestCancellation = () => {
-    if (!isBusy || cancellationState !== "idle") {
-      return;
-    }
-
-    const cancellation = cancellationRef.current;
-    cancellation.requested = true;
     setCancellationError(undefined);
-    setCancellationState("requested");
-
-    if (cancellation.turnId !== undefined) {
-      cancelTurn(cancellation.turnId);
-    }
+    void agent.cancel().catch((error: unknown) => {
+      setCancellationError(toErrorMessage(error));
+    });
   };
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
     if ((text.length === 0 && message.files.length === 0) || isBusy) return;
 
-    prepareTurn();
+    setCancellationError(undefined);
 
     if (message.files.length === 0) {
       await agent.send(text);
@@ -144,7 +66,7 @@ export function AgentChat() {
   const composer = (
     <PromptInput onSubmit={handleSubmit}>
       <PromptInputTextarea placeholder="Send a message…" />
-      <PromptInputSubmit onStop={requestCancellation} status={submitStatus} />
+      <PromptInputSubmit onStop={requestCancellation} status={agent.status} />
     </PromptInput>
   );
 
@@ -183,7 +105,7 @@ export function AgentChat() {
                 key={message.id}
                 message={message}
                 onInputResponses={(inputResponses) => {
-                  prepareTurn();
+                  setCancellationError(undefined);
                   return agent.respond(inputResponses);
                 }}
               />

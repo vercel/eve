@@ -73,6 +73,7 @@ function messageResponseOf(events: readonly unknown[]): MessageResponse {
     isStamped(event) ? event : stampTestEvent(event as UnstampedMessageStreamEvent, index),
   );
   return new MessageResponse({
+    cancelTurn: async () => ({ status: "no_active_turn" }),
     createStream: async function* () {
       for (const event of stamped) yield event;
     },
@@ -3610,6 +3611,7 @@ describe("EveTUIRunner mid-turn message queue", () => {
     vi.spyOn(session, "send").mockImplementation(
       async () =>
         new MessageResponse({
+          cancelTurn: async (turnId) => await session.cancel({ turnId }),
           createStream: async function* () {
             yield stampTestEvent(
               {
@@ -3733,6 +3735,7 @@ describe("EveTUIRunner session id reporting", () => {
     vi.spyOn(session, "send").mockImplementation(
       async () =>
         new MessageResponse({
+          cancelTurn: async (turnId) => await session.cancel({ turnId }),
           createStream: async function* () {
             yield { type: "turn.started", data: { turnId: "turn-1", sequence: 1 } } as never;
             await gate.promise;
