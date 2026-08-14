@@ -1,83 +1,48 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { createFakePrompter, type FakePrompterConfig } from "#internal/testing/fake-prompter.js";
+import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
-import { confirmInitInNonEmptyDirectory, type InitConfirmDependencies } from "./init-confirm.js";
+import { confirmExistingPackageIntegration } from "./init-confirm.js";
 
-function dependencies(input: {
-  interactive: boolean;
-  onSelect?: FakePrompterConfig["single"];
-  onText?: FakePrompterConfig["text"];
-}): InitConfirmDependencies {
-  const fake = createFakePrompter({ single: input.onSelect, text: input.onText });
-  return {
-    createPrompter: vi.fn(() => fake.prompter),
-    hasInteractiveTerminal: vi.fn(() => input.interactive),
-  };
-}
+const summary = ["Create agent/agent.ts", "Add dependencies: ai, eve"];
 
-describe("confirmInitInNonEmptyDirectory", () => {
-  it("selects the current directory with an overwrite warning", async () => {
-    const deps = dependencies({
-      interactive: true,
-      onSelect: (options) => {
-        expect(options).toMatchObject({
-          message: "Where should eve initialize the project?",
-          description:
-            "The current directory isn't empty. Found: README.md, src, notes.txt, draft.md, data.json, and 1 more.",
-          initialValue: "subdirectory",
-        });
-        expect(options.options).toEqual([
-          {
-            value: "subdirectory",
-            label: "Create a new subdirectory",
-            hint: "Keep the current directory unchanged",
-          },
-          {
-            value: "current-directory",
-            label: "Use the current directory",
-            hint: "Overwrite files at generated paths",
-            accent: "warning",
-          },
-        ]);
-        return "current-directory";
+describe("confirmExistingPackageIntegration", () => {
+  it("prints the plan and --yes recovery without a TTY", async () => {
+    await expect(
+      confirmExistingPackageIntegration(summary, {
+        createPrompter: () => createFakePrompter().prompter,
+        hasInteractiveTerminal: () => false,
+      }),
+    ).rejects.toThrow("Planned edits:\n  - Create agent/agent.ts\n  - Add dependencies: ai, eve");
+  });
+
+  it("confirms the durable-edit and install checkpoint in a TTY", async () => {
+    let description = "";
+    const fake = createFakePrompter({
+      single: (options) => {
+        description = options.description ?? "";
+        return true;
       },
     });
 
     await expect(
-      confirmInitInNonEmptyDirectory(
-        ["README.md", "src", "notes.txt", "draft.md", "data.json", "archive"],
-        deps,
-      ),
-    ).resolves.toEqual({ kind: "current-directory" });
+      confirmExistingPackageIntegration(summary, {
+        createPrompter: () => fake.prompter,
+        hasInteractiveTerminal: () => true,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(description).toContain("remain if installation fails");
   });
 
-  it("asks for and normalizes a new subdirectory name", async () => {
-    const deps = dependencies({
-      interactive: true,
-      onSelect: () => "subdirectory",
-      onText: (options) => {
-        expect(options).toMatchObject({
-          message: "Subdirectory name",
-          defaultValue: "my-agent",
-        });
-        expect(options.validate?.("../escape")).toBeDefined();
-        return "  research-agent  ";
-      },
-    });
+  it("cancels without applying the supplied plan", async () => {
+    const fake = createFakePrompter({ single: () => false });
 
-    await expect(confirmInitInNonEmptyDirectory(["README.md"], deps)).resolves.toEqual({
-      kind: "subdirectory",
-      name: "research-agent",
-    });
-  });
-
-  it("refuses a non-interactive scaffold instead of opening a prompt", async () => {
-    const deps = dependencies({ interactive: false });
-
-    await expect(confirmInitInNonEmptyDirectory(["README.md"], deps)).rejects.toThrow(
-      "Cannot choose where to initialize the non-empty current directory without an interactive terminal. Found: README.md. Pass a new directory name, for example: eve init my-agent.",
-    );
-    expect(deps.createPrompter).not.toHaveBeenCalled();
+    await expect(
+      confirmExistingPackageIntegration(summary, {
+        createPrompter: () => fake.prompter,
+        hasInteractiveTerminal: () => true,
+      }),
+    ).rejects.toThrow("no files were changed");
   });
 });

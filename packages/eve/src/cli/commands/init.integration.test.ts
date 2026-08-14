@@ -11,6 +11,8 @@ import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { detectPackageManager } from "#setup/package-manager.js";
 import {
   addAgentToProject,
+  applyAddAgentToProjectPlan,
+  planAddAgentToProject,
   type AddAgentToProjectOptions,
 } from "#setup/scaffold/create/add-to-project.js";
 import {
@@ -91,6 +93,8 @@ function dependencies(
       }
       return addAgentToProject(merged);
     },
+    applyAddAgentToProjectPlan,
+    confirmExistingPackageIntegration: vi.fn(async () => {}),
     confirmInitInNonEmptyDirectory: vi.fn(async () => ({ kind: "current-directory" })),
     // Stubbed to "no visible manager" so assertions do not depend on which
     // manager launched the test runner itself.
@@ -100,6 +104,12 @@ function dependencies(
     isCodingAgentLaunch: vi.fn(async () => false),
     now: vi.fn(() => 0),
     detectPackageManager,
+    planAddAgentToProject: (options: AddAgentToProjectOptions) =>
+      planAddAgentToProject({
+        ...BASE_VERSIONS,
+        ...options,
+        evePackage: options.evePackage ?? BASE_VERSIONS.evePackage,
+      }),
     scaffoldBaseProject: (options: ScaffoldBaseProjectOptions) => {
       const merged = { ...BASE_VERSIONS, ...options };
       if (options.evePackage === undefined) {

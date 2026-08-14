@@ -4,13 +4,20 @@ import { join } from "node:path";
 import type { PackageManagerKind } from "../../package-manager.js";
 import type { NodeEngineOverride } from "../../node-engine.js";
 import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
-import { pathExists, writeTextFile } from "../files.js";
-import { patchPackageJson, type PackageJsonPatch } from "../update/package-json.js";
-import { resolveVersionToken } from "../version-tokens.js";
+import { pathExists } from "../files.js";
 import {
-  applyPackageManagerWorkspaceConfiguration,
+  applyFileWritePlan,
+  planFileWrite,
+  type AppliedFileWrite,
+  type PlannedFileWrite,
+} from "../bounded-write-plan.js";
+import { preparePackageJsonPatch, type PackageJsonPatch } from "../update/package-json.js";
+import { resolveVersionToken } from "../version-tokens.js";
+import { preparePnpmWorkspacePolicy } from "../../primitives/pm/pnpm.js";
+import {
   isPackageManagerWorkspaceMember,
-  patchWorkspaceRootPackageJson,
+  packageManagerRootOnlyPackageJsonPatch,
+  workspaceRootPackageJsonPath,
 } from "../workspace-root.js";
 import {
   agentTemplateFiles,
@@ -26,10 +33,6 @@ export interface AddAgentToProjectOptions {
   projectRoot: string;
   model: string;
   reasoning?: AgentReasoningDefinition;
-  /**
-   * The host project's package manager, which owns any manager-specific
-   * generated project configuration. Defaults to pnpm.
-   */
   packageManager?: PackageManagerKind;
   evePackage?: EvePackageContract;
   aiPackageVersion?: string;
@@ -37,11 +40,18 @@ export interface AddAgentToProjectOptions {
   zodPackageVersion?: string;
 }
 
+export interface AddAgentToProjectPlan {
+  dependenciesAdded: readonly string[];
+  nodeEngineOverride?: NodeEngineOverride;
+  projectRoot: string;
+  summary: readonly string[];
+  writes: readonly PlannedFileWrite[];
+}
+
 export interface AddAgentToProjectResult {
+  appliedWrites: readonly AppliedFileWrite[];
   filesWritten: string[];
-  /** Dependencies added to package.json; ones the project already declares anywhere are left untouched. */
   dependenciesAdded: string[];
-  /** Present when an incompatible package.json engines.node value was replaced. */
   nodeEngineOverride?: NodeEngineOverride;
 }
 
@@ -58,60 +68,47 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 
 function hasDeclaredDependency(packageJson: unknown, dependencyName: string): boolean {
   if (!isJsonObject(packageJson)) return false;
-  for (const field of DEPENDENCY_FIELDS) {
+  return DEPENDENCY_FIELDS.some((field) => {
     const block = packageJson[field];
-    if (isJsonObject(block) && typeof block[dependencyName] === "string") {
-      return true;
-    }
-  }
-  return false;
+    return isJsonObject(block) && typeof block[dependencyName] === "string";
+  });
 }
 
-/**
- * Adds an eve agent to an existing package: writes the `agent/` files, adds
- * missing runtime dependencies, reconciles `engines.node` with eve's
- * requirement, and applies the selected package manager's project
- * configuration. Other host configuration (tsconfig, scripts, ignore files)
- * remains untouched. All conflicts are gathered and reported before anything
- * is written.
- */
-export async function addAgentToProject(
+export async function planAddAgentToProject(
   options: AddAgentToProjectOptions,
-): Promise<AddAgentToProjectResult> {
+): Promise<AddAgentToProjectPlan> {
   const packageManager = options.packageManager ?? "pnpm";
   const packageJsonPath = join(options.projectRoot, "package.json");
   if (!(await pathExists(packageJsonPath))) {
     throw new Error(
-      `Cannot add an eve agent to "${options.projectRoot}" because it has no package.json. ` +
-        "Run `eve init <name>` to create a new project instead.",
+      `Cannot add an eve agent to "${options.projectRoot}" because it has no package.json.`,
     );
   }
 
+  let packageJsonRaw: string;
   let packageJson: unknown;
   try {
-    packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+    packageJsonRaw = await readFile(packageJsonPath, "utf8");
+    packageJson = JSON.parse(packageJsonRaw);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Cannot add an eve agent because "${packageJsonPath}" is not valid JSON. No files were changed. Fix the file, then retry eve init. ${detail}`,
+      `Cannot add an eve agent because "${packageJsonPath}" is not valid JSON. No files were changed. ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
   const files = agentTemplateFiles(options.model, options.reasoning);
-  const conflicts: string[] = [];
-  for (const relativePath of Object.keys(files)) {
-    if (await pathExists(join(options.projectRoot, relativePath))) {
-      conflicts.push(relativePath);
-    }
-  }
+  const conflicts = (
+    await Promise.all(
+      Object.keys(files).map(async (relativePath) =>
+        (await pathExists(join(options.projectRoot, relativePath))) ? relativePath : undefined,
+      ),
+    )
+  ).filter((path): path is string => path !== undefined);
   if (conflicts.length === 0 && (await pathExists(join(options.projectRoot, "agent")))) {
     conflicts.push("agent/");
   }
   if (conflicts.length > 0) {
-    throw new Error(
-      `Cannot add an eve agent to "${options.projectRoot}" because it already has: ` +
-        `${conflicts.join(", ")}.`,
-    );
+    throw new Error(`Cannot add an eve agent because it already has: ${conflicts.join(", ")}.`);
   }
 
   const evePackage = resolveEvePackageContract(options.evePackage);
@@ -119,9 +116,6 @@ export async function addAgentToProject(
     "aiPackageVersion",
     options.aiPackageVersion ?? DEFAULT_AI_PACKAGE_VERSION,
   );
-  // Channels and connections scaffolded later (`eve add channel/slack`,
-  // possibly while `eve dev` is running) import `@vercel/connect`; shipping
-  // it from init means adding them never introduces a missing dependency.
   const connectVersion = resolveVersionToken(
     "connectPackageVersion",
     options.connectPackageVersion ?? DEFAULT_CONNECT_PACKAGE_VERSION,
@@ -130,55 +124,127 @@ export async function addAgentToProject(
     "zodPackageVersion",
     options.zodPackageVersion ?? DEFAULT_ZOD_PACKAGE_VERSION,
   );
-
-  const filesWritten: string[] = [];
-  for (const [relativePath, content] of Object.entries(files)) {
-    const filePath = join(options.projectRoot, relativePath);
-    await writeTextFile(filePath, content);
-    filesWritten.push(filePath);
-  }
-
-  const wanted: Record<string, string> = {
+  const wanted = {
     "@vercel/connect": connectVersion,
     ai: aiVersion,
     eve: formatEveDependencySpecifier(evePackage.version),
     zod: zodVersion,
   };
-  const additions: Record<string, string> = {};
-  for (const [name, version] of Object.entries(wanted)) {
-    if (!hasDeclaredDependency(packageJson, name)) {
-      additions[name] = version;
-    }
-  }
+  const additions = Object.fromEntries(
+    Object.entries(wanted).filter(([name]) => !hasDeclaredDependency(packageJson, name)),
+  );
   const patch: PackageJsonPatch = {};
-  if (Object.keys(additions).length > 0) {
-    patch.dependencies = additions;
-  }
-  const workspaceMember = isPackageManagerWorkspaceMember(packageManager, options.projectRoot);
-  if (!workspaceMember) {
+  if (Object.keys(additions).length > 0) patch.dependencies = additions;
+  if (!isPackageManagerWorkspaceMember(packageManager, options.projectRoot)) {
     patch.nodeEngineRequirement = evePackage.nodeEngine;
   }
-  const patchResult = await patchPackageJson(packageJsonPath, patch);
-
-  const workspacePatchResult = await patchWorkspaceRootPackageJson(
+  const preparedPackageJson = preparePackageJsonPatch(packageJsonRaw, patch);
+  const workspacePackageJsonPath = workspaceRootPackageJsonPath(
     packageManager,
     options.projectRoot,
-    {
-      aiPackageVersion: aiVersion,
-      nodeEngineRequirement: evePackage.nodeEngine,
-    },
   );
-  const nodeEngineOverride =
-    workspacePatchResult.nodeEngineOverride ?? patchResult.nodeEngineOverride;
-
-  await applyPackageManagerWorkspaceConfiguration({
-    packageManager,
-    projectRoot: options.projectRoot,
-  });
-
+  const workspacePackageJsonBefore =
+    workspacePackageJsonPath === undefined
+      ? undefined
+      : await readFile(workspacePackageJsonPath, "utf8");
+  const preparedWorkspacePackageJson =
+    workspacePackageJsonBefore === undefined
+      ? undefined
+      : preparePackageJsonPatch(
+          workspacePackageJsonBefore,
+          packageManagerRootOnlyPackageJsonPatch(packageManager, {
+            aiPackageVersion: aiVersion,
+            nodeEngineRequirement: evePackage.nodeEngine,
+          }),
+        );
+  const pnpmWorkspacePath = join(options.projectRoot, "pnpm-workspace.yaml");
+  const pnpmWorkspaceBefore =
+    packageManager === "pnpm" &&
+    !isPackageManagerWorkspaceMember(packageManager, options.projectRoot)
+      ? await readFile(pnpmWorkspacePath, "utf8").catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return undefined;
+          throw error;
+        })
+      : undefined;
+  const pnpmWorkspaceAfter =
+    packageManager === "pnpm" &&
+    !isPackageManagerWorkspaceMember(packageManager, options.projectRoot)
+      ? preparePnpmWorkspacePolicy(pnpmWorkspaceBefore)
+      : undefined;
+  const writes = await Promise.all([
+    ...Object.entries(files).map(([relativePath, content]) =>
+      planFileWrite({
+        bytes: Buffer.from(content),
+        destination: join(options.projectRoot, relativePath),
+        root: options.projectRoot,
+      }),
+    ),
+    ...(preparedPackageJson.changed
+      ? [
+          planFileWrite({
+            bytes: preparedPackageJson.bytes,
+            destination: packageJsonPath,
+            root: options.projectRoot,
+          }),
+        ]
+      : []),
+    ...(preparedWorkspacePackageJson?.changed === true && workspacePackageJsonPath !== undefined
+      ? [
+          planFileWrite({
+            bytes: preparedWorkspacePackageJson.bytes,
+            destination: workspacePackageJsonPath,
+            root: join(workspacePackageJsonPath, ".."),
+          }),
+        ]
+      : []),
+    ...(pnpmWorkspaceAfter !== undefined && pnpmWorkspaceAfter !== pnpmWorkspaceBefore
+      ? [
+          planFileWrite({
+            bytes: Buffer.from(pnpmWorkspaceAfter),
+            destination: pnpmWorkspacePath,
+            root: options.projectRoot,
+          }),
+        ]
+      : []),
+  ]);
+  const dependenciesAdded = Object.keys(additions).sort();
   return {
-    filesWritten,
-    dependenciesAdded: Object.keys(additions).sort(),
-    nodeEngineOverride,
+    dependenciesAdded,
+    nodeEngineOverride: preparedPackageJson.nodeEngineOverride,
+    projectRoot: options.projectRoot,
+    summary: [
+      ...Object.keys(files).map((path) => `Create ${path}`),
+      ...(dependenciesAdded.length === 0
+        ? []
+        : [`Add dependencies: ${dependenciesAdded.join(", ")}`]),
+      ...(preparedPackageJson.nodeEngineOverride === undefined
+        ? []
+        : [`Update package.json engines.node to ${preparedPackageJson.nodeEngineOverride.next}`]),
+      ...(preparedWorkspacePackageJson?.changed === true
+        ? [`Update workspace package.json at ${workspacePackageJsonPath}`]
+        : []),
+      ...(pnpmWorkspaceAfter !== undefined && pnpmWorkspaceAfter !== pnpmWorkspaceBefore
+        ? ["Update pnpm-workspace.yaml package policy"]
+        : []),
+    ],
+    writes,
   };
+}
+
+export async function applyAddAgentToProjectPlan(
+  plan: AddAgentToProjectPlan,
+): Promise<AddAgentToProjectResult> {
+  const appliedWrites = await applyFileWritePlan(plan.projectRoot, plan.writes);
+  return {
+    appliedWrites,
+    dependenciesAdded: [...plan.dependenciesAdded],
+    filesWritten: appliedWrites.map((write) => write.destination),
+    nodeEngineOverride: plan.nodeEngineOverride,
+  };
+}
+
+export async function addAgentToProject(
+  options: AddAgentToProjectOptions,
+): Promise<AddAgentToProjectResult> {
+  return applyAddAgentToProjectPlan(await planAddAgentToProject(options));
 }

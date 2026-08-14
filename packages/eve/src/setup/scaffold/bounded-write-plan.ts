@@ -4,6 +4,7 @@ import { basename, dirname, relative, resolve } from "node:path";
 export interface PlannedFileWrite {
   bytes: Buffer;
   destination: string;
+  root: string;
   expectedBefore: Buffer | undefined;
   mode?: number;
 }
@@ -64,6 +65,7 @@ export async function planFileWrite(input: {
   return {
     bytes: input.bytes,
     destination,
+    root,
     expectedBefore: existing?.bytes,
     mode: existing?.mode ?? input.mode,
   };
@@ -73,11 +75,11 @@ export async function applyFileWritePlan(
   root: string,
   writes: readonly PlannedFileWrite[],
 ): Promise<readonly AppliedFileWrite[]> {
-  const canonicalRoot = resolve(root);
+  resolve(root);
   const applied: AppliedFileWrite[] = [];
   try {
     for (const write of writes) {
-      await assertSafeParents(canonicalRoot, write.destination);
+      await assertSafeParents(write.root, write.destination);
       const before = await readRegularFile(write.destination);
       if (!sameBytes(write.expectedBefore, before?.bytes)) {
         throw new Error(`Refusing to overwrite changed path "${write.destination}".`);

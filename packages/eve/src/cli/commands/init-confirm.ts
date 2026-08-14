@@ -23,6 +23,28 @@ function formatEntries(entries: readonly string[]): string {
   return `${visible}${suffix}`;
 }
 
+export async function confirmExistingPackageIntegration(
+  summary: readonly string[],
+  dependencies: InitConfirmDependencies = defaultDependencies,
+): Promise<void> {
+  if (!dependencies.hasInteractiveTerminal()) {
+    throw new Error(
+      `Existing-package integration requires confirmation. Planned edits:\n${summary.map((line) => `  - ${line}`).join("\n")}\n\nRe-run with --yes to apply these edits. Package-manager changes will remain if installation fails.`,
+    );
+  }
+  const prompter = dependencies.createPrompter();
+  const confirmed = await prompter.select<boolean>({
+    message: "Apply these existing-project edits?",
+    description: `${summary.join("; ")}. These edits and package-manager side effects remain if installation fails.`,
+    options: [
+      { value: true, label: "Apply edits and install dependencies" },
+      { value: false, label: "Cancel" },
+    ],
+    initialValue: false,
+  });
+  if (!confirmed) throw new Error("Existing-project integration cancelled; no files were changed.");
+}
+
 export async function confirmInitInNonEmptyDirectory(
   entries: readonly string[],
   dependencies: InitConfirmDependencies = defaultDependencies,
