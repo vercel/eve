@@ -1,4 +1,5 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
+import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { EveEvalDerivedFacts, EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
@@ -107,8 +108,11 @@ export function deriveRunFacts(
 
       case "actions.requested": {
         for (const action of event.data.actions) {
-          if (action.kind !== "tool-call") continue;
-          ensureToolCall(action.callId, action.toolName, action.input);
+          if (action.kind === "tool-call") {
+            ensureToolCall(action.callId, action.toolName, action.input);
+          } else if (action.kind === "load-skill") {
+            ensureToolCall(action.callId, LOAD_SKILL_TOOL_NAME, action.input);
+          }
         }
         break;
       }

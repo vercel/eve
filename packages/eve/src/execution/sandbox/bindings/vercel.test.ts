@@ -748,6 +748,63 @@ describe("createVercelSandbox", () => {
     expect(templateSandbox.update).toHaveBeenCalledWith({ networkPolicy: "deny-all" });
   });
 
+  it("resolves mounts only for a fresh live session sandbox", async () => {
+    const templateSandbox = createMockSandbox({ name: "template" });
+    const sessionSandbox = createMockSandbox({ name: "session" });
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(templateSandbox)
+      .mockResolvedValueOnce(sessionSandbox);
+    const resolveSessionCreateOptions = vi.fn(({ session }) => ({
+      mounts: { "/workspace/repos": { drive: `e0-${session.id}` } },
+    }));
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () =>
+        ({ Sandbox: { create, get: vi.fn().mockResolvedValue(null) } }) as never,
+      resolveSessionCreateOptions,
+    });
+
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+    await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      tags: { sessionId: "parent-session" },
+      templateKey: "template-key",
+    });
+
+    expect(resolveSessionCreateOptions).toHaveBeenCalledWith({
+      session: { id: "parent-session" },
+    });
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("mounts");
+    expect(create.mock.calls[1]?.[0]).toMatchObject({
+      mounts: { "/workspace/repos": { drive: "e0-parent-session" } },
+    });
+  });
+
+  it("does not resolve session create options when resuming a sandbox", async () => {
+    const existing = createMockSandbox({ name: "session-key" });
+    const create = vi.fn();
+    const resolveSessionCreateOptions = vi.fn();
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () =>
+        ({ Sandbox: { create, get: vi.fn().mockResolvedValue(existing) } }) as never,
+      resolveSessionCreateOptions,
+    });
+
+    await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: null,
+    });
+
+    expect(resolveSessionCreateOptions).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("forwards author source to template create as the base layer", async () => {
     /*
      * The real Vercel SDK pre-populates `currentSnapshotId` on a

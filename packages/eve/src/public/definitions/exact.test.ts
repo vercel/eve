@@ -14,7 +14,10 @@ import {
   type HookEventMap,
   type StreamEventHook,
 } from "#public/definitions/hook.js";
-import { defineInstructions } from "#public/definitions/instructions.js";
+import {
+  defineDynamic as defineDynamicInstructions,
+  defineInstructions,
+} from "#public/definitions/instructions.js";
 import { defineInstrumentation } from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
@@ -221,11 +224,42 @@ function typeOnlyFixtures(): void {
   // @ts-expect-error Instructions identity is path-derived.
   defineInstructions(instructionsWithName);
 
+  defineInstructions({ content: "Always be concise." });
+  defineInstructions({ content: "Account context.", role: "user" });
+
+  // @ts-expect-error Instructions use either content or deprecated markdown, never both.
+  defineInstructions({
+    content: "mixed",
+    markdown: "mixed",
+  });
+
+  defineInstructions({
+    content: "invalid role",
+    // @ts-expect-error Instructions support only system and user roles.
+    role: "assistant",
+  });
+
+  defineDynamicInstructions({
+    events: {
+      "session.started": () => defineInstructions({ content: "Session." }),
+      "turn.started": async () => defineInstructions({ content: "Turn.", role: "user" }),
+      // @ts-expect-error Dynamic instructions do not support step scope.
+      "step.started": () => defineInstructions({ content: "Step." }),
+    },
+  });
+
+  defineInstrumentation({
+    isEnabled: true,
+    recordInputs: true,
+  });
+
+  // Unlike the helpers above, `defineInstrumentation` takes a generic union — a
+  // config and a provider overlap on `events` and `setup` — so it cannot use
+  // `ExactDefinition`. Excess keys reach `eve build` instead.
   const instrumentationWithEnabled = {
     isEnabled: true,
     recordInputs: true,
   };
-  // @ts-expect-error Instrumentation has no separate enable toggle.
   defineInstrumentation(instrumentationWithEnabled);
 
   defineInstrumentation({

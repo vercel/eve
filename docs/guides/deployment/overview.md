@@ -34,7 +34,7 @@ Keep credentials in your deployment environment or secret manager. Don’t inclu
 
 Your model configuration determines the required credential. A string model ID uses the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) and requires Vercel project OpenID Connect (OIDC) or `AI_GATEWAY_API_KEY`. A provider-authored model uses that provider’s package and API key. See [Agent configuration](../../agent-config#set-the-model) for both forms.
 
-Configure production route authentication separately from model access. The default policy rejects browser traffic in production. See [Auth and route protection](../auth-and-route-protection) for the available policies and secret requirements.
+Configure production route authentication separately from model access. The default policy rejects browser traffic in production. See [Authentication](../auth-and-route-protection) for the available policies and secret requirements.
 
 ## Verify the deployment
 

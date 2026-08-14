@@ -43,7 +43,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 40;
+export const COMPILED_AGENT_MANIFEST_VERSION = 41;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -229,7 +229,7 @@ export interface CompiledDynamicSkillDefinition extends ModuleSourceRef {
 
 /**
  * Compiled dynamic instructions resolver entry. The resolver produces
- * {@link ModelMessage[]} at runtime rather than static markdown.
+ * role-aware instructions at runtime.
  */
 export interface CompiledDynamicInstructionsDefinition extends ModuleSourceRef {
   readonly slug: string;
@@ -316,10 +316,12 @@ const compiledDynamicModelDefinitionSchema: z.ZodType<CompiledDynamicModelDefini
 
 const channelMethodSchema = z.union([
   z.literal("GET"),
+  z.literal("HEAD"),
   z.literal("POST"),
   z.literal("PUT"),
   z.literal("PATCH"),
   z.literal("DELETE"),
+  z.literal("OPTIONS"),
   z.literal("WEBSOCKET"),
 ]);
 
@@ -439,7 +441,9 @@ const compiledAgentConfigBaseFields = {
   description: z.string().optional(),
   experimental: z
     .object({
+      instrumentationProviders: z.boolean().optional(),
       subagentPersistentSessions: z.boolean().optional(),
+      tasks: z.boolean().optional(),
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),
     })
     .strict()
@@ -470,9 +474,10 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z.union([
 
 const compiledInstructionsSchema: z.ZodType<CompiledInstructionsDefinition> = z
   .object({
+    content: z.string(),
     name: z.string(),
     logicalPath: z.string(),
-    markdown: z.string(),
+    role: z.enum(["system", "user"]),
     sourceId: z.string(),
     sourceKind: z.union([z.literal("markdown"), z.literal("module")]),
   })
@@ -697,7 +702,7 @@ const compiledAgentResourceFields = {
   schedules: z.array(compiledScheduleDefinitionSchema),
   remoteAgents: z.array(compiledRemoteAgentNodeSchema),
   skills: z.array(compiledSkillSourceSchema).readonly(),
-  instructions: compiledInstructionsSchema.optional(),
+  instructions: z.array(compiledInstructionsSchema).readonly().default([]),
   tools: z.array(compiledToolDefinitionSchema),
   workspaceResourceRoot: compiledWorkspaceResourceRootSchema,
 };
@@ -807,7 +812,7 @@ export const compiledAgentManifestSchema = z
     skills: z.array(compiledSkillSourceSchema).readonly(),
     subagentEdges: z.array(compiledSubagentEdgeSchema),
     subagents: z.array(compiledSubagentNodeSchema),
-    instructions: compiledInstructionsSchema.optional(),
+    instructions: z.array(compiledInstructionsSchema).readonly().default([]),
     tools: z.array(compiledToolDefinitionSchema),
     version: z.literal(COMPILED_AGENT_MANIFEST_VERSION),
     workspaceResourceRoot: compiledWorkspaceResourceRootSchema,
@@ -833,7 +838,7 @@ export interface CreateCompiledAgentResourcesInput {
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
   readonly schedules?: readonly CompiledScheduleDefinition[];
   readonly skills?: readonly CompiledSkillDefinition[];
-  readonly instructions?: CompiledInstructionsDefinition;
+  readonly instructions?: readonly CompiledInstructionsDefinition[];
   readonly tools?: readonly CompiledToolDefinition[];
   readonly workspaceResourceRoot?: CompiledWorkspaceResourceRoot;
 }
@@ -862,6 +867,7 @@ export function createCompiledAgentResources(
     dynamicTools: [...(input.dynamicTools ?? [])],
     extensionMounts: [...(input.extensionMounts ?? [])],
     hooks: [...(input.hooks ?? [])],
+    instructions: [...(input.instructions ?? [])],
     remoteAgents: [...(input.remoteAgents ?? [])],
     sandbox: input.sandbox ?? null,
     sandboxWorkspaces: [...(input.sandboxWorkspaces ?? [])],
@@ -876,10 +882,6 @@ export function createCompiledAgentResources(
       }),
     },
   };
-
-  if (input.instructions !== undefined) {
-    resources.instructions = input.instructions;
-  }
 
   return resources;
 }
@@ -917,7 +919,9 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
       config.experimental === undefined
         ? undefined
         : {
+            instrumentationProviders: config.experimental.instrumentationProviders,
             subagentPersistentSessions: config.experimental.subagentPersistentSessions,
+            tasks: config.experimental.tasks,
             workflow:
               config.experimental.workflow === undefined
                 ? undefined
@@ -1015,7 +1019,7 @@ export function createCompiledAgentManifest(input: {
   readonly skills?: readonly CompiledSkillDefinition[];
   readonly subagentEdges?: readonly CompiledSubagentEdge[];
   readonly subagents?: readonly CompiledSubagentNode[];
-  readonly instructions?: CompiledInstructionsDefinition;
+  readonly instructions?: readonly CompiledInstructionsDefinition[];
   readonly tools?: readonly CompiledToolDefinition[];
   readonly extensionMounts?: readonly CompiledExtensionMount[];
 }): CompiledAgentManifest {

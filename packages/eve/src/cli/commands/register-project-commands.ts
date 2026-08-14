@@ -1,4 +1,5 @@
 import type { Command } from "#compiled/commander/index.js";
+import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
 
 interface ProjectCommandLogger {
   error(message: string): void;
@@ -9,21 +10,19 @@ interface ProjectCommandLogger {
 export function registerProjectCommands(input: {
   program: Command;
   logger: ProjectCommandLogger;
-  appRoot: string;
+  applicationContext: CliApplicationContext;
 }): void {
-  input.program
-    .command("link")
+  applicationCommand(input.program.command("link"), input.applicationContext)
     .description("Link this directory to a Vercel project and pull AI Gateway credentials.")
     .action(async () => {
       const { runLinkCommand } = await import("./link.js");
-      await runLinkCommand(input.logger, input.appRoot);
+      await runLinkCommand(input.logger, input.applicationContext.root);
     });
 
-  input.program
-    .command("deploy")
+  applicationCommand(input.program.command("deploy"), input.applicationContext)
     .description("Deploy the agent to Vercel production (links first if needed).")
     .action(async () => {
       const { runDeployCommand } = await import("./deploy.js");
-      await runDeployCommand(input.logger, input.appRoot);
+      await runDeployCommand(input.logger, input.applicationContext.root);
     });
 }

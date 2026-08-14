@@ -48,15 +48,15 @@ describe("createDocsRedirects", () => {
 
 describe("createRootMarkdownRedirects", () => {
   it("redirects only explicit Markdown representations into docs", () => {
-    expect(createRootMarkdownRedirects("/installation", "/installation")).toEqual([
+    expect(createRootMarkdownRedirects("/installation", "/getting-started")).toEqual([
       {
         source: "/installation.md",
-        destination: "/docs/installation.md",
+        destination: "/docs/getting-started.md",
         permanent: true,
       },
       {
         source: "/installation.mdx",
-        destination: "/docs/installation.mdx",
+        destination: "/docs/getting-started.mdx",
         permanent: true,
       },
     ]);
@@ -105,12 +105,24 @@ describe("docsRedirects", () => {
     ["/docs/channels", "/docs/channels/overview"],
     ["/docs/guides/deployment.md", "/docs/guides/deployment/overview.md"],
     ["/docs/introduction.md", "/docs/getting-started.md"],
+    ["/docs/installation", "/docs/getting-started"],
+    ["/docs/installation.md", "/docs/getting-started.md"],
+    ["/docs/project-structure", "/docs/getting-started"],
+    ["/docs/project-structure.md", "/docs/getting-started.md"],
     ["/docs/reference/http-api", "/docs/channels/eve"],
-    ["/docs/project-layout", "/docs/reference/project-layout"],
+    ["/docs/project-layout", "/docs/getting-started"],
+    ["/docs/reference/project-layout", "/docs/getting-started"],
+    ["/docs/reference/project-layout.md", "/docs/getting-started.md"],
     ["/docs/dynamic-capabilities", "/docs/guides/dynamic-capabilities"],
-    ["/docs/dynamic-workflows", "/docs/guides/dynamic-workflows"],
+    ["/docs/guides/state", "/docs/concepts/state"],
+    ["/docs/dynamic-workflows", "/docs/subagents/workflow-tool"],
+    ["/docs/guides/dynamic-workflows", "/docs/subagents/workflow-tool"],
     ["/docs/sessions", "/docs/concepts/sessions-runs-and-streaming"],
     ["/docs/agent", "/docs/agent-config"],
+    ["/docs/guides/acp", "/docs/protocols/acp"],
+    ["/docs/guides/acp.md", "/docs/protocols/acp.md"],
+    ["/docs/guides/ucp", "/docs/protocols/ucp"],
+    ["/docs/guides/ucp.mdx", "/docs/protocols/ucp.mdx"],
     ["/docs/evals", "/docs/evals/overview"],
   ])("redirects %s to %s", (source, destination) => {
     expect(docsRedirects).toContainEqual({ source, destination, permanent: true });
@@ -120,6 +132,8 @@ describe("docsRedirects", () => {
 describe("rootMarkdownRedirects", () => {
   it.each([
     ["/getting-started.mdx", "/docs/getting-started.mdx"],
+    ["/installation.md", "/docs/getting-started.md"],
+    ["/project-structure.mdx", "/docs/getting-started.mdx"],
     ["/tools/overview.md", "/docs/tools.md"],
     ["/channels/eve.mdx", "/docs/channels/eve.mdx"],
   ])("redirects observed root Markdown alias %s to %s", (source, destination) => {

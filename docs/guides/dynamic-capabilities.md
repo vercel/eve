@@ -21,6 +21,44 @@ resolver first selects a model, eve normalizes the selection and resolves any
 omitted context-window metadata from the AI Gateway catalog. Dynamic tools,
 skills, instructions, and subagents may return `null` to omit a capability.
 
+### Route image inputs to a vision model
+
+Use `step.started` when model choice depends on the current messages. This
+keeps GLM for text and switches to Gemini Flash when user history contains an
+image:
+
+```ts title="agent/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineAgent({
+  model: defineDynamic({
+    events: {
+      "step.started": (_event, ctx) => {
+        const hasImage = ctx.messages.some(
+          (message) =>
+            message.role === "user" &&
+            Array.isArray(message.content) &&
+            message.content.some(
+              (part) =>
+                part.type === "image" ||
+                (part.type === "file" &&
+                  (part.mediaType === "image" || part.mediaType.startsWith("image/"))),
+            ),
+        );
+
+        return hasImage ? "google/gemini-3.5-flash" : "zai/glm-5.2";
+      },
+    },
+  }),
+});
+```
+
+eve stages byte-backed `file` parts under `/workspace/attachments` before
+`step.started`, but keeps their media type in `ctx.messages`. When an image
+reaches the provider, vision models can process it and non-vision models reject
+it. eve does not reroute automatically. See [Inbound
+attachments](../sandbox#inbound-attachments).
+
 ## Dynamic subagents
 
 Wrap a declared subagent's own `agent.ts` in `defineDynamic` when its
@@ -212,7 +250,7 @@ Skills follow the same naming rule as tools: a single `defineSkill(...)` is name
 
 ## Dynamic instructions
 
-A dynamic instructions file resolves the per-session system prompt the same way, returning `defineInstructions(...)` built from the principal, tenant, or external data:
+A dynamic instructions file returns `defineInstructions({ content, role? })` built from the principal, tenant, channel, or external data. Omit `role` for system context:
 
 ```ts title="agent/instructions/persona.ts"
 import { defineDynamic, defineInstructions } from "eve/instructions";
@@ -222,14 +260,36 @@ export default defineDynamic({
     "session.started": (_event, ctx) => {
       const plan = ctx.session.auth.current?.attributes.plan ?? "free";
       return defineInstructions({
-        markdown: `The caller is on the ${plan} plan. Match the depth of your answers to it.`,
+        content: `The caller is on the ${plan} plan. Match the depth of your answers to it.`,
       });
     },
   },
 });
 ```
 
-Both resolve before the prompt is assembled, so the model sees the right instructions and skill set for whoever is calling, without that context reaching anyone else.
+Use `role: "user"` when the resolved value is application or user context that should become part of durable history:
+
+```ts title="agent/instructions/brief.ts"
+import { defineDynamic, defineInstructions } from "eve/instructions";
+import { loadBrief } from "../lib/briefs";
+
+export default defineDynamic({
+  events: {
+    "turn.started": async (_event, ctx) => {
+      const brief = await loadBrief(ctx.session.auth.current);
+      return brief ? defineInstructions({ content: brief, role: "user" }) : null;
+    },
+  },
+});
+```
+
+Instruction resolvers support `session.started` and `turn.started` only. A system result lives in that scope and stays outside history. A user result is appended to history at the lifecycle boundary, with session results before turn results and both before the current delivery. There is no automatic deduplication: returning the same user content on a later turn intentionally appends another message.
+
+Resolver snapshots reflect that order. At `session.started`, `ctx.messages` includes static user-role instructions. At `turn.started`, it also includes user-role results from `session.started`. These augmented snapshots are specific to instruction resolvers; tools, skills, models, and subagents keep their existing message snapshots.
+
+Returning `null` or blank content contributes nothing. A throwing or invalid session resolver leaves any wider valid system selection in place. Every turn starts with fresh turn-scoped system instructions, so a failed or empty turn result cannot leak the previous turn's value. Completed lifecycle steps are replay-safe: parking, resuming, or replaying them does not duplicate user-role messages.
+
+Dynamic system content that changes frequently can reduce provider prompt-cache reuse. Prefer session scope for stable values and use turn scope only when the context must be refreshed. Cache behavior remains provider-specific.
 
 ## What to read next
 
@@ -237,4 +297,4 @@ Both resolve before the prompt is assembled, so the model sees the right instruc
 - The static tool basics this builds on → [Tools](../tools)
 - The built-in tools and how to override them → [Default harness](../concepts/default-harness)
 - Authenticate a tool or connection to an external service → [Auth & route protection](./auth-and-route-protection)
-- Durable per-session memory for resolvers to read → [State](./state)
+- Durable per-session memory for resolvers to read → [State](../concepts/state)

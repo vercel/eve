@@ -11,7 +11,11 @@ import {
   type GitHubThread,
 } from "#public/channels/github/binding.js";
 import { getGitHubRepository, type GitHubApiOptions } from "#public/channels/github/api.js";
-import type { GitHubChannelCredentials } from "#public/channels/github/auth.js";
+import {
+  createGitHubBotNameResolver,
+  type GitHubBotName,
+  type GitHubChannelCredentials,
+} from "#public/channels/github/auth.js";
 import { GITHUB_CHANNEL_DEFAULT_ROUTE } from "#public/channels/github/constants.js";
 import { createDefaultEvents, defaultOnComment } from "#public/channels/github/defaults.js";
 import {
@@ -105,6 +109,8 @@ export interface GitHubEventContext extends GitHubChannelContext, ChannelContinu
 export type GitHubInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /**
@@ -127,9 +133,9 @@ type GitHubSessionFailedHandler = (
 /**
  * Event handlers for `githubChannel({ events })`. The channel installs built-in
  * handlers for `turn.started` (eyes reaction plus repo checkout),
- * `message.completed` (posts the reply), and `session.failed`/`turn.failed`
- * (posts an error comment). A handler supplied here replaces the built-in for
- * that key rather than running alongside it.
+ * `message.completed` (posts the reply), `input.requested` (posts the prompt),
+ * and `session.failed`/`turn.failed` (posts an error comment). A handler supplied
+ * here replaces the built-in for that key rather than running alongside it.
  */
 export interface GitHubChannelEvents {
   readonly "action.partial"?: GitHubEventHandler<"action.partial">;
@@ -152,7 +158,12 @@ export interface GitHubChannelEvents {
 /** Configuration for {@link githubChannel}. */
 export interface GitHubChannelConfig {
   readonly api?: GitHubApiOptions;
-  readonly botName?: string;
+  /**
+   * The name the channel answers to in `@mentions`, supplied directly or
+   * resolved lazily on first use inside request handling. Falls back to the
+   * credentials' `appSlug`, then `GITHUB_APP_SLUG`.
+   */
+  readonly botName?: GitHubBotName;
   readonly credentials?: GitHubChannelCredentials;
   readonly events?: GitHubChannelEvents;
   readonly progress?: GitHubProgressConfig;
@@ -220,11 +231,15 @@ export interface GitHubChannel extends Channel<GitHubChannelState, GitHubReceive
 
 /** GitHub channel factory for GitHub App webhooks and proactive comments. */
 export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
-  const botName = config.botName ?? process.env.GITHUB_APP_SLUG;
+  const botName = createGitHubBotNameResolver({
+    botName: config.botName,
+    credentials: config.credentials,
+  });
   const dispatchOptions = { botName };
   const mergedEvents: GitHubChannelEvents = {
     ...createDefaultEvents({
       api: config.api,
+      botName,
       credentials: config.credentials,
       progress: config.progress,
     }),

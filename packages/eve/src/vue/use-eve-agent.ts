@@ -2,6 +2,7 @@ import { shallowRef, computed, onScopeDispose, type ComputedRef } from "vue";
 import type { UserContent } from "ai";
 
 import {
+  detachEveAgentStore,
   EveAgentStore,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
@@ -14,6 +15,7 @@ import type { ClientSession } from "#client/session.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
+  CancelSessionResult,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -43,6 +45,8 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
  * Reactive return value from `useEveAgent`.
  */
 export interface UseEveAgentReturn<TData> {
+  /** Request durable cancellation of the active turn while continuing to receive its events. */
+  readonly cancel: () => Promise<CancelSessionResult>;
   /** Projected state: the reducer folds every stream event into this value. */
   readonly data: ComputedRef<TData>;
   /** Last transport-level error, or `undefined` when healthy. */
@@ -65,8 +69,6 @@ export interface UseEveAgentReturn<TData> {
   readonly session: ComputedRef<ClientSessionState | undefined>;
   /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
   readonly status: ComputedRef<UseEveAgentStatus>;
-  /** Abort the in-flight request. */
-  readonly stop: () => void;
 }
 
 /**
@@ -146,8 +148,8 @@ export function useEveAgent<TData>(
  * Without a `reducer`, events project into `EveMessageData` via
  * `defaultMessageReducer()`; pass `reducer` to project into a custom `TData`.
  * Returns reactive refs (`data`, `error`, `events`, `session`, `status`) plus
- * `send`, `respond`, `stop`, and `reset`. Configuration is read once on store creation;
- * remount to change it. On scope dispose, the in-flight request is aborted and
+ * `send`, `respond`, `cancel`, and `reset`. Configuration is read once on store creation;
+ * remount to change it. On scope dispose, the in-flight request is detached and
  * the store unsubscribed.
  */
 export function useEveAgent<TData>(
@@ -183,11 +185,12 @@ export function useEveAgent<TData>(
 
     onScopeDispose(() => {
       unsubscribe();
-      store.stop();
+      detachEveAgentStore(store);
     });
   }
 
   return {
+    cancel: () => store.cancel(),
     data: computed(() => snapshot.value.data),
     error: computed(() => snapshot.value.error),
     events: computed(() => snapshot.value.events),
@@ -200,6 +203,5 @@ export function useEveAgent<TData>(
       store.send({ ...options, message }),
     session: computed(() => snapshot.value.session),
     status: computed(() => snapshot.value.status),
-    stop: () => store.stop(),
   };
 }

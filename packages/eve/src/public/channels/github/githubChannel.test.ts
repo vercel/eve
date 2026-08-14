@@ -211,6 +211,7 @@ describe("githubChannel", () => {
     const channel = githubChannel({
       botName: "testbot",
       credentials: { webhookSecret: SECRET },
+      onComment: (ctx) => ({ auth: defaultGitHubAuth(ctx), title: "GitHub run" }),
     });
     const { send } = await firePost(
       channel,
@@ -254,7 +255,95 @@ describe("githubChannel", () => {
         repo: "eve",
         triggeringCommentId: 10,
       },
+      title: "GitHub run",
     });
+  });
+
+  it("resolves a lazy botName on first dispatch and caches it", async () => {
+    const resolveBotName = vi.fn().mockResolvedValue("testbot");
+    const channel = githubChannel({
+      botName: resolveBotName,
+      credentials: { webhookSecret: SECRET },
+    });
+    const commentRequest = () =>
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "@testbot help me",
+            html_url: "https://github.test/vercel/eve/issues/5#issuecomment-10",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      );
+
+    const first = await firePost(channel, commentRequest());
+    const second = await firePost(channel, commentRequest());
+
+    expect(first.send).toHaveBeenCalledTimes(1);
+    expect(second.send).toHaveBeenCalledTimes(1);
+    expect(first.send.mock.calls[0]![1].message).toBe("help me");
+    expect(resolveBotName).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed botName resolver on the next delivery instead of pinning", async () => {
+    const resolveBotName = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("no request context"))
+      .mockRejectedValueOnce(new Error("no request context"))
+      .mockResolvedValue("testbot");
+    const channel = githubChannel({
+      botName: resolveBotName,
+      credentials: { webhookSecret: SECRET },
+    });
+    const commentRequest = () =>
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "@testbot help me",
+            html_url: "https://github.test/vercel/eve/issues/5#issuecomment-10",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      );
+
+    const first = await firePost(channel, commentRequest());
+    const second = await firePost(channel, commentRequest());
+
+    expect(first.send).not.toHaveBeenCalled();
+    expect(second.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the credentials' appSlug when botName is not configured", async () => {
+    const channel = githubChannel({
+      credentials: { appSlug: "testbot", webhookSecret: SECRET },
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "@testbot help me",
+            html_url: "https://github.test/vercel/eve/issues/5#issuecomment-10",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![1].message).toBe("help me");
   });
 
   it("keeps GitHub metadata separate from the comment text", async () => {
@@ -801,6 +890,183 @@ describe("githubChannel", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "https://github.test/repos/vercel/eve/issues/5/comments",
     );
+  });
+
+  it("posts input requests through the issue comments API", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 77 })));
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          botName: "testbot",
+          credentials: {
+            appId: "test-app",
+            webhookSecret: SECRET,
+          },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy" },
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "deny", label: "No" },
+            ],
+            prompt: "Approve this change?",
+            requestId: "call_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      body: "Approve this change?\n\n1. Yes\n2. No\n\nAnswer by mentioning me in a reply, e.g. `@testbot Yes`.",
+    });
+  });
+
+  it("renders the mention instruction from a lazy botName resolver", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 79 })));
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          botName: () => Promise.resolve("testbot"),
+          credentials: { appId: "test-app", webhookSecret: SECRET },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy" },
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "deny", label: "No" },
+            ],
+            prompt: "Approve this change?",
+            requestId: "call_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      body: "Approve this change?\n\n1. Yes\n2. No\n\nAnswer by mentioning me in a reply, e.g. `@testbot Yes`.",
+    });
+  });
+
+  it("omits the mention instruction when no bot name is configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 78 })));
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          credentials: { appId: "test-app", webhookSecret: SECRET },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy" },
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "deny", label: "No" },
+            ],
+            prompt: "Approve this change?",
+            requestId: "call_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      buildAdapterContext(adapter, stubAccessor()),
+    );
+
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      body: "Approve this change?\n\n1. Yes\n2. No",
+    });
+  });
+
+  it("does not post an empty input request comment", async () => {
+    const fetchMock = vi.fn();
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          credentials: { appId: "test-app", webhookSecret: SECRET },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      buildAdapterContext(adapter, stubAccessor()),
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("turn.started adds an eyes reaction to the triggering comment", async () => {

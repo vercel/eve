@@ -87,6 +87,16 @@ export async function addAgentToProject(
     );
   }
 
+  let packageJson: unknown;
+  try {
+    packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Cannot add an eve agent because "${packageJsonPath}" is not valid JSON. No files were changed. Fix the file, then retry eve init. ${detail}`,
+    );
+  }
+
   const files = agentTemplateFiles(options.model, options.reasoning);
   const conflicts: string[] = [];
   for (const relativePath of Object.keys(files)) {
@@ -128,7 +138,6 @@ export async function addAgentToProject(
     filesWritten.push(filePath);
   }
 
-  const packageJson: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
   const wanted: Record<string, string> = {
     "@vercel/connect": connectVersion,
     ai: aiVersion,

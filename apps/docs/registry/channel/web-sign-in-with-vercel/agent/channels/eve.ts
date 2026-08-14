@@ -17,7 +17,6 @@ const betterAuthSession: AuthFn<Request> = async (request) => {
   return {
     attributes,
     authenticator: "better-auth:vercel",
-    issuer: "https://vercel.com",
     principalId: session.user.id,
     principalType: "user",
   };

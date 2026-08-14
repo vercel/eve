@@ -146,50 +146,78 @@ describe("TurnControlReceiver", () => {
     expect(bufferedSessionControls).toEqual(["clear", "compact", "expired"]);
   });
 
-  it("buffers a steering message before cancelling the active turn", async () => {
+  it("consumes a replayed task delivery only once", async () => {
     installControlHook([parkResult()], true);
     const bufferedDeliveries: DeliverHookPayload[] = [];
-    vi.mocked(forwardTurnCancellationStep).mockImplementation(async () => {
-      expect(bufferedDeliveries).toEqual([
-        expect.objectContaining({
-          payloads: [{ message: "replace this turn" }],
-          turnPolicy: "steer",
-        }),
-      ]);
-      return true;
+    const caller = {
+      callId: "call-task",
+      replyTo: { kind: "hook" as const, token: "task-token" },
+      subagentName: "research",
+      taskId: "task-1",
+    };
+
+    await runReceiver(bufferedDeliveries, {
+      commandInbox: createCommandInbox([
+        { caller, kind: "send", payload: { message: "once" } },
+        { caller, kind: "send", payload: { message: "duplicate" } },
+      ]),
+      seenTaskDeliveries: new Set(),
     });
+
+    expect(bufferedDeliveries.map((delivery) => delivery.payloads[0]?.message)).toEqual(["once"]);
+  });
+
+  it("deduplicates a replayed task response without dropping a different partial response", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
 
     await runReceiver(bufferedDeliveries, {
       commandInbox: createCommandInbox([
         {
           kind: "send",
-          payload: { message: "replace this turn" },
-          turnPolicy: "steer",
+          payload: { inputResponses: [{ requestId: "q1" }] },
+          taskDeliveryId: "task-1:q1",
+        },
+        {
+          kind: "send",
+          payload: { inputResponses: [{ requestId: "q1" }] },
+          taskDeliveryId: "task-1:q1",
+        },
+        {
+          kind: "send",
+          payload: { inputResponses: [{ requestId: "q2" }] },
+          taskDeliveryId: "task-1:q2",
         },
       ]),
+      seenTaskDeliveries: new Set(),
     });
 
+    expect(
+      bufferedDeliveries.map((delivery) => delivery.payloads[0]?.inputResponses?.[0]?.requestId),
+    ).toEqual(["q1", "q2"]);
+  });
+
+  it("discards queued deliveries when their task is cancelled", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+
+    await runReceiver(bufferedDeliveries, {
+      commandInbox: createCommandInbox([
+        {
+          kind: "send",
+          payload: { inputResponses: [{ requestId: "q1" }] },
+          taskDeliveryId: "task-1:q1",
+        },
+        { kind: "cancel", taskId: "task-1", turnId: "turn_3" },
+      ]),
+      seenTaskDeliveries: new Set(),
+    });
+
+    expect(bufferedDeliveries).toEqual([]);
     expect(forwardTurnCancellationStep).toHaveBeenCalledWith({
       payload: {},
       token: "turn-control:cancel",
     });
-  });
-
-  it("does not cancel for queued messages or input responses", async () => {
-    installControlHook([parkResult()], true);
-
-    await runReceiver([], {
-      commandInbox: createCommandInbox([
-        { kind: "send", payload: { message: "later" }, turnPolicy: "queue" },
-        {
-          kind: "send",
-          payload: { inputResponses: [{ optionId: "yes", requestId: "input-1" }] },
-          turnPolicy: "steer",
-        },
-      ]),
-    });
-
-    expect(forwardTurnCancellationStep).not.toHaveBeenCalled();
   });
 
   it("forwards cancel and reset through the active turn's private hook", async () => {
@@ -222,12 +250,15 @@ function runReceiver(
   options: {
     readonly bufferedSessionControls?: Array<"clear" | "compact" | "expired" | "reset">;
     readonly commandInbox?: SessionCommandInbox;
+    readonly seenTaskDeliveries?: Set<string>;
   } = {},
 ): ReturnType<TurnControlReceiver["waitForAction"]> {
   const receiver = new TurnControlReceiver({
     bufferedDeliveries,
     bufferedSessionControls: options.bufferedSessionControls ?? [],
     commandInbox: options.commandInbox ?? createCommandInbox(),
+    expectedTurnId: "turn_0",
+    seenTaskDeliveries: options.seenTaskDeliveries,
     token: "turn-control",
   });
   return receiver.waitForAction().finally(() => receiver.dispose());

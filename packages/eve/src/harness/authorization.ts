@@ -34,6 +34,7 @@
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { SessionIdKey } from "#context/keys.js";
+import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type { AuthorizationCallback, ConnectionPrincipal } from "#runtime/connections/types.js";
 import type { JsonValue } from "#public/types/json.js";
@@ -50,6 +51,7 @@ const AUTHORIZATION_PENDING_BRAND = "__eveAuthorizationPending" as const;
 export interface AuthorizationChallenge {
   /** Opaque identity of this exact authorization attempt. */
   readonly attemptId?: string;
+  readonly candidateId?: string;
   readonly name: string;
   readonly challenge: ConnectionAuthorizationChallenge;
   readonly hookUrl: string;
@@ -113,6 +115,7 @@ export function redactSignalResume(signal: AuthorizationSignal): AuthorizationSi
   return requestAuthorization(
     signal.challenges.map((entry) => ({
       attemptId: entry.attemptId,
+      candidateId: entry.candidateId,
       name: entry.name,
       challenge: entry.challenge,
       hookUrl: entry.hookUrl,
@@ -174,7 +177,10 @@ export function getHookUrl(name: string, attemptId: string): string | undefined 
   const baseUrl = ctx.get(CallbackBaseUrlKey);
   if (!sessionId || !baseUrl) return undefined;
   const token = authHookToken(sessionId);
-  return `${baseUrl}${createEveConnectionCallbackRoutePath(name, attemptId, token)}`;
+  return createWorkflowCallbackUrl(
+    baseUrl,
+    createEveConnectionCallbackRoutePath(name, attemptId, token),
+  );
 }
 
 /** Mints the identity and callback URL for one interactive authorization attempt. */

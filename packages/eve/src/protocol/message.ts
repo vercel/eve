@@ -7,6 +7,10 @@ import {
 } from "#internal/attachments/url-refs.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createEventId } from "#protocol/event-id.js";
+import {
+  createEveSessionStreamRoutePath,
+  createEveSubagentStreamRoutePath,
+} from "#protocol/routes.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type {
   RuntimeActionRequest,
@@ -23,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "21";
+export const EVE_MESSAGE_STREAM_VERSION = "22";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -120,6 +124,17 @@ export interface RuntimeIdentity {
 }
 
 /**
+ * Portable trace coordinates for correlating an eve run with an external
+ * observability backend. The fields follow the W3C trace-context model while
+ * remaining owned by eve rather than exposing an OpenTelemetry type.
+ */
+export interface RuntimeTraceContext {
+  readonly traceId: string;
+  readonly spanId: string;
+  readonly traceFlags: number;
+}
+
+/**
  * JSON request accepted by the canonical message route.
  *
  * `message` is either a plain text string or an AI SDK `UserContent`
@@ -149,6 +164,7 @@ export interface SessionStartedStreamEvent {
   data: {
     invocation?: SubagentSessionInvocationMetadata;
     runtime?: RuntimeIdentity;
+    trace?: RuntimeTraceContext;
   };
   type: "session.started";
 }
@@ -159,6 +175,7 @@ export interface SessionStartedStreamEvent {
 export interface TurnStartedStreamEvent {
   data: {
     sequence: number;
+    trace?: RuntimeTraceContext;
     turnId: string;
   };
   type: "turn.started";
@@ -214,6 +231,36 @@ export interface ActionsRequestedStreamEvent {
   type: "actions.requested";
 }
 
+export type ApprovalCandidateOutcome = "pending" | "rejected" | "failed" | "timed-out" | "stale";
+
+/** Safe lifecycle event for one responder-bound approval candidate. */
+export interface ApprovalCandidateStreamEvent {
+  data: {
+    candidateId: string;
+    outcome: ApprovalCandidateOutcome;
+    requestId: string;
+    responderPrincipalId: string;
+    reason?: string;
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "approval.candidate";
+}
+
+/** Terminal durable settlement for one approval request. */
+export interface ApprovalSettledStreamEvent {
+  data: {
+    outcome: "approved" | "cancelled";
+    requestId: string;
+    responderPrincipalId: string;
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "approval.settled";
+}
+
 /**
  * Stream event emitted when the harness needs human input before it can
  * continue the run.
@@ -265,10 +312,22 @@ export interface SubagentCalledStreamEvent {
   data: {
     callId: string;
     childSessionId: string;
+    childStreamPath: string;
     sessionId: string;
     sequence: number;
     name: string;
     remote?: {
+      /**
+       * Key to the authored credential functions (`auth`/`headers`) for this
+       * remote child, resolved at stream-proxy time by
+       * `resolveRemoteAgentStreamHeaders`. Static subagent → the node id in
+       * `subagentRegistry.subagentsByNodeId`; dynamic subagent → its
+       * `credentialsStepId` in the step registry. The event stores this key —
+       * never resolved header values — because tokens expire and this event
+       * is persisted and streamed to clients. Absent when the remote child
+       * has no authored credentials.
+       */
+      resolverId?: string;
       url: string;
     };
     toolName: string;
@@ -308,6 +367,15 @@ export interface SubagentChildEventStreamEvent {
  */
 export interface SubagentCompletedStreamEvent {
   data: {
+    /**
+     * Present when the originating call completed with a background-task
+     * receipt while the child itself kept running. Consumers must not treat
+     * this as the child's terminal boundary; the child stream owns that.
+     */
+    backgroundTask?: {
+      taskId: string;
+      status: "working";
+    };
     callId: string;
     output: string;
     subagentName: string;
@@ -528,7 +596,10 @@ export interface CompactionCompletedStreamEvent {
  */
 export interface AuthorizationRequiredStreamEvent {
   data: {
+    /** Stable identity of this exact authorization attempt. */
+    attemptId?: string;
     authorization?: ConnectionAuthorizationChallenge;
+    candidateId?: string;
     description: string;
     name: string;
     sequence: number;
@@ -560,6 +631,9 @@ export type ConnectionAuthorizationOutcome = AuthorizationOutcome;
  */
 export interface AuthorizationCompletedStreamEvent {
   data: {
+    /** Stable identity shared with the matching required event. */
+    attemptId?: string;
+    candidateId?: string;
     /**
      * The challenge from the matching `authorization.required` event,
      * journaled across the park. Lets channels keep rendering the
@@ -616,6 +690,8 @@ export interface SessionCompletedStreamEvent {
  * consumers receive {@link MessageStreamEvent}.
  */
 export type UnstampedMessageStreamEvent =
+  | ApprovalCandidateStreamEvent
+  | ApprovalSettledStreamEvent
   | ContextClearedStreamEvent
   | CompactionCompletedStreamEvent
   | CompactionRequestedStreamEvent
@@ -703,6 +779,7 @@ export function isTurnFailureEvent<TEvent extends UnstampedMessageStreamEvent>(
 export function createSessionStartedEvent(input?: {
   readonly invocation?: SubagentSessionInvocationMetadata;
   readonly runtime?: RuntimeIdentity;
+  readonly trace?: RuntimeTraceContext;
 }): SessionStartedStreamEvent {
   const data: SessionStartedStreamEvent["data"] = {};
 
@@ -712,6 +789,10 @@ export function createSessionStartedEvent(input?: {
 
   if (input?.runtime !== undefined) {
     data.runtime = input.runtime;
+  }
+
+  if (input?.trace !== undefined) {
+    data.trace = input.trace;
   }
 
   return {
@@ -725,13 +806,20 @@ export function createSessionStartedEvent(input?: {
  */
 export function createTurnStartedEvent(input: {
   readonly sequence: number;
+  readonly trace?: RuntimeTraceContext;
   readonly turnId: string;
 }): TurnStartedStreamEvent {
+  const data: TurnStartedStreamEvent["data"] = {
+    sequence: input.sequence,
+    turnId: input.turnId,
+  };
+
+  if (input.trace !== undefined) {
+    data.trace = input.trace;
+  }
+
   return {
-    data: {
-      sequence: input.sequence,
-      turnId: input.turnId,
-    },
+    data,
     type: "turn.started",
   };
 }
@@ -976,7 +1064,9 @@ export function createActionsRequestedEvent(input: {
  * for `getToken`-only authorization sources that authorize out of band.
  */
 export function createAuthorizationRequiredEvent(input: {
+  readonly attemptId?: string;
   readonly authorization?: ConnectionAuthorizationChallenge;
+  readonly candidateId?: string;
   readonly description: string;
   readonly name: string;
   readonly sequence: number;
@@ -991,8 +1081,14 @@ export function createAuthorizationRequiredEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.attemptId !== undefined) {
+    data.attemptId = input.attemptId;
+  }
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
+  }
+  if (input.candidateId !== undefined) {
+    data.candidateId = input.candidateId;
   }
   if (input.webhookUrl !== undefined) {
     data.webhookUrl = input.webhookUrl;
@@ -1009,7 +1105,9 @@ export function createAuthorizationRequiredEvent(input: {
  * authorization deadline has expired.
  */
 export function createAuthorizationCompletedEvent(input: {
+  readonly attemptId?: string;
   readonly authorization?: ConnectionAuthorizationChallenge;
+  readonly candidateId?: string;
   readonly name: string;
   readonly outcome: AuthorizationOutcome;
   readonly reason?: string;
@@ -1024,8 +1122,14 @@ export function createAuthorizationCompletedEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.attemptId !== undefined) {
+    data.attemptId = input.attemptId;
+  }
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
+  }
+  if (input.candidateId !== undefined) {
+    data.candidateId = input.candidateId;
   }
   if (input.reason !== undefined) {
     data.reason = input.reason;
@@ -1034,6 +1138,20 @@ export function createAuthorizationCompletedEvent(input: {
     data,
     type: "authorization.completed",
   };
+}
+
+/** Creates a safe candidate lifecycle event. */
+export function createApprovalCandidateEvent(
+  input: ApprovalCandidateStreamEvent["data"],
+): ApprovalCandidateStreamEvent {
+  return { data: input, type: "approval.candidate" };
+}
+
+/** Creates a terminal approval settlement event. */
+export function createApprovalSettledEvent(
+  input: ApprovalSettledStreamEvent["data"],
+): ApprovalSettledStreamEvent {
+  return { data: input, type: "approval.settled" };
 }
 
 /**
@@ -1080,8 +1198,8 @@ export function createActionResultEvent(input: {
       error: outcome.error,
       result: input.result,
       sequence: input.sequence,
-      stepIndex: input.stepIndex,
       status: outcome.status,
+      stepIndex: input.stepIndex,
       turnId: input.turnId,
     },
     type: "action.result",
@@ -1116,6 +1234,7 @@ export function createSubagentCalledEvent(input: {
   readonly sequence: number;
   readonly name: string;
   readonly remote?: {
+    readonly resolverId?: string;
     readonly url: string;
   };
   readonly toolName: string;
@@ -1126,6 +1245,14 @@ export function createSubagentCalledEvent(input: {
     data: {
       callId: input.callId,
       childSessionId: input.childSessionId,
+      childStreamPath:
+        input.remote === undefined
+          ? createEveSessionStreamRoutePath(input.childSessionId)
+          : createEveSubagentStreamRoutePath({
+              callId: input.callId,
+              childSessionId: input.childSessionId,
+              parentSessionId: input.sessionId,
+            }),
       sessionId: input.sessionId,
       sequence: input.sequence,
       name: input.name,

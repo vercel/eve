@@ -20,9 +20,13 @@ export default defineEval({
         `turn ${String(turnNumber).padStart(3, "0")}/${TURN_COUNT} completed in ${elapsedSeconds.toFixed(3)}s`,
       );
 
+      if (sessionId === undefined) {
+        sessionId = result.sessionId;
+        t.log(`workflow run id: ${sessionId}`);
+      }
+
       const turn = result.expectOk();
 
-      sessionId ??= turn.sessionId;
       await t.require(turn.sessionId, equals(sessionId));
       await t.require(turn.message, equals(`stress-ack:${turnNumber}:${marker}`));
     }

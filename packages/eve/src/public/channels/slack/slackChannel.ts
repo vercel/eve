@@ -6,8 +6,9 @@ import type {
   ChannelResolveSession,
   ChannelSource,
 } from "#channel/channel-operations.js";
+import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
@@ -175,6 +176,12 @@ type SlackSessionFailedHandler = (
  * step boundaries. Anything written here must round-trip through
  * `JSON.stringify` / `JSON.parse`.
  */
+export interface SlackPendingApprovalCard {
+  readonly messageBlocks: readonly unknown[];
+  readonly messageTs: string;
+  readonly userId?: string;
+}
+
 export interface SlackChannelState {
   /** Slack channel id seeded by the inbound mention. */
   channelId: string | null;
@@ -212,6 +219,9 @@ export interface SlackChannelState {
    * resolution outcome.
    */
   pendingAuthMessageTs?: Record<string, string>;
+  pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
+  pendingApprovalCandidateUsers?: Record<string, string>;
+  approvalResponderUsers?: Record<string, string>;
 }
 
 /**
@@ -410,11 +420,13 @@ export interface SlackInteractionUser {
  * Result of an `onAppMention` or `onDirectMessage` callback. Return an
  * object (auth may be `null`) to dispatch a turn, or `null` to drop the
  * inbound message. `context` strings are appended as user messages to
- * session history before the delivery message.
+ * session history before the delivery message. `title` overrides the
+ * workflow run title without changing the message sent to the model.
  */
 export type SlackMentionResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  readonly title?: string;
 } | null;
 
 export type SlackMentionResultOrPromise = SlackMentionResult | Promise<SlackMentionResult>;
@@ -437,6 +449,8 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
  * context and exposes the ID as `data.sessionId`.
  */
 export interface SlackChannelEvents {
+  readonly "approval.candidate"?: SlackEventHandler<"approval.candidate">;
+  readonly "approval.settled"?: SlackEventHandler<"approval.settled">;
   readonly "turn.started"?: SlackEventHandler<"turn.started">;
   readonly "actions.requested"?: SlackEventHandler<"actions.requested">;
   readonly "action.partial"?: SlackEventHandler<"action.partial">;
@@ -483,8 +497,6 @@ export interface SlackChannelConfig {
 
   /** Override the default webhook route path (`/eve/v1/slack`). */
   readonly route?: string;
-  /** Policy for accepted messages that arrive while a turn is active. */
-  readonly turnPolicy?: TurnPolicy;
 
   /**
    * Inbound upload policy applied to file attachments before they reach
@@ -640,10 +652,27 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
   const authorizationRequiredOverride = config.events?.["authorization.required"];
+  const candidateHandler =
+    config.events?.["approval.candidate"] ?? defaultEvents["approval.candidate"]!;
   const turnStartedHandler = config.events?.["turn.started"] ?? defaultEvents["turn.started"]!;
   const mergedEvents: SlackChannelInternalEvents = {
     ...defaultEvents,
     ...config.events,
+    async "approval.candidate"(data, channel, ctx) {
+      const responderUserId = channel.state.approvalResponderUsers?.[data.responderPrincipalId];
+      if (data.outcome === "pending" && responderUserId !== undefined) {
+        channel.state.pendingApprovalCandidateUsers = {
+          ...channel.state.pendingApprovalCandidateUsers,
+          [data.candidateId]: responderUserId,
+        };
+      }
+      await candidateHandler(data, channel, ctx);
+      if (data.outcome !== "pending") {
+        const users = { ...channel.state.pendingApprovalCandidateUsers };
+        delete users[data.candidateId];
+        channel.state.pendingApprovalCandidateUsers = users;
+      }
+    },
     async "turn.started"(data, channel, ctx) {
       const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
       if (triggeringUserId !== undefined) {
@@ -669,7 +698,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     SlackInstrumentationMetadata
   >({
     kindHint: "slack",
-    turnPolicy: config.turnPolicy,
     state: {
       channelId: null as string | null,
       threadTs: null as string | null,
@@ -679,6 +707,9 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       lastReasoningTypingAtMs: null,
       lastReasoningTypingStatus: null,
       pendingAuthMessageTs: {},
+      pendingApprovalCards: {},
+      pendingApprovalCandidateUsers: {},
+      approvalResponderUsers: {},
     },
     fetchFile: slackFetchFile,
     metadata(state): SlackInstrumentationMetadata {
@@ -692,6 +723,21 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
     context(state, session) {
       return rebuildSlackContext(state, session, config.credentials);
+    },
+
+    deliver(payload, channel) {
+      const cards = payload.pendingApprovalCards;
+      if (typeof cards === "object" && cards !== null) {
+        channel.state.pendingApprovalCards = { ...channel.state.pendingApprovalCards, ...cards };
+      }
+      const responders = payload.approvalResponderUsers;
+      if (typeof responders === "object" && responders !== null) {
+        channel.state.approvalResponderUsers = {
+          ...channel.state.approvalResponderUsers,
+          ...responders,
+        };
+      }
+      return defaultDeliverResult(payload);
     },
 
     routes: [
@@ -1181,14 +1227,11 @@ async function deliverSlackMessage(input: {
     );
 
     const channelContext = input.result.context ?? [];
+    const title = input.result.title ?? message.markdown;
     const sendOptions: SlackSendOptions =
       channelContext.length === 0
-        ? { auth: input.result.auth, title: message.markdown }
-        : {
-            auth: input.result.auth,
-            context: channelContext,
-            title: message.markdown,
-          };
+        ? { auth: input.result.auth, title }
+        : { auth: input.result.auth, context: channelContext, title };
 
     await input.sessionOperations.send(turnMessage, sendOptions);
   } catch (error) {

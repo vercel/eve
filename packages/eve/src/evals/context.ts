@@ -56,6 +56,7 @@ export function createEvalContext(deps: {
     cancel: () => primary().cancel(),
     requireInputRequest: (filter) => primary().requireInputRequest(filter),
     respond: (responses, options) => primary().respond(responses, options),
+    startRespond: (responses, options) => primary().startRespond(responses, options),
     respondAll: (optionId) => primary().respondAll(optionId),
     send: (message, options) => {
       lastPrompt = typeof message === "string" ? message : "";

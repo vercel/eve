@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { readProjectLink } from "#setup/project-resolution.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#setup/scaffold/index.js";
 import {
   createPromptCommandOutput,
@@ -21,7 +22,6 @@ import {
   CONNECT_LOOKUP_TIMEOUT_MS,
   fetchSlackWorkspace,
   findSlackConnector,
-  readProjectLink,
   listSlackConnectors,
   type SlackConnectLifecycleDeps,
   type SlackConnectorCleanupResult,

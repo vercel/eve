@@ -128,6 +128,66 @@ describe("registry commands", () => {
     expect(logger.errors).toEqual([]);
   });
 
+  it("suggests matching registry items when an item is not found", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockRejectedValue(
+      Object.assign(
+        new Error(
+          "The item at https://eve.dev/r/channel/salk.json was not found. It may not exist at the registry.",
+        ),
+        { code: "NOT_FOUND" },
+      ),
+    );
+    searchRegistries.mockImplementation(async ([source]: string[]) => ({
+      items:
+        source === "https://eve.dev/r/registry.json"
+          ? [
+              {
+                registry: source,
+                name: "channel/slack",
+                addCommandArgument: "https://eve.dev/r/channel/slack.json",
+                description: "Connect an eve agent to Slack.",
+              },
+            ]
+          : [],
+      pagination: {
+        total: source === "https://eve.dev/r/registry.json" ? 1 : 0,
+        offset: 0,
+        limit: 5,
+        hasMore: false,
+      },
+    }));
+
+    await runAddCommand(logger, "/project", "channel/salk", {});
+
+    expect(logger.errors).toEqual([
+      "The item at https://eve.dev/r/channel/salk.json was not found. It may not exist at the registry.",
+    ]);
+    expect(searchRegistries).toHaveBeenCalledWith(
+      ["https://eve.dev/r/registry.json"],
+      expect.objectContaining({ limit: 5, query: "channel/salk" }),
+    );
+    expect(logger.logs).toEqual([
+      "Did you mean?",
+      ["eve (1 result)", "  slack", "    channel/slack", "    Connect an eve agent to Slack."].join(
+        "\n",
+      ),
+    ]);
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("does not search for suggestions after other registry failures", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockRejectedValue(new Error("Registry unavailable."));
+
+    await runAddCommand(logger, "/project", "channel/slack", {});
+
+    expect(logger.errors).toEqual(["Registry unavailable."]);
+    expect(searchRegistries).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
   it.each(["web", "slack"] as const)(
     "installs the official %s item before running its declared setup",
     async (kind) => {

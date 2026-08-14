@@ -1,4 +1,5 @@
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
+import { buildResolvedInputBatch } from "#harness/input-request-resolution.js";
 import {
   getPendingInputBatches,
   queueDeferredStepInput,
@@ -66,6 +67,9 @@ export function resolveSessionLimitInput(
     leftoverResponses,
     limitContinuation,
     messages,
+    resolvedInputs: [buildResolvedInputBatch(input.pendingBatch, input.responses)].filter(
+      (batch): batch is NonNullable<typeof batch> => batch !== undefined,
+    ),
     resolvedStepInput: input.resolvedStepInput,
     session,
   });

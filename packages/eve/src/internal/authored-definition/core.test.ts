@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   normalizeAgentDefinition,
+  normalizeInstructionsDefinition,
   normalizeScheduleDefinition,
 } from "#internal/authored-definition/core.js";
 import { defineDynamic } from "#public/definitions/tool.js";
@@ -279,6 +280,34 @@ describe("normalizeAgentDefinition", () => {
       ),
     ).toThrow('"experimental.subagentPersistentSessions" must be a boolean.');
   });
+
+  it("accepts a boolean tasks flag", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: {
+          tasks: true,
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.tasks).toBe(true);
+  });
+
+  it("rejects non-boolean tasks values", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            tasks: "yes",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"experimental.tasks" must be a boolean.');
+  });
 });
 
 describe("normalizeScheduleDefinition", () => {
@@ -293,5 +322,39 @@ describe("normalizeScheduleDefinition", () => {
         "Expected the schedule config to match the public eve shape.",
       ),
     ).toThrow(`Unknown key "${field}"`);
+  });
+});
+
+describe("normalizeInstructionsDefinition", () => {
+  const message = "Expected instructions to match the public eve shape.";
+
+  it("normalizes content with a default system role", () => {
+    expect(normalizeInstructionsDefinition({ content: "Be concise." }, message)).toEqual({
+      content: "Be concise.",
+      role: "system",
+    });
+  });
+
+  it("accepts user-role content", () => {
+    expect(
+      normalizeInstructionsDefinition({ content: "Tenant context.", role: "user" }, message),
+    ).toEqual({ content: "Tenant context.", role: "user" });
+  });
+
+  it("normalizes the deprecated markdown shape as system content", () => {
+    expect(normalizeInstructionsDefinition({ markdown: "Legacy." }, message)).toEqual({
+      content: "Legacy.",
+      role: "system",
+    });
+  });
+
+  it.each([
+    { content: "mixed", markdown: "mixed" },
+    { content: "invalid", role: "assistant" },
+    { markdown: "legacy", role: "system" },
+    { content: "unknown", extra: true },
+    {},
+  ])("rejects invalid instructions definitions %#", (definition) => {
+    expect(() => normalizeInstructionsDefinition(definition, message)).toThrow(message);
   });
 });

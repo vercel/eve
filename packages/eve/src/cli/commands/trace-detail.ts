@@ -27,8 +27,9 @@ export interface LocalTraceSummary {
 
 /**
  * Compact metrics for one tree row: token chips (`↑1.4K`/`↓213`), cost
- * (`$0.0031`), and the tool name for `ai.toolCall` spans. Only chips whose
- * attributes the span actually carries — rows without usage stay clean.
+ * (`$0.0031`). Only chips whose attributes the span actually carries — rows
+ * without usage stay clean. Tool names belong to eve's durable `agent.action`
+ * label instead of the AI SDK's child span.
  * Raw values: callers sanitize for their output surface.
  */
 export function spanMetricChips(span: LocalTraceSpan): string[] {
@@ -39,10 +40,6 @@ export function spanMetricChips(span: LocalTraceSpan): string[] {
   if (output !== undefined) chips.push(`↓${formatCompactTokenCount(output)}`);
   const cost = spanCostUsd(span);
   if (cost !== undefined) chips.push(formatCostUsd(cost));
-  if (span.name === "ai.toolCall") {
-    const tool = span.attributes["gen_ai.tool.name"];
-    if (typeof tool === "string" && tool.length > 0) chips.push(tool);
-  }
   return chips;
 }
 

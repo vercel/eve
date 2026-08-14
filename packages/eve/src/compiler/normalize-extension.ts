@@ -2,18 +2,23 @@ import { join as joinPath, relative as relativePath } from "node:path";
 
 import type { AgentSourceManifest, ResolvedExtensionMount } from "#discover/manifest.js";
 import type {
+  CompiledChannelEntry,
   CompiledConnectionDefinition,
   CompiledDynamicInstructionsDefinition,
   CompiledDynamicSkillDefinition,
   CompiledDynamicToolDefinition,
   CompiledHookDefinition,
+  CompiledInstructionsDefinition,
+  CompiledScheduleDefinition,
   CompiledSkillDefinition,
   CompiledToolDefinition,
 } from "#compiler/manifest.js";
+import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
 import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
+import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
 import { compileSkillSource } from "#compiler/normalize-skill.js";
 import { compileToolEntry } from "#compiler/normalize-tool.js";
 
@@ -22,6 +27,7 @@ import { compileToolEntry } from "#compiler/normalize-tool.js";
  * already namespaced by the mount and rebased onto the consumer's agent root.
  */
 export interface CompiledExtensionContributions {
+  readonly channels: CompiledChannelEntry[];
   readonly tools: CompiledToolDefinition[];
   readonly dynamicTools: CompiledDynamicToolDefinition[];
   readonly hooks: CompiledHookDefinition[];
@@ -29,7 +35,8 @@ export interface CompiledExtensionContributions {
   readonly dynamicSkills: CompiledDynamicSkillDefinition[];
   readonly dynamicInstructions: CompiledDynamicInstructionsDefinition[];
   readonly connections: CompiledConnectionDefinition[];
-  readonly instructionFragments: string[];
+  readonly instructions: CompiledInstructionsDefinition[];
+  readonly schedules: CompiledScheduleDefinition[];
 }
 
 /**
@@ -171,6 +178,27 @@ async function composeManifestContributions(input: {
   const rebase = (logicalPath: string): string =>
     relativePath(consumerAgentRoot, joinPath(sourceRoot, logicalPath)).replaceAll("\\", "/");
 
+  const channels = (
+    await Promise.all(
+      manifest.channels.map((source) => compileChannelDefinition(sourceRoot, source, options)),
+    )
+  )
+    .flat()
+    .map((channel): CompiledChannelEntry =>
+      channel.kind === "disabled"
+        ? {
+            ...channel,
+            name: `${prefix}${channel.name}`,
+            logicalPath: rebase(channel.logicalPath),
+          }
+        : {
+            ...channel,
+            name: `${prefix}${channel.name}`,
+            sourceId: scopeSourceId(channel.sourceId),
+            logicalPath: rebase(channel.logicalPath),
+          },
+    );
+
   const tools: CompiledToolDefinition[] = [];
   const dynamicTools: CompiledDynamicToolDefinition[] = [];
   const disabledToolTargets: DisabledToolTarget[] = [];
@@ -257,11 +285,15 @@ async function composeManifestContributions(input: {
   }));
 
   const dynamicInstructions: CompiledDynamicInstructionsDefinition[] = [];
-  const instructionFragments: string[] = [];
+  const instructions: CompiledInstructionsDefinition[] = [];
   for (const source of manifest.instructions) {
     const entry = await compileInstructionsEntry(sourceRoot, source, options);
     if (entry.kind === "instructions") {
-      instructionFragments.push(entry.definition.markdown);
+      instructions.push({
+        ...entry.definition,
+        sourceId: scopeSourceId(entry.definition.sourceId),
+        logicalPath: rebase(entry.definition.logicalPath),
+      });
     } else {
       dynamicInstructions.push({
         ...entry.definition,
@@ -272,8 +304,21 @@ async function composeManifestContributions(input: {
     }
   }
 
+  const schedules = await Promise.all(
+    manifest.schedules.map(async (source) => {
+      const schedule = await compileScheduleDefinition(sourceRoot, source, options);
+      return {
+        ...schedule,
+        name: `${prefix}${schedule.name}`,
+        sourceId: scopeSourceId(schedule.sourceId),
+        logicalPath: rebase(schedule.logicalPath),
+      };
+    }),
+  );
+
   return {
     contributions: {
+      channels,
       tools,
       dynamicTools,
       hooks,
@@ -281,7 +326,8 @@ async function composeManifestContributions(input: {
       dynamicSkills,
       dynamicInstructions,
       connections,
-      instructionFragments,
+      instructions,
+      schedules,
     },
     disabledToolTargets,
   };
@@ -299,10 +345,11 @@ function describeExtensionSource(
 
 /**
  * Merges two composed contribution sets with earlier-set-wins precedence per
- * composed name. Named contributions (tools, connections, skills, dynamic
- * tools) dedup by their model-facing identifier so an override shadows the
- * extension's same-named entry; unnamed contributions (hooks, dynamic skills,
- * dynamic instructions, instruction fragments) simply concatenate.
+ * composed name. Named contributions dedup by their composed identifier so
+ * an override shadows the extension's same-named entry. Channel entries dedup
+ * as a group so every route from the winning channel is preserved. Unnamed
+ * contributions (hooks, dynamic skills, dynamic instructions, static
+ * instructions) simply concatenate.
  *
  * Exported for unit testing: passing the consumer overrides as `primary` and
  * the extension's own contributions as `secondary` yields consumer-wins
@@ -312,7 +359,12 @@ export function mergeContributions(
   primary: CompiledExtensionContributions,
   secondary: CompiledExtensionContributions,
 ): CompiledExtensionContributions {
+  const primaryChannelNames = new Set(primary.channels.map((channel) => channel.name));
   return {
+    channels: [
+      ...primary.channels,
+      ...secondary.channels.filter((channel) => !primaryChannelNames.has(channel.name)),
+    ],
     tools: dedupeBy([...primary.tools, ...secondary.tools], (tool) => tool.name),
     dynamicTools: dedupeBy(
       [...primary.dynamicTools, ...secondary.dynamicTools],
@@ -323,10 +375,14 @@ export function mergeContributions(
       (connection) => connection.connectionName,
     ),
     skills: dedupeBy([...primary.skills, ...secondary.skills], (skill) => skill.name),
+    schedules: dedupeBy(
+      [...primary.schedules, ...secondary.schedules],
+      (schedule) => schedule.name,
+    ),
     hooks: [...primary.hooks, ...secondary.hooks],
     dynamicSkills: [...primary.dynamicSkills, ...secondary.dynamicSkills],
     dynamicInstructions: [...primary.dynamicInstructions, ...secondary.dynamicInstructions],
-    instructionFragments: [...primary.instructionFragments, ...secondary.instructionFragments],
+    instructions: [...primary.instructions, ...secondary.instructions],
   };
 }
 

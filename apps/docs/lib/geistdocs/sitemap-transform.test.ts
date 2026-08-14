@@ -23,6 +23,7 @@ describe("transformSitemapMarkdown", () => {
 
   it.each([
     ["/docs/guides/hooks", "Guide", "How-to"],
+    ["/docs/protocols/acp", "Guide", "How-to"],
     ["/docs/tutorial/first-agent", "Conceptual", "How-to"],
     ["/docs/concepts/context-control", "Conceptual", "Conceptual"],
     ["/docs/reference/cli", "Reference", "Reference"],

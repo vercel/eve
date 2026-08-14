@@ -14,7 +14,15 @@ A browser UI is a client of the agent's HTTP routes (the [eve channel](../../cha
 
 The per-framework pages below walk through the wiring step by step: [Next.js](./nextjs), [Nuxt](./nuxt), and [SvelteKit](./sveltekit).
 
-For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [TypeScript SDK](../client/overview) directly.
+For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [Client SDK](../client/overview) directly.
+
+## Authenticate browser requests
+
+A same-origin framework integration sends your application cookies with every eve request. For bearer tokens or another non-cookie scheme, pass `auth` or `headers` to `useEveAgent`.
+
+The default eve channel fails closed. Without an authored `agent/channels/eve.ts`, production browser traffic receives `401` from the default `[vercelOidc(), localDev(), placeholderAuth()]` policy. Add the channel file with an `AuthFn` that verifies your application session or token.
+
+For a public demo, use `none()` from `eve/channels/auth` to admit anonymous requests explicitly. Do not use `none()` for an agent that handles private or production data. See [Authentication](../auth-and-route-protection) for application-session examples, token verifiers, and the default policy.
 
 ## Basic chat (React)
 
@@ -70,7 +78,7 @@ export function Chat() {
 | `session` | Serializable fixed session cursor (`sessionId`, `streamIndex`).             |
 | `send`    | Send text or a multi-part message, with per-turn options.                   |
 | `respond` | Answer pending HITL input requests, with per-turn options.                  |
-| `stop`    | Abort the client's in-flight stream. The server-side turn keeps running.    |
+| `cancel`  | Request durable cancellation of the active turn.                            |
 | `reset`   | Clear local events, data, errors, and the local session cursor.             |
 
 Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
@@ -97,15 +105,17 @@ await agent.send([
 ]);
 ```
 
-Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to abort the client's in-flight stream, and `reset()` to clear local state so the next send starts a fresh durable session.
+Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `cancel()` to stop the durable server-side turn, and `reset()` to clear local state so the next send starts a fresh durable session.
 
-`stop()` is local: turns are resumable across disconnects, so detaching the stream never cancels the work — the turn keeps running and billing on the server. To stop the turn itself, POST the session's [cancel route](../../channels/eve#routes); the turn then settles on the stream as `turn.cancelled` followed by `session.waiting`.
+`cancel()` can be called as soon as `status` is `"submitted"`; the hook waits for the active response to identify its turn when necessary, sends one guarded cancellation request, and keeps the event stream attached. The promise resolves when eve accepts the request or reports that no turn is active, and rejects if the cancellation request fails. The turn then settles on the same stream as `turn.cancelled` followed by `session.waiting`, so the session is safe to continue.
 
-A chat UI with a server-side Cancel button can use the `sessionId` exposed by the
-hook, attach a fixed `ClientSession`, and call `session.cancel({ turnId })` after
-observing that turn's `turn.started` event. The `turnId` guard makes a late click
-a harmless no-op instead of cancelling a newer turn. Keep the stream open until
-the cancellation boundary arrives; do not use `stop()` for this interaction.
+```tsx
+if (agent.status === "submitted" || agent.status === "streaming") {
+  await agent.cancel();
+}
+```
+
+Unmounting the component or closing the page disconnects the local stream but does not cancel server execution. Call `cancel()` before detaching when the user intends to stop the durable turn.
 
 After eve confirms an attachment turn with `message.received`, the default reducer projects each
 received attachment as a `file` part on the user message. The part includes `mediaType`, optional
@@ -204,11 +214,12 @@ const agent = useEveAgent({
 
 ## Lifecycle callbacks
 
-On top of `onSessionChange`, the hook takes a few per-turn callbacks:
+The hook accepts these lifecycle callbacks:
 
 - `onEvent(event)`: fires for each eve stream event as it arrives.
 - `onError(error)`: fires with the last `Error` when a turn fails.
 - `onFinish(snapshot)`: fires with the final `{ data, status, session, ... }` snapshot once a turn settles.
+- `onSessionChange(session)`: fires when the session cursor advances. Persist it to resume across reloads.
 
 ```tsx
 const agent = useEveAgent({
@@ -320,5 +331,5 @@ const support = useEveAgent({ agent: "support" });
 
 - [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the event stream and session cursor
 - [Channels](../../channels/overview): the HTTP routes the hook talks to
-- [TypeScript SDK](../client/overview): the lower-level client underneath the frontend hooks
+- [Client SDK](../client/overview): the lower-level client underneath the frontend hooks
 - [Next.js](./nextjs): step-by-step setup for wiring eve into a Next.js app

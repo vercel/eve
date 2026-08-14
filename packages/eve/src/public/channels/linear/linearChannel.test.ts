@@ -8,6 +8,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { defaultLinearAuth } from "#public/channels/linear/defaults.js";
 import { linearChannel, type LinearChannelState } from "#public/channels/linear/linearChannel.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 import type { InputRequest } from "#runtime/input/types.js";
@@ -157,7 +158,13 @@ function makeRequest(overrides: Partial<InputRequest> = {}): InputRequest {
 
 describe("linearChannel inbound Agent Session events", () => {
   it("dispatches created events with auth, context, token, and state", async () => {
-    const channel = linearChannel({ credentials: { webhookSecret: SECRET } });
+    const channel = linearChannel({
+      credentials: { webhookSecret: SECRET },
+      onAgentSession: (_ctx, event) => ({
+        auth: defaultLinearAuth(event),
+        title: "Linear run",
+      }),
+    });
     const { response, send } = await firePost(channel, signedRequest(sessionPayload()));
 
     expect(response.status).toBe(200);
@@ -178,6 +185,7 @@ describe("linearChannel inbound Agent Session events", () => {
         issueIdentifier: "EVE-123",
         organizationId: "org_1",
       },
+      title: "Linear run",
     });
   });
 

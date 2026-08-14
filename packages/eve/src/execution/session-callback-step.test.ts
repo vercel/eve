@@ -138,7 +138,7 @@ describe("fireSessionCallbackStep", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it("never includes usage on failed callbacks", async () => {
+  it("includes usage on failed callbacks", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -149,7 +149,7 @@ describe("fireSessionCallbackStep", () => {
       usage: USAGE,
     });
 
-    expect(parsePostedBody(fetchMock).usage).toBeUndefined();
+    expect(parsePostedBody(fetchMock).usage).toEqual(USAGE);
   });
 
   it("posts the failed callback with the normalized error message", async () => {

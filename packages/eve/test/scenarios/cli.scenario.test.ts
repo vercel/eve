@@ -278,11 +278,12 @@ describe("runCli", () => {
     expect(output).toContain("0 errors, 0 warnings");
   });
 
-  it("defaults to dev when no command is provided", async () => {
+  it("defaults to dev when no command is provided in an eve project", async () => {
     const logger = {
       error: vi.fn(),
       log: vi.fn(),
     };
+    const findApplicationRoot = vi.fn(async () => process.cwd());
     const startHost = vi.fn(() => ({
       start: async () => {
         throw new Error("dev started");
@@ -292,10 +293,12 @@ describe("runCli", () => {
 
     await expect(
       runCli([], logger, {
+        findApplicationRoot,
         startHost,
       }),
     ).rejects.toThrow("dev started");
 
+    expect(findApplicationRoot).toHaveBeenCalledOnce();
     expect(startHost).toHaveBeenCalledOnce();
   });
 

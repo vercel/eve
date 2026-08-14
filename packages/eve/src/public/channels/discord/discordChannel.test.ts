@@ -192,7 +192,13 @@ describe("discordChannel() inbound route", () => {
 
   it("dispatches verified application commands with Discord auth and state", async () => {
     const { privateKey, publicKeyHex } = testKeys();
-    const channel = discordChannel({ credentials: { publicKey: publicKeyHex } });
+    const channel = discordChannel({
+      credentials: { publicKey: publicKeyHex },
+      onCommand: (_ctx, interaction) => ({
+        auth: defaultDiscordAuth(interaction),
+        title: "Discord run",
+      }),
+    });
 
     const { response, send } = await firePost(
       channel,
@@ -220,6 +226,7 @@ describe("discordChannel() inbound route", () => {
         initialResponseSent: false,
         interactionToken: "tok",
       },
+      title: "Discord run",
     });
   });
 

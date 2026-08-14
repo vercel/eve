@@ -66,12 +66,15 @@ const INFO: AgentInfoResult = {
   hooks: [],
   instructions: {
     dynamic: [],
-    static: {
-      logicalPath: "instructions.md",
-      markdown: "You are a weather assistant.",
-      name: "instructions",
-      sourceKind: "markdown",
-    },
+    static: [
+      {
+        content: "You are a weather assistant.",
+        logicalPath: "instructions.md",
+        name: "instructions",
+        role: "system",
+        sourceKind: "markdown",
+      },
+    ],
   },
   kind: "eve-agent-info",
   mode: "development",
@@ -100,7 +103,7 @@ const INFO: AgentInfoResult = {
     ],
     reserved: [],
   },
-  version: 1,
+  version: 2,
   workflow: {
     enabled: false,
     toolName: "Workflow",

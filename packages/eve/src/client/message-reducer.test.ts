@@ -462,7 +462,7 @@ describe("defaultMessageReducer", () => {
             kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes", style: "primary" },
-              { id: "cancel", label: "No", style: "danger" },
+              { id: "deny", label: "No", style: "danger" },
             ],
             prompt: "Approve tool call: bash",
             requestId: "approval_1",
@@ -499,7 +499,7 @@ describe("defaultMessageReducer", () => {
                   kind: "tool-approval",
                   options: [
                     { id: "approve", label: "Yes", style: "primary" },
-                    { id: "cancel", label: "No", style: "danger" },
+                    { id: "deny", label: "No", style: "danger" },
                   ],
                   prompt: "Approve tool call: bash",
                   requestId: "approval_1",
@@ -585,7 +585,7 @@ describe("defaultMessageReducer", () => {
             kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes", style: "primary" },
-              { id: "cancel", label: "No", style: "danger" },
+              { id: "deny", label: "No", style: "danger" },
             ],
             prompt: "Approve tool call: bash",
             requestId: "approval_1",
@@ -600,7 +600,7 @@ describe("defaultMessageReducer", () => {
     data = reducer.reduce(data, {
       data: {
         createdAt: 1,
-        responses: [{ optionId: "cancel", requestId: "approval_1" }],
+        responses: [{ optionId: "deny", requestId: "approval_1" }],
       },
       type: "client.input.responded",
     });
@@ -630,12 +630,12 @@ describe("defaultMessageReducer", () => {
                   kind: "tool-approval",
                   options: [
                     { id: "approve", label: "Yes", style: "primary" },
-                    { id: "cancel", label: "No", style: "danger" },
+                    { id: "deny", label: "No", style: "danger" },
                   ],
                   prompt: "Approve tool call: bash",
                   requestId: "approval_1",
                 },
-                inputResponse: { optionId: "cancel", requestId: "approval_1" },
+                inputResponse: { optionId: "deny", requestId: "approval_1" },
                 kind: "tool-call",
                 name: "bash",
               },
@@ -665,7 +665,7 @@ describe("defaultMessageReducer", () => {
             kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes", style: "primary" },
-              { id: "cancel", label: "No", style: "danger" },
+              { id: "deny", label: "No", style: "danger" },
             ],
             prompt: "Approve tool call: bash",
             requestId: "approval_1",

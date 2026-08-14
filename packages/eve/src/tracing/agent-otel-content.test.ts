@@ -2,8 +2,53 @@ import { describe, expect, it } from "vitest";
 
 import {
   CONTENT_ATTRIBUTE_LIMIT,
+  genAiInputMessagesAttribute,
+  genAiOutputMessagesAttribute,
+  genAiSystemInstructionsAttribute,
   toolResultsContentAttribute,
 } from "#tracing/agent-otel-content.js";
+
+describe("GenAI message attributes", () => {
+  it("formats model input, output, and system instructions for inspectors", () => {
+    expect(
+      genAiInputMessagesAttribute([
+        { content: "hello", role: "user" },
+        {
+          content: [
+            {
+              input: { message: "echo" },
+              toolCallId: "call-1",
+              toolName: "delegate",
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+      ]),
+    ).toBe(
+      '[{"parts":[{"content":"hello","type":"text"}],"role":"user"},{"parts":[{"arguments":{"message":"echo"},"id":"call-1","name":"delegate","type":"tool_call"}],"role":"assistant"}]',
+    );
+    expect(genAiSystemInstructionsAttribute("Be concise.")).toBe(
+      '[{"content":"Be concise.","type":"text"}]',
+    );
+    expect(
+      genAiOutputMessagesAttribute(
+        [
+          { text: "Working.", type: "text" },
+          {
+            callId: "call-1",
+            input: { message: "echo" },
+            toolName: "delegate",
+            type: "tool-call",
+          },
+        ],
+        "tool-calls",
+      ),
+    ).toBe(
+      '[{"finish_reason":"tool_call","parts":[{"content":"Working.","type":"text"},{"arguments":{"message":"echo"},"id":"call-1","name":"delegate","type":"tool_call"}],"role":"assistant"}]',
+    );
+  });
+});
 
 describe("toolResultsContentAttribute", () => {
   it("returns the full payload when it fits", () => {

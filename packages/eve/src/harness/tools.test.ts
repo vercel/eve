@@ -20,6 +20,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import type { ApprovalContext } from "#public/definitions/approval.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
@@ -991,7 +992,7 @@ describe("buildToolSet", () => {
     });
 
     it("passes the active caller and session context into approval", async () => {
-      let capturedCtx: Parameters<NonNullable<HarnessToolDefinition["approval"]>>[0] | undefined;
+      let capturedCtx: ApprovalContext | undefined;
       const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
         [
           "delete_project",

@@ -17,7 +17,7 @@ Every turn runs as a durable workflow, built on the open-source [Workflow SDK](h
 
 The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds platform features such as latest production deployment routing and dashboard run metadata.
 
-When a Vercel production deployment changes, the next model turn in an existing session uses that deployment's current instructions, model, and tools. The durable session keeps its conversation history and authored state, so identity-based channels such as Telegram private chats and Twilio phone-number conversations adopt agent updates without requiring a new session.
+When a Vercel production deployment changes, the next model turn in an existing session uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. Identity-based channels such as Telegram private chats and Twilio phone-number conversations therefore adopt agent behavior updates without duplicating or rewriting their existing context.
 
 Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or `defaultBackend()`.
 
@@ -60,7 +60,7 @@ Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up fro
 
 There's nothing to configure. eve owns the workflow lifecycle, and sessions are durable by default.
 
-You don't write workflow code directly. Workflow primitives (`start()`, `resumeHook()`, etc.) are an implementation detail of eve's runtime layer; channels, tools, and hooks never touch them. Two surfaces give your own code session data: tools read the current session's metadata (id, turn, auth, parent lineage) via `ctx.session`, and [`defineState`](../guides/state) reads or writes session-scoped durable state. See [State](../guides/state) for the read/write model.
+You don't write workflow code directly. Workflow primitives (`start()`, `resumeHook()`, etc.) are an implementation detail of eve's runtime layer; channels, tools, and hooks never touch them. Two surfaces give your own code session data: tools read the current session's metadata (id, turn, auth, parent lineage) via `ctx.session`, and [`defineState`](./state) reads or writes session-scoped durable state. See [State](./state) for the read/write model.
 
 ## Parked work
 
@@ -91,10 +91,10 @@ A turn can hand work off to a [subagent](../subagents). Each subagent gets its o
 
 ## How eve orders session history
 
-Conversation history within a session is append-only. Turns land in order, and the tool calls inside a turn (plus their results) keep their order too. Read a session back and you see events in the order they happened.
+Conversation history within a session is append-only. Static user-role instructions lead fresh-session history. Dynamic user-role instructions land at their session or turn boundary before the current delivery. Turns follow in order, and the tool calls inside a turn (plus their results) keep their order too. Read a session back and you see messages in the order they happened.
 
 ## What to read next
 
 - [Sessions and streaming](./sessions-runs-and-streaming): the handles you hold and the event stream you watch.
 - [Security model](./security-model): the trust boundaries the runtime enforces.
-- [State](../guides/state): durable per-session memory that persists across step boundaries.
+- [State](./state): durable per-session memory that persists across step boundaries.

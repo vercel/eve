@@ -67,7 +67,7 @@ async function compileAgentNodeManifest(
   options: {
     readonly agentConfigDefinition?: unknown;
     readonly externalDependencies?: readonly string[];
-    readonly allowWorkflowConfig?: boolean;
+    readonly allowRootOnlyConfig?: boolean;
   } = {},
 ): Promise<CompiledAgentNodeManifest> {
   const rawConfig = Object.hasOwn(options, "agentConfigDefinition")
@@ -75,9 +75,14 @@ async function compileAgentNodeManifest(
         definition: options.agentConfigDefinition,
       })
     : await compileAgentConfig(manifest, context);
-  if (options.allowWorkflowConfig === false && rawConfig.experimental?.workflow !== undefined) {
+  if (options.allowRootOnlyConfig === false && rawConfig.experimental?.workflow !== undefined) {
     throw new Error(
       `Workflow runtime configuration is only supported on the root agent config. Remove "experimental.workflow" from "${manifest.agentId}".`,
+    );
+  }
+  if (options.allowRootOnlyConfig === false && rawConfig.experimental?.tasks !== undefined) {
+    throw new Error(
+      `Background tasks are only supported on the root agent config. Remove "experimental.tasks" from "${manifest.agentId}".`,
     );
   }
   const externalDependencies = mergeExternalDependencies(
@@ -190,7 +195,7 @@ async function compileAgentResources(
   const dynamicToolSlugs = new Set(dynamicTools.map((tool) => tool.slug));
   const connectionNames = new Set(connections.map((connection) => connection.connectionName));
   const skillNames = new Set(skills.map((skill) => skill.name));
-  const extensionInstructionFragments: string[] = [];
+  const extensionInstructions: CompiledInstructionsDefinition[] = [];
   for (const mount of [...manifest.resolvedExtensions].sort((left, right) =>
     left.namespace.localeCompare(right.namespace),
   )) {
@@ -200,6 +205,7 @@ async function compileAgentResources(
       consumerAgentRoot: manifest.agentRoot,
       externalDependencies,
     });
+    compiledChannels.push(...contributions.channels);
     for (const tool of contributions.tools) {
       if (!toolNames.has(tool.name)) {
         toolNames.add(tool.name);
@@ -224,28 +230,14 @@ async function compileAgentResources(
         skills.push(skill);
       }
     }
+    schedules.push(...contributions.schedules);
     hooks.push(...contributions.hooks);
     dynamicSkills.push(...contributions.dynamicSkills);
     dynamicInstructions.push(...contributions.dynamicInstructions);
-    extensionInstructionFragments.push(...contributions.instructionFragments);
+    extensionInstructions.push(...contributions.instructions);
   }
 
-  const composedMarkdown = [
-    ...staticInstructions.map((entry) => entry.markdown),
-    ...extensionInstructionFragments,
-  ];
-  const composedInstructions: CompiledInstructionsDefinition | undefined =
-    composedMarkdown.length === 0
-      ? undefined
-      : staticInstructions.length === 1 && extensionInstructionFragments.length === 0
-        ? staticInstructions[0]
-        : {
-            name: "instructions",
-            logicalPath: "instructions",
-            markdown: composedMarkdown.join("\n\n"),
-            sourceId: staticInstructions[0]?.sourceId ?? "instructions",
-            sourceKind: "module",
-          };
+  const instructions = [...staticInstructions, ...extensionInstructions];
 
   return createCompiledAgentResources({
     agentRoot: manifest.agentRoot,
@@ -275,7 +267,7 @@ async function compileAgentResources(
     schedules,
     dynamicInstructions,
     skills,
-    instructions: composedInstructions,
+    instructions,
     tools,
   });
 }

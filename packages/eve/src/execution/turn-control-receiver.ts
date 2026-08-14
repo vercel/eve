@@ -1,6 +1,6 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, SessionCommand } from "#channel/types.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
@@ -22,19 +22,28 @@ export class TurnControlReceiver {
   private readonly commandInbox: SessionCommandInbox;
   private readonly control: Hook<TurnControlPayload>;
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
+  private readonly expectedTurnId: string;
+  private readonly cancelledTaskIds: Set<string>;
+  private readonly seenTaskDeliveries: Set<string>;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
 
   constructor(input: {
     readonly bufferedDeliveries: DeliverHookPayload[];
     readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+    readonly cancelledTaskIds?: Set<string>;
     readonly commandInbox: SessionCommandInbox;
+    readonly expectedTurnId: string;
+    readonly seenTaskDeliveries?: Set<string>;
     readonly token: string;
   }) {
     this.bufferedDeliveries = input.bufferedDeliveries;
     this.bufferedSessionControls = input.bufferedSessionControls;
+    this.cancelledTaskIds = input.cancelledTaskIds ?? new Set();
     this.commandInbox = input.commandInbox;
+    this.seenTaskDeliveries = input.seenTaskDeliveries ?? new Set();
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
+    this.expectedTurnId = input.expectedTurnId;
   }
 
   /** Token passed to the turn workflow so it can publish control messages. */
@@ -73,10 +82,12 @@ export class TurnControlReceiver {
     command: SessionInboxPayload,
   ): Promise<TurnDriverAction | undefined> {
     if (command.kind === "deliver") {
+      if (!this.acceptTaskDelivery(command)) return undefined;
       await this.bufferDelivery(command);
       return undefined;
     }
     if (command.kind === "send") {
+      if (!this.acceptTaskDelivery(command)) return undefined;
       await this.bufferDelivery(sendCommandToDelivery(command));
       return undefined;
     }
@@ -88,9 +99,19 @@ export class TurnControlReceiver {
       this.bufferedSessionControls.push("expired");
       return undefined;
     }
+    if (command.kind === "runtime-action-result") {
+      return undefined;
+    }
     if (command.kind === "cancel") {
+      if (command.taskId !== undefined) this.discardTaskDeliveries(command.taskId);
+      const turnId =
+        command.taskId !== undefined &&
+        command.turnId !== undefined &&
+        command.turnId !== this.expectedTurnId
+          ? undefined
+          : command.turnId;
       await forwardTurnCancellationStep({
-        payload: command.turnId === undefined ? {} : { turnId: command.turnId },
+        payload: turnId === undefined ? {} : { turnId },
         token: turnCancellationHookToken(this.control.token),
       });
       return undefined;
@@ -120,7 +141,9 @@ export class TurnControlReceiver {
     payload: Extract<TurnControlPayload, { readonly kind: "turn-result" }>,
   ): void {
     if (payload.bufferedDeliveries !== undefined) {
-      this.bufferedDeliveries.unshift(...payload.bufferedDeliveries);
+      this.bufferedDeliveries.unshift(
+        ...payload.bufferedDeliveries.filter((delivery) => !this.shouldDiscard(delivery)),
+      );
     }
   }
 
@@ -207,11 +230,18 @@ export class TurnControlReceiver {
       }
 
       this.commandInbox.consumeNext();
-      if (winner.value.value.kind === "deliver" || winner.value.value.kind === "send") {
-        const candidate =
-          winner.value.value.kind === "deliver"
-            ? winner.value.value
-            : sendCommandToDelivery(winner.value.value);
+      if (winner.value.value.kind === "deliver") {
+        if (!this.acceptTaskDelivery(winner.value.value)) continue;
+        if (deliveryHasMessage(winner.value.value)) {
+          await this.bufferDelivery(winner.value.value);
+        } else {
+          delivery = winner.value.value;
+        }
+        continue;
+      }
+      if (winner.value.value.kind === "send") {
+        if (!this.acceptTaskDelivery(winner.value.value)) continue;
+        const candidate = sendCommandToDelivery(winner.value.value);
         if (deliveryHasMessage(candidate)) {
           await this.bufferDelivery(candidate);
         } else {
@@ -263,7 +293,7 @@ export class TurnControlReceiver {
       if (winner.kind === "command") {
         const terminal = await this.handleSessionCommand(winner.command);
         if (terminal !== undefined) {
-          this.bufferedDeliveries.unshift(outstanding);
+          if (!this.shouldDiscard(outstanding)) this.bufferedDeliveries.unshift(outstanding);
           return terminal;
         }
         continue;
@@ -276,18 +306,54 @@ export class TurnControlReceiver {
       }
 
       if (payload.kind === "turn-delivery-cancelled" && payload.requestId === requestId) {
-        this.bufferedDeliveries.unshift(outstanding);
+        if (!this.shouldDiscard(outstanding)) this.bufferedDeliveries.unshift(outstanding);
         return undefined;
       }
 
       if (payload.kind === "turn-result") {
-        this.bufferedDeliveries.unshift(outstanding);
+        if (!this.shouldDiscard(outstanding)) this.bufferedDeliveries.unshift(outstanding);
       }
 
       const terminal = this.readTerminalControl(payload);
       if (terminal !== undefined) return terminal;
     }
   }
+
+  private acceptTaskDelivery(
+    command: DeliverHookPayload | Extract<SessionCommand, { readonly kind: "send" }>,
+  ): boolean {
+    const deliveryId = command.taskDeliveryId ?? command.caller?.taskId;
+    if (deliveryId === undefined) return true;
+    if (this.originatesFromCancelledTask(deliveryId)) return false;
+    if (this.seenTaskDeliveries.has(deliveryId)) return false;
+    this.seenTaskDeliveries.add(deliveryId);
+    return true;
+  }
+
+  private discardTaskDeliveries(taskId: string): void {
+    this.cancelledTaskIds.add(taskId);
+    const kept = this.bufferedDeliveries.filter((delivery) => !this.shouldDiscard(delivery));
+    this.bufferedDeliveries.splice(0, this.bufferedDeliveries.length, ...kept);
+  }
+
+  private originatesFromCancelledTask(deliveryId: string): boolean {
+    return [...this.cancelledTaskIds].some((taskId) =>
+      deliveryOriginatesFromTask(deliveryId, taskId),
+    );
+  }
+
+  private shouldDiscard(delivery: DeliverHookPayload): boolean {
+    const deliveryId = delivery.taskDeliveryId ?? delivery.caller?.taskId;
+    return deliveryId !== undefined && this.originatesFromCancelledTask(deliveryId);
+  }
+}
+
+/**
+ * Task delivery ids are either a bare task id (the `caller.taskId` fallback)
+ * or `${taskId}:${discriminator}` as minted in tasks/child/steps.ts.
+ */
+function deliveryOriginatesFromTask(deliveryId: string, taskId: string): boolean {
+  return deliveryId === taskId || deliveryId.startsWith(`${taskId}:`);
 }
 
 function deliveryHasMessage(delivery: DeliverHookPayload): boolean {

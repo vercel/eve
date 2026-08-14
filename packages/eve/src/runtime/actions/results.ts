@@ -2,12 +2,12 @@ import { getRuntimeActionResultKey } from "#runtime/actions/keys.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
 /** Returns results in pending-key order once every requested action has completed. */
-export function resolveRuntimeActionResultsForKeys(input: {
+export function resolveRuntimeActionResultsForKeys<TResult extends RuntimeActionResult>(input: {
   readonly pendingKeys: readonly string[];
-  readonly results: readonly RuntimeActionResult[];
-}): RuntimeActionResult[] | undefined {
+  readonly results: readonly TResult[];
+}): TResult[] | undefined {
   const pendingKeySet = new Set(input.pendingKeys);
-  const resultsByKey = new Map<string, RuntimeActionResult>();
+  const resultsByKey = new Map<string, TResult>();
 
   for (const result of input.results) {
     const key = getRuntimeActionResultKey(result);
@@ -19,7 +19,7 @@ export function resolveRuntimeActionResultsForKeys(input: {
     resultsByKey.set(key, result);
   }
 
-  const orderedResults: RuntimeActionResult[] = [];
+  const orderedResults: TResult[] = [];
 
   for (const key of input.pendingKeys) {
     const result = resultsByKey.get(key);

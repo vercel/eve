@@ -32,6 +32,7 @@ function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
     dynamicSkills: [],
     dynamicTools: [],
     hooks: [],
+    instructions: [],
     kind: "eve-agent-compiled-manifest",
     remoteAgents: [],
     schedules: [],

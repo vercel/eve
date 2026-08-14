@@ -90,7 +90,7 @@ export function createSession(input: CreateSessionInput): HarnessSession {
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: input.continuationToken,
-    history: [],
+    history: [...(turnAgent.initialMessages ?? [])],
     sessionId: input.sessionId,
   };
 

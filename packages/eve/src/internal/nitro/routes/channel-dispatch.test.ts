@@ -24,7 +24,7 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import {
   getInstrumentationConfig,
   registerInstrumentationConfig,
-} from "#harness/instrumentation-config.js";
+} from "#harness/instrumentation/config.js";
 import type { Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { resolveVercelOidcCurrentProject } from "#runtime/governance/auth/vercel-oidc-project.js";
@@ -812,6 +812,54 @@ describe("dispatchChannelRequest tracing", () => {
     expect(nested).toBeDefined();
     expect(nested!.spanContext().traceId).toBe(server!.spanContext().traceId);
     expect(parentSpanId(nested!)).toBe(server!.spanContext().spanId);
+  });
+
+  it("captures the created SERVER span context on channel delivery metadata", async () => {
+    const tracedRuntime = createRuntime({
+      dispatchContinuation: vi
+        .fn()
+        .mockResolvedValue({ sessionId: "session-1", status: "accepted" }),
+    });
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      channels: [
+        slackChannel(async () => new Response("unused"), {
+          adapter: { kind: "channel:slack" },
+          handler: async (_request, args) => {
+            await args.from("thread-1").send("hello", { auth: null });
+            return new Response("ok");
+          },
+        }),
+      ],
+      runtime: tracedRuntime,
+    });
+
+    await dispatchChannelRequest(
+      createEvent({
+        headers: {
+          traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+          "x-vercel-id": "iad1::request-1",
+        },
+        method: "POST",
+        waitUntil: vi.fn(),
+      }),
+      "POST /slack",
+      {} as never,
+    );
+
+    const [server] = await finishedSpans();
+    const command = vi.mocked(tracedRuntime.dispatchContinuation).mock.calls[0]?.[0].command;
+    const delivery = command?.kind === "send" ? command.delivery : undefined;
+    expect(delivery).toMatchObject({
+      channelKind: "channel:slack",
+      channelName: "slack",
+      requestId: "iad1::request-1",
+      requestTraceContext: {
+        spanId: server!.spanContext().spanId,
+        traceFlags: server!.spanContext().traceFlags,
+        traceId: server!.spanContext().traceId,
+      },
+    });
+    expect(delivery?.requestTraceContext?.spanId).not.toBe("b7ad6b7169203331");
   });
 
   it("adopts an incoming traceparent as the request span's parent", async () => {

@@ -99,6 +99,8 @@ export interface TwilioReceiveTarget {
 /** Result of an inbound Twilio text or transcription hook. Return `null` (or `undefined`) to drop the webhook without dispatching; otherwise supply the session `auth` context. */
 export type TwilioInboundResult = {
   auth: SessionAuthContext | null;
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  title?: string;
 } | null;
 
 /** Sync or async {@link TwilioInboundResult}. */
@@ -569,6 +571,7 @@ async function dispatchText(input: {
         lastMessageSid: message.messageSid ?? null,
         to: message.to ?? null,
       },
+      title: result.title,
     });
   } catch (error) {
     log.error("text delivery failed", { error });
@@ -642,6 +645,7 @@ async function dispatchVoiceTranscription(input: {
           lastMessageSid: null,
           to: transcription.to ?? null,
         },
+        title: result.title,
       });
   } catch (error) {
     log.error("voice transcription delivery failed", { error });

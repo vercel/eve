@@ -3,9 +3,9 @@ title: "Extensions"
 description: "Package reusable eve capabilities and mount them from npm or a monorepo workspace."
 ---
 
-Extensions package eve tools, connections, skills, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
+Extensions package eve tools, channels, connections, skills, schedules, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
 
-Ready-made extensions can also be distributed through an eve integration registry. See [Install Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
+Ready-made extensions can also be distributed through an eve integration registry. See [Add Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
 
 This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A memory extension could use hooks to capture context and tools to recall it. A self-improving extension could pair hooks with dynamic instructions.
 
@@ -29,8 +29,10 @@ An extension uses the same file conventions as an agent for its contributions:
   extension/
     extension.ts
     tools/search.ts
+    channels/webhook.ts
     connections/api.ts
     skills/triage/SKILL.md
+    schedules/sync.ts
     instructions.md
     hooks/audit.ts
     lib/http.ts
@@ -38,9 +40,9 @@ An extension uses the same file conventions as an agent for its contributions:
 
 Each listed slot accepts the same authored forms as its agent counterpart. Static and dynamic tools, skills, and instructions all work in an extension: `extension/instructions.ts` is as valid as `extension/instructions.md`, and `extension/tools/` can contain `defineDynamic(...)`.
 
-Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. Keep shared code in `extension/lib/`.
+Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. The same prefix applies to channel and schedule IDs, while channel route paths and schedule cron expressions stay unchanged. Keep shared code in `extension/lib/`.
 
-Keep agent configuration, sandboxes, schedules, and nested extensions in the consumer's agent.
+Keep agent configuration, sandboxes, and nested extensions in the consumer's agent.
 
 ### Add configuration and contributions
 
@@ -58,7 +60,7 @@ export default defineExtension({
 });
 ```
 
-Contributions import that handle to read the validated configuration. Defaults have already been applied:
+Contributions, including schedule handlers, can import that handle to read the validated configuration. Defaults have already been applied:
 
 ```ts title="extension/tools/search.ts"
 import { defineTool } from "eve/tools";
@@ -168,7 +170,7 @@ export default crm({ apiKey: process.env.CRM_API_KEY! });
 
 Set `CRM_API_KEY` in the consumer's environment, such as `.env.local` for local development.
 
-The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, and `connections/api.ts` becomes `crm__api`.
+The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, `schedules/sync.ts` becomes `crm__sync`, and `connections/api.ts` becomes `crm__api`. Channels keep their declared route paths, and schedules keep their cron expressions.
 
 For an extension with no configuration, mount its default export directly:
 
@@ -274,7 +276,7 @@ import crm from "@acme/crm";
 export default crm({ apiKey: process.env.CRM_API_KEY! });
 ```
 
-A same-named consumer tool, connection, or skill wins. To adjust an extension tool, import it from the package's `./tools` export and define it again:
+A same-named consumer channel, tool, connection, skill, or schedule wins. To adjust an extension tool, import it from the package's `./tools` export and define it again:
 
 ```ts title="agent/extensions/crm/tools/search.ts"
 import { search } from "@acme/crm/tools";
@@ -329,4 +331,6 @@ At build time, eve checks the extension's generated capability metadata. If the 
 - [Instructions](/docs/instructions): static and TypeScript instructions
 - [Skills](/docs/skills): package procedures and supporting files
 - [Connections](/docs/connections): integrate external services
+- [Channels](/docs/channels/overview): receive messages and expose routes
+- [Schedules](/docs/schedules): run the agent on a cron cadence
 - [Hooks](/docs/guides/hooks): observe agent events

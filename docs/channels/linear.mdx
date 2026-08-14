@@ -99,7 +99,7 @@ Event handlers receive `channel.linear`, which exposes `createActivity`, `listAc
 
 ## Custom hooks
 
-Return `{ auth }` to dispatch, or `null` to acknowledge without waking the agent.
+Return `{ auth }` to dispatch, or `null` to acknowledge without waking the agent. Return `title` alongside `auth` to set the title when the dispatch starts a run.
 
 ```ts
 import { defaultLinearAuth, linearChannel } from "eve/channels/linear";

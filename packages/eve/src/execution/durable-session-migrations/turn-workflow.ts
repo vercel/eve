@@ -26,6 +26,7 @@ export const TURN_WORKFLOW_INPUT_VERSION = 1;
 
 /** Trusted runtime-action results collected by the parent turn driver. */
 interface RuntimeActionResultStepInput {
+  readonly acceptedAtMsByCallId?: Readonly<Record<string, number>>;
   readonly kind: "runtime-action-result";
   readonly results: readonly RuntimeActionResult[];
 }

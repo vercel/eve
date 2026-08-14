@@ -1,6 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import { buildResolvedInputBatch } from "#harness/input-request-resolution.js";
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
 import {
   queueDeferredStepInput,
@@ -60,6 +61,9 @@ export function resolveQuestionOnlyInputBatches(
       consumedMessage: input.resolvedStepInput.messageConsumed,
       outcome: "resolved",
       messages,
+      resolvedInputs: [buildResolvedInputBatch(sole, [])].filter(
+        (batch): batch is NonNullable<typeof batch> => batch !== undefined,
+      ),
       session: removePendingInputBatches(input.session, [sole]),
     };
   }
@@ -74,6 +78,10 @@ export function resolveQuestionOnlyInputBatches(
     deferTurnInput: input.deferTurnInput,
     leftoverResponses,
     messages,
+    resolvedInputs: resolvedBatches.flatMap((batch) => {
+      const resolved = buildResolvedInputBatch(batch, input.responses);
+      return resolved === undefined ? [] : [resolved];
+    }),
     resolvedStepInput: input.resolvedStepInput,
     session: removePendingInputBatches(input.session, resolvedBatches),
   });

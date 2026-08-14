@@ -3,7 +3,8 @@ import type { UserContent } from "ai";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { StepInput } from "#harness/types.js";
 
 /**
  * Enriched return shape from a channel's {@link ChannelAdapter.fetchFile}
@@ -52,6 +53,7 @@ export interface GenericChannelDefinition<
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
+  deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
   readonly state?: TState;
   /**
    * CORS policy for this channel's HTTP routes. `true` enables H3/Nitro's

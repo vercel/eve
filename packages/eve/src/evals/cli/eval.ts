@@ -1,9 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
-import { resolveApplicationRoot } from "#internal/application/paths.js";
+import {
+  EVE_EVALUATION_ENV_FLAG,
+  EVE_EVALUATION_RUN_ID_ENV,
+} from "#internal/application/dev-environment.js";
 import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
 import { filterEvalsByTags } from "#evals/cli/filter.js";
@@ -49,9 +53,8 @@ export async function runEvalCommand(
   evalIds: readonly string[],
   options: EvalCliOptions,
   logger: EvalCliLogger,
+  appRoot: string = process.cwd(),
 ): Promise<void> {
-  const appRoot = resolveApplicationRoot();
-
   loadDevelopmentEnvironmentFiles(appRoot);
 
   const requestedEvalIds = evalIds.length > 0 ? evalIds : undefined;
@@ -141,6 +144,10 @@ export async function runEvalCommand(
         url: options.url,
       });
     } else {
+      // Set before the server boots, because a provider's `setup` reads it
+      // once at startup and never again.
+      process.env[EVE_EVALUATION_ENV_FLAG] = "1";
+      process.env[EVE_EVALUATION_RUN_ID_ENV] = randomUUID();
       devServer = createDevelopmentServer(appRoot, { host: "127.0.0.1", port: 0 });
       const started = await devServer.start();
       client = await createEvalClient({ kind: "local", url: started.url });

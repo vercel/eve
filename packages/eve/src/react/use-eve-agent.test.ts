@@ -142,6 +142,54 @@ describe("useEveAgent", () => {
     expect(seenHelpers.at(-1)).toBe(firstHelpers);
   });
 
+  it("stops an active turn stream when the component unmounts", async () => {
+    let streamSignal: AbortSignal | null | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createStartedMessageResponse("session_1", "http:session_1");
+      }
+
+      streamSignal = init?.signal;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamSignal?.addEventListener("abort", () => controller.error(createAbortError()));
+          },
+        }),
+      );
+    });
+
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+    let root: ReturnType<typeof create> | undefined;
+
+    function TestComponent() {
+      helpers = useEveAgent();
+      return null;
+    }
+
+    await act(async () => {
+      root = create(createElement(TestComponent));
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = helpers?.send("Hello");
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    });
+
+    expect(streamSignal?.aborted).toBe(false);
+
+    await act(async () => {
+      root?.unmount();
+    });
+
+    expect(streamSignal?.aborted).toBe(true);
+
+    await act(async () => {
+      await sendPromise;
+    });
+  });
+
   it("sends a message and projects streamed events with the default reducer", async () => {
     const events = [
       createMessageReceivedEvent({
@@ -227,6 +275,47 @@ describe("useEveAgent", () => {
         userMessage: "Hello",
       }),
     );
+  });
+
+  it("detaches locally on unmount without cancelling the durable turn", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementationOnce((_input, init) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener("abort", () => reject(createAbortError()), {
+          once: true,
+        });
+      });
+    });
+
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+
+    function TestComponent() {
+      helpers = useEveAgent();
+      return null;
+    }
+
+    let renderer: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      renderer = create(createElement(TestComponent));
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = helpers?.send("Hello");
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+    await act(async () => {
+      await sendPromise;
+    });
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("prepares fresh clientContext before sending without projecting it optimistically", async () => {

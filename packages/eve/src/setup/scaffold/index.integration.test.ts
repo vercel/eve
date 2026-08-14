@@ -325,6 +325,7 @@ describe("ensureChannel", () => {
     const channelSource = await readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8");
     expect(channelSource).toContain("auth.api.getSession");
     expect(channelSource).toContain('authenticator: "better-auth:vercel"');
+    expect(channelSource).not.toContain('issuer: "https://vercel.com"');
     expect(channelSource).toContain("vercelOidc()");
     expect(channelSource).toContain("localDev()");
     expect(channelSource).not.toContain("placeholderAuth");
@@ -434,7 +435,7 @@ describe("ensureChannel", () => {
     expect(normalizeEol(channelSource)).toBe(normalizeEol(sourceChannel));
   });
 
-  test("scaffolds a Web Chat Stop button that cancels the active durable turn", async () => {
+  test("scaffolds a Web Chat Stop button with the agent cancellation API", async () => {
     const projectRoot = await createTempDir();
     await mkdir(join(projectRoot, "agent"), { recursive: true });
     await writeFile(
@@ -453,11 +454,9 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain(".attach(sessionId)");
-    expect(agentChatSource).toContain(".cancel({ turnId })");
-    expect(agentChatSource).toContain("onSessionChange(session)");
-    expect(agentChatSource).toContain("cancellation.sentTurnId === turnId");
-    expect(agentChatSource).not.toContain("onStop={agent.stop}");
+    expect(agentChatSource).toContain("agent.cancel()");
+    expect(agentChatSource).not.toContain(".attach(sessionId)");
+    expect(agentChatSource).not.toContain('event.type !== "turn.started"');
   });
 
   test("writes npm dist-tags for Web Chat without semver range decoration", async () => {

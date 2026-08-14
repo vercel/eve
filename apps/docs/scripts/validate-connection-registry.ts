@@ -40,7 +40,7 @@ const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
 const items = registry.items.filter((item) => item.name.startsWith("connection/"));
 const expectedSlugs = connectionEntries()
-  .filter((entry) => entry.surfaces.gallery)
+  .filter((entry) => entry.surfaces.registry)
   .map((entry) => entry.slug);
 const actualSlugs = items.map((item) => item.name.slice("connection/".length));
 const CONNECT_SERVICES: Readonly<Record<string, string>> = {
@@ -49,12 +49,13 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   notion: "mcp.notion.com",
   datadog: "mcp.datadoghq.com",
   honeycomb: "mcp.honeycomb.io",
+  context: "mcp.context.dev",
   natural: "mcp.natural.com",
 };
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
-    `Connection registry entries do not match the gallery.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
+    `Connection registry entries do not match the catalog.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
   );
 }
 

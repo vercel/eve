@@ -1,4 +1,8 @@
 import type { ContextAccessor } from "#context/key.js";
+import {
+  createChannelDeliveryMetadata,
+  type ChannelDeliverySource,
+} from "#channel/delivery-metadata.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 import type {
@@ -34,8 +38,8 @@ export interface Session {
     inputResponses: readonly InputResponse[],
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
-  /** Requests cancellation of this exact session's active turn. */
-  cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
+  /** Requests cancellation of this exact session's active turn or one owned task. */
+  cancel(options?: { taskId?: string; turnId?: string }): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
   compact(): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
@@ -79,11 +83,12 @@ export interface SessionHandle {
 export function createSession(
   id: string,
   runtime: Runtime,
-  metadata: { readonly requestId?: string; readonly turnPolicy?: TurnPolicy } = {},
+  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
 ): Session {
   return {
     id,
     async send(message, options) {
+      const delivery = createDelivery(metadata);
       const caller = sessionCallbackToTurnCaller(options.callback);
       const payload: {
         context?: readonly string[];
@@ -94,6 +99,7 @@ export function createSession(
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
         auth: options.auth,
+        delivery,
         kind: "send" as const,
         payload,
         requestId: metadata.requestId,
@@ -109,6 +115,7 @@ export function createSession(
         throw new Error("respond() requires at least one input response.");
       }
       const caller = sessionCallbackToTurnCaller(options.callback);
+      const delivery = createDelivery(metadata);
       const payload: {
         context?: readonly string[];
         inputResponses: readonly InputResponse[];
@@ -118,6 +125,7 @@ export function createSession(
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
         auth: options.auth,
+        delivery,
         kind: "send" as const,
         payload,
         requestId: metadata.requestId,
@@ -127,9 +135,9 @@ export function createSession(
         sessionId: id,
       });
     },
-    async cancel(options?: { turnId?: string }) {
+    async cancel(options?: { taskId?: string; turnId?: string }) {
       return await runtime.dispatchSession({
-        command: { kind: "cancel", turnId: options?.turnId },
+        command: { kind: "cancel", taskId: options?.taskId, turnId: options?.turnId },
         sessionId: id,
       });
     },
@@ -157,9 +165,17 @@ export function createSession(
 /** Builds an I/O-free factory for fixed session-ID handles. */
 export function createAttachSessionFn(
   runtime: Runtime,
-  metadata: { readonly requestId?: string; readonly turnPolicy?: TurnPolicy } = {},
+  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
 ): (sessionId: string) => Session {
   return (sessionId) => createSession(sessionId, runtime, metadata);
+}
+
+function createDelivery(
+  metadata: Partial<ChannelDeliverySource>,
+): ReturnType<typeof createChannelDeliveryMetadata> | undefined {
+  return metadata.channelKind !== undefined && metadata.channelName !== undefined
+    ? createChannelDeliveryMetadata(metadata as ChannelDeliverySource)
+    : undefined;
 }
 
 /**
@@ -217,7 +233,8 @@ export function sessionCallbackToTurnCaller(
     ? undefined
     : {
         callId: callback.callId,
-        replyTo: { kind: "callback", url: callback.url },
+        replyTo: { kind: "callback", token: callback.token, url: callback.url },
         subagentName: callback.subagentName,
+        taskId: callback.taskId,
       };
 }

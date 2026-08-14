@@ -25,6 +25,6 @@ describe("local instrumentation runtime ownership", () => {
         frameworkVersion: "test",
         serviceName: "test-agent",
       }),
-    ).toThrow(/another runtime already exists/u);
+    ).toThrow(/another runtime already owns the global tracer provider/u);
   });
 });

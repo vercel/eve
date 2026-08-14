@@ -12,6 +12,7 @@ function contributions(
   overrides: Partial<CompiledExtensionContributions>,
 ): CompiledExtensionContributions {
   return {
+    channels: [],
     tools: [],
     dynamicTools: [],
     hooks: [],
@@ -19,7 +20,8 @@ function contributions(
     dynamicSkills: [],
     dynamicInstructions: [],
     connections: [],
-    instructionFragments: [],
+    instructions: [],
+    schedules: [],
     ...overrides,
   };
 }
@@ -27,12 +29,21 @@ function contributions(
 describe("mergeContributions", () => {
   it("keeps the primary (consumer override) entry when a named contribution collides", () => {
     const primary = contributions({
+      channels: [
+        { name: "crm__webhook", logicalPath: "override", method: "GET" },
+        { name: "crm__webhook", logicalPath: "override", method: "POST" },
+      ] as never,
       tools: [{ name: "crm__search", logicalPath: "override" }] as never,
       connections: [{ connectionName: "crm__api", logicalPath: "override" }] as never,
       skills: [{ name: "crm__lookup", logicalPath: "override" }] as never,
       dynamicTools: [{ slug: "crm__dynamic", logicalPath: "override" }] as never,
+      schedules: [{ name: "crm__sweep", logicalPath: "override" }] as never,
     });
     const secondary = contributions({
+      channels: [
+        { name: "crm__webhook", logicalPath: "extension", method: "POST" },
+        { name: "crm__status", logicalPath: "extension", method: "GET" },
+      ] as never,
       tools: [
         { name: "crm__search", logicalPath: "extension" },
         { name: "crm__list", logicalPath: "extension" },
@@ -40,10 +51,19 @@ describe("mergeContributions", () => {
       connections: [{ connectionName: "crm__api", logicalPath: "extension" }] as never,
       skills: [{ name: "crm__lookup", logicalPath: "extension" }] as never,
       dynamicTools: [{ slug: "crm__dynamic", logicalPath: "extension" }] as never,
+      schedules: [
+        { name: "crm__sweep", logicalPath: "extension" },
+        { name: "crm__digest", logicalPath: "extension" },
+      ] as never,
     });
 
     const merged = mergeContributions(primary, secondary);
 
+    expect(merged.channels).toEqual([
+      { name: "crm__webhook", logicalPath: "override", method: "GET" },
+      { name: "crm__webhook", logicalPath: "override", method: "POST" },
+      { name: "crm__status", logicalPath: "extension", method: "GET" },
+    ]);
     expect(merged.tools).toEqual([
       { name: "crm__search", logicalPath: "override" },
       { name: "crm__list", logicalPath: "extension" },
@@ -51,22 +71,29 @@ describe("mergeContributions", () => {
     expect(merged.connections).toEqual([{ connectionName: "crm__api", logicalPath: "override" }]);
     expect(merged.skills).toEqual([{ name: "crm__lookup", logicalPath: "override" }]);
     expect(merged.dynamicTools).toEqual([{ slug: "crm__dynamic", logicalPath: "override" }]);
+    expect(merged.schedules).toEqual([
+      { name: "crm__sweep", logicalPath: "override" },
+      { name: "crm__digest", logicalPath: "extension" },
+    ]);
   });
 
   it("concatenates unnamed contributions from both sets", () => {
     const primary = contributions({
       hooks: [{ slug: "crm__before" }] as never,
-      instructionFragments: ["override fragment"],
+      instructions: [{ content: "override", role: "system" }] as never,
     });
     const secondary = contributions({
       hooks: [{ slug: "crm__after" }] as never,
-      instructionFragments: ["extension fragment"],
+      instructions: [{ content: "extension", role: "user" }] as never,
     });
 
     const merged = mergeContributions(primary, secondary);
 
     expect(merged.hooks).toEqual([{ slug: "crm__before" }, { slug: "crm__after" }]);
-    expect(merged.instructionFragments).toEqual(["override fragment", "extension fragment"]);
+    expect(merged.instructions).toEqual([
+      { content: "override", role: "system" },
+      { content: "extension", role: "user" },
+    ]);
   });
 });
 

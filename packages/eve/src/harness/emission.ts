@@ -10,7 +10,11 @@ import type {
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
-import type { AssistantStepFinishReason, RuntimeIdentity } from "#protocol/message.js";
+import type {
+  AssistantStepFinishReason,
+  RuntimeIdentity,
+  RuntimeTraceContext,
+} from "#protocol/message.js";
 import {
   createActionsRequestedEvent,
   createActionPartialEvent,
@@ -76,14 +80,15 @@ export async function emitTurnPreamble(
   input: StepInput,
   state: HarnessEmissionState,
   runtimeIdentity?: RuntimeIdentity,
+  traceContext?: RuntimeTraceContext,
 ): Promise<HarnessEmissionState> {
   const turnId = `turn_${state.sequence}`;
 
   if (!state.sessionStarted) {
-    await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity }));
+    await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity, trace: traceContext }));
   }
 
-  await emitFn(createTurnStartedEvent({ sequence: state.sequence, turnId }));
+  await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
 
   if (input.message !== undefined) {
     await emitFn(

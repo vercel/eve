@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  buildAgentInfoResponseFromManifest: vi.fn(() => ({ kind: "eve-agent-info", version: 1 })),
+  buildAgentInfoResponseFromManifest: vi.fn(() => ({ kind: "eve-agent-info", version: 2 })),
   getVercelOidcToken: vi.fn(),
   loadAgentInfoManifestData: vi.fn(async () => ({
     manifest: {

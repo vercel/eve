@@ -11,6 +11,7 @@ import {
   resolveInitialTurnCallerStep,
 } from "#execution/delegated-parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import {
@@ -22,7 +23,6 @@ import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
-import { dispatchTurnStep } from "#execution/workflow-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
@@ -58,15 +58,23 @@ vi.mock("./create-session-step.js", () => ({
 }));
 
 vi.mock("./route-child-delivery.js", () => ({
-  routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads, sessionState }) => ({
-    kind: "continue",
-    remainder: payloads[0],
-    sessionState,
-  })),
+  routeDeliverToChildren: vi
+    .fn()
+    .mockImplementation(async ({ delivery, serializedContext = {}, sessionState }) => ({
+      kind: "continue",
+      remainder: delivery,
+      serializedContext,
+      sessionState,
+    })),
 }));
 
 vi.mock("./delegated-parent-notification.js", () => ({
+  bindTurnCallerContextStep: vi
+    .fn()
+    .mockImplementation(async ({ serializedContext }) => serializedContext),
+  notifyCancelledTaskCallerStep: vi.fn().mockResolvedValue(undefined),
   notifyDelegatedParentStep: vi.fn().mockResolvedValue(undefined),
+  notifyTaskTurnStartedStep: vi.fn().mockResolvedValue(undefined),
   notifyTurnCallerStep: vi.fn().mockResolvedValue(undefined),
   resolveInitialTurnCallerStep: vi.fn().mockResolvedValue(undefined),
 }));
@@ -75,7 +83,7 @@ vi.mock("./terminate-child-sessions-step.js", () => ({
   terminateChildSessionsStep: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("./workflow-steps.js", () => ({
+vi.mock("./dispatch-turn-step.js", () => ({
   dispatchTurnStep: vi.fn().mockImplementation(async () => ({ runId: "turn-run" })),
 }));
 
@@ -196,10 +204,13 @@ describe("workflowEntry", () => {
     expect(getConflict.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(dispatchTurnStep).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
-    expect(terminateChildSessionsStep).toHaveBeenCalledWith({ sessionState });
+    expect(terminateChildSessionsStep).toHaveBeenCalledWith({
+      serializedContext: expect.any(Object),
+      sessionState,
+    });
   });
 
-  it("fails a conflicting delivery hook before dispatching the first turn", async () => {
+  it("exits a conflicting initial continuation before dispatching the first turn", async () => {
     const sessionState = createBaseSessionState();
     const dispose = vi.fn();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
@@ -219,25 +230,14 @@ describe("workflowEntry", () => {
         input: { message: "duplicate" },
         serializedContext: createSerializedContext(),
       }),
-    ).rejects.toMatchObject({
-      message: "Agent workflow failed. Inspect the private session trace for details.",
-      name: "EveWorkflowFailure",
-    });
+    ).resolves.toEqual({ output: "" });
 
-    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: expect.objectContaining({
-          conflictingRunId: "wrun_owner",
-          name: "HookConflictError",
-          token: "http:test",
-        }),
-      }),
-    );
+    expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
     expect(dispatchTurnStep).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
   });
 
-  it("normalizes the getConflict fallback error before dispatching the first turn", async () => {
+  it("also exits when a legacy world reports the initial continuation conflict", async () => {
     const sessionState = createBaseSessionState();
     const dispose = vi.fn();
     const fallbackError = Object.assign(new Error("legacy hook conflict"), {
@@ -263,20 +263,9 @@ describe("workflowEntry", () => {
         input: { message: "duplicate" },
         serializedContext: createSerializedContext(),
       }),
-    ).rejects.toMatchObject({
-      message: "Agent workflow failed. Inspect the private session trace for details.",
-      name: "EveWorkflowFailure",
-    });
+    ).resolves.toEqual({ output: "" });
 
-    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: expect.objectContaining({
-          message: 'Hook token "http:test" is already in use',
-          name: "HookConflictError",
-          token: "http:test",
-        }),
-      }),
-    );
+    expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
     expect(dispatchTurnStep).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
   });
@@ -356,7 +345,10 @@ describe("workflowEntry", () => {
       token: sessionCommandHookToken("wrun_test_123"),
     });
     expect(timeoutControl.dispose).toHaveBeenCalledOnce();
-    expect(terminateChildSessionsStep).toHaveBeenCalledWith({ sessionState });
+    expect(terminateChildSessionsStep).toHaveBeenCalledWith({
+      serializedContext: expect.any(Object),
+      sessionState,
+    });
     expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
     expect(emitTerminalSessionCompletionStep).toHaveBeenCalledWith({
       parentWritable: expect.any(WritableStream),
@@ -553,7 +545,10 @@ describe("workflowEntry", () => {
         error: expect.objectContaining({ message: "persistent recoverable failure" }),
       }),
     );
-    expect(terminateChildSessionsStep).toHaveBeenCalledWith({ sessionState });
+    expect(terminateChildSessionsStep).toHaveBeenCalledWith({
+      serializedContext: expect.any(Object),
+      sessionState,
+    });
     expect(notifyDelegatedParentStep).not.toHaveBeenCalled();
     expect(notifyTurnCallerStep).toHaveBeenCalledOnce();
     expect(notifyTurnCallerStep).toHaveBeenCalledWith({
@@ -843,7 +838,7 @@ describe("workflowEntry", () => {
       serializedContext: createSerializedContext(),
     });
 
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toMatchObject({
       auth: undefined,
       requestId: "req_followup",
       kind: "deliver",
@@ -976,7 +971,7 @@ describe("workflowEntry", () => {
 
     expect(result).toEqual({ output: "after delivery" });
     expect(dispatchTurnStep).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toMatchObject({
       auth: undefined,
       kind: "deliver",
       payloads: [{ message: "not for the child" }],
@@ -1105,6 +1100,7 @@ describe("workflowEntry", () => {
     vi.mocked(routeDeliverToChildren).mockResolvedValueOnce({
       kind: "continue",
       remainder: undefined,
+      serializedContext: {},
       sessionState,
     });
     installHookMocks({
@@ -1141,6 +1137,7 @@ describe("workflowEntry", () => {
     vi.mocked(routeDeliverToChildren).mockResolvedValueOnce({
       kind: "continue",
       remainder: undefined,
+      serializedContext: {},
       sessionState: retiredState,
     });
     installHookMocks({
@@ -1410,7 +1407,7 @@ describe("workflowEntry", () => {
 
     expect(result).toEqual({ output: "" });
     expect(nonTurnHookTokens()).toEqual(["slack:C01:", "slack:C01:1800000000.123456"]);
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toMatchObject({
       kind: "deliver",
       payloads: [{ message: "follow up" }],
     });
@@ -1653,12 +1650,10 @@ function createMockHook<T>(input: {
 }
 
 function createIteratorReturn(): () => Promise<IteratorResult<never>> {
-  return vi.fn(
-    async (): Promise<IteratorResult<never>> => ({
-      done: true,
-      value: undefined,
-    }),
-  );
+  return vi.fn(async (): Promise<IteratorResult<never>> => ({
+    done: true,
+    value: undefined,
+  }));
 }
 
 function nonTurnHookTokens(): string[] {

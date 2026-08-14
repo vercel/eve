@@ -99,7 +99,11 @@ function collectNavReferences(rootDir) {
         if (entry === "---") continue;
         if (/^---.+---$/.test(entry)) continue; // labeled separator: ---Group name---
         if (entry.startsWith("[")) continue; // [Title](url) custom link
-        const slug = entry.startsWith("!") ? entry.slice(1) : entry;
+        const slug = entry.startsWith("!")
+          ? entry.slice(1)
+          : entry.startsWith("...")
+            ? entry.slice(3)
+            : entry;
         const key = relDir ? `${relDir}/${slug}` : slug;
         result.explicit.add(key);
       }
@@ -246,7 +250,11 @@ function checkMetaReferences(rootDir) {
         if (/^---.+---$/.test(entry)) continue;
         if (entry.startsWith("[")) continue;
 
-        const slug = entry.startsWith("!") ? entry.slice(1) : entry;
+        const slug = entry.startsWith("!")
+          ? entry.slice(1)
+          : entry.startsWith("...")
+            ? entry.slice(3)
+            : entry;
         const candidates = [
           resolve(dir, slug),
           resolve(dir, `${slug}.md`),

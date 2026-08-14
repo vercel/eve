@@ -2,6 +2,7 @@ import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,
+  RuntimeActionResultHookPayload,
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
@@ -16,7 +17,11 @@ import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
  * sessions are bounded by the 30-day default timeout, so the decode can be
  * dropped once runs created on those versions have aged out.
  */
-export type SessionInboxPayload = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
+export type SessionInboxPayload =
+  | DeliverHookPayload
+  | RuntimeActionResultHookPayload
+  | SessionCommand
+  | SessionTimeoutHookPayload;
 
 interface HookRead {
   readonly order: number;
@@ -90,7 +95,6 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
   let offered: Promise<IteratorResult<SessionInboxPayload>> | null = null;
   let offeredRead: HookRead | undefined;
   let wake: (() => void) | undefined;
-
   const enqueue = (read: HookRead): void => {
     ready.push(read);
     ready.sort((left, right) => left.order - right.order);
@@ -104,9 +108,10 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
     state.pending = true;
     state.resolved = undefined;
     const next = state.retired
-      ? Promise.resolve(state.hook).then(
-          (value): IteratorResult<SessionInboxPayload> => ({ done: false, value }),
-        )
+      ? Promise.resolve(state.hook).then((value): IteratorResult<SessionInboxPayload> => ({
+          done: false,
+          value,
+        }))
       : state.iterator.next();
     void next.then(
       (result) => {

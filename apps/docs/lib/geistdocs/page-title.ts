@@ -19,7 +19,6 @@ const docsSeoTitles: Readonly<Record<string, string>> = {
   "/docs/concepts/sessions-runs-and-streaming": "Agent sessions, runs, and streaming",
   "/docs/getting-started": "Get started with eve: durable AI agents in TypeScript",
   "/docs/guides/frontend/overview": "Build an AI agent chat UI with useEveAgent",
-  "/docs/reference/project-layout": "agent/ directory reference",
   "/docs/reference/typescript-api": "TypeScript API reference",
   "/docs/tutorial/first-agent": "Build your first agent",
 };

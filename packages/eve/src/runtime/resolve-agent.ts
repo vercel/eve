@@ -100,7 +100,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     input.manifest.sandbox === null
       ? null
       : await resolveSandboxDefinition(input.manifest.sandbox, input.moduleMap, input.nodeId);
-  const instructions = createResolvedInstructionsDefinition(input.manifest.instructions);
+  const instructions = input.manifest.instructions.map(createResolvedInstructionsDefinition);
   const workspaceResourceRoot = input.manifest.workspaceResourceRoot;
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
@@ -116,6 +116,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,
     hooks: resolvedHooks,
+    instructions,
     metadata: {
       agentRoot: input.manifest.agentRoot,
       appRoot: input.manifest.appRoot,
@@ -128,24 +129,19 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     workspaceSpec: { rootEntries: [...workspaceResourceRoot.rootEntries] },
   };
 
-  const withInstructions =
-    instructions === undefined ? resolvedAgent : { ...resolvedAgent, instructions };
   return "config" in input.manifest
-    ? { ...withInstructions, config: createResolvedAgentConfig(input.manifest) }
-    : withInstructions;
+    ? { ...resolvedAgent, config: createResolvedAgentConfig(input.manifest) }
+    : resolvedAgent;
 }
 
 function createResolvedInstructionsDefinition(
-  instructions: CompiledInstructionsDefinition | undefined,
-): ResolvedInstructionsDefinition | undefined {
-  if (instructions === undefined) {
-    return undefined;
-  }
-
+  instructions: CompiledInstructionsDefinition,
+): ResolvedInstructionsDefinition {
   return {
+    content: instructions.content,
     name: instructions.name,
     logicalPath: instructions.logicalPath,
-    markdown: instructions.markdown,
+    role: instructions.role,
     sourceId: instructions.sourceId,
     sourceKind: instructions.sourceKind,
   };
@@ -204,7 +200,9 @@ function createResolvedAgentConfig(
 
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
+      instrumentationProviders: manifest.config.experimental.instrumentationProviders,
       subagentPersistentSessions: manifest.config.experimental.subagentPersistentSessions,
+      tasks: manifest.config.experimental.tasks,
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined

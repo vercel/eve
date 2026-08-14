@@ -2,7 +2,7 @@ import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
 import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
 import type {
   VercelSandboxBootstrapUseOptions,
-  VercelSandboxCreateOptions,
+  VercelSandboxOptions,
   VercelSandboxSessionUseOptions,
 } from "#public/sandbox/vercel-sandbox.js";
 
@@ -12,7 +12,7 @@ import type {
  * including for local development, where it creates real hosted
  * sandboxes (requires Vercel credentials).
  *
- * The optional `opts` parameter is forwarded to Vercel Sandbox creation
+ * The optional provider creation fields are forwarded to Vercel Sandbox creation
  * for every fresh sandbox the framework creates (template at prewarm,
  * session at first-time create). On resume (`Sandbox.get`), no create
  * happens, so opts are not re-applied. `networkPolicy` is applied after
@@ -30,10 +30,15 @@ import type {
  * `sandbox.update(...)`; those settings persist into the snapshot.
  * `onSession({ use })` applies its options to the live session via the
  * SDK's `update` under the hood, overriding any overlapping field
- * from `opts`.
+ * from `opts`. `sessionCreateOptions`, when provided, is resolved only
+ * when creating a fresh live session and can attach session-specific Drives.
  */
 export function vercel(
-  opts?: VercelSandboxCreateOptions,
+  opts?: VercelSandboxOptions,
 ): SandboxBackend<VercelSandboxBootstrapUseOptions, VercelSandboxSessionUseOptions> {
-  return createVercelSandbox({ createOptions: opts });
+  const { sessionCreateOptions, ...createOptions } = opts ?? {};
+  return createVercelSandbox({
+    createOptions,
+    resolveSessionCreateOptions: sessionCreateOptions,
+  });
 }

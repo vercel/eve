@@ -185,8 +185,16 @@ function normalizeExperimentalDefinition(
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
+  if (experimental.instrumentationProviders !== undefined) {
+    compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
+  }
+
   if (experimental.subagentPersistentSessions !== undefined) {
     compiledExperimental.subagentPersistentSessions = experimental.subagentPersistentSessions;
+  }
+
+  if (experimental.tasks !== undefined) {
+    compiledExperimental.tasks = experimental.tasks;
   }
 
   if (experimental.workflow !== undefined) {

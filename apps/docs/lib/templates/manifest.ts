@@ -181,6 +181,35 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
+    slug: "eve-software-factory-template",
+    title: "Software factory",
+    setupPrompt:
+      "I want to build a software factory with the eve framework, using the Foreman template. Read the setup instructions at https://ask-foreman.dev/docs/getting-started and follow them. They cover deploying the template, connecting GitHub and Linear, running it locally, and how the pipeline works overall.",
+    description:
+      "Foreman, a software factory that takes tasks from GitHub and Linear, runs each through classifier, analyst, implementer, and reviewer stations, and delivers a reviewed draft pull request on your repository.",
+    demoHref: "https://ask-foreman.dev",
+    sourceHref: "https://github.com/vercel-labs/eve-software-factory-template/tree/main",
+    category: "Collaboration",
+    model: "openai/gpt-5.6-terra-fast",
+    integrations: ["GitHub", "Linear"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "eve-software-factory-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/github.ts",
+      "agent/channels/linear.ts",
+      "agent/extensions/github.ts",
+      "agent/instructions.ts",
+      "agent/lib/github/approval.ts",
+      "agent/lib/trust.ts",
+      "agent/subagents/analyst/agent.ts",
+      "agent/subagents/classifier/agent.ts",
+      "agent/subagents/implementer/agent.ts",
+      "agent/subagents/implementer/tools/push_branch.ts",
+      "agent/subagents/reviewer/agent.ts",
+    ],
+  },
+  {
     slug: "marketing-team-eve-template",
     title: "Marketing team",
     setupPrompt:

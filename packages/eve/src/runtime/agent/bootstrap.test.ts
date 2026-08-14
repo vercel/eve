@@ -10,7 +10,7 @@ function createResolvedAgentForTest(overrides: Partial<ResolvedAgent> = {}): Res
     config: { name: "test-agent" } as ResolvedAgent["config"],
     connections: [],
     disabledFrameworkTools: [],
-    instructions: { markdown: "" } as ResolvedAgent["instructions"],
+    instructions: [],
     skills: [],
     ...overrides,
   };
@@ -18,6 +18,46 @@ function createResolvedAgentForTest(overrides: Partial<ResolvedAgent> = {}): Res
 }
 
 describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
+  it("partitions static user instructions into initial messages", () => {
+    const turnAgent = createResolvedRuntimeTurnAgent({
+      agent: createResolvedAgentForTest({
+        instructions: [
+          {
+            content: "System policy.",
+            logicalPath: "instructions/system.ts",
+            name: "instructions/system",
+            role: "system",
+            sourceId: "instructions/system.ts",
+            sourceKind: "module",
+          },
+          {
+            content: "  Pinned user context.  ",
+            logicalPath: "instructions/user.ts",
+            name: "instructions/user",
+            role: "user",
+            sourceId: "instructions/user.ts",
+            sourceKind: "module",
+          },
+          {
+            content: " \n ",
+            logicalPath: "instructions/empty.ts",
+            name: "instructions/empty",
+            role: "user",
+            sourceId: "instructions/empty.ts",
+            sourceKind: "module",
+          },
+        ],
+      }),
+      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      tools: [],
+    });
+
+    expect(turnAgent.initialMessages).toEqual([{ content: "Pinned user context.", role: "user" }]);
+    expect(turnAgent.instructions).toContainEqual(
+      "Instructions (instructions/system)\nSystem policy.",
+    );
+  });
+
   it("includes the messaging instruction for an opted-in root agent (framework agent tool)", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
@@ -42,6 +82,22 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     });
 
     expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
+  });
+
+  it("explains task-derived busy agents when tasks imply persistent sessions", () => {
+    const turnAgent = createResolvedRuntimeTurnAgent({
+      agent: createResolvedAgentForTest({
+        config: {
+          experimental: { tasks: true },
+          name: "test-agent",
+        } as ResolvedAgent["config"],
+      }),
+      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+      tools: [],
+    });
+
+    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("availability=busy"));
+    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("taskId"));
   });
 
   it("omits the messaging instruction when an authored tool named agent shadows the framework tool", () => {

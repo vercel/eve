@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 import {
+  detachEveAgentStore,
   EveAgentStore,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
@@ -14,6 +15,7 @@ import { defaultMessageReducer, type EveMessageData } from "#client/message-redu
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 import type {
+  CancelSessionResult,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -44,7 +46,9 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
  * Snapshot plus commands returned by `useEveAgent`.
  */
 export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
-  /** Resets the session: aborts any in-flight turn, recreates the owned session, and clears events and projected data. */
+  /** Requests durable cancellation of the active turn while continuing to receive its events. */
+  readonly cancel: () => Promise<CancelSessionResult>;
+  /** Resets the session: detaches any local stream, recreates the owned session, and clears events and projected data. */
   readonly reset: () => void;
   /** Sends a message. Rejects if a turn is already in flight. */
   readonly send: <TOutput = unknown>(
@@ -56,8 +60,6 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
     inputResponses: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
   ) => Promise<void>;
-  /** Aborts the in-flight turn's stream, if any. */
-  readonly stop: () => void;
 }
 
 /**
@@ -119,7 +121,7 @@ export function useEveAgent<TData>(
  * React hook that drives an eve session and projects its event stream into UI data.
  *
  * Returns the current snapshot (`data`, `events`, `session`, `status`, `error`)
- * plus the commands `send`, `respond`, `stop`, and `reset`. With no reducer, `data` is the
+ * plus the commands `send`, `respond`, `cancel`, and `reset`. With no reducer, `data` is the
  * built-in `UIMessage` projection from {@link defaultMessageReducer} (`TData`
  * is {@link EveMessageData}); pass a reducer to project into your own shape and
  * infer `TData`.
@@ -168,6 +170,9 @@ export function useEveAgent<TData>(
     () => store.snapshot,
   );
 
+  useEffect(() => () => detachEveAgentStore(store), [store]);
+
+  const cancel = useCallback(() => store.cancel(), [store]);
   const reset = useCallback(() => store.reset(), [store]);
   const send = useCallback(
     <TOutput = unknown>(message: string | UserContent, options?: SendTurnOptions<TOutput>) => {
@@ -182,16 +187,14 @@ export function useEveAgent<TData>(
     ) => store.send({ ...options, inputResponses }),
     [store],
   );
-  const stop = useCallback(() => store.stop(), [store]);
-
   return useMemo(
     () => ({
       ...snapshot,
+      cancel,
       reset,
       respond,
       send,
-      stop,
     }),
-    [reset, respond, send, snapshot, stop],
+    [cancel, reset, respond, send, snapshot],
   );
 }

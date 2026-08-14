@@ -29,6 +29,7 @@ import {
   isRuntimeIpAllowed,
   type RuntimeIpAllowList,
 } from "#runtime/governance/network/ip-allow-list.js";
+import { isLoopbackHostname } from "#shared/network-address.js";
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -438,13 +439,37 @@ function formatChallenge(challenge: UnauthorizedChallenge): string {
     return challenge.scheme;
   }
   const renderedParameters = Object.entries(challenge.parameters)
-    .map(([key, value]) => `${key}="${escapeChallengeValue(value)}"`)
+    .map(([key, value]) => `${key}="${escapeAuthChallengeParameter(value)}"`)
     .join(", ");
   return `${challenge.scheme} ${renderedParameters}`;
 }
 
-function escapeChallengeValue(value: string): string {
+/** @internal Escapes a value for an HTTP auth challenge quoted string. */
+export function escapeAuthChallengeParameter(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function isValidOAuthIdentifierUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const secureTransport =
+      url.protocol === "https:" || (url.protocol === "http:" && isLoopbackHostname(url.hostname));
+    return (
+      secureTransport &&
+      url.username.length === 0 &&
+      url.password.length === 0 &&
+      url.search.length === 0 &&
+      url.hash.length === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isValidMetadataPath(value: string): boolean {
+  if (!value.startsWith("/") || value.startsWith("//")) return false;
+  const url = new URL(value, "https://eve.invalid");
+  return url.origin === "https://eve.invalid" && url.search.length === 0 && url.hash.length === 0;
 }
 
 /**
@@ -496,6 +521,97 @@ export class ForbiddenError extends Error {
 export type AuthFn<TEvent = Request> = (
   event: TEvent,
 ) => SessionAuthContext | null | undefined | Promise<SessionAuthContext | null | undefined>;
+
+/**
+ * OAuth protected-resource metadata attached to an inbound auth policy.
+ * `issuer` is shorthand for a single authorization server.
+ */
+export type OAuthResourceOptions = {
+  readonly metadataPath?: string;
+  readonly resource?: string;
+  readonly scopes?: readonly string[];
+} & (
+  | {
+      readonly authorizationServers?: never;
+      readonly issuer: string;
+    }
+  | {
+      readonly authorizationServers: readonly string[];
+      readonly issuer?: never;
+    }
+);
+
+const OAUTH_RESOURCE_SYMBOL = Symbol.for("eve.channels.auth.oauthResource");
+
+/**
+ * An ordinary route authenticator decorated with OAuth protected-resource
+ * discovery metadata.
+ */
+export type OAuthResourceAuth = AuthFn<Request> & {
+  readonly [OAUTH_RESOURCE_SYMBOL]: OAuthResourceOptions;
+};
+
+/**
+ * Adds OAuth protected-resource metadata to an existing inbound auth policy.
+ *
+ * The returned value remains an {@link AuthFn}: it preserves the ordered auth
+ * walk and can be used by any channel. A protocol-aware channel such as
+ * `mcpChannel` may additionally publish the metadata and discovery challenge.
+ */
+export function oauthResource(
+  auth: AuthFn<Request> | readonly AuthFn<Request>[],
+  options: OAuthResourceOptions,
+): OAuthResourceAuth {
+  const authorizationServers =
+    options.issuer !== undefined ? [options.issuer] : options.authorizationServers;
+  if (
+    authorizationServers.length === 0 ||
+    authorizationServers.some((value) => !isValidOAuthIdentifierUrl(value))
+  ) {
+    throw new Error(
+      "oauthResource requires at least one HTTPS authorization server URL (HTTP is allowed only on loopback).",
+    );
+  }
+  if (options.resource !== undefined && !isValidOAuthIdentifierUrl(options.resource)) {
+    throw new Error(
+      "oauthResource resource must be an HTTPS URL without credentials, query, or fragment (HTTP is allowed only on loopback).",
+    );
+  }
+  if (options.metadataPath !== undefined && !isValidMetadataPath(options.metadataPath)) {
+    throw new Error(
+      "oauthResource metadataPath must be an absolute path without a host, query, or fragment.",
+    );
+  }
+
+  const list: readonly AuthFn<Request>[] = Array.isArray(auth)
+    ? (auth as readonly AuthFn<Request>[])
+    : [auth as AuthFn<Request>];
+  const composed: AuthFn<Request> = async (request) => {
+    for (const fn of list) {
+      const result = await fn(request);
+      if (result) return result;
+    }
+    return null;
+  };
+  const declaredChallenges = collectDeclaredChallenges(list);
+  const wrapped = withAuthChallenges(
+    composed,
+    declaredChallenges.length > 0 ? declaredChallenges : [{ scheme: "Bearer" }],
+  ) as OAuthResourceAuth;
+  Object.defineProperty(wrapped, OAUTH_RESOURCE_SYMBOL, {
+    enumerable: false,
+    value: options,
+  });
+  return wrapped;
+}
+
+/** @internal Reads OAuth resource metadata without widening `AuthFn`. */
+export function readOAuthResourceOptions(
+  auth: AuthFn<Request> | readonly AuthFn<Request>[],
+): OAuthResourceOptions | undefined {
+  if (Array.isArray(auth)) return undefined;
+  return (auth as Partial<OAuthResourceAuth>)[OAUTH_RESOURCE_SYMBOL];
+}
 
 /**
  * Symbol-keyed property carrying the `www-authenticate` challenges an
@@ -608,9 +724,43 @@ export async function routeAuth(
   }
 
   const declaredChallenges = collectDeclaredChallenges(list);
+  const challenges =
+    declaredChallenges.length > 0
+      ? addInvalidBearerTokenError(request, declaredChallenges)
+      : [{ scheme: "Bearer" } satisfies UnauthorizedChallenge];
   return createUnauthorizedResponse({
-    challenges: declaredChallenges.length > 0 ? declaredChallenges : [{ scheme: "Bearer" }],
+    challenges,
   });
+}
+
+/**
+ * A supplied Bearer credential that every declared Bearer strategy declined
+ * is invalid, rather than absent. Add the RFC 6750 error only after the whole
+ * auth walk has exhausted so another Bearer strategy or a fallback such as
+ * localDev() still has a chance to accept the request.
+ */
+function addInvalidBearerTokenError(
+  request: Request,
+  challenges: readonly UnauthorizedChallenge[],
+): readonly UnauthorizedChallenge[] {
+  const authorization = request.headers.get("authorization");
+  if (authorization === null || !/^Bearer(?:\s|$)/i.test(authorization.trim())) {
+    return challenges;
+  }
+  if (!challenges.some((challenge) => challenge.scheme === "Bearer")) {
+    return challenges;
+  }
+  return challenges.map((challenge) =>
+    challenge.scheme !== "Bearer" || challenge.parameters?.error !== undefined
+      ? challenge
+      : {
+          ...challenge,
+          parameters: {
+            ...challenge.parameters,
+            error: "invalid_token",
+          },
+        },
+  );
 }
 
 /**

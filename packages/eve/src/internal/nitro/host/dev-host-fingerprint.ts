@@ -50,12 +50,21 @@ export async function computeDevelopmentHostFingerprint(
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
-async function readInstrumentationSource(
-  host: PreparedDevelopmentApplicationHost,
-): Promise<string | null> {
-  const path = host.compiledArtifacts.instrumentationSourcePath;
-  if (path === undefined) {
+async function readInstrumentationSource(host: PreparedDevelopmentApplicationHost): Promise<{
+  readonly kind: "directory" | "file";
+  readonly modules: readonly { readonly slot: string | null; readonly source: string }[];
+} | null> {
+  const paths = host.compiledArtifacts.instrumentationSourcePaths;
+  const layout = host.compiledArtifacts.instrumentationLayout;
+  if (paths === undefined || layout === undefined) {
     return null;
   }
-  return await readFile(path, "utf8");
+  const sources = await Promise.all(paths.map(async (path) => await readFile(path, "utf8")));
+  return {
+    kind: layout.kind,
+    modules: sources.map((source, index) => ({
+      slot: layout.kind === "directory" ? (layout.slots[index] ?? null) : null,
+      source,
+    })),
+  };
 }

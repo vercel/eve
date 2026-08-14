@@ -583,6 +583,12 @@ describe("slackChannel() default event handlers", () => {
         value: "approve",
       },
     ]);
+    expect(ctx.state.pendingApprovalCards).toEqual({
+      approval_abc123: {
+        messageBlocks: controlsBody.blocks,
+        messageTs: "1700000001.000001",
+      },
+    });
   });
 
   it("keeps a large tool input out of the Slack button callback", async () => {
@@ -1451,6 +1457,21 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(input.title).toBe("hello");
   });
 
+  it("uses the run title returned by onAppMention without changing the message", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null, title: "Run" }),
+    });
+
+    const { body } = buildMentionBody({ text: "private message text" });
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]!;
+    expect(input.title).toBe("Run");
+    expect(input.message).toContain("<content>\nprivate message text\n</content>");
+  });
+
   it("uses only this app's reply as the incremental thread context boundary", async () => {
     const threadTs = "1700000000.000001";
     const currentTs = "1700000000.000006";
@@ -2165,6 +2186,22 @@ describe("slackChannel() inbound direct message pipeline", () => {
     const opts = options as { auth: unknown; state: { channelId: string } };
     expect(opts.auth).toMatchObject({ principalId: "U01", authenticator: "test" });
     expect(opts.state.channelId).toBe(channelId);
+    expect(options.title).toBe("hello");
+  });
+
+  it("uses the run title returned by onDirectMessage", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage: () => ({ auth: null, title: "Private support case" }),
+    });
+
+    const { body } = buildDirectMessageBody({ text: "sensitive message" });
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, options] = send.mock.calls[0]!;
+    expect(options.title).toBe("Private support case");
+    expect(options.message).toContain("<content>\nsensitive message\n</content>");
   });
 
   it("does not dispatch when onDirectMessage resolves to null", async () => {

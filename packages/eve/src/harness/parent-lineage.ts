@@ -1,6 +1,6 @@
 import type { SessionParent } from "#channel/types.js";
 import { isSubagentAdapterState } from "#execution/subagent-adapter-state.js";
-import type { InstrumentationParentLineage } from "#harness/instrumentation-lifecycle.js";
+import type { InstrumentationParentLineage } from "#harness/instrumentation/lifecycle.js";
 
 /**
  * Resolves the dispatch that created the running session, if any. Dispatch

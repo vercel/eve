@@ -1,4 +1,5 @@
 {
   "title": "Connections",
+  "defaultOpen": false,
   "pages": ["overview", "mcp", "openapi"]
 }

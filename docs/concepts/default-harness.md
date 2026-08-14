@@ -57,7 +57,7 @@ The model-facing file tools accept absolute paths and paths beginning with `$HOM
 
 Notes:
 
-- **`agent`** is available only in the root session. Its child uses the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and fresh [state](../guides/state). The child receives neither `agent` nor `Workflow`; declared subagents do not receive the built-in `agent` either. See [Subagents](../subagents).
+- **`agent`** is available only in the root session. Its child uses the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and fresh [state](./state). The child receives neither `agent` nor `Workflow`; declared subagents do not receive the built-in `agent` either. See [Subagents](../subagents).
 - **`load_skill`** only pulls instructions into context. It adds no new execution surface, because behavior still comes from the tools the agent already has.
 - **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. It's registered only when the agent has connections.
 - **`web_search`** has no local executor; the provider runs it. AI Gateway models use Exa by default. To use Parallel instead, export `webSearch({ provider: "parallel" })` from `agent/tools/web_search.ts`. Direct provider models continue to use their native search implementation. To supply your own implementation, override it with `defineTool()`.
@@ -125,7 +125,7 @@ import { experimental_workflow } from "eve/tools";
 export default experimental_workflow({ maxSubagents: 100 });
 ```
 
-With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. The tool is root-only — delegated subagent sessions never see it — and one program may dispatch at most the configured `maxSubagents` calls (default 100). See [Dynamic workflows](../guides/dynamic-workflows).
+With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. The tool is root-only — delegated subagent sessions never see it — and one program may dispatch at most the configured `maxSubagents` calls (default 100). See [Workflow Tool](../subagents/workflow-tool).
 
 ## The opt-in `sleep` tool
 

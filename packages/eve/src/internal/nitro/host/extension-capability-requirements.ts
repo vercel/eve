@@ -44,8 +44,10 @@ export async function deriveExtensionCapabilityRequirements(input: {
 
   if (tools.length > 0) required.add("tool");
   if (tools.some((entry) => entry.kind === "dynamic-tool")) required.add("dynamicTool");
+  if (input.manifest.channels.length > 0) required.add("channel");
   if (input.manifest.connections.length > 0) required.add("connection");
   if (input.manifest.hooks.length > 0) required.add("hook");
+  if (input.manifest.schedules.length > 0) required.add("schedule");
   if (skills.length > 0) required.add("skill");
   if (skills.some((entry) => entry.kind === "dynamic-skill")) required.add("dynamicSkill");
   if (instructions.length > 0) required.add("instructions");

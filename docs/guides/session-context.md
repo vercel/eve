@@ -1,20 +1,22 @@
 ---
 title: "Session Context"
-description: "Runtime helpers: ctx.session, ctx.getSandbox, ctx.getSkill, and defineState."
+description: "Use ctx.session and runtime accessors inside eve-managed execution."
 ---
 
-eve exposes runtime state through the `ctx` parameter passed to tool `execute`, hook handlers, channel event handlers, and connection auth/header resolvers:
+eve passes a runtime `ctx` to tool executors, hook handlers, channel event handlers, and connection auth and header resolvers. Use it to inspect the active session and reach resources bound to that execution.
 
-- `ctx.session`: session metadata, turn, auth, and parent lineage
-- `ctx.getSandbox()`: live sandbox handle for the current agent
-- `ctx.getSkill(identifier)`: handle for a named skill visible to the current agent
-- `defineState(name, initial)`: typed durable state with `get()` and `update()` (imported from `eve/context`)
+| Accessor                     | Provides                                                  | Full guide                                      |
+| ---------------------------- | --------------------------------------------------------- | ----------------------------------------------- |
+| `ctx.session`                | Session identity, turn metadata, auth, and parent lineage | This page                                       |
+| `ctx.getSandbox()`           | The current agent's live sandbox handle                   | [Sandbox](../sandbox)                           |
+| `ctx.getSkill(identifier)`   | A handle for a skill visible to the current agent         | [Skills](../skills#read-skill-files-at-runtime) |
+| `defineState(name, initial)` | Durable typed state shared by runtime code in one session | [State](../concepts/state)                      |
 
-These APIs work only inside active authored runtime execution, including tools, channel event handlers, and authored hooks. They throw when called outside a managed context.
+These APIs work only during eve-managed runtime execution. Calling them during module evaluation, discovery, or a build throws.
 
 ## `ctx.session`
 
-`ctx.session` exposes durable runtime metadata about the current execution.
+`ctx.session` describes the durable session and active turn:
 
 ```ts title="agent/tools/who_called_me.ts"
 import { defineTool } from "eve/tools";
@@ -37,132 +39,61 @@ export default defineTool({
 });
 ```
 
-Public session fields:
+Public fields include:
 
-- `auth.current`
-- `auth.initiator`
-- `id`
-- `turn.id`
-- `turn.sequence`
-- optional `parent`
+- `id`: the durable session ID.
+- `turn.id`: the current turn ID.
+- `turn.sequence`: the turn's position in the session.
+- `auth.current`: the caller for the active inbound turn.
+- `auth.initiator`: the caller that started the session.
+- `parent`: the parent call, session, root session, and turn for a child subagent session.
 
-Behavior:
-
-- `auth.current` is the caller for the active inbound turn.
-- `auth.initiator` is the caller that started the durable session.
-- Unprotected agents expose both as `null`.
-- Top-level schedule sessions expose the framework app principal (`principalId: "eve:app"`, `principalType: "runtime"`).
-- `parent` is present for child subagent sessions and includes the parent `callId`, `sessionId`, `rootSessionId`, and `turn`.
+Unprotected agents expose `auth.current` and `auth.initiator` as `null`. Top-level schedule sessions use the framework app principal (`principalId: "eve:app"`, `principalType: "runtime"`). See [Authentication](./auth-and-route-protection#what-reaches-ctxsessionauth) for how inbound identity becomes session auth.
 
 ## `ctx.getSandbox()`
 
-`ctx.getSandbox()` returns a live handle for the current agent's sandbox.
+Call `ctx.getSandbox()` when authored runtime code needs filesystem or process access in the current agent's sandbox:
 
 ```ts
 const sandbox = await ctx.getSandbox();
 const result = await sandbox.run({ command: "npm test" });
 ```
 
-Behavior:
-
-- It takes no arguments. Each agent has exactly one sandbox.
-- It is async because eve binds or restores sandbox state lazily.
-- It only works when sandbox access is attached to the active runtime path.
-- Visibility is node-local. A subagent sees its own sandbox, not the parent's.
-- The returned `RuntimeSandboxSession` extends the ordinary sandbox I/O surface
-  with `stop()`. It is exported from `eve/sandbox`.
-
-Call `stop()` to release sandbox compute while preserving the durable session
-and its filesystem:
-
-```ts
-const sandbox = await ctx.getSandbox();
-await sandbox.stop();
-```
-
-Each backend implements this with its native lifecycle operation. Treat the
-stop as the end of sandbox work in the current callback; a later callback calls
-`ctx.getSandbox()` normally and eve reopens the same durable session. Vercel
-also supports using the same handle again: its next command or file operation
-automatically resumes the sandbox, just as it would after an inactivity
-timeout. No separate eve reconnect state is created, and provider failures
-reject the returned promise.
-
-`SandboxSession` also exposes `resolvePath(path)`, which returns the live backend-native path for a logical `/workspace/...` location. Use it when authored code needs that path before passing it to shell code or a child process.
-
-See [Sandbox](../sandbox) for lifecycle details.
+The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned runtime handle can also stop compute while preserving the durable sandbox state. See [Sandbox](../sandbox#using-the-sandbox) for the I/O API and lifecycle.
 
 ## `ctx.getSkill(identifier)`
 
-`ctx.getSkill(identifier)` returns a handle for a named skill visible to the current agent.
+Call `ctx.getSkill(identifier)` to read a packaged skill's supporting files:
 
 ```ts
 const skill = ctx.getSkill("research");
 const notes = await skill.file("references/checklist.md").text();
 ```
 
-Behavior:
-
-- It is synchronous. File content is read lazily from the active sandbox.
-- It only works when sandbox access is attached to the active runtime path.
-- `identifier` is the path-derived skill id.
-- Visibility follows the current agent's sandbox.
-- A missing skill surfaces when a file accessor reads a missing sandbox path.
-- The returned handle exposes `name` and `file(relativePath)`.
-
-See [Skills](../skills) for the full authoring model.
+The accessor is synchronous; file content is read lazily from the active sandbox. Visibility follows the current agent. See [Skills](../skills#read-skill-files-at-runtime) for the complete handle behavior.
 
 ## Custom state with `defineState`
 
-Use `defineState` when your agent needs durable typed state that tools, hooks, and channel handlers can share. State survives workflow step boundaries. Declare the handle at module scope so every importer shares it:
-
-```ts title="agent/lib/budget.ts"
-import { defineState } from "eve/context";
-
-interface BudgetState {
-  readonly count: number;
-  readonly cap: number;
-}
-
-export const budget = defineState<BudgetState>("myapp.budget", () => ({
-  count: 0,
-  cap: 25,
-}));
-```
-
-`get()` reads the current value (returning `initial()` on first access), and `update(fn)` applies a function to it. Both throw outside a managed scope. See [State](./state) for the full read/write model and examples from tools and hooks.
+Use `defineState` for durable per-session values that tools, hooks, and channel handlers share. Unlike the `ctx` accessors, import it from `eve/context` and declare the handle at module scope. Its `get()` and `update()` methods still require active eve execution. See [State](../concepts/state) for the read, update, reset, and subagent-isolation model.
 
 ## Where these APIs work
 
-Safe places:
+Runtime context is available:
 
-- inside `defineTool(...).execute(input, ctx)`
-- inside connection `auth: (ctx) => provider` and `headers: (ctx) => values` resolvers
-- inside authored callbacks eve runs inside the runtime
-- after asynchronous boundaries inside the same authored execution chain
+- inside `defineTool(...).execute(input, ctx)`;
+- inside connection `auth` and `headers` resolvers;
+- inside channel and hook callbacks that receive `ctx`;
+- after asynchronous boundaries within the same authored execution chain.
 
-Unsafe places:
-
-- top-level module evaluation
-- build scripts
-- discovery-time code paths
-
-If you call them outside an active eve runtime context, they throw immediately with a message explaining the required scope.
+Runtime context is not available during top-level module evaluation, build scripts, or discovery. Declare reusable definitions and state handles at module scope, but call their context-dependent methods only from an eve-managed callback.
 
 ## How it works
 
-The framework sets up a context container before invoking authored code:
-
-1. The runtime populates durable seed values (auth, session id, compiled bundle).
-2. Before each step, the framework derives step-local values (session metadata, sandbox access, skill access) from the durable state.
-3. Authored code runs inside the managed scope, so `ctx` and `defineState` accessors resolve automatically.
-4. After the step, the framework commits mutable state (for example sandbox changes) back to the durable session.
-
-The framework manages this lifecycle. Authored code only uses `ctx` and the public accessors.
+eve establishes the managed context before invoking authored runtime code and keeps it available across asynchronous work in that execution chain. The framework binds durable session data and step-local resources, then commits mutable state at the step boundary. Authored code uses the public accessors rather than managing this lifecycle.
 
 ## What to read next
 
-- [State](./state)
-- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming)
-- [Subagents](../subagents)
-- [Skills](../skills)
+- [State](../concepts/state): durable typed values scoped to one session.
+- [Sandbox](../sandbox): runtime filesystem and process access.
+- [Skills](../skills): load procedures and read packaged skill files.
+- [Sessions, runs, and streaming](../concepts/sessions-runs-and-streaming): the durable session and event contract.

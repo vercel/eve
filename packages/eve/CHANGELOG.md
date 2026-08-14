@@ -1,5 +1,91 @@
 # eve
 
+## 0.37.1
+
+### Patch Changes
+
+- 8bf1e5b: Render background subagent activity in one persistent dev TUI section across parent turns. Idle task wakes render while the prompt remains active, remote child streams use the authenticated parent proxy, and child boundaries finalize sections without later-turn cancellation closing unrelated background work.
+- 046981e: Add experimental background tasks for local and remote subagents. With `experimental.tasks` enabled, subagent calls return durable task receipts; parents can inspect, continue, or cancel work while lifecycle notifications and human-input requests arrive asynchronously. Remote child streams are exposed through an authenticated parent-origin proxy so clients never receive remote credentials.
+- d8cef1a: Scope create-once operations to the effective forwarded principal so two forwarded users behind the same trusted forwarder cannot adopt each other's session.
+- 5d12328: Preserve a session-scoped dynamic model selection when the first turn is cancelled so later turns can reuse it without requiring a `turn.started` resolver.
+- 10a09a1: Make failed `eve init` runs recoverable: new targets are cleaned up, preexisting empty targets are restored, and existing projects receive clear dependency-install recovery guidance.
+- 8bf1e5b: The dev TUI now presents and routes approval or question prompts raised by background tasks while the parent session is idle, instead of leaving the task blocked.
+- 046981e: Preserve remote task HITL response routes for loopback HTTP children and Vercel deployments configured with Protection Bypass for Automation. HTTPS remains required for every non-loopback remote child.
+- 63726db: Polish the connection authorization completion page with a Vercel-styled success state.
+- d8cef1a: Add authenticated create-once session requests through `operationId`. Concurrent or retried creates adopt the active session that first claimed the operation without dispatching duplicate input.
+- 5ba9749: Add a secure MCP channel that reuses eve route auth and lets clients start, inspect, update, authorize, and cancel principal-bound durable agent invocations over MCP 2026-07-28 with a stateless 2025 compatibility path.
+- 60e87ef: Keep active client turns connected while they are paused for authorization so responses resume automatically after the callback completes.
+
+## 0.37.0
+
+### Minor Changes
+
+- fe691aa: Expose Vercel Sandbox Drives and allow authors to mount them when creating live session sandboxes.
+
+### Patch Changes
+
+- d0bb6af: Fix Sign in with Vercel Web Chat projects failing to load user-scoped Vercel Connect tools because the generated channel used a reserved issuer.
+- 7ab7d97: Running eve without a command now initializes the current directory when no eve project is present, and starts development when one is detected.
+- c77c661: `eve init` now asks whether to scaffold a non-empty current directory in place or create a named subdirectory. In-place scaffolds preserve unrelated files and overwrite generated paths; coding-agent and non-interactive launches must pass an explicit directory name.
+- 456c0a5: `eve init` now scaffolds the current directory when no target is provided, including when launched by a coding agent.
+
+## 0.36.0
+
+### Minor Changes
+
+- 2714386: `eve/sveltekit` now deploys the agent through Vercel's stable services model. On Vercel builds it generates an eve Build Output service and a `/eve/v1/*` service route instead of writing legacy `experimentalServices` to `vercel.json`. The `configureVercelJson` and `servicePrefix` plugin options and the `EVE_SVELTEKIT_SERVICE_PREFIX` export were removed; delete any generated `experimentalServices` block from `vercel.json`.
+
+### Patch Changes
+
+- 20a5201: Update eve's default agent model to `zai/glm-5.2`. New agents created with `eve init`, config-less agents, and the setup model picker now use GLM 5.2 instead of Claude Sonnet 5.
+- ee8943b: Recover cancelled responder-authorized approvals after replay so the pending tool call remains cancelled and cannot hang while waiting for a consumed response.
+
+## 0.35.0
+
+### Minor Changes
+
+- 3f92f7d: Instrumentation now records trace metadata without model or tool inputs and outputs by default. Set `recordInputs` or `recordOutputs` to `true`, or use `EVE_TRACES_CONTENT=on` for the automatic local trace spool, to opt into content capture.
+
+### Patch Changes
+
+- 9a07754: Recognize repository-style Vercel link metadata during guided setup, so Vercel Connect integrations can continue after Vercel CLI links a repository-backed project.
+- 1cd563b: A model step that requests a tool approval (or question) and a subagent or remote-agent call in the same response no longer drops the approval. The harness now parks on both: the input request surfaces immediately, the delegation runs, and when its result arrives the turn re-parks on the still-pending approval instead of calling the model with a dangling tool call (`AI_MissingToolResultsError`).
+- 02b7b7e: `githubChannel({ botName })` now also accepts a lazy resolver function, resolved on first use inside request handling, cached on success, and retried after a failure, so resolvers that depend on request-scoped credentials work in production. When `botName` is omitted, the channel falls back to the new `appSlug` field on `GitHubChannelCredentials`, then to `GITHUB_APP_SLUG`.
+- 77eb819: Traced session and turn start events now carry portable trace context. Eval reporters can observe individual eval and traced-session starts, correlate completed results across every session trace, and read those contexts from artifacts and Braintrust metadata.
+- df0804e: Instructions now accept `content` with an optional `system` or `user` role, and dynamic instruction resolvers have a lifecycle-specific typed API. User-role instructions enter durable conversation history at their static, session, or turn boundary; the legacy `markdown` form remains available as a deprecated system-role definition.
+- a19c743: The local trace viewer now reads user messages and runtime actions from durable channel delivery and action spans, avoiding duplicate SDK tool details in `eve traces` output.
+- 23c7354: Organize the internal harness instrumentation modules under a dedicated directory without changing runtime behavior.
+- 891aed8: Fix authored-module evaluation on Windows when configured external dependencies resolve to absolute paths.
+- df398a9: Update eve's bundled Workflow SDK packages to the latest 5.0.0 beta releases, aligning the worlds with the `@workflow/core` beta already pinned.
+
+## 0.34.0
+
+### Minor Changes
+
+- 11908eb: Tools and connections can now define optional `request` and `response` approval policies, while preserving the existing function shorthand. Response policies can authenticate the responder and return a tagged allow or rejection decision, and authorization token results can expose a stable provider subject.
+
+### Patch Changes
+
+- 82c1314: Instrumentation providers can observe durable inbound channel deliveries from processing start through the resulting turn terminal. OpenTelemetry destinations receive consumer spans under the session window, with traced HTTP requests represented as links rather than parents.
+- 29313be: Reconstruct durable `agent.action` spans when runtime actions settle, including across worker replacement, and record each action's exact caller-accepted duration, kind, outcome, stable error code, and subagent usage. Remote eve sessions join the caller action trace through W3C `traceparent`; older receivers may ignore the header. Human approval waits appear as durable `agent.approval` child spans, while chat spans use standard self-contained model input and output attributes.
+- 749581b: Instrumentation lifecycle events now use eve-owned payloads and flat event names, including `step.attempt.*` and durable `input.requested`/`input.resolved` boundaries, instead of AI SDK callback types and paired hooks. Existing spans and attributes are unchanged.
+- 7770fba: Add an experimental Buzz ACP compatibility adapter that publishes threaded and top-level responses through the local Buzz CLI, prevents duplicate replies, and defaults to Buzz's owner-only author gate. Shared service agents must explicitly opt in to letting multiple accepted Buzz senders use the same eve authentication and connections.
+- 3eba855: Post GitHub human-in-the-loop prompts by default so users can see and answer pending input requests in the issue or pull request thread.
+- f06633b: Give every instrumentation lifecycle event a replay-stable `idempotencyKey` derived from durable eve identity, allowing providers to upsert one record across retries and worker replays.
+- c90a459: Add the experimental `agent/instrumentation/` provider layout with durable lifecycle handlers, including user input boundaries and action settlement-time, outcome, error-code, and usage metadata, final setup context, reserved OpenTelemetry destinations, and coordinated flush and shutdown. OpenTelemetry singleton settings and destinations are exposed through `eve/instrumentation/otel`, and eve's AI SDK bridge composes with registered integrations.
+- d304544: OpenTelemetry destinations can independently decline input or output content. Redaction covers span attributes, exception and custom events, and status messages without mutating spans shared with other destinations; `EVE_TRACES_CONTENT=off` now narrows only local traces.
+- 084f8f1: eve now assembles its local OpenTelemetry runtime from declarative singleton settings and ordered destinations. The local trace spool is an ordinary span processor, and tracer-provider ownership, flushing, and shutdown are managed centrally without changing recorded spans.
+- 3b43b3d: Instrumentation providers can choose metadata-only or content-bearing events. eve builds sensitive projections only when requested and keeps prompts, responses, tool payloads, exceptions, and opaque provider metadata away from metadata-only providers.
+- 1528fda: Add durable operation-scoped state to instrumentation handlers, isolated by provider and automatically released at terminal boundaries. Bound each handler and persist start-handler abandonment so a stalled provider cannot block the bus or later receive a mismatched terminal.
+- 760c14a: Allow canary builds to scaffold projects pinned to their exact package artifact URL.
+- 4138e64: Publish durable lifecycle events for runtime actions and user input requests, including approval decisions that resume in another worker. Action terminals expose caller-accepted settlement time, exact outcome, stable error code, and subagent usage even when settlement crosses workers. Framework skill loads are also preserved in eval tool-call facts.
+
+## 0.33.3
+
+### Patch Changes
+
+- 22975d3: Keep GitHub comment text separate from channel metadata so option replies can resume pending input requests.
+
 ## 0.33.2
 
 ### Patch Changes

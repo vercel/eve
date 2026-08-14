@@ -123,8 +123,9 @@ describe("fixed session operations", () => {
         auth: null,
         caller: {
           callId: "call_1",
-          replyTo: { kind: "callback", url: callback.url },
+          replyTo: { kind: "callback", token: callback.token, url: callback.url },
           subagentName: "research",
+          taskId: undefined,
         },
         kind: "send",
         payload: { message: "continue" },

@@ -98,12 +98,7 @@ void (async () => {
     const screen = new MockScreen({ columns: 100, rows: 40 });
     const input = new MockUserInput();
     const runner = new EveTUIRunner({
-      // `/model` never dispatches a turn; a turn in this test is a bug.
-      session: {
-        send: async () => {
-          throw new Error("unexpected turn dispatched during /model smoke test");
-        },
-      },
+      // `/model` runs before the first chat turn, so no client session exists yet.
       screen,
       userInput: input,
       name: "Packed install model command",

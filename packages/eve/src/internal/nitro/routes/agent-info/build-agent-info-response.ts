@@ -78,13 +78,14 @@ export interface AgentInfoSkillEntry extends AgentInfoSource {
 }
 
 export interface AgentInfoInstructionsEntry extends AgentInfoSource {
-  readonly markdown: string;
+  readonly content: string;
   readonly name: string;
+  readonly role: "system" | "user";
 }
 
 export interface AgentInfoInstructions {
   readonly dynamic: readonly AgentInfoDynamicResolverEntry[];
-  readonly static: AgentInfoInstructionsEntry | null;
+  readonly static: readonly AgentInfoInstructionsEntry[];
 }
 
 export interface AgentInfoScheduleEntry extends AgentInfoSource {
@@ -215,7 +216,7 @@ export interface AgentInfoResponse {
     readonly total: number;
   };
   readonly tools: AgentInfoTools;
-  readonly version: 1;
+  readonly version: 2;
   readonly workflow: {
     readonly enabled: boolean;
     readonly toolName: string;
@@ -290,13 +291,12 @@ export function buildAgentInfoResponse(
       dynamic: agent.dynamicInstructionsResolvers.map((resolver) =>
         renderDynamicResolver(resolver, { origin: "authored" }),
       ),
-      static: agent.instructions
-        ? {
-            ...toSource(agent.instructions),
-            markdown: agent.instructions.markdown,
-            name: agent.instructions.name,
-          }
-        : null,
+      static: agent.instructions.map((instructions) => ({
+        ...toSource(instructions),
+        content: instructions.content,
+        name: instructions.name,
+        role: instructions.role,
+      })),
     },
     kind: "eve-agent-info",
     mode: input.mode,
@@ -313,7 +313,7 @@ export function buildAgentInfoResponse(
       total: data.manifest.subagents.length,
     },
     tools,
-    version: 1,
+    version: 2,
     workflow: {
       enabled: agent.workflowTool !== undefined,
       toolName: WORKFLOW_TOOL_NAME,
@@ -560,7 +560,7 @@ export function renderSubagent(subagent: CompiledSubagentNode): AgentInfoSubagen
       channels: subagent.agent.channels.length,
       connections: subagent.agent.connections.length,
       hooks: subagent.agent.hooks.length,
-      instructions: subagent.agent.instructions !== undefined,
+      instructions: subagent.agent.instructions.length > 0,
       schedules: subagent.agent.schedules.length,
       skills: subagent.agent.skills.length,
       tools: subagent.agent.tools.length,

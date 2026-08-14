@@ -27,10 +27,13 @@ export function sendCommandToDelivery(
   return {
     auth: command.auth,
     caller: command.caller,
+    deliveryMetadata:
+      command.delivery === undefined ? undefined : [{ ...command.delivery, payloadIndex: 0 }],
     kind: "deliver",
     payload: command.payload,
     payloads: [command.payload],
     requestId: command.requestId,
+    taskDeliveryId: command.taskDeliveryId,
     turnPolicy: command.turnPolicy,
   };
 }

@@ -8,7 +8,11 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { telegramChannel, type TelegramChannelState } from "#public/channels/telegram/index.js";
+import {
+  defaultTelegramAuth,
+  telegramChannel,
+  type TelegramChannelState,
+} from "#public/channels/telegram/index.js";
 
 const SECRET = "telegram-secret";
 
@@ -142,6 +146,10 @@ describe("telegramChannel() inbound route", () => {
     const channel = telegramChannel({
       api: { fetch: fakeTelegramFetch() },
       credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
+      onMessage: (_ctx, message) => ({
+        auth: defaultTelegramAuth(message),
+        title: "Telegram run",
+      }),
     });
 
     const { response, send } = await firePost(channel, {
@@ -170,6 +178,7 @@ describe("telegramChannel() inbound route", () => {
         chatType: "private",
         conversationId: null,
       },
+      title: "Telegram run",
     });
   });
 

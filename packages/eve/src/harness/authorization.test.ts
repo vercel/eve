@@ -1,14 +1,34 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionIdKey } from "#context/keys.js";
 import {
+  CallbackBaseUrlKey,
   clearPendingAuthorization,
   consumeAuthorizationResult,
   getPendingAuthorization,
+  getHookUrl,
   PendingAuthorizationResultKey,
   setPendingAuthorization,
 } from "#harness/authorization.js";
 import type { ConnectionPrincipal } from "#runtime/connections/types.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("authorization callback URLs", () => {
+  it("includes the Vercel automation bypass query when configured", () => {
+    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret value");
+    const ctx = new ContextContainer();
+    ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
+    ctx.set(SessionIdKey, "session-1");
+
+    expect(contextStorage.run(ctx, () => getHookUrl("linear", "attempt-1"))).toBe(
+      "https://agent.example.com/eve/v1/connections/linear/callback/attempt-1/session-1%3Aauth?x-vercel-protection-bypass=secret+value",
+    );
+  });
+});
 
 describe("authorization callback results", () => {
   it("consumes each callback result once", () => {
@@ -42,6 +62,49 @@ describe("authorization callback results", () => {
       expect(ctx.has(PendingAuthorizationResultKey)).toBe(false);
       expect(consumeAuthorizationResult("linear")).toBeUndefined();
     });
+  });
+});
+
+function candidateChallenge(name: string, candidateId: string) {
+  return {
+    candidateId,
+    challenge: { url: `https://idp.example/${candidateId}` },
+    hookUrl: `https://eve.example/${candidateId}`,
+    name,
+  };
+}
+
+describe("pending authorization state", () => {
+  it("merges concurrent candidate challenges by authorization name", () => {
+    const first = setPendingAuthorization(undefined, {
+      challenges: [candidateChallenge("candidate-1:github", "candidate-1")],
+    });
+    const second = setPendingAuthorization(first, {
+      challenges: [candidateChallenge("candidate-2:github", "candidate-2")],
+    });
+
+    expect(getPendingAuthorization(second)?.challenges).toEqual([
+      expect.objectContaining({ candidateId: "candidate-1", name: "candidate-1:github" }),
+      expect.objectContaining({ candidateId: "candidate-2", name: "candidate-2:github" }),
+    ]);
+  });
+
+  it("replaces a repeated challenge without duplicating it", () => {
+    const first = setPendingAuthorization(undefined, {
+      challenges: [candidateChallenge("candidate-1:github", "candidate-1")],
+    });
+    const second = setPendingAuthorization(first, {
+      challenges: [
+        {
+          ...candidateChallenge("candidate-1:github", "candidate-1"),
+          hookUrl: "https://eve.example/refreshed",
+        },
+      ],
+    });
+
+    expect(getPendingAuthorization(second)?.challenges).toEqual([
+      expect.objectContaining({ hookUrl: "https://eve.example/refreshed" }),
+    ]);
   });
 });
 

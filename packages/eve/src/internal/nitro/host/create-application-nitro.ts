@@ -520,9 +520,11 @@ function addDynamicCapabilityTransformPlugin(nitro: Nitro): void {
  */
 function addInstrumentationModuleSideEffectsPlugin(
   nitro: Nitro,
-  instrumentationModulePath: string,
+  instrumentationModulePaths: readonly string[],
 ): void {
-  const normalizedInstrumentationModulePath = normalizePath(instrumentationModulePath);
+  const normalizedInstrumentationModulePaths = new Set(
+    instrumentationModulePaths.map(normalizePath),
+  );
 
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
@@ -532,7 +534,7 @@ function addInstrumentationModuleSideEffectsPlugin(
     config.plugins.unshift({
       name: "eve:instrumentation-module-side-effects",
       resolveId(source: string) {
-        if (normalizePath(source) !== normalizedInstrumentationModulePath) {
+        if (!normalizedInstrumentationModulePaths.has(normalizePath(source))) {
           return null;
         }
 
@@ -682,10 +684,10 @@ function configureSharedApplicationNitro(
 
   addDynamicCapabilityTransformPlugin(nitro);
 
-  if (preparedHost.compiledArtifacts.instrumentationSourcePath !== undefined) {
+  if (preparedHost.compiledArtifacts.instrumentationSourcePaths !== undefined) {
     addInstrumentationModuleSideEffectsPlugin(
       nitro,
-      preparedHost.compiledArtifacts.instrumentationSourcePath,
+      preparedHost.compiledArtifacts.instrumentationSourcePaths,
     );
   }
 }

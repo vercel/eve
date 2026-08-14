@@ -45,7 +45,7 @@ async function bundleEveDistAsSingleChunk(input: RolldownInputOptions): Promise<
       return !isEveOwnedSpecifier(source);
     },
     resolve: {
-      conditionNames: ["eve-source", "node", "import"],
+      conditionNames: ["eve-source"],
       mainFields: ["module", "main"],
     },
     treeshake: false,

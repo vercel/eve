@@ -1,6 +1,5 @@
-import { Buffer } from "node:buffer";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
   resolvePackageSourceDirectoryPath,
@@ -10,9 +9,7 @@ import {
   prepareEveVersionedCacheDirectory,
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
-import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
-import { atomicWriteFile } from "#shared/atomic-write-file.js";
 import {
   bundleFinalWorkflowOutput,
   collectWorkflowInputFiles,
@@ -96,18 +93,10 @@ export class WorkflowBundleBuilder {
     await mkdir(this.#outDir, { recursive: true });
     const discoveredEntries = await this.discoverEntries(inputFiles, this.#outDir, tsconfigPath);
 
-    const workflowsOutfile = join(this.#outDir, "workflows.mjs");
-    const { manifest: workflowsManifest } = await this.createWorkflowsBundle({
-      discoveredEntries,
-      // eve owns dev rebuilds through `dev-authored-source-watcher`.
-      keepInterimBundleContext: false,
-      outfile: workflowsOutfile,
-      bundleFinalOutput: false,
-      format: "esm",
-      inputFiles,
-      tsconfigPath,
-    });
     const stepsOutfile = join(this.#outDir, "steps.mjs");
+    const workflowsOutfile = join(this.#outDir, "workflows.mjs");
+    const nitroStepOutfile = options.nitroStepOutfile;
+    const nitroWorkflowOutfile = options.nitroWorkflowOutfile;
     const stepsManifest = await writeNitroStepEntrypoint({
       builtinsPath: resolveWorkflowModulePath("workflow/internal/builtins"),
       discoveredEntries,
@@ -117,8 +106,6 @@ export class WorkflowBundleBuilder {
       sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
       workingDir: this.config.workingDir,
     });
-    const nitroStepOutfile = options.nitroStepOutfile;
-
     if (nitroStepOutfile !== undefined && nitroStepOutfile !== stepsOutfile) {
       await writeNitroStepEntrypoint({
         builtinsPath: resolveWorkflowModulePath("workflow/internal/builtins"),
@@ -130,22 +117,22 @@ export class WorkflowBundleBuilder {
         workingDir: this.config.workingDir,
       });
     }
-
-    await addStepRegistrationsImport(workflowsOutfile, stepsOutfile);
-    await rewriteWorkflowRuntimeImports(workflowsOutfile);
-    await rewriteWorkflowCodeLiteral(workflowsOutfile, this.#queueNamespace);
-
-    const nitroWorkflowOutfile = options.nitroWorkflowOutfile;
-
-    if (nitroWorkflowOutfile !== undefined && nitroWorkflowOutfile !== workflowsOutfile) {
-      await mkdir(dirname(nitroWorkflowOutfile), { recursive: true });
-      await mirrorFileBypassingUnlink(workflowsOutfile, nitroWorkflowOutfile);
-      if (nitroStepOutfile !== undefined) {
-        await addStepRegistrationsImport(nitroWorkflowOutfile, nitroStepOutfile);
-        await rewriteWorkflowRuntimeImports(nitroWorkflowOutfile);
-        await rewriteWorkflowCodeLiteral(nitroWorkflowOutfile, this.#queueNamespace);
-      }
-    }
+    const { manifest: workflowsManifest } = await this.createWorkflowsBundle({
+      additionalOutputs:
+        nitroWorkflowOutfile === undefined || nitroWorkflowOutfile === workflowsOutfile
+          ? []
+          : [
+              {
+                outfile: nitroWorkflowOutfile,
+                stepRegistrationsPath: nitroStepOutfile ?? stepsOutfile,
+              },
+            ],
+      discoveredEntries,
+      outfile: workflowsOutfile,
+      inputFiles,
+      stepRegistrationsPath: stepsOutfile,
+      tsconfigPath,
+    });
 
     await this.createManifest({
       workflowBundlePath: join(this.#outDir, "workflows.mjs"),
@@ -244,12 +231,11 @@ export class WorkflowBundleBuilder {
   }
 
   protected async createWorkflowsBundle({
-    bundleFinalOutput = true,
+    additionalOutputs = [],
     discoveredEntries,
-    format = "cjs",
     inputFiles,
-    keepInterimBundleContext = this.config.watch,
     outfile,
+    stepRegistrationsPath,
     tsconfigPath,
   }: WorkflowBundleCreateWorkflowsBundleOptions): Promise<WorkflowBundleCreateWorkflowsBundleResult> {
     const discovered =
@@ -285,7 +271,7 @@ export class WorkflowBundleBuilder {
           createWorkflowNodeBuiltinGuardPlugin(),
         ],
         resolve: {
-          conditionNames: ["eve-source", "workflow", "node", "import", "default"],
+          conditionNames: ["eve-source", "workflow"],
           extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
           mainFields: ["module", "main"],
         },
@@ -299,31 +285,16 @@ export class WorkflowBundleBuilder {
       },
     );
 
-    await bundleFinalWorkflowOutput({
-      bundleFinalOutput,
-      code: interimBundle.code,
-      format,
-      outfile,
-      queueNamespace: this.#queueNamespace,
-      workingDir: this.config.workingDir,
-    });
-
-    if (keepInterimBundleContext) {
-      return {
-        bundleFinal: async (interimBundleResult: string) => {
-          await bundleFinalWorkflowOutput({
-            bundleFinalOutput,
-            code: interimBundleResult,
-            format,
-            outfile,
-            queueNamespace: this.#queueNamespace,
-            workingDir: this.config.workingDir,
-          });
-        },
-        interimBundleCtx: undefined,
-        manifest: workflowManifest,
-      };
-    }
+    await Promise.all(
+      [{ outfile, stepRegistrationsPath }, ...additionalOutputs].map((output) =>
+        bundleFinalWorkflowOutput({
+          code: interimBundle.code,
+          outfile: output.outfile,
+          queueNamespace: this.#queueNamespace,
+          stepRegistrationsPath: output.stepRegistrationsPath,
+        }),
+      ),
+    );
 
     return { manifest: workflowManifest };
   }
@@ -352,188 +323,4 @@ export class WorkflowBundleBuilder {
   async #getBuildInputFiles(): Promise<string[]> {
     return await this.getInputFiles();
   }
-}
-
-async function addStepRegistrationsImport(
-  workflowBundlePath: string,
-  stepRegistrationsPath: string,
-): Promise<void> {
-  const source = await readTextFileIfPresent(workflowBundlePath);
-
-  if (source === null || source.includes("__eveWorkflowStepsRegistered")) {
-    return;
-  }
-
-  const importSpecifier = createRelativeImportSpecifier(
-    dirname(workflowBundlePath),
-    stepRegistrationsPath,
-  );
-  const importSource = [
-    `import { __steps_registered as __eveWorkflowStepsRegistered } from ${JSON.stringify(importSpecifier)};`,
-    "void __eveWorkflowStepsRegistered;",
-    "",
-  ].join("\n");
-  const firstImportMatch = source.match(/^import\s.+?;\n/m);
-
-  if (firstImportMatch === null || firstImportMatch.index === undefined) {
-    await atomicWriteFile(workflowBundlePath, `${importSource}${source}`);
-    return;
-  }
-
-  const insertionIndex = firstImportMatch.index + firstImportMatch[0].length;
-  const nextSource = `${source.slice(0, insertionIndex)}${importSource}${source.slice(insertionIndex)}`;
-
-  await atomicWriteFile(workflowBundlePath, nextSource);
-}
-
-async function rewriteWorkflowRuntimeImports(filePath: string): Promise<void> {
-  const source = await readTextFileIfPresent(filePath);
-
-  if (source === null) {
-    return;
-  }
-
-  let nextSource = source;
-
-  for (const specifier of [
-    "workflow",
-    "workflow/api",
-    "workflow/internal/builtins",
-    "workflow/internal/private",
-    "workflow/runtime",
-  ]) {
-    const resolvedSpecifier = normalizeImportSpecifierPath(resolveWorkflowModulePath(specifier));
-    nextSource = replaceStringLiteralSpecifier(nextSource, specifier, resolvedSpecifier);
-  }
-
-  if (nextSource !== source) {
-    await atomicWriteFile(filePath, nextSource);
-  }
-}
-
-async function rewriteWorkflowCodeLiteral(filePath: string, queueNamespace: string): Promise<void> {
-  const source = await readTextFileIfPresent(filePath);
-
-  if (source === null) {
-    return;
-  }
-
-  const declarationPrefix = "const workflowCode = ";
-  const declarationSuffix = `;\n\nexport const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringify(queueNamespace)} });`;
-  const expressionStart = source.indexOf(declarationPrefix);
-  const expressionEnd = source.lastIndexOf(declarationSuffix);
-
-  if (expressionStart === -1 || expressionEnd === -1 || expressionEnd <= expressionStart) {
-    return;
-  }
-
-  const valueStart = expressionStart + declarationPrefix.length;
-  const expression = source.slice(valueStart, expressionEnd);
-
-  if (!expression.trimStart().startsWith("`")) {
-    return;
-  }
-
-  const workflowCode = decodeWorkflowCodeTemplateLiteral(expression, filePath);
-  const nextSource = `${source.slice(0, valueStart)}${encodeWorkflowCodeLiteral(workflowCode)}${source.slice(
-    expressionEnd,
-  )}`;
-
-  if (nextSource !== source) {
-    await atomicWriteFile(filePath, nextSource);
-  }
-}
-
-function encodeWorkflowCodeLiteral(workflowCode: string): string {
-  const encodedWorkflowCode = Buffer.from(workflowCode, "utf8").toString("base64");
-  const chunks = encodedWorkflowCode.match(/.{1,16384}/g) ?? [""];
-
-  return `Buffer.from(${JSON.stringify(chunks)}.join(""), "base64").toString("utf8")`;
-}
-
-function decodeWorkflowCodeTemplateLiteral(expression: string, filePath: string): string {
-  const trimmedExpression = expression.trim();
-
-  if (!trimmedExpression.startsWith("`") || !trimmedExpression.endsWith("`")) {
-    throw new Error(`Expected generated workflow code literal in "${filePath}" to be a template.`);
-  }
-
-  const rawValue = trimmedExpression.slice(1, -1);
-  let value = "";
-
-  for (let index = 0; index < rawValue.length; index += 1) {
-    const char = rawValue[index];
-
-    if (char !== "\\") {
-      value += char;
-      continue;
-    }
-
-    const escapedChar = rawValue[index + 1];
-
-    if (escapedChar === "\\" || escapedChar === "`" || escapedChar === "$") {
-      value += escapedChar;
-      index += 1;
-      continue;
-    }
-
-    value += char;
-  }
-
-  return value;
-}
-
-function replaceStringLiteralSpecifier(source: string, from: string, to: string): string {
-  return source
-    .replaceAll(JSON.stringify(from), JSON.stringify(to))
-    .replaceAll(`'${from}'`, JSON.stringify(to));
-}
-
-function normalizeImportSpecifierPath(path: string): string {
-  return normalizeEsmImportSpecifier(path);
-}
-
-function createRelativeImportSpecifier(fromDirectoryPath: string, targetPath: string): string {
-  const relativePath = relative(fromDirectoryPath, targetPath).replaceAll("\\", "/");
-
-  if (relativePath.startsWith(".")) {
-    return relativePath;
-  }
-
-  return `./${relativePath}`;
-}
-
-async function readTextFileIfPresent(filePath: string): Promise<string | null> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return null;
-    }
-
-    throw error;
-  }
-}
-
-async function readBinaryFileIfPresent(filePath: string): Promise<Buffer | null> {
-  try {
-    return await readFile(filePath);
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return null;
-    }
-
-    throw error;
-  }
-}
-
-async function mirrorFileBypassingUnlink(sourcePath: string, targetPath: string): Promise<void> {
-  const sourceContents = await readFile(sourcePath);
-  const existingContents = await readBinaryFileIfPresent(targetPath);
-
-  if (existingContents !== null && existingContents.equals(sourceContents)) {
-    return;
-  }
-
-  await atomicWriteFile(targetPath, sourceContents);
 }

@@ -29,6 +29,8 @@ export interface PhotonInboundMessageContext {
 export type PhotonInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /** Sync or async {@link PhotonInboundResult}. */
@@ -125,7 +127,7 @@ async function dispatchMessage(
       context: [...(result.context ?? [])],
       message: content,
     },
-    { auth: result.auth, thread },
+    { auth: result.auth, thread, title: result.title },
   );
 }
 

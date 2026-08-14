@@ -9,10 +9,14 @@ if (appRoot === undefined) {
   throw new Error(`${DEVELOPMENT_WORKER_APP_ROOT_ENV} is required for local tracing.`);
 }
 
-installLocalInstrumentationRuntime({
+const runtime = installLocalInstrumentationRuntime({
   appRoot,
   frameworkVersion: resolveInstalledPackageInfo().version,
   serviceName: basename(appRoot),
 });
 
-export default function installLocalTracingRuntimePlugin(): void {}
+export default function installLocalTracingRuntimePlugin(nitroApp?: {
+  readonly hooks?: { hook(name: "close", handler: () => Promise<void>): unknown };
+}): void {
+  nitroApp?.hooks?.hook("close", () => runtime.shutdown());
+}
