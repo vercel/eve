@@ -640,9 +640,7 @@ function createCliProgram(
   return program;
 }
 
-/**
- * Runs the eve CLI entrypoint.
- */
+/** Runs the eve CLI entrypoint. */
 export async function runCli(
   argv: string[] = process.argv.slice(2),
   logger: CliLogger = console,
