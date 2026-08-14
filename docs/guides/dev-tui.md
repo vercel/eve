@@ -86,3 +86,4 @@ For a Vercel deployment that needs authentication, run `/vc:login` and follow th
 
 - [Instrumentation](./instrumentation): traces, OpenTelemetry, and diagnostics.
 - [CLI](../reference/cli): commands and flags.
+- [Agent Client Protocol (ACP)](../protocols/acp): drive the same agent from ACP clients such as Zed instead of the TUI.
