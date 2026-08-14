@@ -473,6 +473,7 @@ function updateCompactionThresholdForModelReference(input: {
 // ---------------------------------------------------------------------------
 
 const TURN_TRACE_STATE_KEY = "eve.harness.turnTrace";
+const TASK_UPDATE_INSTRUCTION_STATE_KEY = "eve.tasks.updateInstructionAnnounced";
 
 /**
  * Serializable subset of `SpanContext` stored on `session.state` so
@@ -631,6 +632,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       callback?.taskId !== undefined ||
       readTaskIdFromInboxToken(String(channel?.state?.parentContinuationToken ?? "")) !== undefined;
     const taskUpdatesEnabled = taskOwned && config.tools.has(TASK_UPDATE_TOOL_NAME);
+    const announceTaskUpdates =
+      taskUpdatesEnabled && session.state?.[TASK_UPDATE_INSTRUCTION_STATE_KEY] !== true;
     const parentLineage = resolveParentLineage(parent, channel);
     const parentTraceContext = store?.get(ParentTraceContextKey);
     let activeAttemptScope: InstrumentationAttemptScope | undefined;
@@ -1263,7 +1266,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (emptyDeliveryEnabled) {
       systemMessages.push({ role: "system", content: CONDITIONAL_DELIVERY_INSTRUCTION });
     }
-    if (taskUpdatesEnabled) {
+    if (announceTaskUpdates) {
       systemMessages.push({
         role: "system",
         content:
@@ -1833,6 +1836,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           settledTurn,
         };
       }
+    }
+
+    // This one-time note has now reached a successful model call. Persist the
+    // marker on the child session so later turns keep the stable base prompt.
+    if (announceTaskUpdates) {
+      session = {
+        ...session,
+        state: { ...session.state, [TASK_UPDATE_INSTRUCTION_STATE_KEY]: true },
+      };
     }
 
     // --- Step-side observability tags ---------------------------------------

@@ -11009,7 +11009,7 @@ describe("createToolLoopHarness", () => {
           });
         }
 
-        await contextStorage.run(ctx, () =>
+        const first = await contextStorage.run(ctx, () =>
           runStep(createTestSession(), { message: "Research this." }),
         );
 
@@ -11017,6 +11017,13 @@ describe("createToolLoopHarness", () => {
         expect(JSON.stringify(instructions)).toContain("Background task updates");
         expect(JSON.stringify(instructions)).toContain("what you are currently doing");
         expect(JSON.stringify(instructions)).toContain("do not include preliminary findings");
+
+        await contextStorage.run(ctx, () =>
+          runStep(first.session, { message: "Continue the research." }),
+        );
+        expect(JSON.stringify(getLastAgentSettings().instructions)).not.toContain(
+          "Background task updates",
+        );
       },
     );
 
