@@ -15,7 +15,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (request.userMessages.some((entry) => entry.includes("TASK-UPDATE-PROGRESS"))) {
     return "TASK-UPDATE-RECEIVED";
   }
-  if (message === "TASK-UPDATE-CHILD") return sendTaskUpdate(request);
+  if (message.includes("TASK-UPDATE-CHILD")) return sendTaskUpdate(request);
   if (message.includes("TASK-FANOUT-INTERACTIVE-CHECK")) return "TASK-FANOUT-INTERACTIVE-OK";
   if (message.includes("TASK-CANCEL-NOW")) return cancelWorkerTask(request);
   if (message.includes("CHILD-TASK-EXCLUSIVITY-RACE")) return raceBusyWorker(request);

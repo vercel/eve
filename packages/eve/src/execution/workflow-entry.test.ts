@@ -179,12 +179,15 @@ describe("workflowEntry", () => {
       deadline: new Date("2026-01-31T00:00:00.000Z"),
       token: sessionCommandHookToken("wrun_test_123"),
     });
-    expect(createSessionStep).toHaveBeenCalledWith({
-      compiledArtifactsSource: {},
-      continuationToken: "http:test",
-      nodeId: undefined,
-      sessionId: "wrun_test_123",
-    });
+    expect(createSessionStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        compiledArtifactsSource: {},
+        continuationToken: "http:test",
+        nodeId: undefined,
+        sessionId: "wrun_test_123",
+        taskOwned: false,
+      }),
+    );
     expect(dispatchTurnStep).toHaveBeenCalledWith(
       expect.objectContaining({
         completionToken: expect.any(String),

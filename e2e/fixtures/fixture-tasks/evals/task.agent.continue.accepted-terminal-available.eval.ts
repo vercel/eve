@@ -54,12 +54,7 @@ export default defineTaskEval({
       second.session,
     );
     continued.turn.expectOk();
-    const send = continued.turn.toolCalls.find((call) => call.name === "approval-worker");
-    const secondTaskId =
-      send?.output !== null && typeof send?.output === "object"
-        ? Reflect.get(send.output, "taskId")
-        : undefined;
-    if (typeof secondTaskId !== "string") throw new Error("Continuation returned no new task id.");
+    const secondTaskId = requireBackgroundTaskId(continued.turn);
     await t.require(
       secondTaskId,
       satisfies((taskId) => taskId !== firstTaskId, "continuation creates a new task identity"),

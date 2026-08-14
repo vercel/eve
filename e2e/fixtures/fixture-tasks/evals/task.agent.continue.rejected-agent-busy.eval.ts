@@ -1,6 +1,3 @@
-import { type EveEvalToolCall } from "eve/evals";
-import { satisfies } from "eve/evals/expect";
-
 import { defineTaskEval } from "./task-transition.js";
 import {
   requireBackgroundTaskId,
@@ -41,28 +38,20 @@ export default defineTaskEval({
     raced.expectOk();
     raced.messageIncludes("CHILD-TASK-EXCLUSIVITY-RACE-DONE");
 
-    const sends = raced.toolCalls.filter((call) => call.name === "busy-worker");
-    const admitted = sends.filter(hasTaskReceipt);
-    await t.require(
-      sends,
-      satisfies(
-        (calls: readonly EveEvalToolCall[]) =>
-          calls.length === 2 &&
-          calls.filter(hasTaskReceipt).length === 1 &&
-          calls.filter((call) => isBusyRejection(call.output)).length === 1,
-        "one competing send is admitted and one is rejected without a task receipt",
-      ),
-    );
-
-    const admittedTaskId = taskIdFromReceipt(admitted[0]);
-    const rejected = sends.find((call) => isBusyRejection(call.output));
-    await t.require(
-      rejected?.output,
-      satisfies(
-        (output) => isBusyRejection(output, admittedTaskId),
-        "the same-batch rejection identifies the admitted task and creates no task receipt",
-      ),
-    );
+    const admittedTaskId = requireBackgroundTaskId(raced);
+    raced.event("action.result", {
+      count: 2,
+      data: { result: { kind: "subagent-result", subagentName: "busy-worker" } },
+    });
+    raced.calledSubagent("busy-worker", {
+      count: 1,
+      status: "completed",
+    });
+    raced.calledSubagent("busy-worker", {
+      count: 1,
+      output: (output) => isBusyRejection(output, admittedTaskId),
+      status: "failed",
+    });
 
     const later = await sendAndFollowQueuedTurn(
       t,
@@ -70,29 +59,15 @@ export default defineTaskEval({
       race.session,
       { allowFailedActions: true },
     );
-    const laterSends = later.turn.toolCalls.filter((call) => call.name === "busy-worker");
-    await t.require(
-      laterSends,
-      satisfies(
-        (calls: readonly EveEvalToolCall[]) =>
-          calls.length === 1 && isBusyRejection(calls[0]?.output, admittedTaskId),
-        "the later rejection creates no task receipt while the admitted task is nonterminal",
-      ),
-    );
+    later.turn.calledSubagent("busy-worker", {
+      count: 1,
+      output: (output) => isBusyRejection(output, admittedTaskId),
+      status: "failed",
+    });
 
     await waitForCompletedTask(t, later.session, "CHILD-TASK-EXCLUSIVITY-VERIFY", admittedTaskId);
   },
 });
-
-function hasTaskReceipt(call: EveEvalToolCall): boolean {
-  return (
-    call.output !== null &&
-    typeof call.output === "object" &&
-    typeof Reflect.get(call.output, "agentId") === "string" &&
-    typeof Reflect.get(call.output, "taskId") === "string" &&
-    Reflect.get(call.output, "status") === "working"
-  );
-}
 
 function agentIdFromTaskView(output: unknown, taskId: string): string {
   if (output === null || typeof output !== "object") throw new Error("No task view output.");
@@ -109,23 +84,13 @@ function agentIdFromTaskView(output: unknown, taskId: string): string {
   return agentId;
 }
 
-function taskIdFromReceipt(call: EveEvalToolCall | undefined): string {
-  const output = call?.output;
-  const taskId =
-    output !== null && typeof output === "object" ? Reflect.get(output, "taskId") : null;
-  if (typeof taskId !== "string") throw new Error("No admitted continuation task id.");
-  return taskId;
-}
-
 function isBusyRejection(output: unknown, activeTaskId?: string): boolean {
   if (output === null || typeof output !== "object") return false;
-  const keys = Object.keys(output);
   const message = Reflect.get(output, "message");
   return (
-    keys.length === 1 &&
-    keys[0] === "message" &&
+    Reflect.get(output, "code") === "AGENT_BUSY" &&
     typeof message === "string" &&
-    message.startsWith("AGENT_BUSY") &&
+    !Object.hasOwn(output, "taskId") &&
     (activeTaskId === undefined || message.includes(activeTaskId))
   );
 }
