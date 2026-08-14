@@ -173,7 +173,9 @@ describe("session-limit continuation decline integration", () => {
         // result, reaches its own pre-model gate, and parks on its OWN
         // continuation prompt.
         const hitlTurn = await stream.nextTurn();
-        expect(hitlTurn.at(-1)?.type).toBe("session.waiting");
+        expect(hitlTurn.at(-1)?.type, JSON.stringify(hitlTurn.at(-1), null, 2)).toBe(
+          "session.waiting",
+        );
         expect(filterEventsByType(hitlTurn, "subagent.called")).toHaveLength(1);
         expect(filterEventsByType(hitlTurn, "input.requested")).toHaveLength(1);
         const requestId = requestIdFromPromptTurn(hitlTurn);

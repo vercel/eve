@@ -662,7 +662,9 @@ describe("turn cancellation integration", () => {
         // The child asks a question; the proxy epilogue emits this turn's
         // waiting boundary while the parent keeps waiting on the child.
         const hitlTurn = await stream.nextTurn();
-        expect(hitlTurn.at(-1)?.type).toBe("session.waiting");
+        expect(hitlTurn.at(-1)?.type, JSON.stringify(hitlTurn.at(-1), null, 2)).toBe(
+          "session.waiting",
+        );
         const requested = filterEventsByType(hitlTurn, "input.requested");
         expect(requested).toHaveLength(1);
         const requestId = requested[0]?.data.requests[0]?.requestId;
