@@ -133,7 +133,7 @@ describe("registry commands", () => {
     getRegistryItems.mockRejectedValue(
       Object.assign(
         new Error(
-          "The item at https://eve.dev/r/channel/salk.json was not found. It may not exist at the registry.",
+          "The item at https://eve.dev/r/channels/slack.json was not found. It may not exist at the registry.",
         ),
         { code: "NOT_FOUND" },
       ),
@@ -158,14 +158,14 @@ describe("registry commands", () => {
       },
     }));
 
-    await runAddCommand(logger, "/project", "channel/salk", {});
+    await runAddCommand(logger, "/project", "channels/slack", {});
 
     expect(logger.errors).toEqual([
-      "The item at https://eve.dev/r/channel/salk.json was not found. It may not exist at the registry.",
+      "The item at https://eve.dev/r/channels/slack.json was not found. It may not exist at the registry.",
     ]);
     expect(searchRegistries).toHaveBeenCalledWith(
       ["https://eve.dev/r/registry.json"],
-      expect.objectContaining({ limit: 5, query: "channel/salk" }),
+      expect.objectContaining({ limit: 5, query: "slack" }),
     );
     expect(logger.logs).toEqual([
       "Did you mean?",
