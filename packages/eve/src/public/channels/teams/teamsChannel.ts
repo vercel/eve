@@ -137,6 +137,8 @@ export interface TeamsReceiveTarget {
 export type TeamsInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /** Sync or async {@link TeamsInboundResult}. */
@@ -612,6 +614,7 @@ async function dispatchMessage(input: {
       auth: result.auth,
       context: [formatTeamsContextBlock(inboundContext), ...channelContext],
       state,
+      title: result.title,
     });
   } catch (error) {
     log.error("Teams message delivery failed", { error });

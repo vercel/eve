@@ -239,6 +239,7 @@ async function dispatchWebhookEventTurn(input: {
     }),
     from: input.from,
     state: input.state,
+    title: result.title,
   });
 }
 
@@ -275,6 +276,7 @@ async function dispatchCommentTurn(input: {
     }),
     from: input.from,
     state: input.state,
+    title: result.title,
   });
 }
 
@@ -301,6 +303,7 @@ async function sendGitHubTurn(input: {
   readonly context: readonly string[] | undefined;
   readonly from: ChannelFrom<GitHubChannelState>;
   readonly state: GitHubChannelState;
+  readonly title: string | undefined;
 }): Promise<void> {
   const contextBlock = formatGitHubContextBlock({
     deliveryId: input.event.delivery.id,
@@ -317,6 +320,7 @@ async function sendGitHubTurn(input: {
       auth: input.auth,
       context: [contextBlock, ...(input.context ?? [])],
       state: input.state,
+      title: input.title,
     });
   } catch (error) {
     logError(log, input.logMessage ?? "GitHub delivery failed", error, {

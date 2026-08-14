@@ -37,6 +37,7 @@ describe("photonIMessageChannel", () => {
   it("inherits the shared steering default for a direct message", async () => {
     photonIMessageChannel({
       credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+      onMessage: () => ({ auth: null, title: "Photon run" }),
     });
     const handler = directMessage.mock.calls[0]?.[0];
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
@@ -53,7 +54,7 @@ describe("photonIMessageChannel", () => {
 
     expect(send).toHaveBeenCalledWith(
       { context: [], message: "Steer this response" },
-      { auth: null, thread },
+      { auth: null, thread, title: "Photon run" },
     );
   });
 
@@ -99,7 +100,7 @@ describe("photonIMessageChannel", () => {
 
     expect(send).toHaveBeenCalledWith(
       { context: [], message: "Hello group" },
-      { auth: null, thread },
+      { auth: null, thread, title: undefined },
     );
   });
 });

@@ -127,6 +127,8 @@ export interface EveMessageContext {
 export type EveMessageResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 };
 
 /** Synchronous or asynchronous `onMessage` result. */
@@ -319,6 +321,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             },
             mode: body.mode ?? "conversation",
             parentTraceContext,
+            title: messageResult.title,
           });
         } catch (error) {
           // A concurrent create-once request won the token: adopt its session
@@ -765,6 +768,7 @@ function normalizeEveCorsOrigin(
 interface OnMessageOutcome {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  readonly title?: string;
 }
 
 async function resolveOnMessage(input: {
@@ -797,10 +801,7 @@ async function resolveOnMessage(input: {
     );
   }
 
-  if (result.context === undefined) {
-    return { auth: result.auth };
-  }
-  return { auth: result.auth, context: result.context };
+  return { auth: result.auth, context: result.context, title: result.title };
 }
 
 function defaultOnMessage(ctx: EveMessageContext): EveMessageResult {

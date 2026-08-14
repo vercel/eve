@@ -29,7 +29,7 @@ steers its replacement turn.
 
 Set `turnPolicy: "queue"` when every response should finish before Photon starts the next message.
 
-Customize inbound dispatch with `onMessage`. Return `null` to ignore a message:
+Customize inbound dispatch with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the title when the dispatch starts a run:
 
 ```ts
 export default photonIMessageChannel({

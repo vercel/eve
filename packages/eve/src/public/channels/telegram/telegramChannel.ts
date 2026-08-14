@@ -109,6 +109,8 @@ export interface TelegramReceiveTarget {
 export type TelegramInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /** Sync or async {@link TelegramInboundResult}. */
@@ -529,6 +531,7 @@ async function dispatchMessage(input: {
         auth: result.auth,
         context: [contextBlock, ...channelContext],
         state,
+        title: result.title,
       });
     } else {
       await source.respond(replyInputResponses, {

@@ -588,7 +588,11 @@ describe("eveChannel — onMessage", () => {
       expect(ctx.eve.sessionId).toBeUndefined();
       expect(ctx.eve.request.url).toBe("https://example.com/eve/v1/session");
       expect(message).toBe("What word is selected?");
-      return { auth: defaultEveAuth(ctx), context: ["Authenticated caller profile: enterprise"] };
+      return {
+        auth: defaultEveAuth(ctx),
+        context: ["Authenticated caller profile: enterprise"],
+        title: "HTTP run",
+      };
     });
     const handler = createEveCreateHandler({
       auth: () => ACCEPTED_AUTH,
@@ -612,6 +616,7 @@ describe("eveChannel — onMessage", () => {
     });
     const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
+    expect(options.title).toBe("HTTP run");
   });
 
   it("uses auth returned from onMessage for create requests", async () => {

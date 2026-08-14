@@ -109,6 +109,8 @@ export interface GitHubEventContext extends GitHubChannelContext, ChannelContinu
 export type GitHubInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /**

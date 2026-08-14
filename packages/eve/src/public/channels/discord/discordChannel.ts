@@ -105,11 +105,13 @@ export interface DiscordReceiveTarget {
  * - `auth`: session auth context for the dispatched turn, or `null` for anonymous.
  * - `ephemeral`: when `true`, the deferred reply is visible only to the invoking user.
  * - `context`: model-visible context lines appended after the Discord context block.
+ * - `title`: workflow run title override that does not change model input.
  */
 export type DiscordCommandResult = {
   readonly auth: SessionAuthContext | null;
   readonly ephemeral?: boolean;
   readonly context?: readonly string[];
+  readonly title?: string;
 } | null;
 
 /** Sync or async {@link DiscordCommandResult}. */
@@ -604,6 +606,7 @@ async function dispatchCommand(input: {
         auth: input.result.auth,
         context: [contextBlock, ...channelContext],
         state: input.state,
+        title: input.result.title,
       });
   } catch (error) {
     log.error("command delivery failed", { error });

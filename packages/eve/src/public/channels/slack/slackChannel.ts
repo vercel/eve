@@ -420,11 +420,13 @@ export interface SlackInteractionUser {
  * Result of an `onAppMention` or `onDirectMessage` callback. Return an
  * object (auth may be `null`) to dispatch a turn, or `null` to drop the
  * inbound message. `context` strings are appended as user messages to
- * session history before the delivery message.
+ * session history before the delivery message. `title` overrides the
+ * workflow run title without changing the message sent to the model.
  */
 export type SlackMentionResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  readonly title?: string;
 } | null;
 
 export type SlackMentionResultOrPromise = SlackMentionResult | Promise<SlackMentionResult>;
@@ -1225,14 +1227,11 @@ async function deliverSlackMessage(input: {
     );
 
     const channelContext = input.result.context ?? [];
+    const title = input.result.title ?? message.markdown;
     const sendOptions: SlackSendOptions =
       channelContext.length === 0
-        ? { auth: input.result.auth, title: message.markdown }
-        : {
-            auth: input.result.auth,
-            context: channelContext,
-            title: message.markdown,
-          };
+        ? { auth: input.result.auth, title }
+        : { auth: input.result.auth, context: channelContext, title };
 
     await input.sessionOperations.send(turnMessage, sendOptions);
   } catch (error) {

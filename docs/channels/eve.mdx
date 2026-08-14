@@ -160,8 +160,7 @@ export default eveChannel({
 });
 ```
 
-`onMessage` must return an auth result. A successful canonical eve HTTP message
-always dispatches and therefore always produces or continues a session.
+`onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch starts a run. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
 
 ## Clients
 

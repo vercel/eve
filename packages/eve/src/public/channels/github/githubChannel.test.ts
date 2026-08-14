@@ -211,6 +211,7 @@ describe("githubChannel", () => {
     const channel = githubChannel({
       botName: "testbot",
       credentials: { webhookSecret: SECRET },
+      onComment: (ctx) => ({ auth: defaultGitHubAuth(ctx), title: "GitHub run" }),
     });
     const { send } = await firePost(
       channel,
@@ -254,6 +255,7 @@ describe("githubChannel", () => {
         repo: "eve",
         triggeringCommentId: 10,
       },
+      title: "GitHub run",
     });
   });
 
