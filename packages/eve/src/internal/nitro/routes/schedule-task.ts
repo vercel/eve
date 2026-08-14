@@ -1,11 +1,11 @@
 import { expectScheduleRun, ScheduleDispatcher } from "#channel/schedule.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { loadResolvedCompiledScheduleByTaskName } from "#runtime/schedules/resolve-schedule.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { createNitroWorkflowRuntimeStack } from "#internal/nitro/routes/runtime-stack.js";
 
 /**
  * Dispatches one eve authored schedule via the execution engine.
@@ -36,8 +36,7 @@ export async function dispatchScheduleTaskFromArtifacts(
     compiledArtifactsSource,
   });
 
-  const bundle = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
-  const runtime = createWorkflowRuntime({ compiledArtifactsSource });
+  const { bundle, runtime } = await createNitroWorkflowRuntimeStack(compiledArtifactsSource);
   const dispatcher = new ScheduleDispatcher({
     runtime,
     channels: bundle.graph.root.channels,

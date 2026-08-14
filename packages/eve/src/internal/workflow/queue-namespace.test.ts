@@ -27,11 +27,27 @@ describe("workflow queue namespace", () => {
   });
 
   it("installs the derived namespace for Workflow runtime operations", () => {
-    vi.stubEnv(WORKFLOW_QUEUE_NAMESPACE_ENV, "previous");
+    vi.stubEnv(WORKFLOW_QUEUE_NAMESPACE_ENV, undefined);
 
     try {
       expect(installEveWorkflowQueueNamespace("weather-agent")).toBe(
         "eve776561746865722d6167656e74",
+      );
+      expect(process.env[WORKFLOW_QUEUE_NAMESPACE_ENV]).toBe("eve776561746865722d6167656e74");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("keeps one agent namespace stable for the lifetime of the process", () => {
+    vi.stubEnv(WORKFLOW_QUEUE_NAMESPACE_ENV, "eve776561746865722d6167656e74");
+
+    try {
+      expect(installEveWorkflowQueueNamespace("weather-agent")).toBe(
+        "eve776561746865722d6167656e74",
+      );
+      expect(() => installEveWorkflowQueueNamespace("support-agent")).toThrow(
+        /already installed.*cannot replace/,
       );
       expect(process.env[WORKFLOW_QUEUE_NAMESPACE_ENV]).toBe("eve776561746865722d6167656e74");
     } finally {

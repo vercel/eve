@@ -33,6 +33,12 @@ export function createEveWorkflowQueueTrigger(agentName: string) {
 /** Installs the agent-scoped namespace used by Workflow runtime operations. */
 export function installEveWorkflowQueueNamespace(agentName: string): string {
   const namespace = deriveEveWorkflowQueueNamespace(agentName);
+  const installedNamespace = process.env[WORKFLOW_QUEUE_NAMESPACE_ENV];
+  if (installedNamespace !== undefined && installedNamespace !== namespace) {
+    throw new Error(
+      `Workflow queue namespace is already installed as "${installedNamespace}"; cannot replace it with "${namespace}".`,
+    );
+  }
   process.env[WORKFLOW_QUEUE_NAMESPACE_ENV] = namespace;
   return namespace;
 }
