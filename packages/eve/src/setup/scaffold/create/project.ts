@@ -1,11 +1,12 @@
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
 import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
-import { pathExists, writeTextFile } from "../files.js";
+import { pathExists } from "../files.js";
+import { applyFileWritePlan, planFileWrite } from "../bounded-write-plan.js";
 import { blockingCreateInPlaceEntries } from "../create-in-place.js";
 import { resolveVersionToken } from "../version-tokens.js";
 import {
@@ -445,23 +446,29 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
     nodeEngine,
   };
 
-  await mkdir(targetRoot, { recursive: true });
-
-  for (const [relPath, content] of Object.entries(
-    templateFiles({
-      byokProvider,
-      includeRootOnlyPackageJsonFields: !workspaceMember,
-      packageManager,
+  const writes = await Promise.all(
+    Object.entries(
+      templateFiles({
+        byokProvider,
+        includeRootOnlyPackageJsonFields: !workspaceMember,
+        packageManager,
+      }),
+    ).map(async ([relPath, content]) => {
+      const filePath = join(targetRoot, relPath);
+      const write = await planFileWrite({
+        bytes: Buffer.from(renderTemplate(content, ctx)),
+        destination: filePath,
+        root: targetRoot,
+      });
+      if (write.expectedBefore !== undefined && !(createInPlace && overwriteExisting)) {
+        throw new Error(`Refusing to overwrite ${filePath}.`);
+      }
+      return write;
     }),
-  )) {
-    const filePath = `${targetRoot}/${relPath}`;
-    const existed = await pathExists(filePath);
-    await writeTextFile(filePath, renderTemplate(content, ctx), {
-      force: createInPlace && overwriteExisting,
-    });
-    if (existed) {
-      await options.onOverwriteFile?.(filePath);
-    }
+  );
+  await applyFileWritePlan(targetRoot, writes);
+  for (const write of writes) {
+    if (write.expectedBefore !== undefined) await options.onOverwriteFile?.(write.destination);
   }
 
   await applyPackageManagerWorkspaceConfiguration({
