@@ -36,13 +36,17 @@ async function withoutGitIdentity(projectPath: string, run: () => Promise<void>)
 }
 
 describe("tryInitializeGit", () => {
-  it("removes a partial repository when the initial commit fails", async () => {
+  it("retains an initialized repository when the initial commit fails", async () => {
     const projectPath = await createScratchDirectory("eve-init-git-failure-");
     await writeFile(join(projectPath, "package.json"), "{}\n");
 
     await withoutGitIdentity(projectPath, async () => {
-      await expect(tryInitializeGit(projectPath)).resolves.toMatchObject({ kind: "failed" });
-      await expect(pathExists(join(projectPath, ".git"))).resolves.toBe(false);
+      await expect(tryInitializeGit(projectPath)).resolves.toMatchObject({
+        kind: "failed",
+        repositoryInitialized: true,
+        stage: "commit",
+      });
+      await expect(pathExists(join(projectPath, ".git"))).resolves.toBe(true);
     });
   });
 
@@ -53,7 +57,10 @@ describe("tryInitializeGit", () => {
     await writeFile(join(gitPath, "keep"), "preexisting\n");
     await writeFile(join(projectPath, "package.json"), "{}\n");
 
-    await expect(tryInitializeGit(projectPath)).resolves.toEqual({ kind: "skipped" });
+    await expect(tryInitializeGit(projectPath)).resolves.toEqual({
+      kind: "skipped",
+      reason: "existing-metadata",
+    });
     await expect(readdir(gitPath)).resolves.toEqual(["keep"]);
     await expect(readFile(join(gitPath, "keep"), "utf8")).resolves.toBe("preexisting\n");
   });

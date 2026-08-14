@@ -1,14 +1,20 @@
 import { readdir, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, resolve } from "node:path";
 
-import { pathExists } from "#setup/path-exists.js";
+import { classifyAgentRootEntry, getDirectoryEntryType } from "#discover/filesystem.js";
 import { parseProjectName } from "#setup/project-name.js";
-import { blockingCreateInPlaceEntries } from "#setup/scaffold/create-in-place.js";
 
-import type { InitNonEmptyDirectoryTarget } from "./init-confirm.js";
 import type { InitFailurePolicy } from "./init-recovery.js";
 
-const CURRENT_DIRECTORY_PROJECT_NAME = ".";
+const ENVIRONMENT_ONLY_ENTRIES = new Set([
+  ".DS_Store",
+  ".editorconfig",
+  ".gitattributes",
+  ".gitignore",
+  ".git",
+  ".idea",
+  ".vscode",
+]);
 
 export type InitTarget =
   | {
@@ -16,6 +22,7 @@ export type InitTarget =
       projectPath: string;
     }
   | {
+      createInPlace: boolean;
       failurePolicy: InitFailurePolicy;
       kind: "fresh";
       overwriteExisting: boolean;
@@ -25,28 +32,63 @@ export type InitTarget =
     };
 
 interface ResolveInitTargetInput {
-  agentLaunched: boolean;
-  confirmInitInNonEmptyDirectory(entries: readonly string[]): Promise<InitNonEmptyDirectoryTarget>;
   parentDirectory: string;
   target: string | undefined;
 }
 
-function isCurrentDirectoryTarget(target: string): boolean {
-  return /^\.(?:[/\\]+\.?)*$/u.test(target.trim());
+async function pathKind(path: string): Promise<"directory" | "missing" | "other"> {
+  const stats = await stat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (stats === undefined) return "missing";
+  return stats.isDirectory() ? "directory" : "other";
 }
 
-async function resolveNamedTarget(parentPath: string, rawTarget: string): Promise<InitTarget> {
-  const projectName = parseProjectName(rawTarget);
-  const projectPath = join(parentPath, projectName);
-  const stats = await stat(projectPath).then(
-    (result) => result,
-    (error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return undefined;
-      throw error;
-    },
+function isEnvironmentOnly(entries: readonly string[]): boolean {
+  return entries.every((entry) => ENVIRONMENT_ONLY_ENTRIES.has(entry));
+}
+
+async function isAgentRoot(directory: string): Promise<boolean> {
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  return entries.some((entry) => {
+    const kind = classifyAgentRootEntry(entry.name, getDirectoryEntryType(entry));
+    return kind !== "unknown" && kind !== "ignored-directory" && kind !== "lib-directory";
+  });
+}
+
+async function isExistingEveProject(
+  projectPath: string,
+  entries: readonly string[],
+): Promise<boolean> {
+  if (await isAgentRoot(projectPath)) return true;
+  return (
+    (entries.includes("package.json") || entries.includes("vercel.json")) &&
+    entries.includes("agent") &&
+    (await isAgentRoot(resolve(projectPath, "agent")))
   );
-  if (stats === undefined) {
+}
+
+function listEntries(entries: readonly string[]): string {
+  return entries.map((entry) => `  - ${entry}`).join("\n");
+}
+
+/** Classifies the target itself without walking ancestor projects. */
+export async function resolveInitTarget(input: ResolveInitTargetInput): Promise<InitTarget> {
+  const parentPath = resolve(input.parentDirectory);
+  const targetProvided = input.target !== undefined;
+  const projectPath = resolve(parentPath, input.target ?? ".");
+  const createInPlace = projectPath === parentPath;
+  const kind = await pathKind(projectPath);
+
+  if (kind === "other") {
+    throw new Error(`Cannot initialize an agent because "${projectPath}" is not a directory.`);
+  }
+
+  if (kind === "missing") {
+    const projectName = parseProjectName(basename(projectPath));
     return {
+      createInPlace: false,
       failurePolicy: "remove",
       kind: "fresh",
       overwriteExisting: false,
@@ -55,63 +97,37 @@ async function resolveNamedTarget(parentPath: string, rawTarget: string): Promis
       projectPath,
     };
   }
-  if (!stats.isDirectory()) {
-    throw new Error(`Cannot create project because "${projectPath}" already exists.`);
-  }
 
-  const entries = await readdir(projectPath);
-  if (entries.length > 0) {
-    return { kind: "existing", projectPath };
-  }
-  return {
-    failurePolicy: "clear",
-    kind: "fresh",
-    overwriteExisting: false,
-    preservedEntries: [],
-    projectName,
-    projectPath,
-  };
-}
-
-export async function resolveInitTarget(input: ResolveInitTargetInput): Promise<InitTarget> {
-  const parentPath = resolve(input.parentDirectory);
-  const rawTarget = input.target ?? CURRENT_DIRECTORY_PROJECT_NAME;
-  if (!isCurrentDirectoryTarget(rawTarget)) {
-    return resolveNamedTarget(parentPath, rawTarget);
-  }
-
-  if (await pathExists(join(parentPath, "package.json"))) {
-    return { kind: "existing", projectPath: parentPath };
-  }
-
-  const entries = await readdir(parentPath);
-  const blocking = blockingCreateInPlaceEntries(entries);
-  if (blocking.length === 0) {
+  const entries = (await readdir(projectPath)).sort();
+  if (entries.length === 0 || isEnvironmentOnly(entries)) {
+    const projectName = createInPlace ? "." : parseProjectName(basename(projectPath));
     return {
+      createInPlace: createInPlace || entries.length > 0,
       failurePolicy: "clear",
       kind: "fresh",
       overwriteExisting: false,
       preservedEntries: entries,
-      projectName: CURRENT_DIRECTORY_PROJECT_NAME,
-      projectPath: parentPath,
+      projectName,
+      projectPath,
     };
   }
-  if (input.agentLaunched) {
+
+  if (await isExistingEveProject(projectPath, entries)) {
     throw new Error(
-      "Coding-agent launches cannot choose where to initialize a non-empty current directory. Pass a new directory name, for example: eve init my-agent.",
+      `An eve project already exists at "${projectPath}". Run an existing-project command from that directory instead.`,
     );
   }
 
-  const selection = await input.confirmInitInNonEmptyDirectory(blocking);
-  if (selection.kind === "subdirectory") {
-    return resolveNamedTarget(parentPath, selection.name);
+  if (entries.includes("package.json")) {
+    if (!targetProvided || input.target !== ".") {
+      throw new Error(
+        `Adding eve to an existing package requires an explicit \`eve init .\` from "${projectPath}".`,
+      );
+    }
+    return { kind: "existing", projectPath };
   }
-  return {
-    failurePolicy: "preserve",
-    kind: "fresh",
-    overwriteExisting: true,
-    preservedEntries: entries,
-    projectName: CURRENT_DIRECTORY_PROJECT_NAME,
-    projectPath: parentPath,
-  };
+
+  throw new Error(
+    `Cannot initialize an agent in the non-empty directory "${projectPath}". Move or remove these entries, or choose an empty target:\n${listEntries(entries)}`,
+  );
 }

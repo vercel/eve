@@ -1,5 +1,5 @@
 import { execFile, type ExecFileOptions } from "node:child_process";
-import { rm, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -8,8 +8,13 @@ const runFile = promisify(execFile);
 
 export type GitInitResult =
   | { kind: "initialized" }
-  | { kind: "skipped" }
-  | { kind: "failed"; reason: string };
+  | { kind: "skipped"; reason: "existing-metadata" | "git-unavailable" | "parent-repository" }
+  | {
+      kind: "failed";
+      repositoryInitialized: boolean;
+      reason: string;
+      stage: "initialize" | "default-branch" | "stage" | "commit";
+    };
 
 async function commandSucceeds(
   command: string,
@@ -45,11 +50,29 @@ async function runGit(cwd: string, args: readonly string[]): Promise<void> {
   await runFile("git", [...args], { cwd, timeout: GIT_TIMEOUT_MS, windowsHide: true });
 }
 
+async function runGitStage(
+  cwd: string,
+  stage: "initialize" | "default-branch" | "stage" | "commit",
+  args: readonly string[],
+  repositoryInitialized: boolean,
+): Promise<GitInitResult | undefined> {
+  try {
+    await runGit(cwd, args);
+    return undefined;
+  } catch (error) {
+    return {
+      kind: "failed",
+      repositoryInitialized,
+      reason: error instanceof Error ? error.message : String(error),
+      stage,
+    };
+  }
+}
+
 /**
  * Initializes a Git repository and records the generated files in an initial
- * commit. Missing Git and parent repositories are skips. A failed partial
- * initialization is removed and returned as a `failed` result; presenting the
- * failure (without failing `eve init`) is the caller's job.
+ * commit. Missing Git and parent repositories are skips. Repository metadata
+ * is retained when a later step fails so eve never destroys useful Git state.
  */
 export async function tryInitializeGit(projectPath: string): Promise<GitInitResult> {
   const gitPath = join(projectPath, ".git");
@@ -60,32 +83,33 @@ export async function tryInitializeGit(projectPath: string): Promise<GitInitResu
       throw error;
     },
   );
-  if (
-    gitMetadataExists ||
-    !(await isGitAvailable()) ||
-    (await isInsideExistingRepository(projectPath))
-  ) {
-    return { kind: "skipped" };
+  if (gitMetadataExists) return { kind: "skipped", reason: "existing-metadata" };
+  if (!(await isGitAvailable())) return { kind: "skipped", reason: "git-unavailable" };
+  if (await isInsideExistingRepository(projectPath)) {
+    return { kind: "skipped", reason: "parent-repository" };
   }
 
-  let initialized = false;
-  try {
-    await runGit(projectPath, ["init"]);
-    initialized = true;
+  const initFailure = await runGitStage(projectPath, "initialize", ["init"], false);
+  if (initFailure !== undefined) return initFailure;
 
-    if (!(await hasConfiguredDefaultBranch(projectPath))) {
-      await runGit(projectPath, ["checkout", "-b", "main"]);
-    }
-
-    await runGit(projectPath, ["add", "-A"]);
-    await runGit(projectPath, ["commit", "-m", "Initial commit from eve"]);
-    return { kind: "initialized" };
-  } catch (error) {
-    if (initialized) {
-      await rm(gitPath, { recursive: true, force: true }).catch(() => {});
-    }
-
-    const reason = error instanceof Error ? error.message : String(error);
-    return { kind: "failed", reason };
+  if (!(await hasConfiguredDefaultBranch(projectPath))) {
+    const branchFailure = await runGitStage(
+      projectPath,
+      "default-branch",
+      ["checkout", "-b", "main"],
+      true,
+    );
+    if (branchFailure !== undefined) return branchFailure;
   }
+
+  const stageFailure = await runGitStage(projectPath, "stage", ["add", "-A"], true);
+  if (stageFailure !== undefined) return stageFailure;
+
+  const commitFailure = await runGitStage(
+    projectPath,
+    "commit",
+    ["commit", "-m", "Initial commit from eve"],
+    true,
+  );
+  return commitFailure ?? { kind: "initialized" };
 }
