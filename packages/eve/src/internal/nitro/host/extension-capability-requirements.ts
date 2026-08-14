@@ -22,18 +22,25 @@ export async function deriveExtensionCapabilityRequirements(input: {
 }): Promise<ExtensionCapabilityRequirements> {
   const required = new Set<ExtensionCapability>(["extension"]);
   const loadOptions = { externalDependencies: input.runtimeDependencies };
+  const manifests = collectSubagentManifests(input.manifest);
   const [tools, skills, instructions, declaration, usesState] = await Promise.all([
     Promise.all(
-      input.manifest.tools.map((source) => compileToolEntry(input.sourceRoot, source, loadOptions)),
-    ),
-    Promise.all(
-      input.manifest.skills.map((source) =>
-        compileSkillSource(input.sourceRoot, source, loadOptions),
+      manifests.flatMap((manifest) =>
+        manifest.tools.map((source) => compileToolEntry(manifest.agentRoot, source, loadOptions)),
       ),
     ),
     Promise.all(
-      input.manifest.instructions.map((source) =>
-        compileInstructionsEntry(input.sourceRoot, source, loadOptions),
+      manifests.flatMap((manifest) =>
+        manifest.skills.map((source) =>
+          compileSkillSource(manifest.agentRoot, source, loadOptions),
+        ),
+      ),
+    ),
+    Promise.all(
+      manifests.flatMap((manifest) =>
+        manifest.instructions.map((source) =>
+          compileInstructionsEntry(manifest.agentRoot, source, loadOptions),
+        ),
       ),
     ),
     loadAuthoredModuleNamespace(join(input.sourceRoot, input.declarationModule.logicalPath), {
@@ -44,10 +51,11 @@ export async function deriveExtensionCapabilityRequirements(input: {
 
   if (tools.length > 0) required.add("tool");
   if (tools.some((entry) => entry.kind === "dynamic-tool")) required.add("dynamicTool");
-  if (input.manifest.channels.length > 0) required.add("channel");
-  if (input.manifest.connections.length > 0) required.add("connection");
-  if (input.manifest.hooks.length > 0) required.add("hook");
-  if (input.manifest.schedules.length > 0) required.add("schedule");
+  if (manifests.some((manifest) => manifest.channels.length > 0)) required.add("channel");
+  if (manifests.some((manifest) => manifest.connections.length > 0)) required.add("connection");
+  if (manifests.some((manifest) => manifest.hooks.length > 0)) required.add("hook");
+  if (manifests.some((manifest) => manifest.schedules.length > 0)) required.add("schedule");
+  if (manifests.some((manifest) => manifest.subagents.length > 0)) required.add("subagent");
   if (skills.length > 0) required.add("skill");
   if (skills.some((entry) => entry.kind === "dynamic-skill")) required.add("dynamicSkill");
   if (instructions.length > 0) required.add("instructions");
@@ -70,4 +78,11 @@ export async function deriveExtensionCapabilityRequirements(input: {
       .filter((capability) => required.has(capability))
       .map((capability) => [capability, EXTENSION_CAPABILITY_VERSIONS[capability]]),
   );
+}
+
+function collectSubagentManifests(manifest: AgentSourceManifest): AgentSourceManifest[] {
+  return [
+    manifest,
+    ...manifest.subagents.flatMap((subagent) => collectSubagentManifests(subagent.manifest)),
+  ];
 }

@@ -132,7 +132,7 @@ dist
 const AGENTS_MD_TEMPLATE = `# eve Extension Package
 
 This package is an eve extension — a reusable package of tools, channels,
-connections, skills, schedules, hooks, and instruction fragments that a consuming agent
+connections, skills, schedules, subagents, hooks, and instruction fragments that a consuming agent
 mounts under \`agent/extensions/\`.
 
 Before writing code, read the Extensions guide from the installed eve package
@@ -145,13 +145,14 @@ unavailable, use https://eve.dev/docs/extensions as a fallback.
 
 - Declare the extension in \`extension/extension.ts\` with \`defineExtension\` from
   \`eve/extension\`. Config is optional; read bound values via the handle's
-  \`.config\` in tools, channels, schedules, and hooks.
+  \`.config\` in tools, channels, schedules, hooks, and tools inside contributed subagents.
 - Add contributions under \`extension/\` the same way as in an agent:
-  \`tools/\`, \`channels/\`, \`connections/\`, \`skills/\`, \`schedules/\`, \`hooks/\`, and
+  \`tools/\`, \`channels/\`, \`connections/\`, \`skills/\`, \`schedules/\`, \`subagents/\`, \`hooks/\`, and
   optional instruction fragments. Names come from file paths; the mount supplies the namespace, so
   name tools for what they do (\`search\`, not \`crm_search\`).
-- An extension cannot declare \`agent.ts\`, \`sandbox\`, or nested
-  \`extensions/\` — those belong to the consuming agent.
+- The extension root cannot declare \`agent.ts\`, \`sandbox\`, or nested
+  \`extensions/\`. A subagent under \`extension/subagents/\` owns its own agent
+  configuration and sandbox.
 
 ## Build and publish
 

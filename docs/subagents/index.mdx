@@ -50,6 +50,8 @@ export default defineAgent({
 
 `description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out.
 
+A mounted extension can also contribute declared subagents from `extension/subagents/`. The mount namespace prefixes the subagent visible to the consuming agent node: mounting an extension as `crm` exposes its `reviewer` subagent as `crm__reviewer`. The contributed subagent keeps its own isolated tools, connections, skills, hooks, instructions, sandbox, and nested subagents, and its modules can read configuration from the extension handle. See [Extensions](./extensions#add-a-subagent) for the authoring and override behavior.
+
 ### Conditional availability
 
 To expose a declared subagent only for certain sessions or turns, export
@@ -153,7 +155,7 @@ Declared subagents can call nested subagents defined under their own directories
 
 `Workflow` is also root-only. Child sessions can still call their own declared or remote subagents, but they receive neither `Workflow` nor the built-in `agent`. The Workflow tool's `maxSubagents` option caps the number of calls made by one program (default 100); see [Workflow Tool](./subagents/workflow-tool).
 
-A declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. Unlike connection tools (`<connection>__<tool>`), it carries no namespace, so the model, approvals, logs, and evals all reference it by that name. Its input schema is:
+A directly declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. A subagent supplied by a mounted extension includes the mount namespace, such as `crm__reviewer`. The model, approvals, logs, and evals reference the resulting name. Its input schema is:
 
 ```ts
 {

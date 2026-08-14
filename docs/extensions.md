@@ -3,7 +3,7 @@ title: "Extensions"
 description: "Package reusable eve capabilities and mount them from npm or a monorepo workspace."
 ---
 
-Extensions package eve tools, channels, connections, skills, schedules, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
+Extensions package eve tools, channels, connections, skills, schedules, subagents, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
 
 Ready-made extensions can also be distributed through an eve integration registry. See [Add Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
 
@@ -33,6 +33,7 @@ An extension uses the same file conventions as an agent for its contributions:
     connections/api.ts
     skills/triage/SKILL.md
     schedules/sync.ts
+    subagents/reviewer/agent.ts
     instructions.md
     hooks/audit.ts
     lib/http.ts
@@ -40,9 +41,9 @@ An extension uses the same file conventions as an agent for its contributions:
 
 Each listed slot accepts the same authored forms as its agent counterpart. Static and dynamic tools, skills, and instructions all work in an extension: `extension/instructions.ts` is as valid as `extension/instructions.md`, and `extension/tools/` can contain `defineDynamic(...)`.
 
-Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. The same prefix applies to channel and schedule IDs, while channel route paths and schedule cron expressions stay unchanged. Keep shared code in `extension/lib/`.
+Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. The same prefix applies to channel, schedule, and parent-visible subagent IDs, while channel route paths and schedule cron expressions stay unchanged. Keep shared code in `extension/lib/`.
 
-Keep agent configuration, sandboxes, and nested extensions in the consumer's agent.
+The extension root cannot declare agent configuration, a sandbox, or nested extensions. A subagent contributed under `extension/subagents/` owns its own agent configuration and sandbox like any other [declared subagent](./subagents).
 
 ### Add configuration and contributions
 
@@ -81,6 +82,12 @@ export default defineTool({
 If no configuration is needed, export `defineExtension()` and let consumers re-export it directly. Config schemas must validate synchronously.
 
 `defineState` is automatically scoped to the extension package, so the same state name does not collide with the consumer or another extension.
+
+### Add a subagent
+
+Author a subagent under `extension/subagents/<id>/` using the same files as a subagent declared by an agent. Mounting the extension as `crm` exposes `extension/subagents/reviewer/` to the consuming agent node as `crm__reviewer`. The subagent's own tools, connections, skills, hooks, instructions, sandbox, and nested subagents remain isolated inside its node and keep their path-derived names.
+
+Modules inside the contributed subagent can import the extension handle. For example, a tool under `extension/subagents/reviewer/tools/` can read the configuration bound by the consumer's `agent/extensions/crm.ts` mount.
 
 ### Build and optionally publish
 
@@ -170,7 +177,7 @@ export default crm({ apiKey: process.env.CRM_API_KEY! });
 
 Set `CRM_API_KEY` in the consumer's environment, such as `.env.local` for local development.
 
-The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, `schedules/sync.ts` becomes `crm__sync`, and `connections/api.ts` becomes `crm__api`. Channels keep their declared route paths, and schedules keep their cron expressions.
+The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, `schedules/sync.ts` becomes `crm__sync`, `connections/api.ts` becomes `crm__api`, and `subagents/reviewer/` becomes `crm__reviewer`. Channels keep their declared route paths, and schedules keep their cron expressions.
 
 For an extension with no configuration, mount its default export directly:
 
@@ -276,7 +283,7 @@ import crm from "@acme/crm";
 export default crm({ apiKey: process.env.CRM_API_KEY! });
 ```
 
-A same-named consumer channel, tool, connection, skill, or schedule wins. To adjust an extension tool, import it from the package's `./tools` export and define it again:
+A same-named consumer channel, tool, connection, skill, schedule, or subagent wins. To adjust an extension tool, import it from the package's `./tools` export and define it again:
 
 ```ts title="agent/extensions/crm/tools/search.ts"
 import { search } from "@acme/crm/tools";
@@ -296,7 +303,7 @@ export default disableTool();
 
 Hooks and instruction fragments are additive, so they cannot be replaced. To replace a dynamic tool, use a dynamic definition in the same slot; dynamic tools win over same-named static tools at runtime. `disableTool()` removes either kind.
 
-The `crm__` prefix is reserved for this directory mount. A consumer cannot override the extension from `agent/tools/`, `agent/connections/`, or another agent-root slot.
+The `crm__` prefix is reserved for this directory mount. A consumer cannot override the extension from `agent/tools/`, `agent/connections/`, `agent/subagents/`, or another agent-root slot.
 
 ### Use an extension tool result in a hook
 
@@ -333,4 +340,5 @@ At build time, eve checks the extension's generated capability metadata. If the 
 - [Connections](/docs/connections): integrate external services
 - [Channels](/docs/channels/overview): receive messages and expose routes
 - [Schedules](/docs/schedules): run the agent on a cron cadence
+- [Subagents](/docs/subagents): delegate to declared specialists
 - [Hooks](/docs/guides/hooks): observe agent events

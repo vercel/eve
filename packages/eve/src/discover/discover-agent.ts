@@ -252,6 +252,7 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
         ...connectionsResult.connections,
         ...skillsResult.skills,
         ...schedulesResult.schedules,
+        ...subagentsResult.subagents,
       ],
     }),
   );

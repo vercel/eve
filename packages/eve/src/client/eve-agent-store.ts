@@ -1,10 +1,12 @@
 import { Client } from "#client/client.js";
+import type { MessageResponse } from "#client/message-response.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { toError } from "#shared/errors.js";
 import type {
+  CancelSessionResult,
   ClientAuth,
   HeadersValue,
   SendTurnPayload,
@@ -88,6 +90,14 @@ interface PendingMessageSubmission {
   readonly message: string;
 }
 
+const detachStore = Symbol("detachEveAgentStore");
+
+interface ActiveTurn {
+  readonly abortController: AbortController;
+  readonly response: Promise<MessageResponse | undefined>;
+  readonly resolveResponse: (response: MessageResponse | undefined) => void;
+}
+
 /**
  * Framework-agnostic state machine for an eve agent session.
  *
@@ -98,7 +108,8 @@ interface PendingMessageSubmission {
  * Drives one turn at a time: `send` rejects if a turn is already submitted or
  * streaming. Read the latest projection via the `snapshot` getter, observe
  * changes with `subscribe`, register lifecycle hooks with `setCallbacks`,
- * abort the in-flight turn with `stop`, and discard all state with `reset`.
+ * cancel the durable in-flight turn with `cancel`, and discard all state with
+ * `reset`.
  */
 export class EveAgentStore<TData> {
   readonly #client: Client | undefined;
@@ -110,12 +121,11 @@ export class EveAgentStore<TData> {
   /** Ids already folded into the projection: `initialEvents` and a reconnect can overlap. */
   #seenEvents = createEventDeduper();
 
-  #abortController: AbortController | undefined;
+  #activeTurn: ActiveTurn | undefined;
   #callbacks: EveAgentStoreCallbacks<TData> = {};
   #data: TData;
   #error: Error | undefined;
   #events: readonly MessageStreamEvent[];
-  #operationId = 0;
   #pendingMessageSubmission: PendingMessageSubmission | undefined;
   #projectionEvents: readonly EveAgentReducerEvent[];
   #session: ClientSession | undefined;
@@ -173,9 +183,13 @@ export class EveAgentStore<TData> {
       throw new Error("eve session is already processing a turn.");
     }
 
-    const operationId = this.#startOperation();
-    const abortController = new AbortController();
-    this.#abortController = abortController;
+    const response = Promise.withResolvers<MessageResponse | undefined>();
+    const turn: ActiveTurn = {
+      abortController: new AbortController(),
+      response: response.promise,
+      resolveResponse: response.resolve,
+    };
+    this.#activeTurn = turn;
     this.#error = undefined;
     this.#status = "submitted";
     this.#publish();
@@ -184,7 +198,7 @@ export class EveAgentStore<TData> {
       const preparedInput = (await this.#callbacks.prepareSend?.(input)) ?? input;
       assertExclusiveTurnInput(preparedInput);
 
-      if (!this.#isCurrentOperation(operationId)) {
+      if (!this.#isActiveTurn(turn)) {
         return;
       }
 
@@ -194,13 +208,16 @@ export class EveAgentStore<TData> {
 
       const turnInput = {
         ...preparedInput,
-        signal: createAbortSignal(preparedInput.signal, abortController.signal),
+        signal: createAbortSignal(preparedInput.signal, turn.abortController.signal),
       };
       const response = await this.#dispatchTurn(turnInput);
 
+      if (!this.#isActiveTurn(turn)) return;
+      turn.resolveResponse(response);
+
       let sawEvent = false;
       for await (const event of response) {
-        if (!this.#isCurrentOperation(operationId)) {
+        if (!this.#isActiveTurn(turn)) {
           return;
         }
 
@@ -220,13 +237,13 @@ export class EveAgentStore<TData> {
         this.#publish();
       }
 
-      if (!this.#isCurrentOperation(operationId)) {
+      if (!this.#isActiveTurn(turn)) {
         return;
       }
 
       this.#status = this.#error === undefined ? "ready" : "error";
     } catch (error) {
-      if (!this.#isCurrentOperation(operationId)) {
+      if (!this.#isActiveTurn(turn)) {
         return;
       }
 
@@ -240,8 +257,9 @@ export class EveAgentStore<TData> {
         this.#callbacks.onError?.(this.#error);
       }
     } finally {
-      if (this.#isCurrentOperation(operationId)) {
-        this.#abortController = undefined;
+      if (this.#isActiveTurn(turn)) {
+        turn.resolveResponse(undefined);
+        this.#activeTurn = undefined;
         this.#callbacks.onSessionChange?.(this.#session?.state);
         this.#publish();
         this.#callbacks.onFinish?.(this.#snapshot);
@@ -249,14 +267,29 @@ export class EveAgentStore<TData> {
     }
   }
 
-  stop(): void {
-    this.#abortController?.abort();
+  /**
+   * Requests cooperative cancellation of the active durable turn.
+   *
+   * If the server has not emitted `turn.started` yet, the request waits for
+   * that turn ID. The event stream stays attached until the turn settles.
+   */
+  cancel(): Promise<CancelSessionResult> {
+    const turn = this.#activeTurn;
+    if (turn === undefined) return Promise.resolve({ status: "no_active_turn" });
+    return turn.response.then<CancelSessionResult>((response) =>
+      response === undefined ? { status: "no_active_turn" } : response.cancel(),
+    );
+  }
+
+  [detachStore](): void {
+    this.#activeTurn?.abortController.abort();
   }
 
   reset(): void {
-    this.#invalidateOperation();
-    this.stop();
-    this.#abortController = undefined;
+    const turn = this.#activeTurn;
+    this.#activeTurn = undefined;
+    turn?.resolveResponse(undefined);
+    turn?.abortController.abort();
     if (!this.#externalSession) this.#session = undefined;
     this.#events = [];
     this.#seenEvents = createEventDeduper();
@@ -297,17 +330,8 @@ export class EveAgentStore<TData> {
     return await this.#session.respond(inputResponses, options);
   }
 
-  #startOperation(): number {
-    this.#operationId += 1;
-    return this.#operationId;
-  }
-
-  #invalidateOperation(): void {
-    this.#operationId += 1;
-  }
-
-  #isCurrentOperation(operationId: number): boolean {
-    return this.#operationId === operationId;
+  #isActiveTurn(turn: ActiveTurn): boolean {
+    return this.#activeTurn === turn;
   }
 
   #projectOptimisticMessage(input: SendTurnPayload): void {
@@ -450,6 +474,11 @@ export class EveAgentStore<TData> {
       subscriber();
     }
   }
+}
+
+/** @internal Detaches local transport without cancelling durable server work. */
+export function detachEveAgentStore<TData>(store: EveAgentStore<TData>): void {
+  store[detachStore]();
 }
 
 function assertExclusiveTurnInput(input: SendTurnPayload): void {

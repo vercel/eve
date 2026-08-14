@@ -1,5 +1,28 @@
 # eve
 
+## 0.38.1
+
+### Patch Changes
+
+- d23467d: Allow extensions to contribute namespaced subagents, including their tools, configuration access, nested subagents, and directory-mount overrides.
+- cb2fa2a: Configure MCP channel endpoints with `route`, default them to `/eve/v1/mcp`, and derive OAuth protected-resource metadata paths from the MCP resource identifier.
+
+## 0.38.0
+
+### Minor Changes
+
+- 48c1105: Replace `stop()` on frontend agent bindings with `cancel()`. Cancellation now targets the exact durable turn through `MessageResponse.cancel()` while the binding stays attached through settlement.
+
+### Patch Changes
+
+- 8904392: Extensions can now contribute channels. Mounted channel IDs receive the extension namespace while their authored route paths remain unchanged.
+- 4c3c475: Built-in inbound hooks can now return `title` to set the workflow run title without changing the message sent to the model.
+- a7d34e5: Make Nitro-backed builds more reliable by preserving per-import conditional exports, keeping authored and vendored OpenTelemetry tracers on one registered provider, and running development worker close hooks during an explicit shutdown handshake. Workflow artifacts are now emitted directly instead of repaired through post-build string rewrites.
+- bdd5a9b: Suggest close registry matches when `eve add` cannot find the requested item.
+- ccc604c: Show `eve add` help and registry search guidance when no item is provided.
+- abcd06d: Resolve project-scoped CLI commands from the nearest enclosing eve application when run from a nested directory.
+- 775c061: Extensions can contribute schedules. Mounted schedule IDs use the extension namespace while cron expressions and handler behavior remain unchanged.
+
 ## 0.37.1
 
 ### Patch Changes

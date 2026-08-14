@@ -1,6 +1,11 @@
 import { join as joinPath, relative as relativePath } from "node:path";
 
-import type { AgentSourceManifest, ResolvedExtensionMount } from "#discover/manifest.js";
+import {
+  createPathDerivedSourceId,
+  type AgentSourceManifest,
+  type LocalSubagentSourceRef,
+  type ResolvedExtensionMount,
+} from "#discover/manifest.js";
 import type {
   CompiledChannelEntry,
   CompiledConnectionDefinition,
@@ -97,6 +102,127 @@ export async function compileExtensionContributions(input: {
     extensionDynamicToolSlugs: new Set(base.contributions.dynamicTools.map((tool) => tool.slug)),
     namespace: mount.namespace,
   });
+}
+
+/** Composes one mount's root-visible subagents under its namespace. */
+export function composeExtensionSubagentSources(input: {
+  readonly consumerAgentRoot: string;
+  readonly mount: ResolvedExtensionMount;
+}): LocalSubagentSourceRef[] {
+  const base = scopeExtensionSubagents({
+    consumerAgentRoot: input.consumerAgentRoot,
+    manifest: input.mount.manifest,
+    namespace: input.mount.namespace,
+    sourceIdScope: `ext:${input.mount.namespace}`,
+    sourceRoot: input.mount.sourceRoot,
+  });
+  if (input.mount.overrides === undefined) {
+    return base;
+  }
+
+  const overrides = scopeExtensionSubagents({
+    consumerAgentRoot: input.consumerAgentRoot,
+    manifest: input.mount.overrides,
+    namespace: input.mount.namespace,
+    sourceIdScope: `ext-override:${input.mount.namespace}`,
+    sourceRoot: input.mount.overrides.agentRoot,
+  });
+  return mergeExtensionSubagentSources(overrides, base);
+}
+
+/** Returns authored and mounted-extension subagents visible from one agent node. */
+export function composeAgentSubagentSources(
+  manifest: AgentSourceManifest,
+): LocalSubagentSourceRef[] {
+  return [
+    ...manifest.subagents,
+    ...[...manifest.resolvedExtensions]
+      .sort((left, right) => left.namespace.localeCompare(right.namespace))
+      .flatMap((mount) =>
+        composeExtensionSubagentSources({ consumerAgentRoot: manifest.agentRoot, mount }),
+      ),
+  ];
+}
+
+/** Earlier entries win, matching directory-override precedence for other slots. */
+export function mergeExtensionSubagentSources(
+  primary: readonly LocalSubagentSourceRef[],
+  secondary: readonly LocalSubagentSourceRef[],
+): LocalSubagentSourceRef[] {
+  return dedupeBy([...primary, ...secondary], (source) => source.subagentId);
+}
+
+function scopeExtensionSubagents(input: {
+  readonly consumerAgentRoot: string;
+  readonly manifest: AgentSourceManifest;
+  readonly namespace: string;
+  readonly sourceIdScope: string;
+  readonly sourceRoot: string;
+}): LocalSubagentSourceRef[] {
+  return input.manifest.subagents.map((source) => ({
+    ...scopeExtensionSubagentSource(source, input.sourceRoot, input.sourceIdScope),
+    logicalPath: relativePath(input.consumerAgentRoot, source.entryPath).replaceAll("\\", "/"),
+    subagentId: `${input.namespace}__${source.subagentId}`,
+  }));
+}
+
+function scopeExtensionSubagentSource(
+  source: LocalSubagentSourceRef,
+  sourceRoot: string,
+  sourceIdScope: string,
+): LocalSubagentSourceRef {
+  return {
+    ...source,
+    manifest: scopeExtensionSubagentManifest(source.manifest, sourceRoot, sourceIdScope),
+    sourceId: scopeExtensionSourceId(sourceRoot, source.entryPath, sourceIdScope),
+  };
+}
+
+function scopeExtensionSubagentManifest(
+  manifest: AgentSourceManifest,
+  sourceRoot: string,
+  sourceIdScope: string,
+): AgentSourceManifest {
+  const scopeRef = <T extends { readonly logicalPath: string; readonly sourceId: string }>(
+    source: T,
+  ): T => ({
+    ...source,
+    sourceId: scopeExtensionSourceId(
+      sourceRoot,
+      joinPath(manifest.agentRoot, source.logicalPath),
+      sourceIdScope,
+    ),
+  });
+
+  return {
+    ...manifest,
+    channels: manifest.channels.map(scopeRef),
+    connections: manifest.connections.map(scopeRef),
+    ...(manifest.configModule === undefined
+      ? {}
+      : { configModule: scopeRef(manifest.configModule) }),
+    extensions: manifest.extensions.map(scopeRef),
+    hooks: manifest.hooks.map(scopeRef),
+    instructions: manifest.instructions.map(scopeRef),
+    lib: manifest.lib.map(scopeRef),
+    sandbox: manifest.sandbox === null ? null : scopeRef(manifest.sandbox),
+    sandboxWorkspaces: manifest.sandboxWorkspaces.map(scopeRef),
+    schedules: manifest.schedules.map(scopeRef),
+    skills: manifest.skills.map(scopeRef),
+    subagents: manifest.subagents.map((source) =>
+      scopeExtensionSubagentSource(source, sourceRoot, sourceIdScope),
+    ),
+    tools: manifest.tools.map(scopeRef),
+  };
+}
+
+function scopeExtensionSourceId(
+  sourceRoot: string,
+  sourcePath: string,
+  sourceIdScope: string,
+): string {
+  const logicalPath = relativePath(sourceRoot, sourcePath).replaceAll("\\", "/");
+  return `${sourceIdScope}:${createPathDerivedSourceId(logicalPath)}`;
 }
 
 export interface DisabledToolTarget {
