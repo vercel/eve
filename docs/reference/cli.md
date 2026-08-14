@@ -1,6 +1,6 @@
 ---
 title: "CLI"
-description: "Reference for every eve CLI command: init, set, info, build, start, dev, logs, trace, link, deploy, eval, channels, and extension."
+description: "Reference for every eve CLI command: init, doctor, set, info, build, start, dev, logs, trace, link, deploy, eval, channels, and extension."
 ---
 
 Relevant `eve` commands can run from the application root or any directory beneath it. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
@@ -11,6 +11,7 @@ Relevant `eve` commands can run from the application root or any directory benea
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `eve`                         | Initialize the current directory, or start development when it is already an eve project                                           |
 | `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                         |
+| `eve doctor [path]`           | Diagnose local Node.js, project, package, dependency, and Git state without network calls or changes                               |
 | `eve info`                    | Print the resolved application, including static instructions and discovered capabilities, routes, artifact paths, and diagnostics |
 | `eve build`                   | Compile `.eve/` artifacts and build the host output; prints the output directory                                                   |
 | `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                           |
@@ -41,14 +42,14 @@ eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channe
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
 
-| Target                                                                     | What happens                                                                                                                                                             |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `eve init my-agent`                                                        | Creates an agent project in `my-agent/`                                                                                                                                  |
-| `eve init` or `eve init .` in an empty directory                           | Creates an agent project in the current directory                                                                                                                        |
-| `eve init` or `eve init .` in a non-empty directory without `package.json` | Asks whether to scaffold in the current directory or a named subdirectory. Using the current directory preserves unrelated files but overwrites files at generated paths |
-| `eve init .` in an existing project                                        | Adds `agent/` plus missing `eve`, `ai`, and `zod` dependencies. Requires `package.json` and no existing `agent/` files                                                   |
+| Target                                                         | What happens                                                                                             |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `eve init my-agent`                                            | Creates an agent project in `my-agent/`                                                                  |
+| `eve init` or `eve init .` in an empty directory               | Creates an agent project in the current directory                                                        |
+| `eve init` or `eve init .` in an arbitrary non-empty directory | Stops before writing and lists the content that prevents initialization                                  |
+| `eve init .` in an existing package project                    | Previews and confirms `agent/`, dependency, and supported workspace edits before installing dependencies |
 
-Coding-agent launches and non-interactive terminals cannot answer the location prompt and fail before writing. Pass a new directory name, such as `eve init my-agent`, in those environments.
+Use `eve init . --yes` to confirm a previewed existing-package integration without a TTY. The confirmed edits become durable before installation starts. If installation fails, keep the edits and retry the package-manager command that eve reports; do not rerun `eve init`.
 
 After scaffolding, a human terminal usually continues into `eve dev`. If a coding-agent REPL is on `PATH`, the handoff menu can open it instead or exit without starting either process. Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
@@ -57,6 +58,7 @@ After scaffolding, a human terminal usually continues into `eve dev`. If a codin
 | `--model <model>`      | string | `zai/glm-5.2`    | Set the root agent's AI Gateway model ID.                                                                                |
 | `--reasoning <effort>` | enum   | provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
 | `--channel-web-nextjs` | flag   | off              | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
+| `-y, --yes`            | flag   | off              | Confirm the previewed edits when adding eve to an existing package project without a TTY.                                |
 
 ## `eve extension`
 
@@ -134,6 +136,18 @@ Coding agents should use `eve add <item> --non-interactive`, adding `--yes` to a
 When setup is skipped, cancelled, or needs more input after installation, eve prints or returns the matching `eve add <item> --skip-install` continuation. It reruns the selected components' declared flows without reinstalling registry files.
 
 `eve registry add` records configured sources in `package.json#registries`. `eve registry list` aggregates the official catalog and all configured sources by default. `eve registry search` also includes [skills.sh](https://skills.sh), available without configuration at `@skills`, and groups results by source with each source's available result count. Search returns up to 10 matches per source by default; pass `--limit <count>` to request between 1 and 100. Either command can browse one supplied URL or namespace. Official and other universal items with explicit file targets do not require shadcn project configuration.
+
+## `eve doctor`
+
+```bash
+eve doctor [path] [--json]
+```
+
+Runs local checks without authentication, network calls, project compilation, or filesystem changes. It checks the active Node.js version, canonical project discovery, package-manager selection and conflicting lockfiles, dependency installation, and Git repository and remote state. The command runs every applicable check instead of stopping at the first problem.
+
+Warnings and unknown results exit `0`; failures exit nonzero. Git and remotes are optional for local development, so their absence is a warning rather than a failure. `--json` prints the same diagnostics as JSON without progress or ANSI output. The JSON shape may change during eve's pre-1.0 development and does not include a schema version.
+
+`eve doctor` does not compile authored source because the compiler does not yet expose a proven no-write inspection path. Run `eve build` separately to validate compilation.
 
 ## `eve info`
 

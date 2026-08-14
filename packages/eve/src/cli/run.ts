@@ -263,6 +263,15 @@ function createCliProgram(
       },
     );
 
+  program
+    .command("doctor [path]")
+    .description("Diagnose the local eve environment and project without making changes.")
+    .option("--json", "Output diagnostics as JSON")
+    .action(async (path: string | undefined, options: { json?: boolean }) => {
+      const { runDoctorCommand } = await import("#cli/commands/doctor.js");
+      await runDoctorCommand(logger, path, options);
+    });
+
   applicationCommand(program.command("set"), applicationContext)
     .description("Change root agent model settings.")
     .option("--model <model>", "Set the agent model (provider/model-id)")
