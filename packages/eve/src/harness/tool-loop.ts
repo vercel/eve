@@ -1432,6 +1432,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               attemptScope,
               instrumentationHooks,
               config.instrumentation?.runInContext,
+              telemetryRuntimeContext,
             );
 
       const hooks = buildStepHooks({

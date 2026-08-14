@@ -10398,6 +10398,7 @@ describe("createToolLoopHarness", () => {
         }),
         hooks,
         runInContext,
+        {},
       );
       const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {

@@ -27,6 +27,8 @@ interface AttemptState {
   /** False when no provider asked for content, so none is projected at all. */
   readonly capturesContent: boolean;
   readonly modelKeys: Map<string, string>;
+  /** Merged runtime context attached to the attempt's started events. */
+  readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
   readonly toolKeys: Map<string, string>;
   operation?: InstrumentationOperationRef;
@@ -39,10 +41,15 @@ export function createAiSdkHookBridge(
   scope: InstrumentationAttemptScope,
   hooks: InstrumentationHooks,
   runInContext: InstrumentationContextRunner = directRunInContext,
+  runtimeContext?: Readonly<Record<string, unknown>>,
 ): Telemetry {
   const state: AttemptState = {
     capturesContent: hooks.capturesContent,
     modelKeys: new Map(),
+    runtimeContext:
+      runtimeContext !== undefined && Object.keys(runtimeContext).length > 0
+        ? Object.freeze({ ...runtimeContext })
+        : undefined,
     scope,
     toolKeys: new Map(),
   };
@@ -155,6 +162,7 @@ function toStepAttemptStarted(
   return Object.freeze({
     idempotencyKey: attemptIdempotencyKey(state.scope),
     operation: state.operation,
+    runtimeContext: state.runtimeContext,
     scope: state.scope,
     type: "step.attempt.started",
   });
@@ -174,6 +182,7 @@ function toModelCallStarted(
         })
       : undefined,
     model: Object.freeze({ modelId: source.modelId, provider: source.provider }),
+    runtimeContext: state.runtimeContext,
     scope: state.scope,
     type: "model.call.started",
   });

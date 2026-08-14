@@ -93,6 +93,7 @@ async function emitAttempt(input: {
   readonly runInContext: InstrumentationContextRunner;
   readonly providerMetadata?: Readonly<Record<string, unknown>>;
   readonly actionKind?: InstrumentationActionKind;
+  readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly sessionId: string;
   readonly skipModelTerminal?: boolean;
   readonly skipToolTerminal?: boolean;
@@ -113,7 +114,12 @@ async function emitAttempt(input: {
     await publishTurnStarted(input);
   }
 
-  const bridge = createAiSdkHookBridge(scope, input.hooks, input.runInContext);
+  const bridge = createAiSdkHookBridge(
+    scope,
+    input.hooks,
+    input.runInContext,
+    input.runtimeContext,
+  );
   Reflect.apply(bridge.onStart!, bridge, [
     {
       callId: "call-1",
@@ -702,6 +708,59 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.framework.name": "eve",
       "agent.root.session.id": "session-1",
     });
+  });
+
+  it("writes merged runtime context onto the operation and chat spans", async () => {
+    const runtime = createRuntime();
+
+    await emitAttempt({
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      runtimeContext: {
+        "eve.session.id": "session-1",
+        "posthog.distinct_id": "user-123",
+        nested: { ignored: undefined, team: "platform" },
+        tags: ["a", "b"],
+      },
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const operation = byName(spans, "ai.streamText")[0]!;
+    const model = byName(spans, "chat claude-test")[0]!;
+    for (const span of [operation, model]) {
+      expect(span.attributes).toMatchObject({
+        "ai.settings.context.eve.session.id": "session-1",
+        "ai.settings.context.posthog.distinct_id": "user-123",
+        "ai.settings.context.nested.team": "platform",
+        "ai.settings.context.tags": ["a", "b"],
+      });
+    }
+  });
+
+  it("omits context attributes when no runtime context is merged", async () => {
+    const runtime = createRuntime();
+
+    await emitAttempt({
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const operation = byName(spans, "ai.streamText")[0]!;
+    const model = byName(spans, "chat claude-test")[0]!;
+    for (const span of [operation, model]) {
+      expect(
+        Object.keys(span.attributes).some((key) => key.startsWith("ai.settings.context.")),
+      ).toBe(false);
+    }
   });
 
   it("keeps logical ids stable but separates physical redeliveries", async () => {
