@@ -40,7 +40,7 @@ export function registerBuildCommand(input: {
     .action(async (options: BuildCliOptions) => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 
-      loadDevelopmentEnvironmentFiles(input.applicationContext.root);
+      await loadDevelopmentEnvironmentFiles(input.applicationContext.root);
 
       const buildHost =
         input.buildHost ?? (await import("#internal/nitro/host.js")).buildApplication;

@@ -58,7 +58,7 @@ export function registerAcpCommand(options: RegisterAcpCommandOptions): void {
     )
     .action(async (positionalUrl: string | undefined, commandOptions: AcpCliOptions) => {
       const target = resolveDevelopmentUrlTarget(commandOptions, positionalUrl);
-      loadDevelopmentEnvironmentFiles(options.applicationContext.root);
+      await loadDevelopmentEnvironmentFiles(options.applicationContext.root);
       const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
 
       if (target !== undefined) {
