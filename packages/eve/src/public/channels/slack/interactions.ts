@@ -47,11 +47,10 @@ import {
   SLACK_CARD_SUBTEXT_MAX_LENGTH,
   truncateCardSubtext,
 } from "#public/channels/slack/limits.js";
+import { authorizeInputResponse } from "#public/channels/slack/input-response.js";
 import type {
   SlackChannelConfig,
   SlackChannelState,
-  SlackInputResponseContext,
-  SlackInputResponseResult,
   SlackInputResponseSubmission,
   SlackInteractionAction,
   SlackInteractionContext,
@@ -323,14 +322,7 @@ function hasCardContent(block: Record<string, unknown>): boolean {
   return block.body !== undefined || block.title !== undefined || block.hero_image !== undefined;
 }
 
-/**
- * Channel-supplied dependencies for {@link handleInteractionPost}.
- *
- * Carries the bits the handler needs that come from channel
- * construction: credentials for outbound API calls, the user's
- * `onInteraction` callback for non-HITL clicks, and the resolved HITL
- * input-response admission policy.
- */
+/** Channel-supplied dependencies for {@link handleInteractionPost}. */
 export interface InteractionHandlerDeps {
   readonly config: SlackChannelConfig;
   readonly onInputResponse: NonNullable<SlackChannelConfig["onInputResponse"]>;
@@ -479,36 +471,6 @@ async function dispatchBlockInputResponses(input: {
     await updateAnsweredHitlCard(input.interaction, input.deps);
   } catch (error) {
     log.error("HITL answered-card update failed", { error });
-  }
-}
-
-async function authorizeInputResponse(input: {
-  readonly channelId: string;
-  readonly deps: InteractionHandlerDeps;
-  readonly submission: SlackInputResponseSubmission;
-  readonly teamId: string | null | undefined;
-  readonly threadTs: string;
-}): Promise<SlackInputResponseResult> {
-  const defaultAuth = buildSlackAuthContext({
-    channelId: input.channelId,
-    teamId: input.teamId,
-    threadTs: input.threadTs,
-    userId: input.submission.user.id,
-    userName: input.submission.user.username ?? input.submission.user.name,
-  });
-  const { thread, slack } = buildSlackBinding({
-    botToken: input.deps.config.credentials?.botToken,
-    channelId: input.channelId,
-    threadTs: input.threadTs,
-    teamId: input.teamId ?? undefined,
-  });
-  const ctx: SlackInputResponseContext = { defaultAuth, slack, thread };
-
-  try {
-    return await input.deps.onInputResponse(ctx, input.submission);
-  } catch (error) {
-    log.error("HITL input response authorization failed", { error });
-    return null;
   }
 }
 
