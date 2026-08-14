@@ -7,13 +7,18 @@ import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
+function resolvedProject(appRoot: string) {
+  return { agentRoot: `${appRoot}/agent`, appRoot, layout: "nested" as const };
+}
+
 const { runInitCommand, runSetCommand } = vi.hoisted(() => ({
   runInitCommand: vi.fn(async () => {}),
   runSetCommand: vi.fn(async () => {}),
 }));
 
 vi.mock("#cli/application-root.js", () => ({
-  resolveCliApplicationRoot: vi.fn(async (cwd: string) => cwd),
+  findCliApplicationRoot: vi.fn(async () => undefined),
+  resolveCliApplicationProject: vi.fn(async (cwd: string) => resolvedProject(cwd)),
 }));
 vi.mock("#cli/commands/init.js", () => ({ runInitCommand }));
 vi.mock("#cli/commands/set.js", () => ({ runSetCommand }));
@@ -82,14 +87,14 @@ describe("CLI command registration", () => {
 
   it("runs project commands with the resolved application root", async () => {
     const logger = { error: vi.fn(), log: vi.fn() };
-    const resolveRoot = vi.fn(async () => "/workspace/weather");
+    const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
     runSetCommand.mockClear();
 
     await runCli(["set", "--model", "openai/gpt-5.6-sol"], logger, {
-      resolveApplicationRoot: resolveRoot,
+      resolveApplicationProject: resolveProject,
     });
 
-    expect(resolveRoot).toHaveBeenCalledWith(resolve(process.cwd()));
+    expect(resolveProject).toHaveBeenCalledWith(resolve(process.cwd()));
     expect(runSetCommand).toHaveBeenCalledWith(logger, "/workspace/weather", {
       model: "openai/gpt-5.6-sol",
       reasoning: undefined,
@@ -97,17 +102,17 @@ describe("CLI command registration", () => {
   });
 
   it("does not resolve an application root for command help", async () => {
-    const resolveRoot = vi.fn(async () => "/workspace/weather");
+    const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
 
     await runCli(
       ["set", "--help"],
       { error: vi.fn(), log: vi.fn() },
       {
-        resolveApplicationRoot: resolveRoot,
+        resolveApplicationProject: resolveProject,
       },
     );
 
-    expect(resolveRoot).not.toHaveBeenCalled();
+    expect(resolveProject).not.toHaveBeenCalled();
   });
 
   it("lists model and reasoning options for the set command", async () => {
@@ -493,16 +498,16 @@ describe("eve invoke", () => {
 
   it("prints the JSON schema without resolving or invoking an agent", async () => {
     const runInvoke = vi.fn();
-    const resolveRoot = vi.fn(async () => "/workspace/weather");
+    const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
     const output: string[] = [];
 
     await runCli(
       ["invoke", "--json-schema"],
       { error: () => {}, log: (message) => output.push(message) },
-      { resolveApplicationRoot: resolveRoot, runInvoke },
+      { resolveApplicationProject: resolveProject, runInvoke },
     );
 
-    expect(resolveRoot).not.toHaveBeenCalled();
+    expect(resolveProject).not.toHaveBeenCalled();
     expect(runInvoke).not.toHaveBeenCalled();
     expect(JSON.parse(output[0]!)).toMatchObject({ title: "eve invoke result" });
   });
@@ -519,13 +524,13 @@ describe("eve invoke", () => {
 
 describe("eve dev --url protocol", () => {
   it("does not resolve a local application for a remote URL", async () => {
-    const resolveRoot = vi.fn(async () => "/workspace/weather");
+    const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
 
     await runInteractiveDev(["dev", "https://example.com"], {
-      resolveApplicationRoot: resolveRoot,
+      resolveApplicationProject: resolveProject,
     });
 
-    expect(resolveRoot).not.toHaveBeenCalled();
+    expect(resolveProject).not.toHaveBeenCalled();
   });
 
   it("preserves query parameters on the remote target URL", async () => {

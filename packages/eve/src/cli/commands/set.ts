@@ -1,4 +1,3 @@
-import { isEveProject } from "#setup/scaffold/index.js";
 import {
   changeAgentModelSettings,
   formatApplyModelSettingsOutcome,
@@ -6,8 +5,6 @@ import {
 } from "#setup/flows/model-source-change.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { AgentModelSettingsPatch } from "#source-change/apply-agent-model-settings.js";
-
-import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 
 export interface SetCommandLogger {
   error(message: string): void;
@@ -24,12 +21,10 @@ export interface SetCommandDependencies {
     appRoot: string;
     patch: AgentModelSettingsPatch;
   }) => Promise<ApplyModelSettingsOutcome>;
-  isEveProject: typeof isEveProject;
 }
 
 const defaultDependencies: SetCommandDependencies = {
   changeAgentModelSettings,
-  isEveProject,
 };
 
 function fail(logger: SetCommandLogger, message: string): void {
@@ -45,11 +40,6 @@ export async function runSetCommand(
 ): Promise<void> {
   if (options.model === undefined && options.reasoning === undefined) {
     fail(logger, "Pass --model, --reasoning, or both.");
-    return;
-  }
-
-  if (!(await dependencies.isEveProject(appRoot))) {
-    fail(logger, NOT_AN_AGENT_MESSAGE);
     return;
   }
 

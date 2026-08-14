@@ -1,9 +1,7 @@
-import { isEveProject } from "#setup/scaffold/index.js";
-
 import { runLinkFlow, type LinkFlowDeps } from "#setup/flows/link.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 
-import { hasInteractiveTerminal, NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
+import { hasInteractiveTerminal } from "./preconditions.js";
 
 export interface LinkCliLogger {
   error(message: string): void;
@@ -12,14 +10,12 @@ export interface LinkCliLogger {
 
 export interface LinkCommandDependencies {
   createPrompter?: () => Prompter;
-  isEveProject(projectPath: string): Promise<boolean>;
   hasInteractiveTerminal(): boolean;
   /** Test seam into the flow's detection and box effects. */
   flowDeps?: Partial<LinkFlowDeps>;
 }
 
 const defaultDependencies: LinkCommandDependencies = {
-  isEveProject,
   hasInteractiveTerminal,
 };
 
@@ -36,11 +32,6 @@ export async function runLinkCommand(
   appRoot: string,
   dependencies: LinkCommandDependencies = defaultDependencies,
 ): Promise<void> {
-  if (!(await dependencies.isEveProject(appRoot))) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
-    return;
-  }
   if (!dependencies.hasInteractiveTerminal()) {
     logger.error(
       "`eve link` needs an interactive terminal to pick the team and project. In CI, run `vercel link --project <name> --yes --non-interactive` instead.",

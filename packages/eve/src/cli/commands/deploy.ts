@@ -1,9 +1,7 @@
-import { isEveProject } from "#setup/scaffold/index.js";
-
 import { runDeployFlow, type DeployFlowDeps } from "#setup/flows/deploy.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 
-import { hasInteractiveTerminal, NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
+import { hasInteractiveTerminal } from "./preconditions.js";
 
 export interface DeployCliLogger {
   error(message: string): void;
@@ -12,14 +10,12 @@ export interface DeployCliLogger {
 
 export interface DeployCommandDependencies {
   createPrompter?: () => Prompter;
-  isEveProject(projectPath: string): Promise<boolean>;
   hasInteractiveTerminal(): boolean;
   /** Test seam into the flow's detection and box effects. */
   flowDeps?: Partial<DeployFlowDeps>;
 }
 
 const defaultDependencies: DeployCommandDependencies = {
-  isEveProject,
   hasInteractiveTerminal,
 };
 
@@ -35,12 +31,6 @@ export async function runDeployCommand(
   appRoot: string,
   dependencies: DeployCommandDependencies = defaultDependencies,
 ): Promise<void> {
-  if (!(await dependencies.isEveProject(appRoot))) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
-    return;
-  }
-
   const prompter = dependencies.createPrompter?.() ?? createPrompter();
   prompter.intro("Deploy your eve agent to Vercel");
   try {

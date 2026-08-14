@@ -15,10 +15,8 @@ import {
   runIntegrationSetup,
   type IntegrationSetupRunnerDeps,
 } from "#setup/integrations/runner.js";
-import { isEveProject } from "#setup/scaffold/index.js";
 import { setupQuestionToWire } from "#setup/setup-question-wire.js";
 
-import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import type { RegistryCommandLogger } from "./registry.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 
@@ -45,12 +43,6 @@ export async function runIntegrationSetupCommand(
   options: IntegrationSetupOptions = {},
   dependencies: IntegrationSetupDependencies = defaultIntegrationSetupDependencies,
 ): Promise<void> {
-  if (!(await isEveProject(appRoot))) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
-    return;
-  }
-
   const client = createRegistrySetupClient({
     process: dependencies.setupProcess,
     signal: options.signal,

@@ -1,6 +1,5 @@
-import { isEveProject, listAuthoredChannels } from "#setup/scaffold/index.js";
-
-import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
+import type { ResolvedDiscoveryProject } from "#discover/project.js";
+import { listAuthoredChannels } from "#setup/scaffold/index.js";
 
 export interface CliLogger {
   error(message: string): void;
@@ -13,16 +12,10 @@ export interface ListChannelsCommandOptions {
 
 export async function runChannelsListCommand(
   logger: CliLogger,
-  appRoot: string,
+  project: ResolvedDiscoveryProject,
   options: ListChannelsCommandOptions,
 ): Promise<void> {
-  if (!(await isEveProject(appRoot))) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
-    return;
-  }
-
-  const channels = await listAuthoredChannels(appRoot);
+  const channels = await listAuthoredChannels(project.agentRoot);
 
   if (options.json) {
     logger.log(JSON.stringify({ channels }, null, 2));

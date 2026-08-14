@@ -15,11 +15,9 @@ import { resolveIntegrationVercelProject } from "#setup/integrations/shared/verc
 import { readProjectLink } from "#setup/project-resolution.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import { createRegistrySetupClient } from "#setup/registry-setup-client.js";
-import { isEveProject } from "#setup/scaffold/index.js";
 import { updateConnectionConnectorUid } from "#setup/scaffold/update/update-connection-connector.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import type { RegistryCommandLogger } from "./registry.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 
@@ -126,11 +124,6 @@ export async function runIntegrationConnectCommand(
   options: IntegrationConnectOptions = {},
   dependencies: IntegrationConnectDependencies = defaultDependencies,
 ): Promise<void> {
-  if (!(await isEveProject(appRoot))) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
-    return;
-  }
   const client = createRegistrySetupClient({ signal: options.signal });
   try {
     await runIntegrationConnect({

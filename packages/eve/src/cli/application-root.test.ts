@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   findCliApplicationRoot,
+  resolveCliApplicationProject,
   resolveCliApplicationRoot,
   type ResolveCliApplicationRootDependencies,
 } from "#cli/application-root.js";
@@ -30,6 +31,17 @@ function dependencies(
 }
 
 describe("resolveCliApplicationRoot", () => {
+  it("returns the complete project resolved by discovery", async () => {
+    const project = {
+      agentRoot: "/repo/agent",
+      appRoot: "/repo",
+      layout: "nested" as const,
+    };
+    const deps = dependencies(async () => project);
+
+    await expect(resolveCliApplicationProject("/repo/agent/tools", deps)).resolves.toEqual(project);
+  });
+
   it("uses the application root resolved by project discovery", async () => {
     const deps = dependencies(async () => ({
       agentRoot: "/repo/agent",
