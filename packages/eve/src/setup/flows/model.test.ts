@@ -2,6 +2,7 @@ import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import type { GatewayCatalogModel } from "#setup/boxes/select-model.js";
 import type {
   PrompterValue,
@@ -276,7 +277,7 @@ describe("runModelFlow", () => {
     expect(applySettings).toHaveBeenCalledWith({
       appRoot: APP_ROOT,
       patch: {
-        model: { kind: "set", value: "anthropic/claude-sonnet-5" },
+        model: { kind: "set", value: DEFAULT_AGENT_MODEL_ID },
         reasoning: { kind: "keep" },
         gatewayServiceTier: { kind: "keep" },
       },
