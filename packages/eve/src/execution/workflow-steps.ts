@@ -83,6 +83,7 @@ import {
 } from "#execution/durable-session-store.js";
 import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
@@ -509,6 +510,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           session: lifecycleSession,
           turnAgent: effectiveAgent.turnAgent,
         });
+        const modelSession = tasksEnabled
+          ? await appendTaskAgentAnnouncement(refreshedSession)
+          : refreshedSession;
 
         const step = createExecutionNodeStep({
           abortSignal: input.abortSignal,
@@ -525,7 +529,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           node: effectiveNode,
           workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
         });
-        return step(refreshedSession, stepInput);
+        return step(modelSession, stepInput);
       };
 
       return runHarnessStep(schemaSession, resolved);

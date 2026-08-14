@@ -41,6 +41,7 @@ import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
+import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { turnStep } from "#execution/workflow-steps.js";
@@ -62,6 +63,9 @@ vi.mock("./durable-session-store.js", async (importOriginal) => {
 vi.mock("./tasks/parent/run-parent.js", () => ({
   readLatestTaskView: vi.fn(),
   sendTaskInboundPayload: vi.fn(),
+}));
+vi.mock("./tasks/parent/agent-views.js", () => ({
+  appendTaskAgentAnnouncement: vi.fn(async (session) => session),
 }));
 
 function installSessionStoreMocks(
@@ -215,6 +219,8 @@ afterEach(() => {
   vi.mocked(readLatestTaskView).mockReset();
   vi.mocked(sendTaskInboundPayload).mockReset();
   vi.mocked(sendTaskInboundPayload).mockResolvedValue("delivered");
+  vi.mocked(appendTaskAgentAnnouncement).mockReset();
+  vi.mocked(appendTaskAgentAnnouncement).mockImplementation(async (session) => session);
 });
 
 describe("routeProxiedDeliverStep", () => {
@@ -1429,6 +1435,58 @@ describe("turnStep", () => {
       sessionState: createStubSessionState(),
     });
     expect(settled).toMatchObject({ action: "park", tasksEnabled: true });
+  });
+
+  it("passes task-agent availability projection into execution", async () => {
+    const tasksBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: { experimental: { tasks: true } } },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(tasksBundle);
+
+    const session = createStubSession();
+    const projectedSession = {
+      ...session,
+      history: [{ content: "[Agents]\n<agents>\n</agents>", role: "user" as const }],
+    };
+    installSessionStoreMocks([session]);
+    vi.mocked(appendTaskAgentAnnouncement).mockResolvedValue(projectedSession);
+
+    let executedSession: HarnessSession | undefined;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => {
+        executedSession = stepSession;
+        return { next: null, session: stepSession };
+      };
+    });
+
+    await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "check background work" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(appendTaskAgentAnnouncement).toHaveBeenCalledOnce();
+    expect(executedSession).toBe(projectedSession);
   });
 
   it("carries a settled turn through the typed park action when no work remains pending", async () => {
