@@ -15,6 +15,7 @@ import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "../../src/runtime/loaders/manifest.js";
 import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.js";
+import { loadResolvedModuleExport } from "../../src/runtime/resolve-helpers.js";
 
 const scenarioApp = useScenarioApp();
 const tempRoots: string[] = [];
@@ -83,6 +84,17 @@ const EXT_TREE: Readonly<Record<string, string>> = {
     "  routes: [",
     '    GET("/crm/status", async () => new Response(extension.config.apiKey)),',
     "  ],",
+    "});",
+    "",
+  ].join("\n"),
+  "extension/schedules/sync.ts": [
+    'import { defineSchedule } from "eve/schedules";',
+    'import extension from "../extension.js";',
+    "export default defineSchedule({",
+    '  cron: "0 9 * * *",',
+    "  run({ waitUntil }) {",
+    "    waitUntil(Promise.resolve(extension.config.apiKey));",
+    "  },",
     "});",
     "",
   ].join("\n"),
@@ -209,7 +221,7 @@ describe("mounted extension installed under node_modules", () => {
     );
     expect(
       JSON.parse(extensionFiles[`node_modules/${PACKAGE_NAME}/dist/extension/_manifest.json`]!),
-    ).toMatchObject({ requires: { channel: 1 } });
+    ).toMatchObject({ requires: { channel: 1, schedule: 1 } });
     const app = await scenarioApp({
       name: "mounted-extension-installed",
       installDependencies: true,
@@ -258,6 +270,29 @@ describe("mounted extension installed under node_modules", () => {
       waitUntil() {},
     });
     await expect(response.text()).resolves.toBe("sk-installed");
+
+    const sync = manifest.schedules.find((entry) => entry.name === "crm__sync");
+    expect(sync).toMatchObject({
+      cron: "0 9 * * *",
+      hasRun: true,
+      sourceId: "ext:crm:schedules/sync.mjs",
+    });
+    if (sync === undefined) throw new Error("Expected the extension schedule to compile.");
+    const syncDefinition = (await loadResolvedModuleExport({
+      definition: sync,
+      kindLabel: "schedule",
+      moduleMap,
+      nodeId: undefined,
+    })) as {
+      run(input: { waitUntil(task: Promise<unknown>): void }): Promise<void> | void;
+    };
+    let scheduledTask: Promise<unknown> | undefined;
+    await syncDefinition.run({
+      waitUntil(task) {
+        scheduledTask = task;
+      },
+    });
+    await expect(scheduledTask).resolves.toBe("sk-installed");
 
     expect(graph.root.agent.skills.map((skill) => skill.name)).toEqual(
       expect.arrayContaining(["crm__notes", "crm__research", "crm__guide"]),

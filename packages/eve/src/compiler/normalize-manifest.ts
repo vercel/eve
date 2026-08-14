@@ -230,6 +230,7 @@ async function compileAgentResources(
         skills.push(skill);
       }
     }
+    schedules.push(...contributions.schedules);
     hooks.push(...contributions.hooks);
     dynamicSkills.push(...contributions.dynamicSkills);
     dynamicInstructions.push(...contributions.dynamicInstructions);

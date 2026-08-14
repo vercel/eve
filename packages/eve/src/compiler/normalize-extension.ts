@@ -9,6 +9,7 @@ import type {
   CompiledDynamicToolDefinition,
   CompiledHookDefinition,
   CompiledInstructionsDefinition,
+  CompiledScheduleDefinition,
   CompiledSkillDefinition,
   CompiledToolDefinition,
 } from "#compiler/manifest.js";
@@ -17,6 +18,7 @@ import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
 import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
+import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
 import { compileSkillSource } from "#compiler/normalize-skill.js";
 import { compileToolEntry } from "#compiler/normalize-tool.js";
 
@@ -34,6 +36,7 @@ export interface CompiledExtensionContributions {
   readonly dynamicInstructions: CompiledDynamicInstructionsDefinition[];
   readonly connections: CompiledConnectionDefinition[];
   readonly instructions: CompiledInstructionsDefinition[];
+  readonly schedules: CompiledScheduleDefinition[];
 }
 
 /**
@@ -301,6 +304,18 @@ async function composeManifestContributions(input: {
     }
   }
 
+  const schedules = await Promise.all(
+    manifest.schedules.map(async (source) => {
+      const schedule = await compileScheduleDefinition(sourceRoot, source, options);
+      return {
+        ...schedule,
+        name: `${prefix}${schedule.name}`,
+        sourceId: scopeSourceId(schedule.sourceId),
+        logicalPath: rebase(schedule.logicalPath),
+      };
+    }),
+  );
+
   return {
     contributions: {
       channels,
@@ -312,6 +327,7 @@ async function composeManifestContributions(input: {
       dynamicInstructions,
       connections,
       instructions,
+      schedules,
     },
     disabledToolTargets,
   };
@@ -329,7 +345,7 @@ function describeExtensionSource(
 
 /**
  * Merges two composed contribution sets with earlier-set-wins precedence per
- * composed name. Named contributions dedup by their model-facing identifier so
+ * composed name. Named contributions dedup by their composed identifier so
  * an override shadows the extension's same-named entry. Channel entries dedup
  * as a group so every route from the winning channel is preserved. Unnamed
  * contributions (hooks, dynamic skills, dynamic instructions, static
@@ -359,6 +375,10 @@ export function mergeContributions(
       (connection) => connection.connectionName,
     ),
     skills: dedupeBy([...primary.skills, ...secondary.skills], (skill) => skill.name),
+    schedules: dedupeBy(
+      [...primary.schedules, ...secondary.schedules],
+      (schedule) => schedule.name,
+    ),
     hooks: [...primary.hooks, ...secondary.hooks],
     dynamicSkills: [...primary.dynamicSkills, ...secondary.dynamicSkills],
     dynamicInstructions: [...primary.dynamicInstructions, ...secondary.dynamicInstructions],

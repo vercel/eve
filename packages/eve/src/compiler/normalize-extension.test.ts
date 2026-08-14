@@ -21,6 +21,7 @@ function contributions(
     dynamicInstructions: [],
     connections: [],
     instructions: [],
+    schedules: [],
     ...overrides,
   };
 }
@@ -36,6 +37,7 @@ describe("mergeContributions", () => {
       connections: [{ connectionName: "crm__api", logicalPath: "override" }] as never,
       skills: [{ name: "crm__lookup", logicalPath: "override" }] as never,
       dynamicTools: [{ slug: "crm__dynamic", logicalPath: "override" }] as never,
+      schedules: [{ name: "crm__sweep", logicalPath: "override" }] as never,
     });
     const secondary = contributions({
       channels: [
@@ -49,6 +51,10 @@ describe("mergeContributions", () => {
       connections: [{ connectionName: "crm__api", logicalPath: "extension" }] as never,
       skills: [{ name: "crm__lookup", logicalPath: "extension" }] as never,
       dynamicTools: [{ slug: "crm__dynamic", logicalPath: "extension" }] as never,
+      schedules: [
+        { name: "crm__sweep", logicalPath: "extension" },
+        { name: "crm__digest", logicalPath: "extension" },
+      ] as never,
     });
 
     const merged = mergeContributions(primary, secondary);
@@ -65,6 +71,10 @@ describe("mergeContributions", () => {
     expect(merged.connections).toEqual([{ connectionName: "crm__api", logicalPath: "override" }]);
     expect(merged.skills).toEqual([{ name: "crm__lookup", logicalPath: "override" }]);
     expect(merged.dynamicTools).toEqual([{ slug: "crm__dynamic", logicalPath: "override" }]);
+    expect(merged.schedules).toEqual([
+      { name: "crm__sweep", logicalPath: "override" },
+      { name: "crm__digest", logicalPath: "extension" },
+    ]);
   });
 
   it("concatenates unnamed contributions from both sets", () => {
