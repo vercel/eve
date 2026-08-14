@@ -2993,6 +2993,19 @@ describe("EveTUIRunner Vercel status line", () => {
   });
 
   it("refreshes agent info only after a model-access change", async () => {
+    const runtimeRequests: Array<{ method: string; url: URL }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        runtimeRequests.push({
+          method: init?.method ?? "GET",
+          url: new URL(
+            typeof input === "string" ? input : input instanceof URL ? input : input.url,
+          ),
+        });
+        return Response.json({ revision: "snapshot-a" });
+      }),
+    );
     const client = stubClient();
     const info = vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
     const prompts: Array<string | undefined> = ["/deploy", "/model", undefined];
@@ -3030,6 +3043,14 @@ describe("EveTUIRunner Vercel status line", () => {
 
     expect(infoCallsAtPrompt).toEqual([1, 1, 2]);
     expect(info).toHaveBeenCalledTimes(2);
+    expect(
+      runtimeRequests.some(
+        (request) =>
+          request.method === "POST" &&
+          request.url.pathname === "/eve/v1/dev/runtime-artifacts/rebuild" &&
+          request.url.searchParams.get("force") === "1",
+      ),
+    ).toBe(true);
   });
 
   it("never pushes Vercel status for a remote --url session", async () => {

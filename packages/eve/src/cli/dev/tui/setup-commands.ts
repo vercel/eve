@@ -249,9 +249,9 @@ async function executeSetupCommand(
           message: lines.join("\n"),
           preserveFlowDiagnostics: false,
         };
-        // Provider setup can change both the local env and Vercel identity.
-        // The runner refreshes the complete model-access view after the flow.
-        if (result.providerOutcome !== undefined) {
+        // A model edit can also move routing between AI Gateway and ChatGPT.
+        // The runner rebuilds authored artifacts before refreshing model access.
+        if (result.modelMessage !== undefined || result.providerOutcome !== undefined) {
           outcome.effect = { kind: "model-access-changed" };
         }
         return outcome;

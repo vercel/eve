@@ -1786,16 +1786,17 @@ export class EveTUIRunner {
   }
 
   /**
-   * Setup commands can write env files before the dev watcher reloads them.
-   * Reload first, then cache the credential-normalized `/info` snapshot shared
-   * by the status bar and setup detector. The Vercel auth probe stays off the
-   * prompt path.
+   * Setup commands can write authored source and env files. Force the local
+   * runtime snapshot to catch up, then cache the credential-normalized `/info`
+   * shared by the status bar and setup detector. The Vercel auth probe stays
+   * off the prompt path.
    */
   async #refreshModelAccess(): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
 
     loadDevelopmentEnvironmentFiles(appRoot);
+    await this.#runtimeArtifacts?.refreshAfterSourceChange({});
     const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
     void this.#refreshSetupAttention(refreshedInfo);
   }

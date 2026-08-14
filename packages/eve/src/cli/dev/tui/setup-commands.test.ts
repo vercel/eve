@@ -132,6 +132,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "Model changed to openai/gpt-5.5. Live on your next prompt.",
       preserveFlowDiagnostics: false,
+      effect: { kind: "model-access-changed" },
     });
     expect(flows.runModelFlow).toHaveBeenCalledWith(
       expect.objectContaining({
