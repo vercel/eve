@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createPackageProcessOutputCollector,
-  MAX_STREAMING_SECRET_LENGTH,
   resultSucceeded,
   type ProcessOutputChunk,
 } from "./process-result.js";
@@ -25,41 +24,12 @@ describe("package process results", () => {
     collector.end();
 
     expect(collector.result({ kind: "exit", code: 0 }).output).toEqual([
-      { emittedSequence: 0, stream: "stdout", text: "ready 🚀\n" },
+      { emittedSequence: 0, stream: "stdout", text: "ready " },
+      { emittedSequence: 1, stream: "stdout", text: "🚀\n" },
     ]);
   });
 
-  it("redacts environment secrets split across chunks before every sink", () => {
-    vi.stubEnv("TEST_API_TOKEN", "secret-value-123456");
-    const onOutput = vi.fn();
-    const collector = collect({ onOutput });
-
-    collector.write("stderr", Buffer.from("token=secret-value-"));
-    collector.write("stderr", Buffer.from("123456\n"));
-    collector.end();
-
-    const result = collector.result({ kind: "exit", code: 1 });
-    expect(result.output.map((chunk) => chunk.text).join("")).toBe("token=[REDACTED]\n");
-    expect(onOutput.mock.calls.map(([chunk]) => chunk.text).join("")).toBe("token=[REDACTED]\n");
-    vi.unstubAllEnvs();
-  });
-
-  it("redacts credential URLs and authorization headers", () => {
-    const collector = collect();
-    collector.write(
-      "stderr",
-      Buffer.from(
-        "https://user:password@example.com\nAuthorization: Bearer abcdefghijklmnopqrstuvwxyz\n",
-      ),
-    );
-    collector.end();
-
-    expect(collector.result({ kind: "exit", code: 1 }).output[0]?.text).toBe(
-      "https://user:[REDACTED]@example.com\nAuthorization: Bearer [REDACTED]\n",
-    );
-  });
-
-  it("bounds retained bytes while continuing to stream all redacted output", () => {
+  it("streams raw output while retaining only the byte bound", () => {
     const onOutput = vi.fn();
     const collector = collect({ maxRetainedBytes: 5, onOutput });
     collector.write("stdout", Buffer.from("123456789"));
@@ -69,6 +39,16 @@ describe("package process results", () => {
     expect(result.output.map((chunk) => chunk.text).join("")).toBe("12345");
     expect(result.truncatedBytes).toBe(4);
     expect(onOutput.mock.calls.map(([chunk]) => chunk.text).join("")).toBe("123456789");
+  });
+
+  it("does not split a retained UTF-8 code point at the byte bound", () => {
+    const collector = collect({ maxRetainedBytes: 7 });
+    collector.write("stdout", Buffer.from("ready 🚀"));
+    collector.end();
+
+    const result = collector.result({ kind: "exit", code: 0 });
+    expect(result.output.map((chunk) => chunk.text).join("")).toBe("ready ");
+    expect(result.truncatedBytes).toBe(4);
   });
 
   it("distinguishes every termination kind from success", () => {
@@ -84,10 +64,5 @@ describe("package process results", () => {
         collector.result({ kind: "spawn-error", code: "ENOENT", message: "missing" }),
       ),
     ).toBe(false);
-  });
-
-  it("exports a finite streaming secret limit", () => {
-    expect(MAX_STREAMING_SECRET_LENGTH).toBeGreaterThanOrEqual(128);
-    expect(MAX_STREAMING_SECRET_LENGTH).toBeLessThanOrEqual(1024);
   });
 });

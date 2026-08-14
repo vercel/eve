@@ -19,7 +19,7 @@ import type { PackageManagerInstallOptions } from "./types.js";
 
 /** Output routing options for setup-owned package manager commands. */
 export interface RunPackageManagerOptions {
-  /** Streams redacted command output to a parent-owned renderer. */
+  /** Streams raw command output to a parent-owned local renderer. */
   onOutput?: ProcessOutputHandler;
   /** Aborts the package-manager subprocess when setup is interrupted. */
   signal?: AbortSignal;

@@ -11,7 +11,6 @@ export {
   type RunPnpmOptions,
 } from "./pm/run.js";
 export {
-  MAX_STREAMING_SECRET_LENGTH,
   resultSucceeded,
   type PackageManagerProcessResult,
   type PackageManagerProcessTermination,
