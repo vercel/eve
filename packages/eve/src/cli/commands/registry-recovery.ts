@@ -1,7 +1,4 @@
-import { isEveProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
-
-import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 
 export interface RegistryCommandLogger {
   error(message: string): void;
@@ -22,15 +19,9 @@ function isRegistryNotFoundError(error: unknown): boolean {
 
 export async function runRegistryAction<T>(
   logger: RegistryCommandLogger,
-  appRoot: string,
+  _appRoot: string,
   action: () => Promise<T>,
 ): Promise<T | undefined> {
-  if (!(await isEveProject(appRoot))) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
-    return undefined;
-  }
-
   try {
     return await action();
   } catch (error) {

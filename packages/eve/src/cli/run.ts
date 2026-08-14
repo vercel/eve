@@ -5,7 +5,7 @@ import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
-import { findCliApplicationRoot, resolveCliApplicationRoot } from "#cli/application-root.js";
+import { findCliApplicationRoot, resolveCliApplicationProject } from "#cli/application-root.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
@@ -86,7 +86,7 @@ interface CliRuntimeDependencies {
     appRoot: string,
   ): Promise<void>;
   startHost(appRoot: string, options?: DevelopmentServerOptions): DevelopmentServer;
-  resolveApplicationRoot(cwd: string): Promise<string>;
+  resolveApplicationProject: typeof resolveCliApplicationProject;
   startProductionHost(
     appRoot: string,
     options?: {
@@ -190,7 +190,7 @@ function createCliProgram(
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean }) => {
       const { runChannelsListCommand } = await import("#cli/commands/channels.js");
-      await runChannelsListCommand(logger, applicationContext.root, options);
+      await runChannelsListCommand(logger, applicationContext.project!, options);
     });
 
   registerIntegrationCommands({ program, logger, applicationContext });
@@ -651,9 +651,11 @@ export async function runCli(
   const applicationContext: CliApplicationContext = {
     root: resolveApplicationRoot(),
     async resolve() {
-      applicationContext.root = await (runtime.resolveApplicationRoot ?? resolveCliApplicationRoot)(
+      const project = await (runtime.resolveApplicationProject ?? resolveCliApplicationProject)(
         applicationContext.root,
       );
+      applicationContext.project = project;
+      applicationContext.root = project.appRoot;
     },
   };
   const program = createCliProgram(logger, runtime, applicationContext);

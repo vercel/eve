@@ -37,7 +37,6 @@ const NEXT_TYPESCRIPT_PACKAGE_VERSION = "6.0.3";
 const CONNECT_PACKAGE_NAME = "@vercel/connect";
 const NEXT_PACKAGE_NAME = "next";
 const PACKAGE_DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
-const USER_AUTHORED_CHANNEL_DIR = "agent/channels";
 const WEB_CHANNEL_PATH = "agent/channels/eve.ts";
 const WEB_NEXT_CONFIG_PATH = "next.config.ts";
 const WEB_VERCEL_JSON_PATH = "vercel.json";
@@ -655,8 +654,8 @@ async function ensureSlackChannel(
   return result;
 }
 
-export async function listAuthoredChannels(projectRoot: string): Promise<string[]> {
-  const channelsDir = join(projectRoot, USER_AUTHORED_CHANNEL_DIR);
+export async function listAuthoredChannels(agentRoot: string): Promise<string[]> {
+  const channelsDir = join(agentRoot, "channels");
   let entries;
   try {
     entries = await readdir(channelsDir, { withFileTypes: true });

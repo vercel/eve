@@ -871,7 +871,10 @@ describe("listAuthoredChannels", () => {
     await writeFile(join(projectRoot, "agent/channels/slack/connection.ts"), "", "utf8");
     await writeFile(join(projectRoot, "agent/channels/email.mts"), "", "utf8");
 
-    await expect(listAuthoredChannels(projectRoot)).resolves.toEqual(["email", "slack"]);
+    await expect(listAuthoredChannels(join(projectRoot, "agent"))).resolves.toEqual([
+      "email",
+      "slack",
+    ]);
   });
 });
 

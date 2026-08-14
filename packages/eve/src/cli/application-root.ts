@@ -1,6 +1,10 @@
 import { resolve } from "node:path";
 
-import { DiscoveryProjectResolutionError, resolveDiscoveryProject } from "#discover/project.js";
+import {
+  DiscoveryProjectResolutionError,
+  resolveDiscoveryProject,
+  type ResolvedDiscoveryProject,
+} from "#discover/project.js";
 
 export interface ResolveCliApplicationRootDependencies {
   readonly resolveDiscoveryProject: typeof resolveDiscoveryProject;
@@ -9,6 +13,14 @@ export interface ResolveCliApplicationRootDependencies {
 const defaultDependencies: ResolveCliApplicationRootDependencies = {
   resolveDiscoveryProject,
 };
+
+/** Resolves the nearest enclosing eve application and agent roots. */
+export async function resolveCliApplicationProject(
+  cwd: string = process.cwd(),
+  dependencies: ResolveCliApplicationRootDependencies = defaultDependencies,
+): Promise<ResolvedDiscoveryProject> {
+  return dependencies.resolveDiscoveryProject(cwd);
+}
 
 /** Finds the nearest enclosing eve application. */
 export async function findCliApplicationRoot(
