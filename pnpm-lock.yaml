@@ -1311,6 +1311,9 @@ importers:
       '@types/react-test-renderer':
         specifier: 19.1.0
         version: 19.1.0
+      '@vercel/blob':
+        specifier: 2.4.0
+        version: 2.4.0
       '@vercel/detect-agent':
         specifier: 1.2.3
         version: 1.2.3
