@@ -46,19 +46,11 @@ export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): C
   const now = options.now ?? Date.now;
   let currentState: ChatGptAuthState = { kind: "checking" };
   let cached: ChatGptToken | undefined;
-  let resolution: Promise<ChatGptToken> | undefined;
+  let resolution: { readonly forced: boolean; readonly promise: Promise<ChatGptToken> } | undefined;
 
   return {
     getToken(input) {
-      if (input.reason === "request" && cached !== undefined && isFresh(cached, now())) {
-        return Promise.resolve(cached);
-      }
-      if (resolution === undefined) {
-        resolution = resolveToken(input.reason === "rejected").finally(() => {
-          resolution = undefined;
-        });
-      }
-      return resolution;
+      return getToken(input.reason);
     },
     async refreshState() {
       if (currentState.kind === "signed-out" || currentState.kind === "reauth-required") {
@@ -66,7 +58,7 @@ export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): C
       }
       cached = undefined;
       try {
-        await resolveToken(false);
+        await getToken("request");
       } catch {
         // The state is the reportable result; callers should not need exception control flow.
       }
@@ -76,6 +68,27 @@ export function createCodexTokenBroker(options: CodexTokenBrokerOptions = {}): C
       return currentState;
     },
   };
+
+  function getToken(reason: "rejected" | "request"): Promise<ChatGptToken> {
+    const forced = reason === "rejected";
+    if (!forced && cached !== undefined && isFresh(cached, now())) {
+      return Promise.resolve(cached);
+    }
+    if (resolution !== undefined && (!forced || resolution.forced)) {
+      return resolution.promise;
+    }
+
+    const pending = resolution?.promise;
+    const next =
+      pending === undefined
+        ? resolveToken(forced)
+        : pending.catch(() => undefined).then(() => resolveToken(forced));
+    const promise = next.finally(() => {
+      if (resolution?.promise === promise) resolution = undefined;
+    });
+    resolution = { forced, promise };
+    return promise;
+  }
 
   async function resolveToken(forceRefresh: boolean): Promise<ChatGptToken> {
     try {
