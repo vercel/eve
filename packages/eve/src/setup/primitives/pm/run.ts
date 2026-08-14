@@ -59,6 +59,7 @@ export function spawnPackageManager(
   }
 
   return new Promise((resolvePromise) => {
+    const captureOutput = options.onOutput !== undefined || options.nonInteractive === true;
     const lineBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
     const collector = createPackageProcessOutputCollector({
       command,
@@ -68,7 +69,9 @@ export function spawnPackageManager(
     try {
       child = spawn(invocation.command, [...invocation.args], {
         cwd: projectRoot,
-        stdio: [options.nonInteractive ? "ignore" : "inherit", "pipe", "pipe"],
+        stdio: captureOutput
+          ? [options.nonInteractive ? "ignore" : "inherit", "pipe", "pipe"]
+          : "inherit",
         shell: invocation.shell,
         signal: options.signal,
       });

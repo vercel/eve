@@ -72,7 +72,7 @@ describe("runPnpmInstall", () => {
     expect(mockedSpawn).toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "/tmp/eve-agent", "install", "--no-frozen-lockfile"],
-      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: ["inherit", "pipe", "pipe"] }),
+      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: "inherit" }),
     );
   });
 
@@ -86,7 +86,7 @@ describe("runPnpmInstall", () => {
     expect(mockedSpawn).toHaveBeenLastCalledWith(
       "pnpm",
       ["--dir", "/tmp/eve-agent", "install", "--no-frozen-lockfile"],
-      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: ["inherit", "pipe", "pipe"] }),
+      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: "inherit" }),
     );
   });
 
@@ -100,7 +100,7 @@ describe("runPnpmInstall", () => {
     expect(mockedSpawn).toHaveBeenLastCalledWith(
       "pnpm",
       ["--dir", "/tmp/eve-agent", "install", "--no-frozen-lockfile", "--ignore-workspace"],
-      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: ["inherit", "pipe", "pipe"] }),
+      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: "inherit" }),
     );
   });
 
@@ -219,7 +219,7 @@ describe("pnpmPackageManager", () => {
 });
 
 describe("spawnPnpm", () => {
-  test("runs the given pnpm argv in the project directory", async () => {
+  test("inherits output when no parent renderer is supplied", async () => {
     expect(
       resultSucceeded(await spawnPnpm("/tmp/eve-agent", ["exec", "eve", "dev", "--no-ui"])),
     ).toBe(true);
@@ -227,7 +227,17 @@ describe("spawnPnpm", () => {
     expect(mockedSpawn).toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "/tmp/eve-agent", "exec", "eve", "dev", "--no-ui"],
-      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: ["inherit", "pipe", "pipe"] }),
+      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: "inherit" }),
+    );
+  });
+
+  test("pipes output when stdin is non-interactive without a parent renderer", async () => {
+    await spawnPnpm("/tmp/eve-agent", ["install"], { nonInteractive: true });
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "/tmp/eve-agent", "install"],
+      expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
     );
   });
 
