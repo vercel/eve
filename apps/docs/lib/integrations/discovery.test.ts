@@ -151,7 +151,7 @@ describe("integration discovery", () => {
 
     const markdown = integrationMarkdown(braintrust!);
     expect(markdown).toContain("eve add instrumentation/braintrust");
-    expect(markdown).toContain("agent/instrumentation.ts");
+    expect(markdown).toContain("agent/instrumentation/braintrust.ts");
     expect(markdown).toContain("BRAINTRUST_API_KEY");
 
     const posthog = getIntegration("posthog-instrumentation");

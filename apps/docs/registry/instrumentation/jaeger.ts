@@ -1,12 +1,8 @@
-import { OTLPHttpProtoTraceExporter, registerOTel } from "@vercel/otel";
-import { defineInstrumentation } from "eve/instrumentation";
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
 
-export default defineInstrumentation({
-  setup: ({ agentName }) =>
-    registerOTel({
-      serviceName: agentName,
-      traceExporter: new OTLPHttpProtoTraceExporter({
-        url: "http://localhost:4318/v1/traces",
-      }),
-    }),
+export default otelIntegration({
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: "http://localhost:4318/v1/traces",
+  }),
 });

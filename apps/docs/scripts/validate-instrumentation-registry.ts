@@ -51,7 +51,7 @@ for (const item of items) {
   const expectedFiles: RegistryFile[] = [
     {
       path: expectedPath,
-      target: "agent/instrumentation.ts",
+      target: `agent/instrumentation/${slug}.ts`,
     },
     ...(slug === "braintrust"
       ? [
