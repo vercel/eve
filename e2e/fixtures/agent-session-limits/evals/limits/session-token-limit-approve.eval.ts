@@ -45,38 +45,32 @@ export default defineEval({
     if (activeState === undefined) {
       throw new Error("The active eval session did not expose client state.");
     }
+    // Both messages were queued behind the active turn, so eve delivers them
+    // coalesced into one follow-up turn while the limit prompt stays pending.
     const queuedSession = t.target.watchTurn(active.sessionId, {
       startIndex: activeState.streamIndex,
     });
-    const queuedA = await queuedSession.result();
-    queuedA.event("message.received", { count: 1 });
-    queuedA.notEvent("input.requested");
-    queuedA.eventsSatisfy("delivers message A while preserving the pending prompt", (events) => {
-      const received = events.find((event) => event.type === "message.received");
-      return received !== undefined && received.data.message.includes("Queued message A");
-    });
-    const queuedState = queuedSession.session.state;
-    if (queuedState === undefined) {
-      throw new Error("The attached eval session did not expose client state.");
-    }
-    const queuedBSession = t.target.watchTurn(active.sessionId, {
-      startIndex: queuedState.streamIndex,
-    });
-    const queuedB = await queuedBSession.result();
-    queuedB.event("message.received", { count: 1 });
-    queuedB.notEvent("input.requested");
-    queuedB.eventsSatisfy("delivers message B while preserving the pending prompt", (events) => {
-      const received = events.find((event) => event.type === "message.received");
-      return received !== undefined && received.data.message.includes("Queued message B");
-    });
+    const queued = await queuedSession.result();
+    queued.event("message.received", { count: 1 });
+    queued.notEvent("input.requested");
+    queued.eventsSatisfy(
+      "delivers both queued messages coalesced while preserving the pending prompt",
+      (events) => {
+        const received = events.find((event) => event.type === "message.received");
+        return (
+          received !== undefined &&
+          received.data.message.includes("Queued message A") &&
+          received.data.message.includes("Queued message B")
+        );
+      },
+    );
     t.check(
-      [...prompted.events, ...queuedA.events, ...queuedB.events].filter(
-        (event) => event.type === "input.requested",
-      ).length,
+      [...prompted.events, ...queued.events].filter((event) => event.type === "input.requested")
+        .length,
       equals(1),
     );
 
-    const resumed = await queuedBSession.session.respond([
+    const resumed = await queuedSession.session.respond([
       {
         optionId: "continue",
         requestId: request.requestId,
@@ -87,18 +81,18 @@ export default defineEval({
     resumed.notEvent("input.requested");
     resumed.messageIncludes("approved");
     t.check(resumed.sessionId, equals(active.sessionId));
-    t.check(queuedBSession.session.sessionId, equals(active.sessionId));
+    t.check(queuedSession.session.sessionId, equals(active.sessionId));
 
-    const nextPrompt = await queuedBSession.session.send(
+    const nextPrompt = await queuedSession.session.send(
       'Post-approval probe: reply with exactly "same session".',
     );
     nextPrompt.event("input.requested", { count: 1 });
     nextPrompt.notEvent("message.completed");
     t.check(nextPrompt.sessionId, equals(active.sessionId));
     t.check(nextPrompt.status, equals("waiting"));
-    t.check(queuedBSession.session.sessionId, equals(active.sessionId));
+    t.check(queuedSession.session.sessionId, equals(active.sessionId));
 
-    const nextRequest = queuedBSession.session.requireInputRequest({
+    const nextRequest = queuedSession.session.requireInputRequest({
       display: "confirmation",
       optionIds: ["continue", "stop"],
       toolName: "session_limit_continuation",
