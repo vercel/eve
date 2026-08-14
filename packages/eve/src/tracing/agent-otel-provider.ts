@@ -158,6 +158,7 @@ export function createAgentOtelInstrumentation(
           "agent.step.index": event.scope.stepIndex,
           "agent.turn.id": event.scope.turnId,
           "agent.name": event.scope.functionId,
+          ...runtimeContextAttributes(event.runtimeContext),
         },
         links:
           activeSpanContext === undefined || activeSpanContext.traceId === turn.context.traceId

@@ -710,7 +710,7 @@ describe("createAgentOtelInstrumentation", () => {
     });
   });
 
-  it("writes merged runtime context onto the operation and chat spans", async () => {
+  it("writes merged runtime context onto the step, operation, and chat spans", async () => {
     const runtime = createRuntime();
 
     await emitAttempt({
@@ -729,9 +729,10 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
+    const step = byName(spans, "agent.step")[0]!;
     const operation = byName(spans, "ai.streamText")[0]!;
     const model = byName(spans, "chat claude-test")[0]!;
-    for (const span of [operation, model]) {
+    for (const span of [step, operation, model]) {
       expect(span.attributes).toMatchObject({
         "ai.settings.context.eve.session.id": "session-1",
         "ai.settings.context.posthog.distinct_id": "user-123",
@@ -754,9 +755,10 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
+    const step = byName(spans, "agent.step")[0]!;
     const operation = byName(spans, "ai.streamText")[0]!;
     const model = byName(spans, "chat claude-test")[0]!;
-    for (const span of [operation, model]) {
+    for (const span of [step, operation, model]) {
       expect(
         Object.keys(span.attributes).some((key) => key.startsWith("ai.settings.context.")),
       ).toBe(false);
