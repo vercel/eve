@@ -151,6 +151,21 @@ describe("CLI command registration", () => {
     expect(help).not.toContain("--path");
   });
 
+  it("shows add help and registry search guidance when no item is provided", async () => {
+    const errors: string[] = [];
+    const output: string[] = [];
+
+    await runCli(["add"], {
+      error: (message) => errors.push(message),
+      log: (message) => output.push(message),
+    });
+
+    const help = output.join("\n");
+    expect(errors).toEqual([]);
+    expect(help).toContain("Usage: eve add [options] [item]");
+    expect(help).toContain("eve registry search <query>");
+  });
+
   it("registers JSON output and a search result limit for registry discovery commands", async () => {
     const output: string[] = [];
     const logger = {

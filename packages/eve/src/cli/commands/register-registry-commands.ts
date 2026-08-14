@@ -33,7 +33,7 @@ export function registerRegistryCommands(input: {
 }): void {
   const { applicationContext, logger, program } = input;
 
-  applicationCommand(program.command("add <item>"), applicationContext)
+  const add = applicationCommand(program.command("add [item]"), applicationContext)
     .description("Install a registry item; relative paths use the official eve registry.")
     .option("-o, --overwrite", "Overwrite existing files.")
     .option("--skip-install", "Run the item's setup flow without installing it.")
@@ -48,9 +48,10 @@ export function registerRegistryCommands(input: {
       parseSetupAnswer,
     )
     .option("-y, --yes", "Run setup and accept its recommended defaults.")
+    .addHelpText("after", "\nSearch the registry:\n  $ eve registry search <query>\n")
     .action(
       async (
-        item: string,
+        item: string | undefined,
         options: {
           skipInstall?: boolean;
           overwrite?: boolean;
@@ -60,6 +61,10 @@ export function registerRegistryCommands(input: {
           yes?: boolean;
         },
       ) => {
+        if (item === undefined) {
+          add.outputHelp();
+          return;
+        }
         if (options.answer !== undefined && !options.nonInteractive) {
           throw new InvalidArgumentError("--answer requires --non-interactive.");
         }
