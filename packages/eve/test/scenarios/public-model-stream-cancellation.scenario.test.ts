@@ -435,27 +435,33 @@ const model = new MockLanguageModelV3({
   modelId: "held-stream",
   provider: "eve-test",
   doStream: async ({ abortSignal }) => ({
-    stream: new ReadableStream({
-      start(controller) {
-        let settled = false;
-        const settle = (event: "interrupted" | "completed" | "watchdog", failure?: unknown) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(watchdog);
-          abortSignal?.removeEventListener("abort", abort);
-          void report(event);
-          void report("listener-settled");
+    stream: (() => {
+      let settled = false;
+      let controller: ReadableStreamDefaultController<any> | undefined;
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      const settle = (event: "interrupted" | "completed" | "watchdog", failure?: unknown, terminalize = true) => {
+        if (settled) return;
+        settled = true;
+        if (watchdog !== undefined) clearTimeout(watchdog);
+        abortSignal?.removeEventListener("abort", abort);
+        void report(event);
+        void report("listener-settled");
+        if (terminalize && controller !== undefined) {
           if (failure !== undefined) controller.error(failure);
           else if (event === "completed") {
             controller.enqueue({ id: "held-text", type: "text-end" });
             controller.enqueue({ finishReason: { raw: undefined, unified: "stop" }, type: "finish", usage: { inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 1, total: 1 }, outputTokens: { reasoning: 0, text: 1, total: 1 } } });
             controller.close();
           } else controller.error(new Error("provider interrupted"));
-          void report("stream-settled");
-        };
+        }
+        void report("stream-settled");
+      };
+      return new ReadableStream({
+      start(nextController) {
+        controller = nextController;
         const abort = () => settle("interrupted", abortSignal?.reason);
         abortSignal?.addEventListener("abort", abort, { once: true });
-        const watchdog = setTimeout(() => settle("watchdog", new Error("provider hold timed out")), 5_000);
+        watchdog = setTimeout(() => settle("watchdog", new Error("provider hold timed out")), 5_000);
         void report("handler-ready")
           .then(() => fetch(url("/first-delta")))
           .then(() => {
@@ -468,10 +474,12 @@ const model = new MockLanguageModelV3({
           .catch((error: unknown) => settle("watchdog", error));
       },
       cancel() {
-        // This reports provider-side reader cancellation without creating Eve lifecycle events.
-        settle("interrupted", new Error("provider reader cancelled"));
+        // Reader cancellation owns terminalization, so do not call
+        // controller.error() on an already-cancelled underlying stream.
+        settle("interrupted", undefined, false);
       },
-    }),
+    });
+    })(),
   }),
 });
 
