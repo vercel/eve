@@ -1,5 +1,12 @@
 # eve
 
+## 0.38.3
+
+### Patch Changes
+
+- 8b2a914: Authorize Slack HITL answers with `onInputResponse` before they resume a parked session. Omitting the hook preserves the existing submitting-user authorization behavior regardless of other Slack handlers.
+- c2b9bbf: Slack `onEvent` handlers can now pass `title` to `ctx.send()` to set the run title without changing the message sent to the model.
+
 ## 0.38.2
 
 ### Patch Changes
