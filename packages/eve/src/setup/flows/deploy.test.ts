@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { packageInstallResult } from "#internal/testing/package-process.js";
 import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
 import type { LinkProjectDeps } from "#setup/boxes/link-project.js";
 import type { ResolveProvisioningDeps } from "#setup/boxes/resolve-provisioning.js";
@@ -26,8 +27,8 @@ function createDeployProjectDeps(probe: DeploymentInfo = DEPLOYED) {
       kind: "pnpm",
       source: "default",
     })),
-    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(
-      async () => true,
+    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(async () =>
+      packageInstallResult(),
     ),
     detectDeployment: vi.fn<DeployProjectDeps["detectDeployment"]>(async () => probe),
     syncHostFrameworkPreset: vi.fn<DeployProjectDeps["syncHostFrameworkPreset"]>(async () => {}),

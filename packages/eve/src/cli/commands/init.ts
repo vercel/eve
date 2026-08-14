@@ -20,6 +20,8 @@ import {
 import { pathExists } from "#setup/path-exists.js";
 import {
   eveDevArguments,
+  packageManagerInstallSucceeded,
+  resultSucceeded,
   runPackageManagerInstall,
   spawnPackageManager,
 } from "#setup/primitives/index.js";
@@ -429,7 +431,7 @@ async function runInitSteps(input: {
     const installStartedAt = dependencies.now();
     const installFailureOutput: string[] = [];
     const recentInstallOutput: string[] = [];
-    const installed = await dependencies.runPackageManagerInstall(
+    const installResult = await dependencies.runPackageManagerInstall(
       project.packageManager,
       project.projectPath,
       {
@@ -454,7 +456,7 @@ async function runInitSteps(input: {
       },
     );
     const installElapsedMs = dependencies.now() - installStartedAt;
-    if (!installed) {
+    if (!packageManagerInstallSucceeded(installResult)) {
       initLog.debug("dependency installation failed", { ms: installElapsedMs });
       progress.stop();
       const failureOutput =
@@ -623,11 +625,13 @@ export async function runInitCommand(
   logger.log(pc.dim(freshScaffold ? "$ eve dev --input /model" : "$ eve dev"));
 
   if (
-    !(await dependencies.spawnPackageManager(
-      result.packageManager,
-      result.projectPath,
-      devArguments,
-    ))
+    !resultSucceeded(
+      await dependencies.spawnPackageManager(
+        result.packageManager,
+        result.projectPath,
+        devArguments,
+      ),
+    )
   ) {
     throw new Error(`Development server exited unsuccessfully in "${result.projectPath}".`);
   }
