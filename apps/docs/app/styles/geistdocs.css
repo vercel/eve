@@ -31,11 +31,6 @@ body:has([data-nights-route]) {
   color-scheme: dark;
 }
 
-body:has([data-nights-route]) > div > header,
-body:has([data-nights-route]) > div > footer {
-  display: none;
-}
-
 @keyframes eve-nights-rise {
   from {
     opacity: 0;
@@ -46,6 +41,10 @@ body:has([data-nights-route]) > div > footer {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+[data-nights-route][data-shader-state="loading"] [data-nights-animated] {
+  animation-play-state: paused;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,3 +1,4 @@
+// The black inset prevents clamp-to-edge sampling from exposing the texture boundary.
 export const rgbLogoSvgString = `<svg width="169" height="53" viewBox="0 0 169 53" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg">
   <rect width="169" height="53" fill="black"/>
   <g fill="url(#eve-fill)" stroke="url(#eve-outline)" stroke-width="0.8" stroke-linejoin="round" transform="translate(2 2) scale(0.976331 0.924528)">

@@ -61,11 +61,15 @@ const LogoPlaceholder = ({ target = false }: { target?: boolean }) => (
 );
 
 const NightsPage = () => (
-  <div data-nights-route className="relative h-lvh overflow-hidden bg-black text-white">
+  <div
+    data-nights-route
+    data-shader-state="loading"
+    className="relative h-lvh overflow-hidden bg-black text-white"
+  >
     <div className="pointer-events-none fixed inset-0" aria-hidden="true">
-      <NightsGalaxy />
       <div className="mx-auto grid h-full w-full max-w-6xl grid-cols-1 grid-rows-[40svh_1fr] min-[740px]:grid-cols-2 min-[740px]:grid-rows-1">
-        <div className="flex h-full items-center justify-center p-4">
+        <div className="relative flex h-full items-center justify-center p-4">
+          <NightsGalaxy />
           <LogoPlaceholder target />
         </div>
       </div>

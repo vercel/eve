@@ -279,6 +279,11 @@ const BLOOM_REVEAL_DELAY_MS = 1000;
 // this, the reveal would silently "tick" through the compile time and
 // users would see the animation skip its opening.
 const REVEAL_WARMUP_FRAMES = 2;
+// Never leave the event content hidden if WebGPU initialization stalls.
+const SHADER_READY_TIMEOUT_MS = 3000;
+// The logo tops out near 1080 device pixels, so 1024 preserves its detail
+// while avoiding the larger main-thread pixel copy of the former 1600 texture.
+const LOGO_TEXTURE_SIZE = 1024;
 const revealTargets = {
   logoMinMul: 0.025,
   // The eve mark has broad horizontal strokes; a lower multiplier keeps
@@ -338,6 +343,25 @@ export function NightsGalaxy(): JSX.Element {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
+    const route = container.closest<HTMLElement>("[data-nights-route]");
+    let shaderStateSignaled = false;
+    let shaderReadyTimeout: number | null = null;
+    const signalShaderState = (state: "ready" | "error"): void => {
+      if (shaderStateSignaled) return;
+      shaderStateSignaled = true;
+      container.dataset.shaderState = state;
+      route?.setAttribute("data-shader-state", state);
+      if (shaderReadyTimeout !== null) {
+        window.clearTimeout(shaderReadyTimeout);
+        shaderReadyTimeout = null;
+      }
+    };
+    route?.setAttribute("data-shader-state", "loading");
+    shaderReadyTimeout = window.setTimeout(
+      () => signalShaderState("ready"),
+      SHADER_READY_TIMEOUT_MS,
+    );
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
@@ -1003,6 +1027,8 @@ export function NightsGalaxy(): JSX.Element {
         debugQuads[hoverDebug.mode].render(renderer);
       }
 
+      if (revealStart !== null) signalShaderState("ready");
+
       animationFrameId = requestAnimationFrame(animate);
     };
 
@@ -1022,7 +1048,7 @@ export function NightsGalaxy(): JSX.Element {
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
-    void Promise.all([initPromise, rasterizeSvgToTexture(rgbLogoSvgString, 1600)])
+    void Promise.all([initPromise, rasterizeSvgToTexture(rgbLogoSvgString, LOGO_TEXTURE_SIZE)])
       .then(([, { texture }]) => {
         if (!running) {
           texture.dispose();
@@ -1117,7 +1143,7 @@ export function NightsGalaxy(): JSX.Element {
       })
       .catch((error: unknown) => {
         if (!running) return;
-        container.dataset.shaderState = "error";
+        signalShaderState("error");
         console.error("Failed to initialize the nights shader", error);
       });
 
@@ -1149,6 +1175,7 @@ export function NightsGalaxy(): JSX.Element {
 
     return () => {
       running = false;
+      if (shaderReadyTimeout !== null) window.clearTimeout(shaderReadyTimeout);
       if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
       sceneRef.current = null;
       window.removeEventListener("resize", handleResize);
@@ -1316,6 +1343,7 @@ export function NightsGalaxy(): JSX.Element {
     };
   }, []);
 
+  // Mobile stays bounded to the logo row; desktop intentionally expands to the viewport.
   return (
     <div
       ref={containerRef}

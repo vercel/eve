@@ -37,7 +37,7 @@ export async function rasterizeSvgToTexture(
 
     const imageData = ctx.getImageData(0, 0, size, size);
 
-    // Flip Y so y=0 in the DataTexture sits at the bottom (Three.js UV convention).
+    // Flip Y here so layout coordinates can remain top-origin in the shader.
     const pixels = new Uint8Array(size * size * 4);
     const rowBytes = size * 4;
     for (let y = 0; y < size; y++) {
