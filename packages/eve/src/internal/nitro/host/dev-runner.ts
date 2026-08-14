@@ -4,6 +4,8 @@ import { Worker } from "node:worker_threads";
 import { BaseEnvRunner } from "#compiled/env-runner/index.js";
 import { resolvePackageCompiledFilePath } from "#internal/application/package.js";
 
+const DEVELOPMENT_WORKER_SHUTDOWN_TIMEOUT_MS = 15_000;
+
 export interface DevelopmentRunner {
   readonly closed: boolean;
   close(cause?: unknown): Promise<void>;
@@ -31,6 +33,8 @@ class NodeDevelopmentRunner extends BaseEnvRunner implements DevelopmentRunner {
   #closeCause: unknown;
   readonly #closedListeners = new Set<(cause?: unknown) => void>();
   #worker: Worker | undefined;
+  #workerExit: Promise<void> | undefined;
+  #workerHasExited = false;
 
   constructor(input: DevelopmentRunnerInput) {
     const workerEntry = resolvePackageCompiledFilePath("src/compiled/env-runner/node-worker.js");
@@ -97,9 +101,24 @@ class NodeDevelopmentRunner extends BaseEnvRunner implements DevelopmentRunner {
       return;
     }
 
+    const workerExit = this.#workerExit;
     this.#worker = undefined;
-    worker.removeAllListeners();
-    await worker.terminate();
+    this.#workerExit = undefined;
+
+    try {
+      if (!this.#workerHasExited) {
+        worker.postMessage({ event: "shutdown" });
+      }
+      if (
+        !this.#workerHasExited &&
+        workerExit !== undefined &&
+        !(await waitForWorkerExit(workerExit))
+      ) {
+        await worker.terminate();
+      }
+    } finally {
+      worker.removeAllListeners();
+    }
   }
 
   protected override _handleMessage(message: unknown): void {
@@ -123,14 +142,23 @@ class NodeDevelopmentRunner extends BaseEnvRunner implements DevelopmentRunner {
       },
     });
     this.#worker = worker;
+    this.#workerHasExited = false;
+    let resolveWorkerExit!: () => void;
+    this.#workerExit = new Promise((resolve) => {
+      resolveWorkerExit = resolve;
+    });
     worker.once("error", (error) => {
       this.#closeCause = error;
       void this.close(error);
     });
     worker.once("exit", (code) => {
-      const error = new Error(`Development worker exited with code ${String(code)}.`);
-      this.#closeCause ??= error;
-      void this.close(error);
+      this.#workerHasExited = true;
+      resolveWorkerExit();
+      if (!this.closed) {
+        const error = new Error(`Development worker exited with code ${String(code)}.`);
+        this.#closeCause ??= error;
+        void this.close(error);
+      }
     });
     worker.on("message", (message: unknown) => this._handleMessage(message));
   }
@@ -138,6 +166,21 @@ class NodeDevelopmentRunner extends BaseEnvRunner implements DevelopmentRunner {
 
 export const createNodeDevelopmentRunner: DevelopmentRunnerFactory = (input) =>
   new NodeDevelopmentRunner(input);
+
+async function waitForWorkerExit(workerExit: Promise<void>): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      workerExit.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), DEVELOPMENT_WORKER_SHUTDOWN_TIMEOUT_MS);
+        timer.unref();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function isWorkerInitializationError(
   value: unknown,

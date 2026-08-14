@@ -40,12 +40,8 @@ async function readVercelOutputConfig(outputRoot: string): Promise<{
 
 describe("framework-sveltekit build", () => {
   it("builds the SvelteKit framework fixture against the workspace eve dist", async () => {
-    // Runs `build:sveltekit` rather than the fixture's `build` script: `build`
-    // regenerates the shared workspace `dist/`, which would corrupt scenario
-    // files running in parallel workers. The scenario globalSetup already
-    // rebuilt `dist/` before any worker forked.
     await runPnpmCommand({
-      args: ["--filter", "framework-sveltekit", "build:sveltekit"],
+      args: ["--filter", "framework-sveltekit", "build"],
       cwd: REPO_ROOT,
     });
   }, 300_000);

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "pnpm --filter eve build && pnpm build:next",
+    "build": "pnpm build:next",
     "dev": "next dev",
     "dev:eve": "eve dev",
     "build:eve": "eve build",

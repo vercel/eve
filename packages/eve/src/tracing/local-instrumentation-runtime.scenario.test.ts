@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { ROOT_CONTEXT, trace as apiTrace } from "@opentelemetry/api";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   ROOT_CONTEXT as COMPILED_ROOT_CONTEXT,
@@ -38,15 +38,16 @@ describe("local instrumentation runtime", () => {
   it("persists agent, AI, and user spans in one trace", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "eve-local-traces-"));
     temporaryDirectories.push(appRoot);
+    // Resolve and cache the public API tracer before eve installs its vendored
+    // provider, matching an authored module's normal module-scope setup.
+    const authoredTracer = (
+      require("@opentelemetry/api") as typeof import("@opentelemetry/api")
+    ).trace.getTracer("test-user");
     const runtime = installLocalInstrumentationRuntime({
       appRoot,
       frameworkVersion: "test",
       serviceName: "test-agent",
     });
-    // Resolve the public API outside Vitest's transformed module graph, as an
-    // authored app does when it imports its own @opentelemetry/api dependency.
-    const authoredTrace = (require("@opentelemetry/api") as typeof import("@opentelemetry/api"))
-      .trace;
     const scope: InstrumentationAttemptScope = {
       attemptId: "session-1:turn-1:0:0",
       attemptIndex: 0,
@@ -58,9 +59,8 @@ describe("local instrumentation runtime", () => {
     };
     const delivery = runtimeTrace.getTracer("workflow").startSpan("workflow.delivery");
     const activeContext = runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, delivery);
-    const contextActive = vi.spyOn(runtimeContext, "active").mockReturnValue(activeContext);
 
-    await contextStorage.run(new ContextContainer(), async () => {
+    const exerciseRuntime = async () => {
       await runtime.hooks.publish({
         agentName: "weather",
         idempotencyKey: sessionIdempotencyKey("session-1"),
@@ -87,12 +87,18 @@ describe("local instrumentation runtime", () => {
       ]);
       await Reflect.apply(bridge.onStepStart!, bridge, [{ callId: "call-1", stepNumber: 0 }]);
       await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [
-        { callId: "call-1", messages: [], modelId: "model-1", provider: "test", tools: undefined },
+        {
+          callId: "call-1",
+          messages: [],
+          modelId: "model-1",
+          provider: "test",
+          tools: undefined,
+        },
       ]);
       await bridge.executeLanguageModelCall!({
         callId: "call-1",
         execute: async () => {
-          const span = authoredTrace.getTracer("test-user").startSpan("user.model-work");
+          const span = authoredTracer.startSpan("user.model-work");
           expect(span.isRecording()).toBe(true);
           await Promise.resolve();
           span.end();
@@ -127,7 +133,7 @@ describe("local instrumentation runtime", () => {
       await bridge.executeTool!({
         callId: "call-1",
         execute: async () => {
-          const span = authoredTrace.getTracer("test-user").startSpan("user.tool-work");
+          const span = authoredTracer.startSpan("user.tool-work");
           expect(span.isRecording()).toBe(true);
           await Promise.resolve();
           span.end();
@@ -168,8 +174,10 @@ describe("local instrumentation runtime", () => {
         turnId: "turn-1",
         type: "session.waiting",
       });
-    });
-    contextActive.mockRestore();
+    };
+    await runtimeContext.with(activeContext, () =>
+      contextStorage.run(new ContextContainer(), exerciseRuntime),
+    );
     delivery.end();
     await runtime.forceFlush();
 

@@ -410,14 +410,22 @@ export function createOptionalNativeStubPlugin(packageNames) {
  *   these files changes the cached stamp is invalidated and vendoring re-runs.
  *   Pass everything that influences the output: the orchestrator entry script,
  *   the `_shared.mjs` library, per-package configs, and `.d.ts` declarations.
+ * @param {Record<string, string>} [options.toolVersions]
+ *   Resolved versions of build tools whose output contributes to vendored files.
  */
-export async function runVendor({ packageRoot, compiledRoot, modules, scriptFiles }) {
+export async function runVendor({
+  packageRoot,
+  compiledRoot,
+  modules,
+  scriptFiles,
+  toolVersions = {},
+}) {
   const stampPath = join(compiledRoot, ".vendor-stamp.json");
   const lockPath = join(compiledRoot, ".vendor-lock");
 
   await mkdir(compiledRoot, { recursive: true });
 
-  const desiredStamp = await computeStamp({ scriptFiles, modules, packageRoot });
+  const desiredStamp = await computeStamp({ scriptFiles, modules, packageRoot, toolVersions });
 
   if (stampMatches(desiredStamp, await readExistingStamp(stampPath))) {
     console.log("Compiled vendor modules are already up to date.");
@@ -624,16 +632,8 @@ function getModulePlatform(module) {
   return module.platform ?? "node";
 }
 
-function getDefaultResolve(platform) {
-  return platform === "neutral"
-    ? {
-        conditionNames: ["import", "default"],
-        mainFields: ["module", "main"],
-      }
-    : {
-        conditionNames: ["node", "import", "default"],
-        mainFields: ["module", "main"],
-      };
+function getDefaultResolve() {
+  return { mainFields: ["module", "main"] };
 }
 
 async function bundleStandaloneModule({ destinationRoot, module, packageInfo, packageRoot }) {
@@ -654,7 +654,7 @@ async function bundleStandaloneModule({ destinationRoot, module, packageInfo, pa
     moduleTypes: module.loader ?? {},
     platform,
     plugins: module.plugins ?? [],
-    resolve: module.resolve ?? getDefaultResolve(platform),
+    resolve: module.resolve ?? getDefaultResolve(),
     treeshake: true,
     output: {
       banner: module.banner ?? "/* oxlint-disable */",
@@ -800,7 +800,7 @@ async function writeTypeOnlyModule({ module, compiledRoot, packageRoot }) {
  * a no-op, which makes `build:compiled` safe to invoke concurrently from
  * sibling Turbo tasks without racing on shared destination directories.
  */
-async function computeStamp({ scriptFiles, modules, packageRoot }) {
+async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions }) {
   const scriptHash = createHash("sha256");
   // Hash file contents in a deterministic order so identical inputs always
   // produce identical stamps.
@@ -825,6 +825,9 @@ async function computeStamp({ scriptFiles, modules, packageRoot }) {
   return {
     moduleVersions,
     scriptHash: scriptHash.digest("hex"),
+    toolVersions: Object.fromEntries(
+      Object.entries(toolVersions).sort(([a], [b]) => a.localeCompare(b)),
+    ),
   };
 }
 

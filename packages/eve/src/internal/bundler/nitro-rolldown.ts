@@ -98,8 +98,32 @@ export async function parseWithNitroRolldownAst(
 export async function buildWithNitroRolldown(
   options: Record<string, unknown>,
 ): Promise<RolldownOutput> {
+  assertCustomRolldownConditionNames(options);
   const { build } = await loadNitroRolldown();
   return await build(options);
+}
+
+const ROLLDOWN_STANDARD_CONDITION_NAMES = new Set([
+  "browser",
+  "default",
+  "import",
+  "node",
+  "require",
+]);
+
+function assertCustomRolldownConditionNames(options: Record<string, unknown>): void {
+  const resolve = options.resolve;
+  if (resolve === null || typeof resolve !== "object") return;
+  const conditionNames = Reflect.get(resolve, "conditionNames");
+  if (!Array.isArray(conditionNames)) return;
+
+  for (const conditionName of conditionNames) {
+    if (typeof conditionName === "string" && ROLLDOWN_STANDARD_CONDITION_NAMES.has(conditionName)) {
+      throw new Error(
+        `Rolldown resolves the standard condition ${JSON.stringify(conditionName)} per import edge; conditionNames may contain only eve-specific additions.`,
+      );
+    }
+  }
 }
 
 /**
