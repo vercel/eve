@@ -171,7 +171,7 @@ describe("TurnControlReceiver", () => {
 
     expect(forwardTurnCancellationStep).toHaveBeenCalledWith({
       payload: { reason: expect.objectContaining({ name: "TurnCancelledError" }) },
-      token: "abrt_turn-control_cancel",
+      token: "abrt_007400750072006e002d0063006f006e00740072006f006c_cancel",
     });
   });
 
@@ -207,11 +207,11 @@ describe("TurnControlReceiver", () => {
     expect(action.kind).toBe("park");
     expect(forwardTurnCancellationStep).toHaveBeenNthCalledWith(1, {
       payload: { reason: expect.objectContaining({ name: "TurnCancelledError" }) },
-      token: "abrt_turn-control_cancel",
+      token: "abrt_007400750072006e002d0063006f006e00740072006f006c_cancel",
     });
     expect(forwardTurnCancellationStep).toHaveBeenNthCalledWith(2, {
       payload: { reason: expect.objectContaining({ name: "TurnCancelledError" }) },
-      token: "abrt_turn-control_cancel",
+      token: "abrt_007400750072006e002d0063006f006e00740072006f006c_cancel",
     });
     expect(bufferedSessionControls).toEqual(["reset"]);
   });

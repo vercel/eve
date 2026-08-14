@@ -14,7 +14,13 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 describe("turnCancellationHookToken", () => {
   it("derives a private token from the turn control token", () => {
     expect(turnCancellationHookToken("wrun_abc:turn-control:1")).toBe(
-      "abrt_wrun_abc_turn-control_1_cancel",
+      "abrt_007700720075006e005f006100620063003a007400750072006e002d0063006f006e00740072006f006c003a0031_cancel",
+    );
+  });
+
+  it("keeps distinct control tokens in distinct canonical abort streams", () => {
+    expect(turnCancellationHookToken("session:one")).not.toBe(
+      turnCancellationHookToken("session_one"),
     );
   });
 });
@@ -31,7 +37,8 @@ describe("createTurnCancellationControl", () => {
 
     expect(control!.signal).toBe(controller.signal);
     expect(createActiveStepAbortControllerMock).toHaveBeenCalledWith({
-      token: "abrt_wrun_abc_turn-control_1_cancel",
+      token:
+        "abrt_007700720075006e005f006100620063003a007400750072006e002d0063006f006e00740072006f006c003a0031_cancel",
     });
   });
 

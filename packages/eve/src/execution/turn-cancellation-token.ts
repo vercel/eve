@@ -1,9 +1,12 @@
 /** Derives the private cancellation hook token for one dispatched turn. */
 export function turnCancellationHookToken(controlToken: string): string {
-  // `controlToken` is Eve-generated as `${sessionId}:turn-control:${index}`.
-  // The active-step abort stream uses this token in its stream name, so keep
-  // the deterministic mapping portable to filesystem-backed Workflow worlds.
-  return `abrt_${controlToken.replaceAll(":", "_")}_cancel`;
+  // The stream namespace is canonical ASCII. Fixed-width UTF-16 code units
+  // retain every control-token boundary, unlike delimiter replacement.
+  let encoded = "";
+  for (let index = 0; index < controlToken.length; index += 1) {
+    encoded += controlToken.charCodeAt(index).toString(16).padStart(4, "0");
+  }
+  return `abrt_${encoded}_cancel`;
 }
 
 /** Payload delivered to the active-step abort stream. */

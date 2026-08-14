@@ -11,7 +11,14 @@ import { startEveDev } from "./dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 
-type ProviderEvent = "handler-ready" | "first-delta" | "interrupted" | "completed" | "watchdog";
+type ProviderEvent =
+  | "handler-ready"
+  | "first-delta"
+  | "interrupted"
+  | "completed"
+  | "listener-settled"
+  | "stream-settled"
+  | "watchdog";
 
 interface Rendezvous {
   close(): Promise<void>;
@@ -75,13 +82,9 @@ describe("public model-stream cancellation", () => {
     expect(result.rendezvous.events).toContain("interrupted");
     expect(result.rendezvous.events).not.toContain("completed");
     expect(result.rendezvous.events).not.toContain("watchdog");
-    expect(result.events.map((event) => event.type)).toContain("turn.cancelled");
-    expect(result.events.at(-1)?.type).toBe("session.waiting");
-    expect(result.events.map((event) => event.type)).not.toContain("message.completed");
-    expect(result.events.map((event) => event.type)).not.toContain("step.completed");
-    expect(result.events.map((event) => event.type)).not.toContain("turn.completed");
-    expect(result.events.map((event) => event.type)).not.toContain("turn.failed");
-    expect(result.events.map((event) => event.type)).not.toContain("session.failed");
+    expectCancelledLifecycle(result.events);
+    expect(result.rendezvous.events).toContain("listener-settled");
+    expect(result.rendezvous.events).toContain("stream-settled");
   }, 120_000);
 
   it("keeps the id-less public compatibility path cancellable after the provider delta", async () => {
@@ -93,8 +96,7 @@ describe("public model-stream cancellation", () => {
       status: "accepted",
     });
     expect(result.rendezvous.events).toContain("interrupted");
-    expect(result.events.map((event) => event.type)).toContain("turn.cancelled");
-    expect(result.events.map((event) => event.type)).not.toContain("turn.completed");
+    expectCancelledLifecycle(result.events);
   }, 120_000);
 
   it("ignores a wrong id and cancels exactly once before the first provider delta", async () => {
@@ -103,16 +105,14 @@ describe("public model-stream cancellation", () => {
     expect(wrong.rendezvous.events).toContain("first-delta");
     expect(wrong.rendezvous.events).toContain("completed");
     expect(wrong.rendezvous.events).not.toContain("interrupted");
-    expect(wrong.events.map((event) => event.type)).toContain("turn.completed");
-    expect(wrong.events.map((event) => event.type)).not.toContain("turn.cancelled");
+    expectCompletedLifecycle(wrong.events);
 
     const preDelta = await runHeldProviderScenario({ cancel: "pre-delta" });
 
     expect(preDelta.rendezvous.events).toContain("handler-ready");
     expect(preDelta.rendezvous.events).not.toContain("first-delta");
     expect(preDelta.rendezvous.events).toContain("interrupted");
-    expect(preDelta.events.map((event) => event.type)).toContain("turn.cancelled");
-    expect(preDelta.events.map((event) => event.type)).not.toContain("turn.completed");
+    expectCancelledLifecycle(preDelta.events);
   }, 120_000);
 
   it("settles duplicate exact-id cancellation once without a stale successful terminal", async () => {
@@ -126,17 +126,19 @@ describe("public model-stream cancellation", () => {
       ]),
     );
     expect(result.rendezvous.events.filter((event) => event === "interrupted")).toHaveLength(1);
-    expect(
-      result.events.map((event) => event.type).filter((type) => type === "turn.cancelled"),
-    ).toHaveLength(1);
-    expect(result.events.at(-1)?.type).toBe("session.waiting");
-    expect(result.events.map((event) => event.type)).not.toContain("turn.completed");
-    expect(result.events.map((event) => event.type)).not.toContain("turn.failed");
+    expectCancelledLifecycle(result.events);
+  }, 120_000);
+
+  it("recovers the cancelled public session after an Eve process restart", async () => {
+    const result = await runHeldProviderScenario({ cancel: "exact", restartAfterCancel: true });
+
+    expectCancelledLifecycle(result.events);
   }, 120_000);
 });
 
 async function runHeldProviderScenario(input: {
   readonly cancel: "exact" | "omitted" | "wrong" | "duplicate" | "pre-delta";
+  readonly restartAfterCancel?: boolean;
 }): Promise<{
   readonly cancelResults: Array<{ readonly sessionId?: string; readonly status: string }>;
   readonly events: MessageStreamEvent[];
@@ -153,7 +155,7 @@ async function runHeldProviderScenario(input: {
     installDependencies: true,
     name: `public-model-stream-held-cancellation-${input.cancel}`,
   });
-  const server = await startEveDev(app.appRoot, {
+  let server = await startEveDev(app.appRoot, {
     env: { EVE_TEST_RENDEZVOUS_NONCE: rendezvous.nonce, EVE_TEST_RENDEZVOUS_URL: rendezvous.url },
     useAuthoredModel: true,
   });
@@ -167,13 +169,15 @@ async function runHeldProviderScenario(input: {
     const cancelResults: Array<{ readonly sessionId?: string; readonly status: string }> = [];
     let turnId: string | undefined;
     let resolveTurnId: ((value: string) => void) | undefined;
-    let rejectTurnId: ((reason: Error) => void) | undefined;
-    const started = new Promise<string>((resolve, reject) => {
+    const started = new Promise<string>((resolve) => {
       resolveTurnId = resolve;
-      rejectTurnId = reject;
     });
+    let reachedTerminal = false;
     const consume = (async () => {
       for await (const event of response) {
+        if (reachedTerminal) {
+          throw new Error("Public stream emitted an event after terminal session.waiting.");
+        }
         events.push(event);
         if (event.type === "turn.started") {
           if (
@@ -181,14 +185,12 @@ async function runHeldProviderScenario(input: {
             typeof event.data.turnId !== "string" ||
             event.data.turnId.length === 0
           ) {
-            rejectTurnId?.(
-              new Error("Expected exactly one public turn.started id before cancellation."),
-            );
-            return;
+            throw new Error("Expected exactly one public turn.started id for the full stream.");
           }
           turnId = event.data.turnId;
           resolveTurnId?.(turnId);
         }
+        if (event.type === "session.waiting") reachedTerminal = true;
       }
     })();
 
@@ -220,6 +222,30 @@ async function runHeldProviderScenario(input: {
     }
     await withinDeadline(consume, "public stream did not settle after cancellation");
     if (turnId !== exactTurnId) throw new Error("The public turn id changed during cancellation.");
+    if (input.cancel !== "wrong") {
+      await withinDeadline(
+        rendezvous.waitFor("listener-settled"),
+        "provider abort listener did not settle",
+      );
+      await withinDeadline(
+        rendezvous.waitFor("stream-settled"),
+        "provider stream reader did not settle",
+      );
+    }
+    if (input.restartAfterCancel === true) {
+      await server.crash();
+      server = await startEveDev(app.appRoot, {
+        env: {
+          EVE_TEST_RENDEZVOUS_NONCE: rendezvous.nonce,
+          EVE_TEST_RENDEZVOUS_URL: rendezvous.url,
+        },
+        useAuthoredModel: true,
+      });
+      const recovered = new Client({ host: server.url }).sessions.attach(session.state.sessionId);
+      const snapshot = await recovered.snapshot();
+      expect(snapshot.session.sessionId).toBe(session.state.sessionId);
+      expectCancelledLifecycle(snapshot.events);
+    }
     if (
       cancelResults.some(
         (result) => result.status !== "accepted" || result.sessionId !== session.state.sessionId,
@@ -233,6 +259,40 @@ async function runHeldProviderScenario(input: {
     await server.stop();
     await rendezvous.close();
   }
+}
+
+function expectCancelledLifecycle(events: readonly MessageStreamEvent[]): void {
+  const types = events.map((event) => event.type);
+  const started = types.indexOf("turn.started");
+  const cancelled = types.indexOf("turn.cancelled");
+  const waiting = types.indexOf("session.waiting");
+  expect(types.filter((type) => type === "turn.started")).toHaveLength(1);
+  expect(types.filter((type) => type === "turn.cancelled")).toHaveLength(1);
+  expect(types.filter((type) => type === "session.waiting")).toHaveLength(1);
+  expect(started).toBeGreaterThanOrEqual(0);
+  expect(cancelled).toBeGreaterThan(started);
+  expect(waiting).toBeGreaterThan(cancelled);
+  expect(waiting).toBe(types.length - 1);
+  for (const forbidden of [
+    "message.completed",
+    "step.completed",
+    "turn.completed",
+    "turn.failed",
+    "session.failed",
+  ]) {
+    expect(types).not.toContain(forbidden);
+  }
+}
+
+function expectCompletedLifecycle(events: readonly MessageStreamEvent[]): void {
+  const types = events.map((event) => event.type);
+  expect(types.filter((type) => type === "turn.started")).toHaveLength(1);
+  expect(types.filter((type) => type === "turn.completed")).toHaveLength(1);
+  expect(types.filter((type) => type === "session.waiting")).toHaveLength(1);
+  expect(types.at(-1)).toBe("session.waiting");
+  expect(types).not.toContain("turn.cancelled");
+  expect(types).not.toContain("turn.failed");
+  expect(types).not.toContain("session.failed");
 }
 
 async function startRendezvous(): Promise<Rendezvous> {
@@ -384,12 +444,14 @@ const model = new MockLanguageModelV3({
           clearTimeout(watchdog);
           abortSignal?.removeEventListener("abort", abort);
           void report(event);
+          void report("listener-settled");
           if (failure !== undefined) controller.error(failure);
           else if (event === "completed") {
             controller.enqueue({ id: "held-text", type: "text-end" });
             controller.enqueue({ finishReason: { raw: undefined, unified: "stop" }, type: "finish", usage: { inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 1, total: 1 }, outputTokens: { reasoning: 0, text: 1, total: 1 } } });
             controller.close();
           } else controller.error(new Error("provider interrupted"));
+          void report("stream-settled");
         };
         const abort = () => settle("interrupted", abortSignal?.reason);
         abortSignal?.addEventListener("abort", abort, { once: true });
@@ -407,7 +469,7 @@ const model = new MockLanguageModelV3({
       },
       cancel() {
         // This reports provider-side reader cancellation without creating Eve lifecycle events.
-        void report("interrupted");
+        settle("interrupted", new Error("provider reader cancelled"));
       },
     }),
   }),
