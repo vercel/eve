@@ -68,6 +68,31 @@ typo fixes, small code reorganizations, and similar non-behavioral changes can
 proceed without local integration or scenario runs. CI is always the official
 line of defense, and every required check must pass before merge.
 
+## Agent-ready product principles
+
+1. **Docs is priority #1.** Agents read your docs before they ever touch your
+   product. If the docs are incomplete or ambiguous, the agent is lost before it
+   starts.
+
+2. **Authentication is the biggest friction point.** Auth is where agent runs
+   stall most often: hidden prerequisites, unset keys, and OAuth flows that
+   quietly assume a human is at the keyboard.
+
+3. **Error messages make or break recovery.** A vague or misleading error sends
+   an agent spiraling; a precise, actionable one lets it self-correct. Your errors
+   are documentation.
+
+4. **CLIs often assume a human is present.** Interactive prompts, TTY checks, and
+   "press y to continue" break agents that have no way to answer back.
+
+5. **Discoverability determines whether agents find you at all.** `llms.txt`,
+   typed SDKs, MCP servers, machine-readable specs. If an agent can't discover
+   your surface, it reaches for a competitor it already knows.
+
+6. **Better for agents, better for humans.** Almost everything that makes a tool
+   agent-ready, from clear docs to precise errors to sane defaults, makes it
+   better for human developers too.
+
 ## Coding principles
 
 1. **Public APIs are sensitive.** They usually require a research doc proposing the
