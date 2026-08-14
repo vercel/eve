@@ -50,6 +50,7 @@ import { setChannelContext } from "#execution/channel-context.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
+import { readClientMessageIds, withClientMessageIds } from "#shared/client-message-correlation.js";
 import {
   getRuntimeActionKeysFromWorkflowInterrupt,
   isWorkflowRuntimeActionInterrupt,
@@ -277,7 +278,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           : defaultDeliverResult(payload);
 
         if (result !== undefined && result !== null) {
-          results.push(result);
+          results.push(withClientMessageIds(result, readClientMessageIds(payload)));
         }
       }
     } catch (error) {

@@ -16,6 +16,20 @@ import {
 } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import type { ClientSessionState } from "#client/types.js";
+import { withClientMessageIds } from "#shared/client-message-correlation.js";
+
+const TEST_CLIENT_MESSAGE_ID = "client_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+vi.mock("#shared/ulid.js", () => ({
+  createUlid: () => "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+}));
+
+function createCorrelatedMessageReceivedEvent(
+  input: Parameters<typeof createMessageReceivedEvent>[0],
+) {
+  const event = createMessageReceivedEvent(input);
+  return { ...event, data: withClientMessageIds(event.data, [TEST_CLIENT_MESSAGE_ID]) };
+}
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -192,7 +206,7 @@ describe("useEveAgent", () => {
 
   it("sends a message and projects streamed events with the default reducer", async () => {
     const events = [
-      createMessageReceivedEvent({
+      createCorrelatedMessageReceivedEvent({
         message: "Hello",
         sequence: 0,
         turnId: "turn_1",
@@ -362,6 +376,7 @@ describe("useEveAgent", () => {
       clientContext: {
         randomWord: "waltz",
       },
+      clientMessageId: TEST_CLIENT_MESSAGE_ID,
       message: "What word is currently selected?",
     });
 
@@ -441,7 +456,7 @@ describe("useEveAgent", () => {
     const startFirstResponse = createDeferred<Response>();
     const startSecondResponse = createDeferred<Response>();
     const secondEvents = [
-      createMessageReceivedEvent({
+      createCorrelatedMessageReceivedEvent({
         message: "Second",
         sequence: 0,
         turnId: "turn_2",
@@ -525,7 +540,7 @@ describe("useEveAgent", () => {
 
   it("surfaces terminal stream failures as hook errors", async () => {
     const events = [
-      createMessageReceivedEvent({
+      createCorrelatedMessageReceivedEvent({
         message: "Hello",
         sequence: 0,
         turnId: "turn_1",
@@ -584,7 +599,7 @@ describe("useEveAgent", () => {
 
   it("does not surface recoverable step failures as hook errors", async () => {
     const events = [
-      createMessageReceivedEvent({
+      createCorrelatedMessageReceivedEvent({
         message: "Hello",
         sequence: 0,
         turnId: "turn_1",

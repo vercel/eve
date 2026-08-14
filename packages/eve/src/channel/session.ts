@@ -24,6 +24,7 @@ import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#
 import type { InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
+import { readClientMessageIds, withClientMessageIds } from "#shared/client-message-correlation.js";
 
 /** Immutable-ID handle for one exact durable session. */
 export interface Session {
@@ -59,7 +60,9 @@ interface SessionDeliveryOptions {
 }
 
 /** Options for sending a message through a fixed session handle. */
-export type SessionSendOptions = SessionDeliveryOptions & { readonly turnPolicy?: TurnPolicy };
+export type SessionSendOptions = SessionDeliveryOptions & {
+  readonly turnPolicy?: TurnPolicy;
+};
 
 /** Options for answering pending input requests through a fixed session handle. */
 export type SessionRespondOptions = SessionDeliveryOptions;
@@ -94,7 +97,10 @@ export function createSession(
         context?: readonly string[];
         message: string | UserContent | undefined;
         outputSchema?: JsonObject;
-      } = { message: serializeUrlFilePartsInMessage(message) };
+      } = withClientMessageIds(
+        { message: serializeUrlFilePartsInMessage(message) },
+        readClientMessageIds(options),
+      );
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {

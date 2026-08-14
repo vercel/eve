@@ -25,6 +25,15 @@ describe("coalesceDeliverPayloads", () => {
     });
   });
 
+  it("preserves client message ids when deliveries coalesce", () => {
+    const result = coalesceDeliverPayloads([
+      { clientMessageIds: ["client_1"], message: FIRST_MESSAGE },
+      { clientMessageIds: ["client_2"], message: SECOND_MESSAGE },
+    ]);
+
+    expect(result.clientMessageIds).toEqual(["client_1", "client_2"]);
+  });
+
   it("omits blank messages after preserving adapter fields", () => {
     const result = coalesceDeliverPayloads([
       { adapterMetadata: { deliverySequence: 1 }, message: " " },

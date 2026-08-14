@@ -46,6 +46,7 @@ import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import { readClientMessageIds, withClientMessageIds } from "#shared/client-message-correlation.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -201,11 +202,14 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
               ],
         kind: "deliver",
         payloads: [
-          {
-            message: input.input.message,
-            context: input.input.context,
-            outputSchema: input.input.outputSchema,
-          },
+          withClientMessageIds(
+            {
+              message: input.input.message,
+              context: input.input.context,
+              outputSchema: input.input.outputSchema,
+            },
+            readClientMessageIds(input.input),
+          ),
         ],
         requestId: readChannelRequestId(input.serializedContext),
       },

@@ -7,6 +7,7 @@ import {
   resolveAssistantStepText,
 } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
+import { withClientMessageIds } from "#shared/client-message-correlation.js";
 
 function textFilePart(overrides: {
   readonly filename: string;
@@ -138,6 +139,15 @@ describe("coalesceTurnInputs", () => {
       message: "hello",
       context: ["from-channel", "from-hook"],
     });
+  });
+
+  it("preserves unique client message ids in arrival order", () => {
+    expect(
+      coalesceTurnInputs(
+        withClientMessageIds({}, ["client_1", "shared"]),
+        withClientMessageIds({}, ["shared", "client_2"]),
+      ),
+    ).toEqual({ clientMessageIds: ["client_1", "shared", "client_2"] });
   });
 
   it("returns b when a.message is undefined (UserContent array preserved)", () => {

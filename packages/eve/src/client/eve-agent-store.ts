@@ -1,10 +1,18 @@
+import type { UserContent } from "ai";
+
 import { Client } from "#client/client.js";
 import type { MessageResponse } from "#client/message-response.js";
-import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
+import type {
+  ClientInputRespondedEvent,
+  EveAgentReducer,
+  EveAgentReducerEvent,
+} from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import { readClientMessageIds, withClientMessageId } from "#shared/client-message-correlation.js";
 import { toError } from "#shared/errors.js";
+import { createUlid } from "#shared/ulid.js";
 import type {
   CancelSessionResult,
   ClientAuth,
@@ -12,7 +20,6 @@ import type {
   SendTurnPayload,
   ClientSessionState,
 } from "#client/types.js";
-import type { UserContent } from "ai";
 
 /**
  * Lifecycle state of an {@link EveAgentStore}: `ready` (idle), `submitted`
@@ -85,6 +92,7 @@ export interface EveAgentStoreInit<TData> {
 }
 
 interface PendingMessageSubmission {
+  readonly clientMessageId: string;
   readonly createdAt: number;
   readonly id: string;
   readonly message: string;
@@ -126,6 +134,7 @@ export class EveAgentStore<TData> {
   #data: TData;
   #error: Error | undefined;
   #events: readonly MessageStreamEvent[];
+  #pendingInputResponse: ClientInputRespondedEvent | undefined;
   #pendingMessageSubmission: PendingMessageSubmission | undefined;
   #projectionEvents: readonly EveAgentReducerEvent[];
   #session: ClientSession | undefined;
@@ -202,15 +211,16 @@ export class EveAgentStore<TData> {
         return;
       }
 
-      this.#projectOptimisticMessage(preparedInput);
+      const clientMessageId = this.#projectOptimisticMessage(preparedInput);
       this.#projectInputResponses(preparedInput);
       this.#publish();
 
-      const turnInput = {
-        ...preparedInput,
-        signal: createAbortSignal(preparedInput.signal, turn.abortController.signal),
-      };
-      const response = await this.#dispatchTurn(turnInput);
+      const signal = createAbortSignal(preparedInput.signal, turn.abortController.signal);
+      const response = await this.#dispatchTurn(
+        preparedInput.message === undefined
+          ? { ...preparedInput, signal }
+          : withClientMessageId({ ...preparedInput, signal }, clientMessageId),
+      );
 
       if (!this.#isActiveTurn(turn)) return;
       turn.resolveResponse(response);
@@ -241,6 +251,7 @@ export class EveAgentStore<TData> {
         return;
       }
 
+      this.#pendingInputResponse = undefined;
       this.#status = this.#error === undefined ? "ready" : "error";
     } catch (error) {
       if (!this.#isActiveTurn(turn)) {
@@ -249,11 +260,11 @@ export class EveAgentStore<TData> {
 
       if (isAbortError(error)) {
         this.#status = "ready";
-        this.#failPendingMessageSubmission(toError(error));
+        this.#failPendingProjections(toError(error));
       } else {
         this.#error = toError(error);
         this.#status = "error";
-        this.#failPendingMessageSubmission(this.#error);
+        this.#failPendingProjections(this.#error);
         this.#callbacks.onError?.(this.#error);
       }
     } finally {
@@ -293,6 +304,7 @@ export class EveAgentStore<TData> {
     if (!this.#externalSession) this.#session = undefined;
     this.#events = [];
     this.#seenEvents = createEventDeduper();
+    this.#pendingInputResponse = undefined;
     this.#pendingMessageSubmission = undefined;
     this.#projectionEvents = [];
     this.#data = this.#reducer.initial();
@@ -334,13 +346,14 @@ export class EveAgentStore<TData> {
     return this.#activeTurn === turn;
   }
 
-  #projectOptimisticMessage(input: SendTurnPayload): void {
+  #projectOptimisticMessage(input: SendTurnPayload): string | undefined {
     if (!this.#optimistic || input.message === undefined) {
-      return;
+      return undefined;
     }
 
     const id = createSubmissionId();
     const pending = {
+      clientMessageId: `client_${createUlid()}`,
       createdAt: Date.now(),
       id,
       message: summarizeUserContent(input.message),
@@ -354,6 +367,7 @@ export class EveAgentStore<TData> {
       },
       type: "client.message.submitted",
     });
+    return pending.clientMessageId;
   }
 
   #projectInputResponses(input: SendTurnPayload): void {
@@ -361,18 +375,25 @@ export class EveAgentStore<TData> {
       return;
     }
 
-    this.#appendProjectionEvent({
+    const event: ClientInputRespondedEvent = {
       data: {
         createdAt: Date.now(),
         responses: input.inputResponses,
       },
       type: "client.input.responded",
-    });
+    };
+    this.#pendingInputResponse = event;
+    this.#appendProjectionEvent(event);
   }
 
   #applyServerEvent(event: MessageStreamEvent): void {
-    if (event.type === "message.received" && this.#pendingMessageSubmission !== undefined) {
-      const submissionId = this.#pendingMessageSubmission.id;
+    const pending = this.#pendingMessageSubmission;
+    if (
+      event.type === "message.received" &&
+      pending !== undefined &&
+      readClientMessageIds(event.data)?.includes(pending.clientMessageId) === true
+    ) {
+      const submissionId = pending.id;
       this.#pendingMessageSubmission = undefined;
       this.#replaceProjectionEvent(
         (candidate) =>
@@ -393,12 +414,27 @@ export class EveAgentStore<TData> {
     }
 
     this.#status = "error";
-    this.#failPendingMessageSubmission(error);
+    this.#failPendingProjections(error);
 
     if (this.#error === undefined) {
       this.#error = error;
       this.#callbacks.onError?.(error);
     }
+  }
+
+  #failPendingProjections(error: Error): void {
+    this.#failPendingMessageSubmission(error);
+
+    const pendingInputResponse = this.#pendingInputResponse;
+    if (pendingInputResponse === undefined) {
+      return;
+    }
+
+    this.#pendingInputResponse = undefined;
+    this.#projectionEvents = this.#projectionEvents.filter(
+      (event) => event !== pendingInputResponse,
+    );
+    this.#data = this.#reduceProjectionEvents(this.#projectionEvents);
   }
 
   #failPendingMessageSubmission(error: Error): void {

@@ -8,6 +8,7 @@ import type {
 } from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { StepInput } from "#harness/types.js";
+import { readClientMessageIds, withClientMessageIds } from "#shared/client-message-correlation.js";
 
 /**
  * Merges two {@link StepInput} values into one.
@@ -17,6 +18,9 @@ import type { StepInput } from "#harness/types.js";
  * for each queued delivery payload.
  */
 export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
+  const clientMessageIds = Array.from(
+    new Set([...(readClientMessageIds(a) ?? []), ...(readClientMessageIds(b) ?? [])]),
+  );
   const inputResponses = coalesceInputResponses({
     a: a.inputResponses,
     b: b.inputResponses,
@@ -54,7 +58,7 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     result.outputSchema = outputSchema;
   }
 
-  return result;
+  return withClientMessageIds(result, clientMessageIds.length > 0 ? clientMessageIds : undefined);
 }
 
 /**

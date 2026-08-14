@@ -747,7 +747,21 @@ describe("eveChannel — onMessage", () => {
     expect(handler.send).not.toHaveBeenCalled();
   });
 
-  it("passes validated continuation callback metadata through the public session API", async () => {
+  it("rejects client-message correlation on inputResponses-only requests", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        clientMessageId: "client_message_1",
+        inputResponses: [{ requestId: "req-1", optionId: "approve" }],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.respond).not.toHaveBeenCalled();
+  });
+
+  it("passes callback and client-message correlation through the public session API", async () => {
     const handler = createEveContinueHandler({ auth: none() });
 
     const response = await handler.fetch(
@@ -759,6 +773,7 @@ describe("eveChannel — onMessage", () => {
           token: "tok123",
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
+        clientMessageId: "client_message_1",
         message: "follow up",
       }),
     );
@@ -774,6 +789,7 @@ describe("eveChannel — onMessage", () => {
           token: "tok123",
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
+        clientMessageIds: ["client_message_1"],
       }),
     );
   });
@@ -817,6 +833,21 @@ describe("eveChannel — onMessage", () => {
 });
 
 describe("eveChannel — create session idempotency", () => {
+  it("forwards client-message correlation into initial session input", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ clientMessageId: "client_message_1", message: "hi" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handler.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({ clientMessageIds: ["client_message_1"] }),
+      }),
+    );
+  });
+
   it("creates once for an operation id and uses it as the continuation token", async () => {
     const handler = createEveCreateHandler({ auth: () => ACCEPTED_AUTH });
 

@@ -15,6 +15,20 @@ import {
 import { stampTestEvents } from "#internal/testing/events.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import type { ClientSessionState } from "#client/types.js";
+import { withClientMessageIds } from "#shared/client-message-correlation.js";
+
+const TEST_CLIENT_MESSAGE_ID = "client_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+vi.mock("#shared/ulid.js", () => ({
+  createUlid: () => "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+}));
+
+function createCorrelatedMessageReceivedEvent(
+  input: Parameters<typeof createMessageReceivedEvent>[0],
+) {
+  const event = createMessageReceivedEvent(input);
+  return { ...event, data: withClientMessageIds(event.data, [TEST_CLIENT_MESSAGE_ID]) };
+}
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -128,7 +142,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
 
   it("sends a message and projects streamed events", async () => {
     const events = [
-      createMessageReceivedEvent({
+      createCorrelatedMessageReceivedEvent({
         message: "Hello",
         sequence: 0,
         turnId: "turn_1",
@@ -224,7 +238,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
 
   it("surfaces terminal stream failures as store errors", async () => {
     const events = [
-      createMessageReceivedEvent({
+      createCorrelatedMessageReceivedEvent({
         message: "Hello",
         sequence: 0,
         turnId: "turn_1",
@@ -337,7 +351,11 @@ describe("useEveAgent (Vue composable wiring)", () => {
   it("projects streamed events into reactive refs in the browser", async () => {
     vi.stubGlobal("window", {});
     const events = [
-      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createCorrelatedMessageReceivedEvent({
+        message: "Hello",
+        sequence: 0,
+        turnId: "turn_1",
+      }),
       createMessageCompletedEvent({
         message: "Hi there.",
         sequence: 1,
@@ -384,7 +402,11 @@ describe("useEveAgent (Vue composable wiring)", () => {
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))
       .mockResolvedValueOnce(
         createEagerStreamResponse([
-          createMessageReceivedEvent({ message: "After", sequence: 0, turnId: "turn_1" }),
+          createCorrelatedMessageReceivedEvent({
+            message: "After",
+            sequence: 0,
+            turnId: "turn_1",
+          }),
           createSessionWaitingEvent(),
         ]),
       );

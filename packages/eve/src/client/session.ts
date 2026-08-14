@@ -11,6 +11,7 @@ import {
   resetClientSession,
 } from "#client/session-controls.js";
 import { serializeOutputSchema } from "#shared/tool-schema.js";
+import { readClientMessageId } from "#shared/client-message-correlation.js";
 import { createClientUrl } from "#client/url.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type {
@@ -300,6 +301,8 @@ function createMessageBody(
   requireMessage: boolean,
 ): Record<string, unknown> | null {
   const body: Record<string, unknown> = {};
+  const clientMessageId = readClientMessageId(input);
+  if (clientMessageId !== undefined) body.clientMessageId = clientMessageId;
   if (input.message !== undefined) body.message = input.message;
   if (input.inputResponses !== undefined && input.inputResponses.length > 0) {
     body.inputResponses = input.inputResponses;

@@ -11,6 +11,7 @@ import {
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
+import { withClientMessageIds } from "#shared/client-message-correlation.js";
 
 async function* streamOf(parts: TextStreamPart<ToolSet>[]): AsyncIterable<TextStreamPart<ToolSet>> {
   for (const part of parts) {
@@ -128,6 +129,23 @@ describe("setHarnessEmissionState", () => {
 });
 
 describe("emitTurnPreamble", () => {
+  it("echoes client message ids on the received-message event", async () => {
+    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
+
+    await emitTurnPreamble(
+      async (event) => {
+        events.push(event);
+      },
+      withClientMessageIds({ message: "hello" }, ["client_1", "client_2"]),
+      EMISSION_STATE,
+    );
+
+    expect(events[1]).toMatchObject({
+      data: { clientMessageIds: ["client_1", "client_2"], message: "hello" },
+      type: "message.received",
+    });
+  });
+
   it("attaches one trace context to the session and turn start events", async () => {
     const events: Array<Parameters<HarnessEmitFn>[0]> = [];
     const trace = {

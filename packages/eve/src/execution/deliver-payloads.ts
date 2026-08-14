@@ -3,6 +3,7 @@ import { coalesceTurnInputs } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
 
 const COALESCED_DELIVER_FIELDS = [
+  "clientMessageIds",
   "context",
   "inputResponses",
   "message",

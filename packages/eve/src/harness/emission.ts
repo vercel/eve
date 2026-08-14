@@ -37,6 +37,7 @@ import {
 import type { RunMode } from "#shared/run-mode.js";
 import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import type { JsonObject } from "#shared/json.js";
+import { readClientMessageIds, withClientMessageIds } from "#shared/client-message-correlation.js";
 import {
   createRuntimeToolResultFromStepResult,
   createRuntimeToolResultFromToolError,
@@ -91,13 +92,15 @@ export async function emitTurnPreamble(
   await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
 
   if (input.message !== undefined) {
-    await emitFn(
-      createMessageReceivedEvent({
-        message: input.message,
-        sequence: state.sequence,
-        turnId,
-      }),
-    );
+    const received = createMessageReceivedEvent({
+      message: input.message,
+      sequence: state.sequence,
+      turnId,
+    });
+    await emitFn({
+      ...received,
+      data: withClientMessageIds(received.data, readClientMessageIds(input)),
+    });
   }
 
   return {

@@ -4,6 +4,7 @@ import { buildSessionHandle, createAttachSessionFn, createSession } from "#chann
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
+import { withClientMessageIds } from "#shared/client-message-correlation.js";
 
 function createRuntime(): Runtime {
   return {
@@ -62,7 +63,7 @@ describe("fixed session operations", () => {
     const runtime = createRuntime();
     const session = createAttachSessionFn(runtime, { requestId: "req_1" })("sess_1");
 
-    await session.send("hello", { auth: null });
+    await session.send("hello", withClientMessageIds({ auth: null }, ["client_1"]));
     await session.respond([{ optionId: "approve", requestId: "request_1" }], { auth: null });
     await session.compact();
     await session.clear();
@@ -72,7 +73,7 @@ describe("fixed session operations", () => {
       command: {
         auth: null,
         kind: "send",
-        payload: { message: "hello" },
+        payload: { clientMessageIds: ["client_1"], message: "hello" },
         requestId: "req_1",
         turnPolicy: "steer",
       },

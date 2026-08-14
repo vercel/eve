@@ -67,6 +67,7 @@ import {
 import type { ChannelMethod } from "#public/definitions/channel.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { withClientMessageIds } from "#shared/client-message-correlation.js";
 
 const log = createLogger("eve.channel");
 
@@ -314,11 +315,14 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             callback: body.callback,
             continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
-            input: {
-              message: body.message,
-              context: mergeContext(body.context, messageResult.context),
-              outputSchema: body.outputSchema,
-            },
+            input: withClientMessageIds(
+              {
+                message: body.message,
+                context: mergeContext(body.context, messageResult.context),
+                outputSchema: body.outputSchema,
+              },
+              body.clientMessageId === undefined ? undefined : [body.clientMessageId],
+            ),
             mode: body.mode ?? "conversation",
             parentTraceContext,
             title: messageResult.title,
@@ -398,7 +402,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           };
           result =
             body.inputResponses === undefined
-              ? await session.send(body.message!, options)
+              ? await session.send(
+                  body.message!,
+                  withClientMessageIds(
+                    { ...options },
+                    body.clientMessageId === undefined ? undefined : [body.clientMessageId],
+                  ),
+                )
               : await session.respond(body.inputResponses, options);
         } catch (error) {
           const errorId = logError(log, "session-message request failed", error, { sessionId });
@@ -811,6 +821,7 @@ function defaultOnMessage(ctx: EveMessageContext): EveMessageResult {
 interface ParsedCreateBody {
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
+  clientMessageId?: string;
   message: string | UserContent;
   mode?: RunMode;
   context?: readonly string[];
@@ -848,6 +859,9 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
 
+  const clientMessageId = parseClientMessageIdField(payload.clientMessageId);
+  if (clientMessageId instanceof Response) return clientMessageId;
+
   const context = parseClientContextField(payload.clientContext);
   if (context instanceof Response) return context;
 
@@ -881,6 +895,7 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
   const result: ParsedCreateBody = {
     callback,
     capabilities,
+    clientMessageId,
     message,
     mode,
     context,
@@ -892,6 +907,7 @@ function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | R
 
 interface ParsedSessionMessageBody {
   callback?: SessionCallback;
+  clientMessageId?: string;
   message?: string | UserContent;
   inputResponses?: readonly InputResponse[];
   context?: readonly string[];
@@ -913,6 +929,8 @@ function parseSessionMessageBody(
 
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
+  const clientMessageId = parseClientMessageIdField(payload.clientMessageId);
+  if (clientMessageId instanceof Response) return clientMessageId;
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
   const inputResponses = parseInputResponses(payload.inputResponses);
@@ -941,7 +959,36 @@ function parseSessionMessageBody(
     );
   }
 
-  return { callback, message, inputResponses, context, outputSchema, turnPolicy };
+  if (message === undefined && clientMessageId !== undefined) {
+    return Response.json(
+      { error: "'clientMessageId' requires a message.", ok: false },
+      { status: 400 },
+    );
+  }
+
+  return {
+    callback,
+    clientMessageId,
+    message,
+    inputResponses,
+    context,
+    outputSchema,
+    turnPolicy,
+  };
+}
+
+function parseClientMessageIdField(value: unknown): string | undefined | Response {
+  if (value === undefined) return undefined;
+  if (typeof value === "string" && value.trim() !== "" && value.length <= 128) {
+    return value;
+  }
+  return Response.json(
+    {
+      error: "Expected 'clientMessageId' to be a non-empty string of at most 128 characters.",
+      ok: false,
+    },
+    { status: 400 },
+  );
 }
 
 interface ParsedCancelTurnBody {

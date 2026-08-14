@@ -24,7 +24,7 @@ import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
-import type { HarnessSession, StepResult } from "#harness/types.js";
+import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
@@ -48,6 +48,7 @@ import { emitTerminalSessionFailureStep } from "#execution/terminal-session-fail
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
+import { readClientMessageIds, withClientMessageIds } from "#shared/client-message-correlation.js";
 import {
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
   turnWorkflowReference,
@@ -1917,6 +1918,30 @@ describe("turnStep", () => {
     expect(createDurableSessionState).toHaveBeenLastCalledWith({
       session: expect.objectContaining({ sessionId: "turn-step-session" }),
     });
+  });
+
+  it("preserves client message ids when a custom adapter normalizes delivery", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    let seenInput: StepInput | undefined;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession, input): Promise<StepResult> => {
+        seenInput = input;
+        return { next: { done: true, output: "ok" }, session: stepSession };
+      };
+    });
+
+    await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [withClientMessageIds({ message: "hello" }, ["client_1"])],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(readClientMessageIds(seenInput)).toEqual(["client_1"]);
   });
 
   it("projects a requested sleep onto the durable step result", async () => {

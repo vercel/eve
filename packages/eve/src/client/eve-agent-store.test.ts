@@ -6,6 +6,8 @@ import { stampTestEvents } from "#internal/testing/events.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
+  createInputRequestedEvent,
+  createSessionFailedEvent,
   createSessionWaitingEvent,
   createTurnCancelledEvent,
   createTurnStartedEvent,
@@ -13,6 +15,7 @@ import {
   type UnstampedMessageStreamEvent,
   type MessageStreamEvent,
 } from "#protocol/message.js";
+import { withClientMessageIds } from "#shared/client-message-correlation.js";
 
 function turnEvents(): MessageStreamEvent[] {
   return stampTestEvents([
@@ -26,6 +29,14 @@ function turnEvents(): MessageStreamEvent[] {
     }),
     createSessionWaitingEvent(),
   ] as UnstampedMessageStreamEvent[]);
+}
+
+function createCorrelatedMessageReceivedEvent(
+  input: Parameters<typeof createMessageReceivedEvent>[0],
+  clientMessageIds: readonly string[],
+) {
+  const event = createMessageReceivedEvent(input);
+  return { ...event, data: withClientMessageIds(event.data, clientMessageIds) };
 }
 
 function startedResponse(): Response {
@@ -199,6 +210,217 @@ describe("EveAgentStore stream overlap", () => {
     expect(store.snapshot.events.map((event) => event.meta.id)).toEqual(
       events.map((event) => event.meta.id),
     );
+  });
+
+  it("keeps an unrelated received message from disarming optimistic failure repair", async () => {
+    const events = stampTestEvents([
+      createCorrelatedMessageReceivedEvent(
+        {
+          message: "My message",
+          sequence: 0,
+          turnId: "turn_other",
+        },
+        ["foreign_submission"],
+      ),
+      createSessionFailedEvent({
+        code: "UNAUTHORIZED",
+        message: "Unauthorized",
+        sessionId: "session_1",
+      }),
+    ] as UnstampedMessageStreamEvent[]);
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse(events));
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    await store.send({ message: "My message" });
+
+    expect(store.snapshot.status).toBe("error");
+    expect(store.snapshot.data.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          metadata: expect.objectContaining({ status: "failed" }),
+          parts: [{ text: "My message", type: "text" }],
+          role: "user",
+        }),
+        expect.objectContaining({
+          id: "turn_other:user",
+          parts: [{ state: "done", text: "My message", type: "text" }],
+          role: "user",
+        }),
+      ]),
+    );
+  });
+
+  it("does not infer acknowledgement from matching content without correlation", async () => {
+    const events = stampTestEvents([
+      createMessageReceivedEvent({
+        message: "My message",
+        sequence: 0,
+        turnId: "turn_uncorrelated",
+      }),
+      createSessionFailedEvent({
+        code: "UNAUTHORIZED",
+        message: "Unauthorized",
+        sessionId: "session_1",
+      }),
+    ] as UnstampedMessageStreamEvent[]);
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse(events));
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    await store.send({ message: "My message" });
+
+    expect(
+      store.snapshot.data.messages.find((message) => message.id.startsWith("optimistic:")),
+    ).toMatchObject({ metadata: { optimistic: true, status: "failed" } });
+  });
+
+  it("acknowledges an optimistic message only with its echoed client message id", async () => {
+    let clientMessageId: string | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { clientMessageId?: string };
+        clientMessageId = body.clientMessageId;
+        return startedResponse();
+      }
+
+      return streamResponse(
+        stampTestEvents([
+          createCorrelatedMessageReceivedEvent(
+            {
+              message: "My message",
+              sequence: 0,
+              turnId: "turn_1",
+            },
+            [clientMessageId!],
+          ),
+          createSessionWaitingEvent(),
+        ] as UnstampedMessageStreamEvent[]),
+      );
+    });
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    await store.send({ message: "My message" });
+
+    expect(clientMessageId).toMatch(/^client_[0-9A-HJKMNP-TV-Z]{26}$/u);
+    expect(store.snapshot.data.messages).toEqual([
+      expect.objectContaining({ id: "turn_1:user", role: "user" }),
+    ]);
+  });
+
+  it("mints distinct client message ids for independent stores", async () => {
+    const requestBodies: Array<{ clientMessageId?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      requestBodies.push(JSON.parse(String(init?.body)) as { clientMessageId?: string });
+      throw new Error("dispatch failed");
+    });
+    const first = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const second = new EveAgentStore({ reducer: defaultMessageReducer() });
+
+    await Promise.all([
+      first.send({ message: "same message" }),
+      second.send({ message: "same message" }),
+    ]);
+
+    expect(requestBodies).toHaveLength(2);
+    expect(requestBodies[0]?.clientMessageId).not.toBe(requestBodies[1]?.clientMessageId);
+  });
+
+  it("restores input requests when their response fails", async () => {
+    const [inputRequested, failed] = stampTestEvents([
+      createInputRequestedEvent({
+        requests: [
+          {
+            action: {
+              callId: "call_1",
+              input: { command: "rm -rf ./cache" },
+              kind: "tool-call",
+              toolName: "bash",
+            },
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [{ id: "approve", label: "Yes", style: "primary" }],
+            prompt: "Approve tool call: bash",
+            requestId: "approval_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionFailedEvent({
+        code: "UNAUTHORIZED",
+        message: "Unauthorized",
+        sessionId: "session_1",
+      }),
+    ] as UnstampedMessageStreamEvent[]);
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(streamResponse([failed!]));
+    const store = new EveAgentStore({
+      initialEvents: [inputRequested!],
+      initialSession: { sessionId: "session_1", streamIndex: 1 },
+      reducer: defaultMessageReducer(),
+    });
+
+    await store.send({
+      inputResponses: [{ optionId: "approve", requestId: "approval_1" }],
+    });
+
+    expect(store.snapshot.status).toBe("error");
+    const toolPart = store.snapshot.data.messages[0]?.parts.find(
+      (part) => part.type === "dynamic-tool",
+    );
+    expect(toolPart).toMatchObject({
+      approval: { id: "approval_1" },
+      state: "approval-requested",
+    });
+  });
+
+  it("restores input requests when response dispatch fails", async () => {
+    const [inputRequested] = stampTestEvents([
+      createInputRequestedEvent({
+        requests: [
+          {
+            action: {
+              callId: "call_1",
+              input: { command: "rm -rf ./cache" },
+              kind: "tool-call",
+              toolName: "bash",
+            },
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [{ id: "approve", label: "Yes", style: "primary" }],
+            prompt: "Approve tool call: bash",
+            requestId: "approval_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ] as UnstampedMessageStreamEvent[]);
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Unauthorized"));
+    const store = new EveAgentStore({
+      initialEvents: [inputRequested!],
+      initialSession: { sessionId: "session_1", streamIndex: 1 },
+      reducer: defaultMessageReducer(),
+    });
+
+    await store.send({
+      inputResponses: [{ optionId: "approve", requestId: "approval_1" }],
+    });
+
+    expect(store.snapshot.status).toBe("error");
+    const toolPart = store.snapshot.data.messages[0]?.parts.find(
+      (part) => part.type === "dynamic-tool",
+    );
+    expect(toolPart).toMatchObject({
+      approval: { id: "approval_1" },
+      state: "approval-requested",
+    });
   });
 });
 
