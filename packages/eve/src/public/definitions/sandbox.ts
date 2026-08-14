@@ -68,9 +68,10 @@ export type SandboxDefinition<BO = Record<string, never>, SO = Record<string, ne
  * when paired with a `workspace/` folder); subagents use
  * `subagents/<name>/sandbox.ts`.
  *
- * The callback form can return `parent.sandbox` to select the dispatching
- * parent's exact durable sandbox. It is intended for child-only definitions;
- * throw when `parent` is `null`.
+ * Pass an object to define an independent sandbox. The callback form exists
+ * only for sharing: return `parent.sandbox` to select the dispatching parent's
+ * exact durable sandbox. It is intended for child-only definitions; throw when
+ * `parent` is `null`.
  */
 export function defineSandbox(definition: SandboxParentDefinition): SandboxParentDefinition;
 export function defineSandbox<BO = Record<string, never>, SO = Record<string, never>>(

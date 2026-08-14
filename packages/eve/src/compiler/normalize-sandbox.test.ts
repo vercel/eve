@@ -12,7 +12,19 @@ describe("resolveParentSandboxSelector", () => {
   it("rejects callbacks that return anything else", async () => {
     await expect(
       resolveParentSandboxSelector((_context: unknown) => ({ nope: true }), "invalid sandbox"),
-    ).rejects.toThrow("The sandbox callback must return parent.sandbox");
+    ).rejects.toThrow(
+      "The sandbox callback form is only for parent sharing. Return parent.sandbox, or export a sandbox definition object to configure an independent sandbox.",
+    );
+  });
+
+  it("distinguishes an authored callback error from the sharing requirement", async () => {
+    await expect(
+      resolveParentSandboxSelector(() => {
+        throw new Error("authored failure");
+      }, "invalid sandbox"),
+    ).rejects.toThrow(
+      "export a sandbox definition object to configure an independent sandbox. The callback threw: authored failure",
+    );
   });
 
   it("leaves object definitions unchanged", async () => {

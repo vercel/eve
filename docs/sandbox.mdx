@@ -120,7 +120,7 @@ export default defineSandbox({
 
 ### Sharing a parent's sandbox
 
-A declared subagent can return `parent.sandbox` to use the dispatching agent's exact live sandbox:
+Sandbox definitions use two distinct forms. Pass an object to give an agent or subagent an independent sandbox. The callback form exists only for sharing: return `parent.sandbox` to select the dispatching agent's exact live sandbox:
 
 ```ts title="agent/subagents/reviewer/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";

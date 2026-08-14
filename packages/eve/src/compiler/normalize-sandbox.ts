@@ -60,6 +60,8 @@ export async function compileSandboxDefinition(
  * simply leaves the name unrecorded.
  */
 const PARENT_SANDBOX_VALUE = Object.freeze({ __eveSandboxParentValue: Symbol("parent") });
+const PARENT_SANDBOX_CALLBACK_REQUIREMENT =
+  "The sandbox callback form is only for parent sharing. Return parent.sandbox, or export a sandbox definition object to configure an independent sandbox.";
 
 export async function resolveParentSandboxSelector(
   value: unknown,
@@ -74,12 +76,12 @@ export async function resolveParentSandboxSelector(
     selected = await value({ parent: { sandbox: PARENT_SANDBOX_VALUE } });
   } catch (error) {
     throw new Error(
-      `${message} The sandbox callback must return parent.sandbox when parent is available: ${toErrorMessage(error)}`,
+      `${message} ${PARENT_SANDBOX_CALLBACK_REQUIREMENT} The callback threw: ${toErrorMessage(error)}`,
     );
   }
 
   if (selected !== PARENT_SANDBOX_VALUE) {
-    throw new Error(`${message} The sandbox callback must return parent.sandbox.`);
+    throw new Error(`${message} ${PARENT_SANDBOX_CALLBACK_REQUIREMENT}`);
   }
   return true;
 }
