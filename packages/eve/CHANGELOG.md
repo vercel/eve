@@ -1,5 +1,21 @@
 # eve
 
+## 0.37.1
+
+### Patch Changes
+
+- 8bf1e5b: Render background subagent activity in one persistent dev TUI section across parent turns. Idle task wakes render while the prompt remains active, remote child streams use the authenticated parent proxy, and child boundaries finalize sections without later-turn cancellation closing unrelated background work.
+- 046981e: Add experimental background tasks for local and remote subagents. With `experimental.tasks` enabled, subagent calls return durable task receipts; parents can inspect, continue, or cancel work while lifecycle notifications and human-input requests arrive asynchronously. Remote child streams are exposed through an authenticated parent-origin proxy so clients never receive remote credentials.
+- d8cef1a: Scope create-once operations to the effective forwarded principal so two forwarded users behind the same trusted forwarder cannot adopt each other's session.
+- 5d12328: Preserve a session-scoped dynamic model selection when the first turn is cancelled so later turns can reuse it without requiring a `turn.started` resolver.
+- 10a09a1: Make failed `eve init` runs recoverable: new targets are cleaned up, preexisting empty targets are restored, and existing projects receive clear dependency-install recovery guidance.
+- 8bf1e5b: The dev TUI now presents and routes approval or question prompts raised by background tasks while the parent session is idle, instead of leaving the task blocked.
+- 046981e: Preserve remote task HITL response routes for loopback HTTP children and Vercel deployments configured with Protection Bypass for Automation. HTTPS remains required for every non-loopback remote child.
+- 63726db: Polish the connection authorization completion page with a Vercel-styled success state.
+- d8cef1a: Add authenticated create-once session requests through `operationId`. Concurrent or retried creates adopt the active session that first claimed the operation without dispatching duplicate input.
+- 5ba9749: Add a secure MCP channel that reuses eve route auth and lets clients start, inspect, update, authorize, and cancel principal-bound durable agent invocations over MCP 2026-07-28 with a stateless 2025 compatibility path.
+- 60e87ef: Keep active client turns connected while they are paused for authorization so responses resume automatically after the callback completes.
+
 ## 0.37.0
 
 ### Minor Changes
