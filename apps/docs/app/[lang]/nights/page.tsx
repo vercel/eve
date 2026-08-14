@@ -74,7 +74,7 @@ const NightsPage = () => (
       <div className="flex min-h-0 items-center justify-center p-4" aria-hidden="true">
         <LogoPlaceholder />
       </div>
-      <main className="flex min-h-0 items-center p-4">
+      <main className="flex min-h-0 items-start px-4 pt-12 pb-4 min-[740px]:items-center min-[740px]:p-4">
         <div className="mx-auto flex w-full max-w-md flex-col justify-center gap-12">
           <h1 className="sr-only">eve eves</h1>
           <div
