@@ -2713,7 +2713,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  /** Gives an interactive subprocess the real terminal, then restores the live region. */
+  /** Gives an interactive subprocess a temporary screen, then restores the transcript. */
   async #withInheritedStdio<T>(task: () => Promise<T>): Promise<T> {
     // Setup questions can resolve from the first key in a buffered terminal
     // chunk. The remaining bytes belong to the child process, not the next
@@ -2725,13 +2725,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#detachInput();
     this.#stopTicker();
     this.#live.clear();
-    this.#live.showCursor();
     this.#removeLogCapture();
+    this.#altScreen.enter({ cursor: "visible", mouse: false });
     if (this.#input.isTTY) this.#input.setRawMode?.(false);
     this.#input.pause();
     try {
       return await task();
     } finally {
+      this.#altScreen.exit();
       if (this.#input.isTTY) this.#input.setRawMode?.(true);
       // The parent stream must remain paused while the child owns the terminal.
       // Resume only after its raw mode and key consumer are ready again.

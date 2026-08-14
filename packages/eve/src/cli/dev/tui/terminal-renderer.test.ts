@@ -4092,7 +4092,7 @@ describe("TerminalRenderer setup panel", () => {
 });
 
 describe("TerminalRenderer setup flow session", () => {
-  it("restores the terminal while a child process inherits stdio", async () => {
+  it("discards inherited subprocess output when restoring the transcript", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     renderer.renderNotice("anchor");
@@ -4101,11 +4101,15 @@ describe("TerminalRenderer setup flow session", () => {
     await renderer.setupFlow.withInheritedStdio(async () => {
       inherited = true;
       input.pause();
+      screen.write("temporary OAuth instructions\n");
+      expect(screen.snapshot()).toContain("temporary OAuth instructions");
     });
 
     expect(inherited).toBe(true);
     expect(input.resumeCalls).toBe(2);
+    expect(screen.snapshot()).toContain("anchor");
     expect(screen.snapshot()).toContain("Add integration");
+    expect(screen.snapshot()).not.toContain("temporary OAuth instructions");
     renderer.setupFlow.end();
     renderer.shutdown();
   });
