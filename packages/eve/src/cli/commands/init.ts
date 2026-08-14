@@ -550,7 +550,18 @@ export async function runInitCommand(
   );
 
   if (result.kind === "created" && result.gitResult.kind === "failed") {
-    logger.error(pc.yellow(`Git initialization failed: ${result.gitResult.reason}`));
+    logger.error(
+      pc.yellow(
+        `Git initialization failed during ${result.gitResult.stage}: ${result.gitResult.reason}`,
+      ),
+    );
+    if (result.gitResult.stage === "commit") {
+      logger.error(
+        pc.yellow(
+          `The Git repository and staged files were preserved at "${result.projectPath}".\n\nResolve the Git error above, then retry:\n  git -C ${JSON.stringify(result.projectPath)} commit -m "Initial commit from eve"`,
+        ),
+      );
+    }
   }
 
   const agentDevCommand = [result.packageManager, ...eveDevArguments(result.packageManager)].join(
