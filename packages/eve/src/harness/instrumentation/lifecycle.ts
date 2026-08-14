@@ -273,11 +273,6 @@ export interface InstrumentationStepAttemptStartedEvent {
   readonly type: "step.attempt.started";
   readonly idempotencyKey: string;
   readonly operation: InstrumentationOperationRef;
-  /**
-   * Merged runtime context for this attempt: framework `eve.*` keys plus every
-   * destination's `runtimeContext` contribution, allowlisted onto the AI SDK
-   * call. eve's OTel provider writes these onto the step and operation spans.
-   */
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
 }
@@ -406,7 +401,6 @@ export interface InstrumentationModelCallStartedEvent {
   /** Content. Absent unless this provider declared `capture: "content"`. */
   readonly input?: InstrumentationModelInput;
   readonly model: InstrumentationModelRef;
-  /** The attempt's merged runtime context, written onto the chat span. */
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
 }

@@ -27,7 +27,6 @@ interface AttemptState {
   /** False when no provider asked for content, so none is projected at all. */
   readonly capturesContent: boolean;
   readonly modelKeys: Map<string, string>;
-  /** Merged runtime context attached to the attempt's started events. */
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
   readonly toolKeys: Map<string, string>;
