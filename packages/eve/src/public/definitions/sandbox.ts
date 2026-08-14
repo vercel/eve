@@ -51,6 +51,8 @@ export type SandboxParentDefinition = (
   context: SandboxParentDefinitionContext,
 ) => SandboxParentValue | Promise<SandboxParentValue>;
 
+const SANDBOX_PARENT_DEFINITION_MARKER = Symbol.for("eve.sandbox-parent-definition");
+
 /**
  * The shape passed to {@link defineSandbox}: a discriminated union over
  * whether a `bootstrap` hook is present. `backend` is optional here (it is
@@ -68,10 +70,10 @@ export type SandboxDefinition<BO = Record<string, never>, SO = Record<string, ne
  * when paired with a `workspace/` folder); subagents use
  * `subagents/<name>/sandbox.ts`.
  *
- * Pass an object to define an independent sandbox. The callback form exists
- * only for sharing: return `parent.sandbox` to select the dispatching parent's
- * exact durable sandbox. It is intended for child-only definitions; throw when
- * `parent` is `null`.
+ * Pass an object to define an independent sandbox. Passing a callback to
+ * `defineSandbox` opts into sharing: return `parent.sandbox` to select the
+ * dispatching parent's exact durable sandbox. It is intended for child-only
+ * definitions; throw when `parent` is `null`.
  */
 export function defineSandbox(definition: SandboxParentDefinition): SandboxParentDefinition;
 export function defineSandbox<BO = Record<string, never>, SO = Record<string, never>>(
@@ -80,5 +82,8 @@ export function defineSandbox<BO = Record<string, never>, SO = Record<string, ne
 export function defineSandbox<BO = Record<string, never>, SO = Record<string, never>>(
   definition: SandboxDefinition<BO, SO> | SandboxParentDefinition,
 ): SandboxDefinition<BO, SO> | SandboxParentDefinition {
+  if (typeof definition === "function") {
+    Object.defineProperty(definition, SANDBOX_PARENT_DEFINITION_MARKER, { value: true });
+  }
   return definition;
 }

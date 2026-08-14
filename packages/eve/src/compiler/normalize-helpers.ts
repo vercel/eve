@@ -12,6 +12,8 @@ import { toErrorMessage } from "#shared/errors.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 
+const SANDBOX_PARENT_DEFINITION_MARKER = Symbol.for("eve.sandbox-parent-definition");
+
 /**
  * Shared compile-time context threaded through every per-primitive
  * normalize step.
@@ -50,16 +52,24 @@ export async function loadModuleBackedDefinition(input: {
   );
   const exportValue = getAuthoredModuleExport(moduleNamespace, input.source);
 
-  // Sandbox callbacks receive runtime ancestry and must reach the sandbox
-  // compiler intact. Every other authored primitive keeps the historical
-  // zero-argument definition-factory materialization behavior.
-  if (input.kind === "sandbox" && typeof exportValue === "function" && exportValue.length > 0) {
+  // defineSandbox marks parent selectors so they remain distinguishable from
+  // zero-argument module factories without relying on JavaScript function arity.
+  if (
+    input.kind === "sandbox" &&
+    typeof exportValue === "function" &&
+    Reflect.get(exportValue, SANDBOX_PARENT_DEFINITION_MARKER) === true
+  ) {
     return exportValue;
   }
 
   try {
     return await materializeAuthoredModuleExport(exportValue);
   } catch (error) {
+    if (input.kind === "sandbox" && typeof exportValue === "function") {
+      throw new Error(
+        `Failed to execute the sandbox export "${input.source.exportName ?? "default"}" from "${input.displayPath ?? input.source.logicalPath}" as a zero-argument definition factory. Parent-sharing callbacks must be passed to defineSandbox(...): ${toErrorMessage(error)}`,
+      );
+    }
     throw new Error(
       `Failed to execute the ${input.kind} export "${input.source.exportName ?? "default"}" from "${input.displayPath ?? input.source.logicalPath}": ${toErrorMessage(error)}`,
     );

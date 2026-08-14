@@ -18,8 +18,9 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  SandboxKey,
 } from "#context/keys.js";
-import { contextStorage } from "#context/container.js";
+import { withContextScope } from "#context/run-step.js";
 import {
   BundleKey,
   ChannelKey,
@@ -60,7 +61,6 @@ import {
 import { startLocalSubagent } from "#execution/subagent-start-local.js";
 import { startRemoteSubagent } from "#execution/subagent-start-remote.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -195,23 +195,8 @@ export async function prepareRuntimeActionDispatch(input: {
   });
   const adapter = ctx.require(ChannelKey);
 
-  const sandboxSessionId = resolveActiveSandboxSessionId(adapter.state, session.sessionId);
-  if (planSharesSandbox({ actions: batch.actions, bundle })) {
-    const sandboxAccess = await ensureSandboxAccess({
-      compiledArtifactsSource: bundle.compiledArtifactsSource,
-      nodeId: bundle.graph.root.nodeId,
-      registry: bundle.graph.root.sandboxRegistry,
-      runOnSession: async (callback) => await contextStorage.run(ctx, callback),
-      sessionId: sandboxSessionId,
-      state: session.sandboxState ?? null,
-    });
-    await sandboxAccess.get();
-    session = { ...session, sandboxState: await sandboxAccess.captureState() };
-  }
-
-  // A corrupt handle store throws; surface that before anything dispatches.
-  // A mid-loop throw after a sibling started would durably replay the whole
-  // batch and re-dispatch that sibling.
+  // A corrupt handle store and rejected actions must resolve before sandbox
+  // initialization, which can provision backend resources and run onSession.
   getAgentHandleStore(durableSession.state);
   const plan = planDispatch({
     actions: batch.actions,
@@ -220,6 +205,19 @@ export async function prepareRuntimeActionDispatch(input: {
     session,
     taskControls: input.taskControls,
   });
+
+  const sandboxSessionId = resolveActiveSandboxSessionId(adapter.state, session.sessionId);
+  if (planSharesSandbox({ bundle, plan })) {
+    try {
+      const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
+        await ctx.require(SandboxKey).get();
+        return { result: undefined, session: enrichedSession };
+      });
+      session = scoped.session;
+    } finally {
+      ctx.clearVirtualContext();
+    }
+  }
 
   return {
     adapter,
@@ -241,18 +239,22 @@ export async function prepareRuntimeActionDispatch(input: {
 }
 
 function planSharesSandbox(input: {
-  readonly actions: readonly RuntimeActionRequest[];
   readonly bundle: CompiledBundle;
+  readonly plan: readonly DispatchPlanEntry[];
 }): boolean {
   const graph = (input.bundle as Partial<CompiledBundle>).graph;
-  if (graph === undefined) return false;
-  return input.actions.some(
-    (action) =>
-      action.kind === "subagent-call" &&
-      (action.subagentName === "agent" ||
-        graph.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox.definition
-          .inheritsParent === true),
-  );
+  return input.plan.some((entry) => {
+    if (entry.kind !== "start" || entry.target.kind !== "local") return false;
+    const action = entry.target.action;
+    const isSelfDelegation =
+      action.subagentName === "agent" &&
+      !input.bundle.subagentRegistry.subagentsByNodeId.has(action.nodeId);
+    return (
+      isSelfDelegation ||
+      graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox.definition.inheritsParent ===
+        true
+    );
+  });
 }
 
 function resolveActiveSandboxSessionId(adapterState: unknown, sessionId: string): string {

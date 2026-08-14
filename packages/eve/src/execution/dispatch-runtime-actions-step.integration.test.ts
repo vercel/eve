@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import { ContextContainer, loadContext } from "#context/container.js";
 import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatch.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -26,8 +27,18 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  SessionIdKey,
+  SessionKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import type {
+  SandboxBackend,
+  SandboxBackendCreateInput,
+} from "#public/definitions/sandbox-backend.js";
+import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import type { ResolvedSandboxDefinition } from "#runtime/types.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 
 const mocks = vi.hoisted(() => ({
   continueRemoteAgentSession: vi.fn(),
@@ -231,6 +242,125 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       ],
     });
     expect(writes).toHaveLength(1);
+  });
+
+  it("opens a shared parent sandbox with session context and durable backend tags", async () => {
+    const session = createStartSession({ kind: "local" });
+    const observedSessionIds: string[] = [];
+    const { backend, create } = createSandboxBackend();
+    const registry = createSandboxRegistry(backend, ({ ctx }) => {
+      observedSessionIds.push(ctx.session.id, loadContext().require(SessionKey).sessionId);
+    });
+    installSandboxContext({
+      child: { inheritsParent: true, name: "research", nodeId: "subagents/research" },
+      registry,
+      session,
+    });
+
+    await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(observedSessionIds).toEqual(["parent-session", "parent-session"]);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tags: {
+          agent: "parent-agent",
+          channel: "channel:test",
+          sessionId: "parent-session",
+        },
+      }),
+    );
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapter: expect.objectContaining({
+          state: expect.objectContaining({
+            parentSandboxState: expect.objectContaining({ initialized: true }),
+            sandboxSessionId: "parent-session",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("opens a shared parent sandbox for a background-task child", async () => {
+    const session = createStartSession({ kind: "local" });
+    const { backend, create } = createSandboxBackend();
+    installSandboxContext({
+      child: { inheritsParent: true, name: "research", nodeId: "subagents/research" },
+      registry: createSandboxRegistry(backend),
+      session,
+    });
+    vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({ runId: "task-run-1" });
+
+    await dispatchTaskStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapter: expect.objectContaining({
+          state: expect.objectContaining({ sandboxSessionId: "parent-session" }),
+        }),
+        mode: "conversation",
+      }),
+    );
+  });
+
+  it("does not open the parent sandbox for a declared subagent named agent", async () => {
+    const session = createNamedStartSession({
+      name: "agent",
+      nodeId: "subagents/agent",
+    });
+    const { backend, create } = createSandboxBackend();
+    installSandboxContext({
+      child: { inheritsParent: false, name: "agent", nodeId: "subagents/agent" },
+      registry: createSandboxRegistry(backend),
+      session,
+    });
+
+    await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(create).not.toHaveBeenCalled();
+    expect(mocks.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects recursive self-delegation before opening the parent sandbox", async () => {
+    const session = createNamedStartSession({
+      name: "agent",
+      nodeId: "__root__",
+      session: { rootSessionId: "root-session", subagentDepth: 1 },
+    });
+    const { backend, create } = createSandboxBackend();
+    installSandboxContext({ registry: createSandboxRegistry(backend), session });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        output: expect.objectContaining({ code: "RECURSIVE_AGENT_ROOT_ONLY" }),
+      }),
+    ]);
+    expect(create).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
   it("records a tasks-mode child as an address and derives task identity separately", async () => {
@@ -992,6 +1122,29 @@ function createStartSession(input: {
   });
 }
 
+function createNamedStartSession(input: {
+  readonly name: string;
+  readonly nodeId: string;
+  readonly session?: Partial<HarnessSession>;
+}): HarnessSession {
+  return setPendingRuntimeActionBatch({
+    actions: [
+      {
+        callId: "call-1",
+        description: `Delegate to ${input.name}`,
+        input: { message: "research this" },
+        kind: "subagent-call",
+        name: input.name,
+        nodeId: input.nodeId,
+        subagentName: input.name,
+      },
+    ],
+    event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
+    responseMessages: [],
+    session: { ...createBaseSession(), ...input.session },
+  });
+}
+
 function createPendingSession(input: {
   readonly handle?: AgentHandle;
   readonly agentId: string | null;
@@ -1052,6 +1205,93 @@ function installContext(
     },
   });
   mocks.readDurableSession.mockResolvedValue(session);
+}
+
+function createSandboxBackend() {
+  const sandbox = mockSandbox({ id: "shared-parent-sandbox" });
+  const create = vi.fn(async (input: SandboxBackendCreateInput) => ({
+    captureState: async () => ({
+      backendName: "test",
+      metadata: {},
+      sessionKey: input.sessionKey,
+    }),
+    session: sandbox.session,
+    shutdown: async () => {},
+    stop: async () => {},
+    useSessionFn: async () => sandbox.session,
+  }));
+  return {
+    backend: { create, name: "test", prewarm: vi.fn(async () => ({ reused: false })) },
+    create,
+  };
+}
+
+function createSandboxRegistry(
+  backend: SandboxBackend,
+  onSession?: ResolvedSandboxDefinition["onSession"],
+): RuntimeSandboxRegistry {
+  return {
+    sandbox: {
+      definition: {
+        backend,
+        logicalPath: "agent/sandbox.ts",
+        onSession,
+        sourceId: "agent/sandbox",
+        sourceKind: "module",
+      },
+      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+    },
+  };
+}
+
+function installSandboxContext(input: {
+  readonly child?: {
+    readonly inheritsParent: boolean;
+    readonly name: string;
+    readonly nodeId: string;
+  };
+  readonly registry: RuntimeSandboxRegistry;
+  readonly session: HarnessSession;
+}): void {
+  const root = {
+    agent: { config: { name: "parent-agent" }, connections: [] },
+    nodeId: "__root__",
+    sandboxRegistry: input.registry,
+    turnAgent: input.session.agent,
+  };
+  const nodesByNodeId = new Map<string, unknown>([["__root__", root]]);
+  const subagentsByNodeId = new Map<string, unknown>();
+  if (input.child !== undefined) {
+    nodesByNodeId.set(input.child.nodeId, {
+      sandboxRegistry: {
+        sandbox: {
+          definition: { inheritsParent: input.child.inheritsParent },
+        },
+      },
+    });
+    subagentsByNodeId.set(input.child.nodeId, {
+      definition: {
+        description: `Delegate to ${input.child.name}`,
+        kind: "subagent",
+      },
+    });
+  }
+
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, null);
+  ctx.set(InitiatorAuthKey, null);
+  ctx.set(SessionIdKey, input.session.sessionId);
+  ctx.set(ChannelKey, ADAPTER);
+  ctx.set(BundleKey, {
+    compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    graph: { nodesByNodeId, root },
+    resolvedAgent: { config: {} },
+    subagentRegistry: { subagentsByNodeId },
+    turnAgent: input.session.agent,
+  } as never);
+
+  mocks.deserializeContext.mockResolvedValue(ctx);
+  mocks.readDurableSession.mockResolvedValue(input.session);
 }
 
 function createWritable(writes: Uint8Array[] = []): WritableStream<Uint8Array> {

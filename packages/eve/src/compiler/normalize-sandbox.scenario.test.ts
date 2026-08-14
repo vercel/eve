@@ -35,10 +35,14 @@ describe("sandbox compilation", () => {
         "agent/subagents/foo/agent.ts":
           "export default { description: 'foo', model: 'openai/gpt-5.4' };\n",
         "agent/subagents/foo/description.md": "foo\n",
-        "agent/subagents/foo/sandbox/sandbox.ts":
-          "export default ({ parent }) => parent.sandbox;\n",
+        "agent/subagents/foo/sandbox/sandbox.ts": [
+          'import { defineSandbox } from "eve/sandbox";',
+          "export default defineSandbox((...args) => args[0].parent.sandbox);",
+          "",
+        ].join("\n"),
         "agent/subagents/foo/sandbox/workspace/bar.txt": "child seed\n",
       },
+      installDependencies: true,
       name: "inherited-sandbox-child-resources",
     });
 
