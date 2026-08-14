@@ -139,13 +139,6 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     singularNoun: "task",
     pluralNoun: "tasks",
   },
-  task_send: {
-    verb: "Send",
-    pastVerb: "Sent",
-    argKey: "taskId",
-    singularNoun: "task",
-    pluralNoun: "tasks",
-  },
   task_sleep: {
     verb: "Pause",
     pastVerb: "Paused",
@@ -153,6 +146,13 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     extractItem: sleepSecondsArg,
     singularNoun: "pause",
     pluralNoun: "pauses",
+  },
+  task_update: {
+    verb: "Update",
+    pastVerb: "Updated",
+    argKey: "message",
+    singularNoun: "parent",
+    pluralNoun: "parents",
   },
   web_fetch: {
     verb: "Fetch",

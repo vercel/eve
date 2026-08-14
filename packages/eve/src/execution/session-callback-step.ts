@@ -42,6 +42,35 @@ export async function fireTaskEventCallbackStep(input: {
   }
 }
 
+/** Sends one remote task progress update over its existing parent callback. */
+export async function fireTaskUpdateCallbackStep(input: {
+  readonly callback: unknown;
+  readonly callId: string;
+  readonly childStepIndex: number;
+  readonly childTurnId: string;
+  readonly message: string;
+}): Promise<string | undefined> {
+  "use step";
+
+  const callback = parseSerializedSessionCallback(input.callback);
+  if (callback.taskId === undefined) return undefined;
+  const response = await postSessionCallbackRequest({
+    body: {
+      callId: input.callId,
+      childStepIndex: input.childStepIndex,
+      childTurnId: input.childTurnId,
+      kind: "task.update",
+      message: input.message,
+      taskId: callback.taskId,
+    },
+    url: callback.url,
+  });
+  if (!response.ok) {
+    throw new Error(`Task update callback failed with HTTP ${response.status}.`);
+  }
+  return callback.taskId;
+}
+
 /**
  * Sends the configured session terminal callback.
  *

@@ -44,7 +44,7 @@ so replayed creation for the same originating call yields the same task without 
 
 ### Flag composition
 
-`task_send` follow-ups to a finished child require conversation-mode children and parked
+`agentId` follow-ups to a finished child require conversation-mode children and parked
 handles, which `experimental.subagentPersistentSessions` gates today. `experimental.tasks`
 therefore implies persistent-session children for subagent dispatch. Whether it sets the other
 flag or simply selects the same behavior internally is a stage-4 decision; the two flags must
@@ -86,7 +86,7 @@ New `packages/eve/src/tasks/` module cluster:
 
 - `TaskStatus`, `TaskView`, `TaskMetadata`, `TaskOutput`, and a pure transition function
   enforcing the lifecycle rules (terminal is final; `working <-> input_required`). This stage
-  also settles how `input_required` exposes its outstanding `InputRequest[]`; `task_send`
+  also settles how `input_required` exposes its outstanding `InputRequest[]`; agent continuations
   accepts only a message follow-up for a terminal task.
 - The **durable task run**: a dedicated small workflow per task (precedent: the session-timeout
   run). It is the single writer for transitions, consumes commands over its own hook, and
@@ -102,12 +102,12 @@ lifecycle path.
 
 ### Stage 2 — task tools, undiscoverable
 
-Register the parent tools (`task_peek`, `task_send`, `task_cancel`, `task_sleep`)
+Register the task tools (`task_peek`, `task_cancel`, `task_sleep`, `task_update`)
 as framework tools, filtered out of the tool set unless the flag is on. The first implementation
 has no child-facing task tool.
 
 - `task_sleep` reuses the existing durable turn-sleep request.
-- `task_peek`, `task_cancel`, and `task_send` read the session task index; `task_send` resolves a
+- `task_peek` and `task_cancel` read the session task index; an `agentId` continuation resolves a
   terminal task's child address through the agent handle store and starts a new task.
 
 Verification: unit tests per tool; a scenario test that the tools are absent from advertised
@@ -176,7 +176,7 @@ deliberately; they get their own plans if anything nontrivial surfaces.
    `<agents>` with their active task id and status.
 2. **Wake policy.** Terminal and `input_required` transitions wake a parked parent through the
    session delivery path; they are the only wake triggers.
-3. **`task_send` to a busy child.** A send to a `working` task surfaces `AGENT_BUSY` as a tool
+3. **Continuation to a busy child.** An `agentId` continuation to a `working` task surfaces `AGENT_BUSY` as a tool
    error, matching handle-continuation semantics. Queuing on the task run is deferred; it is
    the reversible follow-up if busy errors prove noisy in practice.
    The same agent is reserved for the whole dispatch batch even if its first task settles quickly.

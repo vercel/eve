@@ -11,9 +11,9 @@ import { defineTaskEval } from "./task-transition.js";
 
 /** A reused child must route every new-turn event through the new owning task. */
 export default defineTaskEval({
-  description: "task_send rebinds a reused child's HITL events to the new task lifecycle.",
+  description: "An agentId continuation rebinds a reused child's HITL events to a new task.",
   transition: {
-    primary: "task.agent.send.accepted-terminal-available",
+    primary: "task.agent.continue.accepted-terminal-available",
     setup: ["task.input.answer.accepted-complete"],
     dimensions: { transport: "local" },
   },
@@ -45,23 +45,24 @@ export default defineTaskEval({
       firstTerminal.requireToolCall("task_peek").output,
       firstTaskId,
     );
+    const firstAgentId = requireAgentId(firstView);
     t.log("first task completed; sending continuation");
 
     const continued = await sendAndFollowQueuedTurn(
       t,
-      `TASK-CONTINUATION-HITL-SEND ${firstTaskId}`,
+      `TASK-CONTINUATION-HITL-SEND ${firstAgentId}`,
       second.session,
     );
     continued.turn.expectOk();
-    const send = continued.turn.toolCalls.find((call) => call.name === "task_send");
+    const send = continued.turn.toolCalls.find((call) => call.name === "approval-worker");
     const secondTaskId =
       send?.output !== null && typeof send?.output === "object"
         ? Reflect.get(send.output, "taskId")
         : undefined;
-    if (typeof secondTaskId !== "string") throw new Error("task_send returned no new task id.");
+    if (typeof secondTaskId !== "string") throw new Error("Continuation returned no new task id.");
     await t.require(
       secondTaskId,
-      satisfies((taskId) => taskId !== firstTaskId, "task_send creates a new task identity"),
+      satisfies((taskId) => taskId !== firstTaskId, "continuation creates a new task identity"),
     );
     t.log("continuation admitted; waiting for rebound HITL");
     const continuedThird = await waitForTaskInput(t, continued.session, "third_gate");
@@ -89,7 +90,6 @@ export default defineTaskEval({
       secondTerminal.requireToolCall("task_peek").output,
       secondTaskId,
     );
-    const firstAgentId = requireAgentId(firstView);
     await t.require(
       secondView,
       satisfies(

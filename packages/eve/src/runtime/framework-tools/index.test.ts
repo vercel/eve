@@ -22,6 +22,8 @@ describe("framework-tools/index", () => {
     expect(names.has("load_skill")).toBe(true);
     expect(names.has("ask_question")).toBe(true);
     expect(names.has("agent")).toBe(true);
+    expect(names.has("task_update")).toBe(true);
+    expect(names.has("task_send")).toBe(false);
     // connection_search is now a dynamic tool resolver, not a framework tool
     expect(names.has("connection_search")).toBe(false);
   });

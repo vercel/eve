@@ -15,6 +15,7 @@ import {
   type TaskInboundAnswerInput,
   type TaskInboundAuthorizationEvent,
   type TaskInboundInputRequest,
+  type TaskInboundUpdate,
   type TaskView,
 } from "#tasks/types.js";
 
@@ -111,6 +112,29 @@ export async function wakeTaskParentStep(input: {
       });
       return;
     }
+    throw error;
+  }
+}
+
+/** Forwards a running child's intermediate update to its parent session. */
+export async function wakeTaskUpdateParentStep(input: {
+  readonly token: string;
+  readonly update: TaskInboundUpdate;
+  readonly view: TaskView;
+}): Promise<void> {
+  "use step";
+
+  const command: SessionCommand = {
+    kind: "send",
+    payload: {
+      message: `Background task ${input.view.taskId} (${input.view.metadata.name}) update: ${input.update.message}`,
+    },
+    taskDeliveryId: `${input.view.taskId}:update:${input.update.childTurnId}:${input.update.childStepIndex}:${input.update.callId}`,
+  };
+  try {
+    await resumeHook(input.token, command);
+  } catch (error) {
+    if (isTaskWorkflowTargetGone(error)) return;
     throw error;
   }
 }

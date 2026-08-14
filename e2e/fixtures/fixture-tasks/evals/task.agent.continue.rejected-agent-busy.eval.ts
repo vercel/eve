@@ -8,16 +8,16 @@ import {
   waitForCompletedTask,
 } from "./shared.js";
 
-/** A persistent child with a nonterminal task rejects every competing send. */
+/** A persistent child with a nonterminal task rejects every competing continuation. */
 export default defineTaskEval({
   description:
-    "One competing task_send is admitted; same-batch and later sends are rejected as AGENT_BUSY without task receipts.",
+    "One agentId continuation is admitted; competing continuations are rejected as AGENT_BUSY.",
   transition: {
-    primary: "task.agent.send.rejected-agent-busy",
+    primary: "task.agent.continue.rejected-agent-busy",
     setup: [
       "task.dispatch.start.accepted-acknowledged",
       "task.lifecycle.complete.accepted-nonterminal",
-      "task.agent.send.accepted-terminal-available",
+      "task.agent.continue.accepted-terminal-available",
     ],
     dimensions: { transport: "local", parentPhase: "active" },
   },
@@ -26,7 +26,13 @@ export default defineTaskEval({
     setup.expectOk();
     setup.messageIncludes("CHILD-TASK-EXCLUSIVITY-READY");
     const initialTaskId = requireBackgroundTaskId(setup);
-    await waitForCompletedTask(t, t, "CHILD-TASK-EXCLUSIVITY-VERIFY", initialTaskId);
+    const initial = await waitForCompletedTask(
+      t,
+      t,
+      "CHILD-TASK-EXCLUSIVITY-VERIFY",
+      initialTaskId,
+    );
+    const agentId = agentIdFromTaskView(initial.requireToolCall("task_peek").output, initialTaskId);
 
     const race = await sendAndFollowQueuedTurn(t, "CHILD-TASK-EXCLUSIVITY-RACE", t, {
       allowFailedActions: true,
@@ -35,7 +41,7 @@ export default defineTaskEval({
     raced.expectOk();
     raced.messageIncludes("CHILD-TASK-EXCLUSIVITY-RACE-DONE");
 
-    const sends = raced.toolCalls.filter((call) => call.name === "task_send");
+    const sends = raced.toolCalls.filter((call) => call.name === "busy-worker");
     const admitted = sends.filter(hasTaskReceipt);
     await t.require(
       sends,
@@ -60,11 +66,11 @@ export default defineTaskEval({
 
     const later = await sendAndFollowQueuedTurn(
       t,
-      `CHILD-TASK-EXCLUSIVITY-LATER ${initialTaskId}`,
+      `CHILD-TASK-EXCLUSIVITY-LATER ${agentId}`,
       race.session,
       { allowFailedActions: true },
     );
-    const laterSends = later.turn.toolCalls.filter((call) => call.name === "task_send");
+    const laterSends = later.turn.toolCalls.filter((call) => call.name === "busy-worker");
     await t.require(
       laterSends,
       satisfies(
@@ -86,6 +92,21 @@ function hasTaskReceipt(call: EveEvalToolCall): boolean {
     typeof Reflect.get(call.output, "taskId") === "string" &&
     Reflect.get(call.output, "status") === "working"
   );
+}
+
+function agentIdFromTaskView(output: unknown, taskId: string): string {
+  if (output === null || typeof output !== "object") throw new Error("No task view output.");
+  const tasks = Reflect.get(output, "tasks");
+  if (!Array.isArray(tasks)) throw new Error("No task views.");
+  const task = tasks.find(
+    (value) =>
+      value !== null && typeof value === "object" && Reflect.get(value, "taskId") === taskId,
+  );
+  const metadata = task !== null && typeof task === "object" ? Reflect.get(task, "metadata") : null;
+  const agentId =
+    metadata !== null && typeof metadata === "object" ? Reflect.get(metadata, "agentId") : null;
+  if (typeof agentId !== "string") throw new Error("Task view has no agent id.");
+  return agentId;
 }
 
 function taskIdFromReceipt(call: EveEvalToolCall | undefined): string {

@@ -391,11 +391,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     event: UnstampedMessageStreamEvent,
     messages?: readonly import("ai").ModelMessage[],
   ): Promise<void> => {
-    // Task children report HITL and authorization transitions to their
-    // parent's session callback before local emission, so the parent's
-    // task run can block/unblock the task under one durable decision.
-    await forwardTaskEventToSessionCallback(ctx, event);
-    const emitted = await emit(event);
+    // A remote task's parent owns its HITL. Forward blocking events over
+    // the task callback and keep them out of the child's local channel;
+    // otherwise two TUIs can present and answer the same request.
+    const forwardedToTaskParent = await forwardTaskEventToSessionCallback(ctx, event);
+    const emitted = forwardedToTaskParent ? stampMessageStreamEvent(event) : await emit(event);
     await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted });
     if (emitted.type !== "step.started") {
       await dispatchDynamicModelEvent({

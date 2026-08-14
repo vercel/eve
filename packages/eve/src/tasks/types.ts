@@ -300,6 +300,15 @@ export interface TaskInboundTurnStarted {
   readonly taskId: string;
 }
 
+/** Intermediate progress sent by a running child to its parent agent. */
+export interface TaskInboundUpdate {
+  readonly callId: string;
+  readonly childStepIndex: number;
+  readonly childTurnId: string;
+  readonly kind: "task-update";
+  readonly message: string;
+}
+
 /**
  * Arrives when the delegated child emits `authorization.required` or
  * `authorization.completed`. The former exposes an authorization blocker in
@@ -335,6 +344,7 @@ export type TaskRunInboundPayload =
   | TaskInboundChildResult
   | TaskInboundInputRequest
   | TaskInboundTurnStarted
+  | TaskInboundUpdate
   | TaskInboundAuthorizationEvent
   | TaskInboundAnswerInput;
 

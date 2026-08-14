@@ -14,7 +14,7 @@ import type { TaskView } from "#tasks/types.js";
 /**
  * Result and lookup helpers shared by the task-control executors
  * (`task_peek`/`task_cancel` in the dispatch module,
- * `task_send` in its own).
+ * task controls in their own).
  */
 
 /** Resolves owned index entries, or the ids this session does not own. */

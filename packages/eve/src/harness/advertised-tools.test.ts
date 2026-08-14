@@ -140,6 +140,7 @@ describe("getAdvertisedTools for definition arrays", () => {
       ["add", createTool("add")],
       ["task_peek", createTaskControlTool("task_peek")],
       ["task_sleep", createTool("task_sleep")],
+      ["task_update", createTaskControlTool("task_update")],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({ session: {}, tools });
@@ -147,18 +148,31 @@ describe("getAdvertisedTools for definition arrays", () => {
     expect([...advertisedTools.keys()]).toEqual(["add", "task_peek", "task_sleep"]);
   });
 
-  it("removes the task tools from delegated sessions", () => {
+  it("keeps only task_update in delegated sessions", () => {
     const tools = new Map([
       ["add", createTool("add")],
       ["task_cancel", createTaskControlTool("task_cancel")],
       ["task_peek", createTaskControlTool("task_peek")],
       ["task_sleep", createTool("task_sleep")],
+      ["task_update", createTaskControlTool("task_update")],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
+      delegatedCaller: true,
       session: { rootSessionId: "root-session", subagentDepth: 1 },
       tools,
     });
+
+    expect([...advertisedTools.keys()]).toEqual(["add", "task_update"]);
+  });
+
+  it("removes task_update from sessions without a delegated caller", () => {
+    const tools = new Map([
+      ["add", createTool("add")],
+      ["task_update", createTaskControlTool("task_update")],
+    ]) satisfies HarnessToolMap;
+
+    const advertisedTools = getAdvertisedTools({ session: {}, tools });
 
     expect([...advertisedTools.keys()]).toEqual(["add"]);
   });
