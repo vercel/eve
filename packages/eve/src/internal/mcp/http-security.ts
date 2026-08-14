@@ -10,7 +10,7 @@ export function validateMcpHttpRequest(request: Request): Response | undefined {
   const baseFailure = validateMcpHttpRequestBase(request);
   if (baseFailure !== undefined) return baseFailure;
 
-  const target = new URL(request.url);
+  const target = resolveMcpPublicRequestUrl(request);
   const originHeader = request.headers.get("origin");
   if (originHeader === null || originHeader.length === 0) return undefined;
 
@@ -37,22 +37,57 @@ export function validateMcpMetadataRequest(request: Request): Response | undefin
 
 function validateMcpHttpRequestBase(request: Request): Response | undefined {
   let target: URL;
+  let publicTarget: URL;
   try {
     target = new URL(request.url);
+    publicTarget = resolveMcpPublicRequestUrl(request);
   } catch {
-    return securityError("Invalid MCP request URL.", 400);
+    return securityError("Invalid MCP request URL or forwarded host.", 400);
   }
 
-  if (
-    target.protocol !== "https:" &&
-    !(target.protocol === "http:" && isLoopbackHostname(target.hostname))
-  ) {
+  if (!isSecureMcpTarget(target) || !isSecureMcpTarget(publicTarget)) {
     return securityError("MCP endpoints require HTTPS except on loopback.");
   }
 
   const hostFailure = validateHostHeader(request, target);
   if (hostFailure !== undefined) return hostFailure;
   return undefined;
+}
+
+function isSecureMcpTarget(target: URL): boolean {
+  return (
+    target.protocol === "https:" ||
+    (target.protocol === "http:" && isLoopbackHostname(target.hostname))
+  );
+}
+
+function pickFirstForwardedValue(value: string | null): string | undefined {
+  const first = value?.split(",")[0]?.trim();
+  return first === undefined || first.length === 0 ? undefined : first;
+}
+
+/** Resolves the public URL in front of an eve host integration or reverse proxy. */
+export function resolveMcpPublicRequestUrl(request: Request): URL {
+  const requestUrl = new URL(request.url);
+  const forwardedHost = pickFirstForwardedValue(request.headers.get("x-forwarded-host"));
+  const forwardedProto = pickFirstForwardedValue(request.headers.get("x-forwarded-proto"));
+  if (forwardedHost === undefined && forwardedProto === undefined) return requestUrl;
+
+  const protocol = forwardedProto ?? requestUrl.protocol.slice(0, -1);
+  if (protocol !== "http" && protocol !== "https") {
+    throw new TypeError("Unsupported forwarded protocol.");
+  }
+  const authority = new URL(`${protocol}://${forwardedHost ?? requestUrl.host}`);
+  if (
+    authority.username !== "" ||
+    authority.password !== "" ||
+    authority.pathname !== "/" ||
+    authority.search !== "" ||
+    authority.hash !== ""
+  ) {
+    throw new TypeError("Invalid forwarded host.");
+  }
+  return new URL(`${requestUrl.pathname}${requestUrl.search}`, authority);
 }
 
 function validateHostHeader(request: Request, target: URL): Response | undefined {

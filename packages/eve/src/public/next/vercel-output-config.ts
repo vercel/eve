@@ -13,6 +13,11 @@ import {
   findClosestLinkedVercelDirectory,
   findClosestVercelOutputDirectory,
 } from "#shared/vercel-output-directory.js";
+import {
+  createVercelRequestPath,
+  createVercelRouteSource,
+  type EveChannelRouteMount,
+} from "./channel-route-mounts.js";
 
 const VERCEL_JSON_FILE_NAME = "vercel.json";
 const VERCEL_OUTPUT_CONFIG_FILE_NAME = ".vercel/output/config.json";
@@ -90,6 +95,7 @@ export interface EnsureVercelOutputConfigResult {
 export interface EnsureVercelOutputConfigAgentInput {
   readonly appRoot: string;
   readonly buildCommand: string;
+  readonly channelRouteMounts: readonly EveChannelRouteMount[];
   readonly name?: string;
   readonly publicRoutePrefix: string;
   readonly servicePrefix: string;
@@ -398,21 +404,25 @@ function createEveServiceRoute(serviceName: string, routeSrc: string): VercelRou
   };
 }
 
-function isEveServiceRequestPathRoute(route: VercelRouteConfig, routeSrc: string): boolean {
-  return route.src === routeSrc;
-}
-
-function createEveServiceRequestPathRoute(routeSrc: string): VercelRouteConfig {
+function createRequestPathRoute(routeSrc: string, requestPath: string): VercelRouteConfig {
   return {
     src: routeSrc,
     transforms: [
       {
-        args: EVE_SERVICE_ROUTE_PATH,
+        args: requestPath,
         op: "set",
         type: "request.path",
       },
     ],
   };
+}
+
+function isEveServiceRequestPathRoute(route: VercelRouteConfig, routeSrc: string): boolean {
+  return route.src === routeSrc;
+}
+
+function createEveServiceRequestPathRoute(routeSrc: string): VercelRouteConfig {
+  return createRequestPathRoute(routeSrc, EVE_SERVICE_ROUTE_PATH);
 }
 
 function insertEveServiceRequestPathRoute(
@@ -430,22 +440,28 @@ function insertEveServiceRequestPathRoute(
 function insertEveServiceRoutes(
   routes: readonly VercelRouteConfig[],
   eveRoutes: readonly {
+    readonly requestPath?: string;
     readonly routeSrc: string;
     readonly serviceName: string;
   }[],
 ): readonly VercelRouteConfig[] {
   const routesWithoutEveRoutes = routes.filter(
     (route) =>
-      !eveRoutes.some((eveRoute) =>
-        isEveServiceRoute(route, eveRoute.serviceName, eveRoute.routeSrc),
+      !eveRoutes.some(
+        (eveRoute) =>
+          isEveServiceRoute(route, eveRoute.serviceName, eveRoute.routeSrc) ||
+          (route.src === eveRoute.routeSrc && route.transforms !== undefined),
       ),
   );
   const filesystemRouteIndex = routesWithoutEveRoutes.findIndex(
     (route) => route.handle === "filesystem",
   );
-  const nextEveRoutes = eveRoutes.map((eveRoute) =>
+  const nextEveRoutes = eveRoutes.flatMap((eveRoute) => [
+    ...(eveRoute.requestPath === undefined
+      ? []
+      : [createRequestPathRoute(eveRoute.routeSrc, eveRoute.requestPath)]),
     createEveServiceRoute(eveRoute.serviceName, eveRoute.routeSrc),
-  );
+  ]);
 
   if (filesystemRouteIndex === -1) {
     return [...nextEveRoutes, ...routesWithoutEveRoutes];
@@ -502,9 +518,11 @@ export async function ensureEveVercelOutputConfig(input: {
     ...existingServices,
   };
   const eveRoutes: {
+    requestPath?: string;
     routeSrc: string;
     serviceName: string;
   }[] = [];
+  const mountedChannelRouteSources = new Map<string, string>();
 
   for (const agent of input.agents) {
     const configuredEveServiceEntry = findConfiguredEveServiceEntry(existingServices, agent);
@@ -545,6 +563,24 @@ export async function ensureEveVercelOutputConfig(input: {
       routeSrc,
       serviceName,
     });
+    for (const mount of agent.channelRouteMounts) {
+      const channelRouteSrc = createVercelRouteSource(mount.publicPath);
+      const existingServiceName = mountedChannelRouteSources.get(channelRouteSrc);
+      if (existingServiceName !== undefined && existingServiceName !== serviceName) {
+        throw new Error(
+          `eve channel route ${JSON.stringify(mount.publicPath)} is claimed by both ${JSON.stringify(existingServiceName)} and ${JSON.stringify(serviceName)}. Configure distinct channel paths or named-agent prefixes.`,
+        );
+      }
+      mountedChannelRouteSources.set(channelRouteSrc, serviceName);
+      eveRoutes.push({
+        requestPath:
+          mount.publicPath === mount.routePath
+            ? undefined
+            : createVercelRequestPath(mount.routePath),
+        routeSrc: channelRouteSrc,
+        serviceName,
+      });
+    }
   }
 
   const { services: _services, ...configWithoutLegacyServices } = existingConfig;

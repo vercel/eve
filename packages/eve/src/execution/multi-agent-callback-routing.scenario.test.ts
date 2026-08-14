@@ -173,6 +173,7 @@ describe("multi-agent callback routing", () => {
         agents: DEPLOYMENT_AGENTS.map((agent) => ({
           appRoot: join(nextRoot, "agents", agent.name),
           buildCommand: "eve build",
+          channelRouteMounts: [],
           name: agent.name,
           publicRoutePrefix: agent.publicRoutePrefix,
           servicePrefix: `/_eve_internal/eve/${agent.name}`,

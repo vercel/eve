@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
+import {
+  resolveMcpPublicRequestUrl,
+  validateMcpHttpRequest,
+  validateMcpMetadataRequest,
+} from "#internal/mcp/http-security.js";
 
 describe("MCP HTTP security", () => {
   it("accepts secure non-browser requests and exact same-origin browser requests", () => {
@@ -50,6 +54,53 @@ describe("MCP HTTP security", () => {
         request("https://agent.example/mcp", { origin: "https://agent.example:444" }),
       )?.status,
     ).toBe(403);
+  });
+
+  it("validates proxied browser requests against their public origin", () => {
+    const proxied = request("http://127.0.0.1:55335/mcp", {
+      origin: "https://agent.example",
+      "x-forwarded-host": "agent.example",
+      "x-forwarded-proto": "https",
+    });
+
+    expect(validateMcpHttpRequest(proxied)).toBeUndefined();
+    expect(resolveMcpPublicRequestUrl(proxied).toString()).toBe("https://agent.example/mcp");
+    expect(
+      validateMcpHttpRequest(
+        request("http://127.0.0.1:55335/mcp", {
+          origin: "https://attacker.example",
+          "x-forwarded-host": "agent.example",
+          "x-forwarded-proto": "https",
+        }),
+      )?.status,
+    ).toBe(403);
+    expect(
+      validateMcpHttpRequest(
+        request("http://agent.example/mcp", {
+          "x-forwarded-host": "agent.example",
+          "x-forwarded-proto": "https",
+        }),
+      )?.status,
+    ).toBe(403);
+  });
+
+  it("rejects insecure or malformed forwarded origins", () => {
+    expect(
+      validateMcpHttpRequest(
+        request("http://127.0.0.1:55335/mcp", {
+          "x-forwarded-host": "agent.example",
+          "x-forwarded-proto": "http",
+        }),
+      )?.status,
+    ).toBe(403);
+    expect(
+      validateMcpHttpRequest(
+        request("http://127.0.0.1:55335/mcp", {
+          "x-forwarded-host": "agent.example/path",
+          "x-forwarded-proto": "https",
+        }),
+      )?.status,
+    ).toBe(400);
   });
 
   it("allows cross-origin OAuth metadata discovery while retaining base guards", () => {

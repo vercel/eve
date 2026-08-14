@@ -27,7 +27,12 @@ vi.mock("./vercel-output-config.js", () => ({
   ),
 }));
 
+vi.mock("./resolve-channel-route-mounts.js", () => ({
+  resolveEveChannelRouteMounts: vi.fn(async () => []),
+}));
+
 const { ensureEveVercelOutputConfig } = await import("./vercel-output-config.js");
+const { resolveEveChannelRouteMounts } = await import("./resolve-channel-route-mounts.js");
 
 vi.mock("./server.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("./server.js")>();
@@ -60,6 +65,7 @@ describe("withEve", () => {
   afterEach(() => {
     vi.mocked(resolveEveDestinationPrefix).mockClear();
     vi.mocked(ensureEveVercelOutputConfig).mockClear();
+    vi.mocked(resolveEveChannelRouteMounts).mockReset().mockResolvedValue([]);
     vi.unstubAllEnvs();
   });
 
@@ -119,17 +125,54 @@ describe("withEve", () => {
     expect(beforeFiles.every((rewrite) => rewrite.source.startsWith("/eve/v1/"))).toBe(true);
   });
 
-  it("rewrites authored channel routes under the eve protocol prefix", async () => {
+  it("rewrites authored channel routes at their configured public paths", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
+    vi.mocked(resolveEveChannelRouteMounts).mockResolvedValue([
+      { publicPath: "/mcp", routePath: "/mcp" },
+      {
+        publicPath: "/.well-known/oauth-protected-resource/mcp",
+        routePath: "/.well-known/oauth-protected-resource/mcp",
+      },
+    ]);
 
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
-    expect(getBeforeFiles(rewrites)).toContainEqual({
-      destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
-      source: "/eve/v1/:path+",
-    });
+    expect(getBeforeFiles(rewrites)).toEqual([
+      {
+        destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
+        source: "/eve/v1/:path+",
+      },
+      {
+        destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/mcp`,
+        source: "/mcp",
+      },
+      {
+        destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/.well-known/oauth-protected-resource/mcp`,
+        source: "/.well-known/oauth-protected-resource/mcp",
+      },
+    ]);
+  });
+
+  it("fails when an authored channel path conflicts with an existing rewrite", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
+    vi.mocked(resolveEveChannelRouteMounts).mockResolvedValue([
+      { publicPath: "/mcp", routePath: "/mcp" },
+    ]);
+
+    const config = await resolveConfig(
+      withEve<TestConfig>({
+        async rewrites() {
+          return [{ destination: "/api/other", source: "/mcp" }];
+        },
+      }),
+    );
+
+    await expect(config.rewrites?.()).rejects.toThrow(
+      'eve channel route "/mcp" conflicts with an existing Next.js rewrite',
+    );
   });
 
   it("uses EVE_BASE_URL in development instead of starting a server", async () => {
@@ -349,6 +392,7 @@ describe("withEve", () => {
         {
           appRoot: expect.stringContaining("/agents/billing"),
           buildCommand: "pnpm build:billing-agent",
+          channelRouteMounts: [],
           name: "billing",
           publicRoutePrefix: "/eve/agents/billing",
           servicePrefix: "/_eve_internal/billing",
@@ -356,6 +400,7 @@ describe("withEve", () => {
         {
           appRoot: expect.stringContaining("/agents/support"),
           buildCommand: "node '../../node_modules/eve/bin/eve.js' build",
+          channelRouteMounts: [],
           name: "support",
           publicRoutePrefix: "/eve/agents/support",
           servicePrefix: `${EVE_NEXT_SERVICE_PREFIX}/support`,

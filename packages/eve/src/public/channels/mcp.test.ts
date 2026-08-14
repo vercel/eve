@@ -362,6 +362,43 @@ describe("mcpChannel", () => {
     });
   });
 
+  it("derives OAuth URLs from a reverse proxy's public origin", async () => {
+    const channel = mcpChannel({
+      auth: oauthResource(() => null, { issuer: "https://issuer.example" }),
+      route: "/mcp",
+    });
+    const metadataRoute = channel.routes[0]!;
+    const mcpRoute = channel.routes[4]!;
+    if (metadataRoute.transport === "websocket" || mcpRoute.transport === "websocket") {
+      throw new Error("expected HTTP routes");
+    }
+    const forwardedHeaders = {
+      "x-forwarded-host": "agent.example",
+      "x-forwarded-proto": "https",
+    };
+
+    const metadata = await metadataRoute.handler(
+      requestWithHost("http://127.0.0.1:55335/.well-known/oauth-protected-resource/mcp", {
+        headers: forwardedHeaders,
+      }),
+      {} as never,
+    );
+    await expect(metadata.json()).resolves.toMatchObject({
+      resource: "https://agent.example/mcp",
+    });
+
+    const unauthorized = await mcpRoute.handler(
+      requestWithHost("http://127.0.0.1:55335/mcp", {
+        headers: forwardedHeaders,
+        method: "POST",
+      }),
+      {} as never,
+    );
+    expect(unauthorized.headers.get("www-authenticate")).toContain(
+      'resource_metadata="https://agent.example/.well-known/oauth-protected-resource/mcp"',
+    );
+  });
+
   it("allows overriding the protected-resource metadata path", () => {
     const channel = mcpChannel({
       auth: oauthResource(() => null, {

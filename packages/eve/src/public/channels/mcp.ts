@@ -16,7 +16,11 @@ import type {
 } from "#internal/invocation/agent-invocation.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
+import {
+  resolveMcpPublicRequestUrl,
+  validateMcpHttpRequest,
+  validateMcpMetadataRequest,
+} from "#internal/mcp/http-security.js";
 import {
   createMcpStreamableHttpServer,
   defineMcpTool,
@@ -117,7 +121,7 @@ function protectedResourceMetadataResponse(
   const securityFailure = validateMcpMetadataRequest(request);
   if (securityFailure !== undefined) return securityFailure;
   const resource =
-    options.resource ?? new URL(resourcePath, new URL(request.url).origin).toString();
+    options.resource ?? new URL(resourcePath, resolveMcpPublicRequestUrl(request)).toString();
   const authorizationServers =
     options.issuer !== undefined ? [options.issuer] : options.authorizationServers;
   const response = Response.json(
@@ -161,7 +165,7 @@ function addResourceChallenge(
 ): Response {
   if (response.status !== 401 && response.status !== 403) return response;
   const metadataPath = protectedResourceMetadataPath(options, new URL(request.url).pathname);
-  const publicBase = options.resource ?? new URL(request.url).origin;
+  const publicBase = options.resource ?? resolveMcpPublicRequestUrl(request).origin;
   const metadataUrl = new URL(metadataPath, publicBase).toString();
   const headers = new Headers(response.headers);
   const existing = headers.get("www-authenticate");

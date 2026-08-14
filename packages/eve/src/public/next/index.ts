@@ -4,6 +4,8 @@ import type { NextConfig } from "next";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
+import type { EveChannelRouteMount } from "./channel-route-mounts.js";
+import { resolveEveChannelRouteMounts } from "./resolve-channel-route-mounts.js";
 import { resolveEveDestinationPrefix } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 
@@ -263,6 +265,16 @@ function createEveRewriteRule(input: {
   };
 }
 
+function createChannelRewriteRule(input: {
+  readonly destinationPrefix: string;
+  readonly mount: EveChannelRouteMount;
+}): EveNextRewriteRule {
+  return {
+    destination: joinRoutePrefix(input.destinationPrefix, input.mount.routePath),
+    source: input.mount.publicPath,
+  };
+}
+
 async function resolveExistingRewrites(
   rewrites: EveNextConfig["rewrites"],
 ): Promise<EveNextRewrites | undefined> {
@@ -290,6 +302,32 @@ function mergeRewriteRules(
     ...existing,
     beforeFiles: [...eveRules, ...(existing.beforeFiles ?? [])],
   };
+}
+
+function collectRewriteSources(rewrites: EveNextRewrites | undefined): ReadonlySet<string> {
+  if (rewrites === undefined) return new Set();
+  if (!isRewriteSections(rewrites)) return new Set(rewrites.map((rewrite) => rewrite.source));
+  return new Set(
+    [
+      ...(rewrites.beforeFiles ?? []),
+      ...(rewrites.afterFiles ?? []),
+      ...(rewrites.fallback ?? []),
+    ].map((rewrite) => rewrite.source),
+  );
+}
+
+function assertNoRewriteCollisions(
+  existing: EveNextRewrites | undefined,
+  eveRules: readonly EveNextRewriteRule[],
+): void {
+  const existingSources = collectRewriteSources(existing);
+  for (const rule of eveRules) {
+    if (existingSources.has(rule.source)) {
+      throw new Error(
+        `eve channel route ${JSON.stringify(rule.source)} conflicts with an existing Next.js rewrite. Change the channel route or remove the rewrite.`,
+      );
+    }
+  }
 }
 
 function isRewriteSections(rewrites: EveNextRewrites): rewrites is EveNextRewriteSections {
@@ -408,10 +446,20 @@ export function withEve<TConfig extends EveNextConfig>(
   return async function eveNextConfig(phase, context) {
     const nextConfig = await resolveNextConfig(configOrFunction, phase, context);
     const existingRewrites = nextConfig.rewrites;
+    const agentsWithChannelRoutes = await Promise.all(
+      agents.map(async (agent) => ({
+        ...agent,
+        channelRouteMounts: await resolveEveChannelRouteMounts({
+          appRoot: agent.appRoot,
+          publicRoutePrefix: agent.publicRoutePrefix,
+        }),
+      })),
+    );
     const configuredVercel = await ensureEveVercelOutputConfig({
-      agents: agents.map((agent) => ({
+      agents: agentsWithChannelRoutes.map((agent) => ({
         appRoot: agent.appRoot,
         buildCommand: agent.buildCommand,
+        channelRouteMounts: agent.channelRouteMounts,
         name: agent.name,
         publicRoutePrefix: agent.publicRoutePrefix,
         servicePrefix: agent.servicePrefix,
@@ -426,7 +474,7 @@ export function withEve<TConfig extends EveNextConfig>(
     const configuredAgentByName = new Map(
       configuredVercel.agents.map((agent) => [agent.name, agent] as const),
     );
-    const agentsWithDestinations = agents.map((agent) => {
+    const agentsWithDestinations = agentsWithChannelRoutes.map((agent) => {
       const configuredAgent = configuredAgentByName.get(agent.name);
       const productionDestination = resolveProductionDestination({
         localProductionPortOffset: agent.localProductionPortOffset,
@@ -455,15 +503,22 @@ export function withEve<TConfig extends EveNextConfig>(
                 productionServerOrigin: agent.productionDestination.localServerOrigin,
               });
 
-              return createEveRewriteRule({
-                destinationPrefix,
-                publicRoutePrefix: agent.publicRoutePrefix,
-              });
+              return [
+                createEveRewriteRule({
+                  destinationPrefix,
+                  publicRoutePrefix: agent.publicRoutePrefix,
+                }),
+                ...agent.channelRouteMounts.map((mount) =>
+                  createChannelRewriteRule({ destinationPrefix, mount }),
+                ),
+              ];
             }),
           ),
         ]);
 
-        return mergeRewriteRules(existing, eveRules);
+        const flattenedEveRules = eveRules.flat();
+        assertNoRewriteCollisions(existing, flattenedEveRules);
+        return mergeRewriteRules(existing, flattenedEveRules);
       },
     };
   };
