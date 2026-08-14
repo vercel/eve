@@ -2540,7 +2540,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
     }
   });
 
-  it("rejects HITL by default when an inbound hook is authored", async () => {
+  it("uses default HITL auth when onAppMention is authored", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       onAppMention: () => ({ auth: null }),
@@ -2548,11 +2548,8 @@ describe("slackChannel() HITL interaction pipeline", () => {
 
     const { send } = await firePost(channel, buildHitlButtonRequest());
 
-    expect(send).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "https://slack.com/api/chat.update",
-      expect.anything(),
-    );
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[1].auth?.principalId).toBe("slack:T01:U_APPROVER");
   });
 
   it("does not mark a HITL card answered when response delivery fails", async () => {

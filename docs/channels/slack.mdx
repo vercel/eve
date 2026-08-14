@@ -187,7 +187,7 @@ Keep authorization checks inside sensitive tools too. The inbound allowlist cont
 
 `onInputResponse` runs after eve decodes a built-in HITL answer but before the parked session resumes. Return `{ auth }` to accept the answer. Returning `null` or throwing rejects it, leaves the request pending, and keeps the Slack controls active. `ctx.defaultAuth` identifies the Slack user who submitted the signed interaction; it does not authorize that user by itself.
 
-Without authored inbound hooks, Slack accepts HITL answers with the submitting user's auth. If you author `onAppMention`, `onDirectMessage`, `onMessage`, or `onEvent` but omit `onInputResponse`, eve rejects built-in HITL answers instead of bypassing the authored ingress policy. Put sensitive prompts in conversations limited to the intended approvers, and re-check `ctx.session.auth.current` inside a sensitive tool before performing its side effect.
+If you omit `onInputResponse`, Slack accepts HITL answers with the submitting user's auth, regardless of which message or event handlers you define. Define `onInputResponse` when those handlers enforce an invocation policy that must also apply to HITL answers. Put sensitive prompts in conversations limited to the intended approvers, and re-check `ctx.session.auth.current` inside a sensitive tool before performing its side effect.
 
 #### Continue conversations without repeated mentions
 

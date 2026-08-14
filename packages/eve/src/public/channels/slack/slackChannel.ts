@@ -635,10 +635,9 @@ export interface SlackChannelConfig {
    * Return `{ auth }` to accept the response, or `null` to reject it and keep
    * the request pending. Thrown errors are logged and treated as rejection.
    *
-   * When this hook is omitted, Slack keeps its built-in submitting-user auth
-   * only if no inbound message or Events API hook is authored. Authoring
-   * `onAppMention`, `onDirectMessage`, `onMessage`, or `onEvent` without a
-   * matching `onInputResponse` rejects HITL responses by default.
+   * When this hook is omitted, Slack preserves its built-in behavior and
+   * accepts the response with the submitting user's auth, regardless of other
+   * authored handlers.
    */
   onInputResponse?(
     ctx: SlackInputResponseContext,
@@ -692,9 +691,7 @@ export interface SlackChannel extends Channel<
 export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
-  const onInputResponse =
-    config.onInputResponse ??
-    (hasAuthoredInboundHook(config) ? rejectInputResponse : defaultOnInputResponse);
+  const onInputResponse = config.onInputResponse ?? defaultOnInputResponse;
   const authorizationRequiredOverride = config.events?.["authorization.required"];
   const candidateHandler =
     config.events?.["approval.candidate"] ?? defaultEvents["approval.candidate"]!;
@@ -824,21 +821,8 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   });
 }
 
-function hasAuthoredInboundHook(config: SlackChannelConfig): boolean {
-  return (
-    config.onAppMention !== undefined ||
-    config.onDirectMessage !== undefined ||
-    config.onMessage !== undefined ||
-    config.onEvent !== undefined
-  );
-}
-
 function defaultOnInputResponse(ctx: SlackInputResponseContext): SlackInputResponseResult {
   return { auth: ctx.defaultAuth };
-}
-
-function rejectInputResponse(): null {
-  return null;
 }
 
 /**
