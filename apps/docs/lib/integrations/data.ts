@@ -1742,6 +1742,27 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     keywords: ["mcp", "treasury", "cash", "payments", "accounting", "oauth", "connect"],
     authModes: ["user"],
   },
+  firecrawl: {
+    logo: "firecrawl",
+    docsHref: "https://docs.firecrawl.dev/mcp-server",
+    keywords: [
+      "mcp",
+      "web search",
+      "web scraping",
+      "crawl",
+      "extract",
+      "markdown",
+      "map",
+      "monitoring",
+    ],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "FIRECRAWL_API_KEY",
+      header: "x-api-key",
+    },
+    configureNote:
+      "Create an API key in the [Firecrawl dashboard](https://www.firecrawl.dev/app/api-keys). Without a key the server only exposes rate-limited anonymous search, scrape, and parse tools.",
+  },
   "hugging-face": {
     logo: "hugging-face",
     docsHref: "/docs/connections/mcp",

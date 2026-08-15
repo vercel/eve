@@ -52,6 +52,11 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   context: "mcp.context.dev",
   natural: "mcp.natural.com",
 };
+/** Connections authenticated by a server-side API key instead of Vercel Connect. */
+const API_KEY_CONNECTIONS: Readonly<Record<string, string>> = {
+  "browser-use": "BROWSER_USE_API_KEY",
+  firecrawl: "FIRECRAWL_API_KEY",
+};
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
@@ -82,7 +87,7 @@ for (const item of items) {
   }
 
   const slug = item.name.slice("connection/".length);
-  if (slug !== "browser-use") {
+  if (!(slug in API_KEY_CONNECTIONS)) {
     const expectedSetup = {
       command: "eve",
       package: "eve",
@@ -106,10 +111,11 @@ for (const item of items) {
   }
   await access(join(docsRoot, expectedPath));
 
-  if (slug === "browser-use") {
-    if (item.dependencies !== undefined || !("BROWSER_USE_API_KEY" in (item.envVars ?? {}))) {
+  const apiKeyEnv = API_KEY_CONNECTIONS[slug];
+  if (apiKeyEnv !== undefined) {
+    if (item.dependencies !== undefined || !(apiKeyEnv in (item.envVars ?? {}))) {
       throw new Error(
-        'Registry item "connection/browser-use" must declare its API key without Vercel Connect.',
+        `Registry item "${item.name}" must declare its API key without Vercel Connect.`,
       );
     }
   } else if (!item.dependencies?.includes("@vercel/connect")) {
