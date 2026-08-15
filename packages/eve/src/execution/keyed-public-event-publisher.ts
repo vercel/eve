@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 
-import { appendKeyedStreamChunk, getStepMetadata } from "#compiled/@workflow/core/index.js";
-import { getDeserializeStream, getSerializeStream } from "#compiled/@workflow/core/serialization.js";
+import {
+  appendKeyedStreamChunk,
+  getStepMetadata,
+  KeyedStreamAppendUnavailableError,
+} from "#compiled/@workflow/core/index.js";
+import {
+  getDeserializeStream,
+  getSerializeStream,
+} from "#compiled/@workflow/core/serialization.js";
 import {
   encodeMessageStreamEvent,
   type MessageStreamEvent,
@@ -35,6 +42,8 @@ interface StreamIdentity {
 /** Publishes one step's public events through Workflow's canonical keyed receipt. */
 export function createKeyedPublicEventPublisher(input: {
   readonly parentWritable: WritableStream<Uint8Array>;
+  /** The owning step's writer, used only by the non-exact compatibility path. */
+  readonly parentWriter?: WritableStreamDefaultWriter<Uint8Array>;
   readonly sessionId: string;
 }): {
   publish(event: UnstampedMessageStreamEvent): Promise<{
@@ -48,25 +57,39 @@ export function createKeyedPublicEventPublisher(input: {
   const serializedWriter = serialized.writable.getWriter();
   let ordinal = 0;
   let serializationTail = Promise.resolve();
+  let keyedAppendAvailable = true;
 
   return {
     async publish(event) {
       const stream = resolveStreamIdentity(input.parentWritable);
       const currentOrdinal = ordinal++;
       const semanticDigest = digest(event);
-      const receipt = await appendKeyedStreamChunk(stream.runId, stream.name, {
-        chunk: await serializePublicEvent(
-          encodeMessageStreamEvent(stampMessageStreamEvent(event)),
-          serializedReader,
-          serializedWriter,
-          serializationTail,
-          (next) => {
-            serializationTail = next;
-          },
-        ),
-        idempotencyKey: `eve-public-event/v1/${input.sessionId}/${stepId}/${currentOrdinal}`,
-        semanticDigest,
-      });
+      const stamped = stampMessageStreamEvent(event);
+      const encoded = encodeMessageStreamEvent(stamped);
+      const chunk = await serializePublicEvent(
+        encoded,
+        serializedReader,
+        serializedWriter,
+        serializationTail,
+        (next) => {
+          serializationTail = next;
+        },
+      );
+      if (!keyedAppendAvailable)
+        return await appendOrdinaryPublicEvent(input.parentWriter, encoded, stamped);
+
+      let receipt;
+      try {
+        receipt = await appendKeyedStreamChunk(stream.runId, stream.name, {
+          chunk,
+          idempotencyKey: `eve-public-event/v1/${input.sessionId}/${stepId}/${currentOrdinal}`,
+          semanticDigest,
+        });
+      } catch (error) {
+        if (!(error instanceof KeyedStreamAppendUnavailableError)) throw error;
+        keyedAppendAvailable = false;
+        return await appendOrdinaryPublicEvent(input.parentWriter, encoded, stamped);
+      }
       const canonical = await decodeCanonicalEvent(receipt.canonicalChunk);
       if (digest(withoutMeta(canonical)) !== semanticDigest) {
         throw new KeyedPublicEventDivergenceError();
@@ -74,6 +97,20 @@ export function createKeyedPublicEventPublisher(input: {
       return { event: canonical, inserted: receipt.inserted };
     },
   };
+}
+
+async function appendOrdinaryPublicEvent(
+  writer: WritableStreamDefaultWriter<Uint8Array> | undefined,
+  encoded: Uint8Array,
+  event: MessageStreamEvent,
+): Promise<{ readonly event: MessageStreamEvent; readonly inserted: true }> {
+  if (writer === undefined) throw new KeyedPublicEventCompatibilityError();
+  // beta34 flushes the parent stream only after the step releases its writer;
+  // awaiting this write here would wait on that same release. The owning step
+  // already closes the writer in its finally block, which drains this queued
+  // ordinary chunk in order.
+  void writer.write(encoded);
+  return { event, inserted: true };
 }
 
 async function serializePublicEvent(
@@ -140,7 +177,11 @@ async function decodeCanonicalEvent(chunk: Uint8Array): Promise<MessageStreamEve
 
 function parseCanonicalEvent(chunk: Uint8Array): MessageStreamEvent {
   const event = JSON.parse(decoder.decode(chunk).trim()) as MessageStreamEvent;
-  if (event.meta === undefined || typeof event.meta.at !== "string" || typeof event.meta.id !== "string") {
+  if (
+    event.meta === undefined ||
+    typeof event.meta.at !== "string" ||
+    typeof event.meta.id !== "string"
+  ) {
     throw new Error("missing canonical event metadata");
   }
   return event;

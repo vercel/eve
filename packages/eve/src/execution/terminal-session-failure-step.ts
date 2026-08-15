@@ -3,9 +3,7 @@ import { callAdapterEventHandler } from "#channel/adapter.js";
 import { deserializeContext } from "#context/serialize.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { createLogger, formatError } from "#internal/logging.js";
-import {
-  createSessionFailedEvent,
-} from "#protocol/message.js";
+import { createSessionFailedEvent } from "#protocol/message.js";
 import { createKeyedPublicEventPublisher } from "#execution/keyed-public-event-publisher.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -45,10 +43,12 @@ export async function emitTerminalSessionFailureStep(input: {
   });
 
   const event = createSessionFailedEvent({ code, details, message, sessionId });
+  const writer = input.parentWritable.getWriter();
 
   try {
     const emitted = await createKeyedPublicEventPublisher({
       parentWritable: input.parentWritable,
+      parentWriter: writer,
       sessionId,
     }).publish(event);
     if (!emitted.inserted) return;
@@ -64,5 +64,7 @@ export async function emitTerminalSessionFailureStep(input: {
       sessionId,
       error: writeError,
     });
+  } finally {
+    await writer.close().catch(() => {});
   }
 }

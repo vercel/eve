@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { hydrateStepReturnValue } from "@workflow/core/serialization";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
@@ -160,7 +161,10 @@ async function waitForHookByToken(token: string, timeout = 15_000): Promise<{ ru
 }
 
 /** Finds the one active child turn's cancellation hook before it is resumed. */
-async function waitForChildCancellationHook(parentRunId: string, timeout = 15_000): Promise<{
+async function waitForChildCancellationHook(
+  parentRunId: string,
+  timeout = 15_000,
+): Promise<{
   readonly runId: string;
   readonly token: string;
 }> {
@@ -182,24 +186,132 @@ async function waitForChildCancellationHook(parentRunId: string, timeout = 15_00
   throw new Error("Timed out waiting for the active child cancellation hook.");
 }
 
-/** Verifies the exact child abort receipt on the terminal child turn. */
+const TURN_STEP_NAME = "step//./src/execution/workflow-steps//turnStep";
+const CANCEL_DESCENDANT_TURNS_STEP_NAME =
+  "step//./src/execution/cancel-descendant-turns-step//cancelDescendantTurnsStep";
+const SEND_TURN_CONTROL_STEP_NAME =
+  "step//./src/execution/turn-control-protocol//sendTurnControlStep";
+
+type DurableStepEvent = {
+  readonly correlationId?: string | null;
+  readonly eventData?: {
+    readonly attempt?: number;
+    readonly result?: Uint8Array | unknown;
+    readonly stepName?: string;
+    readonly token?: string;
+  };
+  readonly eventType?: string;
+};
+
+async function listDurableStepEvents(runId: string): Promise<readonly DurableStepEvent[]> {
+  const world = await getWorld();
+  const events: DurableStepEvent[] = [];
+  let cursor: string | undefined;
+
+  do {
+    const pagination: { cursor?: string; limit: number } = { limit: 1_000 };
+    if (cursor !== undefined) pagination.cursor = cursor;
+    const page = await world.events.list({ pagination, resolveData: "all", runId });
+    events.push(...(page.data as readonly DurableStepEvent[]));
+    cursor = page.hasMore === true && page.cursor !== null ? page.cursor : undefined;
+  } while (cursor !== undefined);
+
+  return events;
+}
+
+/**
+ * Binds the durable child cancellation receipt to its in-flight turnStep and
+ * accepts only the ordered cancellation epilogue that settles that attempt.
+ */
 async function expectOnlyCancellationReceipt(runId: string, token: string): Promise<void> {
   const world = await getWorld();
-  const page = await world.events.list({
-    pagination: { limit: 1_000 },
-    resolveData: "none",
-    runId,
-  });
-  const events = page.data as readonly {
-    readonly correlationId?: string | null;
-    readonly eventData?: { readonly token?: string };
-    readonly eventType?: string;
-  }[];
+  const events = await listDurableStepEvents(runId);
+  const receiptIndex = events.findIndex(
+    (event) => event.eventType === "hook_received" && event.eventData?.token === token,
+  );
   const receipts = events.filter(
     (event) => event.eventType === "hook_received" && event.eventData?.token === token,
   );
   expect(receipts).toHaveLength(1);
   expect(receipts[0]?.correlationId).toEqual(expect.any(String));
+  expect(receiptIndex).toBeGreaterThanOrEqual(0);
+
+  const turnStarts = events
+    .slice(0, receiptIndex)
+    .filter(
+      (event) => event.eventType === "step_started" && event.eventData?.stepName === TURN_STEP_NAME,
+    );
+  const activeTurnStart = turnStarts.at(-1);
+  expect(activeTurnStart?.correlationId).toEqual(expect.any(String));
+  const activeTurnCorrelation = activeTurnStart?.correlationId as string;
+  const afterReceipt = events.slice(receiptIndex + 1);
+  const activeTurnAfterReceipt = afterReceipt.filter(
+    (event) => event.correlationId === activeTurnCorrelation,
+  );
+  const cancelledTurnCompletion = activeTurnAfterReceipt.filter(
+    (event) => event.eventType === "step_completed",
+  );
+  expect(cancelledTurnCompletion).toHaveLength(1);
+  expect(activeTurnAfterReceipt.filter((event) => event.eventType === "step_started")).toEqual([]);
+  expect(
+    activeTurnAfterReceipt.filter(
+      (event) => event.eventType === "step_failed" || event.eventType === "step_retrying",
+    ),
+  ).toEqual([]);
+
+  const turnStep = await world.steps.get(runId, activeTurnCorrelation, { resolveData: "all" });
+  // This backend does not persist `attempt` on step_started, so the latest
+  // preceding start is the receipt-bound attempt; the settled step confirms it
+  // remained the first and only attempt.
+  expect(turnStep.attempt).toBe(1);
+  expect(turnStep.status).toBe("completed");
+  expect(await hydrateStepReturnValue(turnStep.output, runId, undefined)).toMatchObject({
+    action: "cancelled",
+  });
+
+  const cancellationEpilogue = [
+    { name: CANCEL_DESCENDANT_TURNS_STEP_NAME, correlationId: undefined as string | undefined },
+    { name: SEND_TURN_CONTROL_STEP_NAME, correlationId: undefined as string | undefined },
+  ];
+  let previousCompletionIndex = afterReceipt.indexOf(cancelledTurnCompletion[0]!);
+  let priorEpilogueCorrelation: string | undefined;
+  for (const step of cancellationEpilogue) {
+    const completions = afterReceipt.filter(
+      (event) => event.eventType === "step_completed" && event.eventData?.stepName === step.name,
+    );
+    expect(completions).toHaveLength(1);
+    const completion = completions[0]!;
+    expect(completion.correlationId).toEqual(expect.any(String));
+    expect(completion.correlationId).not.toBe(activeTurnCorrelation);
+    expect(completion.correlationId).not.toBe(priorEpilogueCorrelation);
+    step.correlationId = completion.correlationId as string;
+    priorEpilogueCorrelation = step.correlationId;
+    expect(afterReceipt.indexOf(completion)).toBeGreaterThan(previousCompletionIndex);
+    previousCompletionIndex = afterReceipt.indexOf(completion);
+    const related = events.filter((event) => event.correlationId === completion.correlationId);
+    expect(related.filter((event) => event.eventType === "step_started")).toHaveLength(1);
+    expect(related.filter((event) => event.eventType === "step_completed")).toHaveLength(1);
+    expect(
+      related.filter(
+        (event) => event.eventType === "step_failed" || event.eventType === "step_retrying",
+      ),
+    ).toEqual([]);
+  }
+
+  const allowedCorrelations = new Set([
+    activeTurnCorrelation,
+    ...cancellationEpilogue.map((step) => step.correlationId),
+  ]);
+  expect(
+    afterReceipt.filter(
+      (event) =>
+        (event.eventType === "step_started" ||
+          event.eventType === "step_completed" ||
+          event.eventType === "step_failed" ||
+          event.eventType === "step_retrying") &&
+        !allowedCorrelations.has(event.correlationId as string),
+    ),
+  ).toEqual([]);
 }
 
 /**

@@ -205,9 +205,23 @@ describe("public model-stream cancellation", () => {
     ).toHaveLength(0);
     expect(
       result.rendezvous.reports.filter(
-        (report) => report.attempt === recovery.replacementAttempt && report.event === "interrupted",
+        (report) =>
+          report.attempt === recovery.replacementAttempt && report.event === "interrupted",
       ),
     ).toHaveLength(1);
+    expect(
+      result.rendezvous.reports.filter(
+        (report) =>
+          report.attempt === recovery.replacementAttempt && report.event === "listener-settled",
+      ),
+    ).toHaveLength(1);
+    expect(
+      result.rendezvous.reports.filter(
+        (report) =>
+          report.attempt === recovery.replacementAttempt && report.event === "stream-settled",
+      ),
+    ).toHaveLength(1);
+    expect(result.rendezvous.reports.filter((report) => report.event === "watchdog")).toEqual([]);
     try {
       expectCancelledLifecycle(result.events);
     } catch (error) {
@@ -245,8 +259,15 @@ async function runHeldProviderScenario(input: {
     useAuthoredModel: true,
   });
   const events: MessageStreamEvent[] = [];
-  let recovery: { readonly crashedAttempt: number; readonly replacementAttempt: number } | undefined;
-  let closeRecoveredStream: (() => Promise<void>) | undefined;
+  let recovery:
+    | { readonly crashedAttempt: number; readonly replacementAttempt: number }
+    | undefined;
+  let recoveredStream:
+    | {
+        readonly close: () => Promise<void>;
+        readonly expectNoEvent: () => Promise<void>;
+      }
+    | undefined;
 
   try {
     const client = new Client({ host: server.url });
@@ -302,6 +323,7 @@ async function runHeldProviderScenario(input: {
       events.splice(0, events.length, ...preCrashSnapshot.events);
       const crashedUrl = server.url;
       await server.crash();
+      expect(server.isProcessTreeAbsent()).toBe(true);
       await expect(fetch(crashedUrl)).rejects.toThrow();
       // The old HTTP follower may be reconnecting to the just-killed URL; it
       // is intentionally not the recovery mechanism. Keep its rejection
@@ -350,7 +372,7 @@ async function runHeldProviderScenario(input: {
       }
       cancelResults.push(await recovered.cancel({ turnId: exactTurnId }));
       try {
-        closeRecoveredStream = await withinDeadline(
+        recoveredStream = await withinDeadline(
           recoveredConsume,
           "recovered public stream did not settle after cancellation",
         );
@@ -414,16 +436,18 @@ async function runHeldProviderScenario(input: {
       expectCancelledLifecycle(snapshot.events);
     }
     if (input.crashBeforeCancel === true) {
-      // The replacement provider, its listener, and its source reader have
-      // already settled above. Snapshot only after that quiescence barrier,
-      // then close the follower; this rejects a late durable public event
-      // instead of hiding it with an immediate iterator.return().
-      const snapshot = await new Client({ host: server.url })
-        .sessions.attach(session.state.sessionId)
+      // The exact replacement provider and source reader must both settle
+      // before this final source-log snapshot. A bounded extra pull then
+      // proves no late public record arrives before the follower closes.
+      const snapshot = await new Client({ host: server.url }).sessions
+        .attach(session.state.sessionId)
         .snapshot();
       expectCancelledLifecycle(snapshot.events);
       events.splice(0, events.length, ...snapshot.events);
-      await closeRecoveredStream?.();
+      await recoveredStream?.expectNoEvent();
+      await recoveredStream?.close();
+      await server.stop();
+      expect(server.isProcessTreeAbsent()).toBe(true);
     }
     if (
       cancelResults.some(
@@ -524,14 +548,46 @@ function createDirectCancellationProbe(): {
 async function readThroughSessionWaiting(
   iterator: AsyncIterator<MessageStreamEvent>,
   events: MessageStreamEvent[],
-): Promise<() => Promise<void>> {
+): Promise<{
+  readonly close: () => Promise<void>;
+  readonly expectNoEvent: () => Promise<void>;
+}> {
   while (true) {
     const next = await iterator.next();
     if (next.done) throw new Error("Recovered public stream ended before session.waiting.");
     events.push(next.value);
     if (next.value.type !== "session.waiting") continue;
-    return async () => {
-      await iterator.return?.();
+    let closed = false;
+    const close = async (): Promise<void> => {
+      if (closed) return;
+      closed = true;
+      const closing = iterator.return?.();
+      if (closing === undefined) return;
+      // Some transport iterators wait for the peer to close. The caller's
+      // server shutdown is that peer closure, so this only bounds cleanup.
+      await Promise.race([closing, new Promise<void>((resolve) => setTimeout(resolve, 250))]);
+    };
+    return {
+      close,
+      async expectNoEvent() {
+        const next = iterator.next().then((result) => ({ kind: "next" as const, result }));
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const outcome = await Promise.race([
+          next,
+          new Promise<{ readonly kind: "quiet" }>((resolve) => {
+            timeout = setTimeout(() => resolve({ kind: "quiet" }), 250);
+          }),
+        ]);
+        if (timeout !== undefined) clearTimeout(timeout);
+        if (outcome.kind === "next") {
+          throw new Error(
+            outcome.result.done
+              ? "Recovered public stream ended after session.waiting."
+              : `Public stream emitted ${outcome.result.value.type} after session.waiting.`,
+          );
+        }
+        await close();
+      },
     };
   }
 }
@@ -554,7 +610,10 @@ async function startRendezvous(): Promise<Rendezvous> {
   const waiters = new Map<ProviderEvent, Array<() => void>>();
   const attemptWaiters = new Map<string, Array<() => void>>();
   const reportWaiters: Array<{
-    readonly matches: (report: { readonly attempt: number; readonly event: ProviderEvent }) => boolean;
+    readonly matches: (report: {
+      readonly attempt: number;
+      readonly event: ProviderEvent;
+    }) => boolean;
     readonly resolve: (report: { readonly attempt: number; readonly event: ProviderEvent }) => void;
   }> = [];
   let released = false;
@@ -572,7 +631,10 @@ async function startRendezvous(): Promise<Rendezvous> {
       request.setEncoding("utf8");
       request.on("data", (chunk: string) => (body += chunk));
       request.on("end", () => {
-        const event = JSON.parse(body) as { readonly attempt?: unknown; readonly event?: ProviderEvent };
+        const event = JSON.parse(body) as {
+          readonly attempt?: unknown;
+          readonly event?: ProviderEvent;
+        };
         if (event.event === undefined) return response.writeHead(400).end();
         events.push(event.event);
         const report = {

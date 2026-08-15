@@ -79,6 +79,7 @@ export async function emitProxiedSubagentEvent(input: {
   const writer = input.parentWritable.getWriter();
   const publisher = createKeyedPublicEventPublisher({
     parentWritable: input.parentWritable,
+    parentWriter: writer,
     sessionId: session.sessionId,
   });
 

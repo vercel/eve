@@ -320,6 +320,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const writer = input.parentWritable.getWriter();
   const publisher = createKeyedPublicEventPublisher({
     parentWritable: input.parentWritable,
+    parentWriter: writer,
     sessionId: initialSession.sessionId,
   });
   const emit = async (event: UnstampedMessageStreamEvent) => {

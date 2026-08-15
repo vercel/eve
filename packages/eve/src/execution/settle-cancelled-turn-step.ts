@@ -29,9 +29,7 @@ import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
-import {
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import { type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createKeyedPublicEventPublisher } from "#execution/keyed-public-event-publisher.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
@@ -87,6 +85,7 @@ export async function settleCancelledTurnStep(input: {
     const writer = input.parentWritable.getWriter();
     const publisher = createKeyedPublicEventPublisher({
       parentWritable: input.parentWritable,
+      parentWriter: writer,
       sessionId: session.sessionId,
     });
     try {

@@ -2,9 +2,7 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { deserializeContext } from "#context/serialize.js";
 import { createLogger } from "#internal/logging.js";
-import {
-  createSessionCompletedEvent,
-} from "#protocol/message.js";
+import { createSessionCompletedEvent } from "#protocol/message.js";
 import { createKeyedPublicEventPublisher } from "#execution/keyed-public-event-publisher.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -19,10 +17,12 @@ export async function emitTerminalSessionCompletionStep(input: {
 
   const event = createSessionCompletedEvent();
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
+  const writer = input.parentWritable.getWriter();
 
   try {
     const emitted = await createKeyedPublicEventPublisher({
       parentWritable: input.parentWritable,
+      parentWriter: writer,
       sessionId,
     }).publish(event);
     if (!emitted.inserted) return;
@@ -37,5 +37,7 @@ export async function emitTerminalSessionCompletionStep(input: {
       error: writeError,
       sessionId,
     });
+  } finally {
+    await writer.close().catch(() => {});
   }
 }

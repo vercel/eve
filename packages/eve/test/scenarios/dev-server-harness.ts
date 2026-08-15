@@ -16,6 +16,8 @@ import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-in
  */
 export interface RunningEveDev {
   crash(): Promise<void>;
+  /** A completed crash/stop owns no remaining Eve dev process root. */
+  readonly isProcessTreeAbsent: () => boolean;
   readonly stderr: () => string;
   readonly stdout: () => string;
   readonly url: string;
@@ -124,6 +126,7 @@ export async function startEveDev(
         "Timed out waiting for the dev server process to crash.",
       );
     },
+    isProcessTreeAbsent: () => child.exitCode !== null || child.signalCode !== null,
     stderr: () => stderr,
     stdout: () => stdout,
     async signalAndAwaitExit(signal, deadlineMs = 1_000) {
@@ -166,7 +169,10 @@ async function forceCrashEveDevChild(
     taskkill.once("error", reject);
     taskkill.once("exit", (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`taskkill failed to terminate Eve dev process tree (exit ${String(code)}).`));
+      else
+        reject(
+          new Error(`taskkill failed to terminate Eve dev process tree (exit ${String(code)}).`),
+        );
     });
   });
 }

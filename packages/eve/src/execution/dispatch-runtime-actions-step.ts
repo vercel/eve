@@ -38,9 +38,7 @@ import {
   getPendingRuntimeActionBatch,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
-import {
-  createSubagentCalledEvent,
-} from "#protocol/message.js";
+import { createSubagentCalledEvent } from "#protocol/message.js";
 import { createKeyedPublicEventPublisher } from "#execution/keyed-public-event-publisher.js";
 import type {
   RuntimeActionRequest,
@@ -176,6 +174,7 @@ export async function dispatchRuntimeActionsStep(input: {
   const writer = input.parentWritable.getWriter();
   const publisher = createKeyedPublicEventPublisher({
     parentWritable: input.parentWritable,
+    parentWriter: writer,
     sessionId: session.sessionId,
   });
   // Split the parent's remaining token quota across the batch's freshly
@@ -247,16 +246,16 @@ export async function dispatchRuntimeActionsStep(input: {
         const emitted = await publisher.publish(
           normalizeAdapterEvent(
             createSubagentCalledEvent({
-            callId: outcome.callId,
-            childSessionId: outcome.address.sessionId,
-            name: outcome.name,
-            remote:
-              outcome.address.kind === "agent/remote" ? { url: outcome.address.url } : undefined,
-            sequence: batchEvent.sequence,
-            sessionId: session.sessionId,
-            toolName: outcome.toolName,
-            turnId: parentTurnId,
-            workflowId: workflowEntryReference.workflowId,
+              callId: outcome.callId,
+              childSessionId: outcome.address.sessionId,
+              name: outcome.name,
+              remote:
+                outcome.address.kind === "agent/remote" ? { url: outcome.address.url } : undefined,
+              sequence: batchEvent.sequence,
+              sessionId: session.sessionId,
+              toolName: outcome.toolName,
+              turnId: parentTurnId,
+              workflowId: workflowEntryReference.workflowId,
             }),
             adapterCtx,
           ),
@@ -623,7 +622,11 @@ async function startLocalSubagent(input: {
     callId: action.callId,
     kind: "called",
     name: action.name,
-    session: await confirmLocalSubagentStart({ address, preparedSession, operationId: operation.id }),
+    session: await confirmLocalSubagentStart({
+      address,
+      preparedSession,
+      operationId: operation.id,
+    }),
     toolName: action.subagentName,
   };
 }
@@ -655,9 +658,7 @@ async function createLocalSubagentSession(input: {
     nodeId: input.nodeId,
   }).createSession({
     ...input.runInput,
-    ...(input.exactRecovery
-      ? { idempotencyKey: `eve-child-start/v1/${input.operationId}` }
-      : {}),
+    ...(input.exactRecovery ? { idempotencyKey: `eve-child-start/v1/${input.operationId}` } : {}),
   });
   return handle.sessionId;
 }

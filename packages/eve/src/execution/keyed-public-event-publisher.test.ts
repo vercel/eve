@@ -2,10 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
-const { appendKeyedStreamChunk, getStepMetadata } = vi.hoisted(() => ({
-  appendKeyedStreamChunk: vi.fn(),
-  getStepMetadata: vi.fn(() => ({ attempt: 1, stepId: "step-a" })),
-}));
+const { appendKeyedStreamChunk, getStepMetadata, KeyedStreamAppendUnavailableError } = vi.hoisted(
+  () => {
+    class KeyedStreamAppendUnavailableError extends Error {}
+    return {
+      appendKeyedStreamChunk: vi.fn(),
+      getStepMetadata: vi.fn(() => ({ attempt: 1, stepId: "step-a" })),
+      KeyedStreamAppendUnavailableError,
+    };
+  },
+);
 
 const { getDeserializeStream, getSerializeStream } = vi.hoisted(() => ({
   getDeserializeStream: vi.fn(),
@@ -15,6 +21,7 @@ const { getDeserializeStream, getSerializeStream } = vi.hoisted(() => ({
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   appendKeyedStreamChunk,
   getStepMetadata,
+  KeyedStreamAppendUnavailableError,
 }));
 
 vi.mock("#compiled/@workflow/core/serialization.js", () => ({
@@ -89,7 +96,10 @@ describe("keyed public event publisher", () => {
       index: 4,
       inserted: true,
     });
-    const first = createKeyedPublicEventPublisher({ parentWritable: parentWritable(), sessionId: "sess-a" });
+    const first = createKeyedPublicEventPublisher({
+      parentWritable: parentWritable(),
+      sessionId: "sess-a",
+    });
     await first.publish(event("hello"));
 
     getStepMetadata.mockReturnValueOnce({ attempt: 2, stepId: "step-a" });
@@ -98,7 +108,10 @@ describe("keyed public event publisher", () => {
       index: 4,
       inserted: false,
     });
-    const retry = createKeyedPublicEventPublisher({ parentWritable: parentWritable(), sessionId: "sess-a" });
+    const retry = createKeyedPublicEventPublisher({
+      parentWritable: parentWritable(),
+      sessionId: "sess-a",
+    });
     await retry.publish(event("hello"));
 
     expect(appendKeyedStreamChunk.mock.calls.map((call) => call[2].idempotencyKey)).toEqual([
@@ -119,7 +132,10 @@ describe("keyed public event publisher", () => {
       index: 0,
       inserted: true,
     });
-    const publisher = createKeyedPublicEventPublisher({ parentWritable: parentWritable(), sessionId: "sess-a" });
+    const publisher = createKeyedPublicEventPublisher({
+      parentWritable: parentWritable(),
+      sessionId: "sess-a",
+    });
 
     await publisher.publish(event("same"));
     await publisher.publish(event("same"));
@@ -136,7 +152,10 @@ describe("keyed public event publisher", () => {
       index: 3,
       inserted: false,
     });
-    const publisher = createKeyedPublicEventPublisher({ parentWritable: parentWritable(), sessionId: "sess-a" });
+    const publisher = createKeyedPublicEventPublisher({
+      parentWritable: parentWritable(),
+      sessionId: "sess-a",
+    });
     const effect = vi.fn();
 
     const result = await publisher.publish(event("hello"));
@@ -157,7 +176,10 @@ describe("keyed public event publisher", () => {
       inserted: false,
     });
 
-    const publisher = createKeyedPublicEventPublisher({ parentWritable: parentWritable(), sessionId: "sess-a" });
+    const publisher = createKeyedPublicEventPublisher({
+      parentWritable: parentWritable(),
+      sessionId: "sess-a",
+    });
 
     await expect(publisher.publish(event("hello"))).resolves.toMatchObject({
       event: { meta: { at: "2026-08-14T00:00:00.000Z", id: "evt_01" } },
@@ -172,7 +194,10 @@ describe("keyed public event publisher", () => {
       index: 0,
       inserted: false,
     });
-    const publisher = createKeyedPublicEventPublisher({ parentWritable: parentWritable(), sessionId: "sess-a" });
+    const publisher = createKeyedPublicEventPublisher({
+      parentWritable: parentWritable(),
+      sessionId: "sess-a",
+    });
 
     await expect(publisher.publish(event("expected"))).rejects.toBeInstanceOf(
       KeyedPublicEventDivergenceError,
@@ -191,7 +216,7 @@ describe("keyed public event publisher", () => {
     expect(appendKeyedStreamChunk).not.toHaveBeenCalled();
   });
 
-  it("does not fall back to an ordinary write when a Vercel-style World rejects keyed append", async () => {
+  it("uses ordinary append after a non-exact backend rejects keyed append", async () => {
     const write = vi.fn();
     const writable = parentWritable();
     const originalGetWriter = writable.getWriter.bind(writable);
@@ -199,12 +224,16 @@ describe("keyed public event publisher", () => {
       const writer = originalGetWriter();
       return Object.assign(writer, { write });
     });
-    appendKeyedStreamChunk.mockRejectedValue(
-      new Error("Keyed stream append v1 is unavailable for this Workflow World"),
-    );
-    const publisher = createKeyedPublicEventPublisher({ parentWritable: writable, sessionId: "sess-a" });
+    const writer = writable.getWriter();
+    appendKeyedStreamChunk.mockRejectedValue(new KeyedStreamAppendUnavailableError());
+    const publisher = createKeyedPublicEventPublisher({
+      parentWritable: writable,
+      parentWriter: writer,
+      sessionId: "sess-a",
+    });
 
-    await expect(publisher.publish(event("hello"))).rejects.toThrow(/keyed stream append v1 is unavailable/i);
-    expect(write).not.toHaveBeenCalled();
+    await expect(publisher.publish(event("hello"))).resolves.toMatchObject({ inserted: true });
+    expect(write).toHaveBeenCalledTimes(1);
+    await writer.releaseLock();
   });
 });

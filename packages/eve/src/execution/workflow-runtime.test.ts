@@ -406,7 +406,10 @@ describe("createWorkflowRuntime#createSession", () => {
   it("rejects an exact-recovery child start before Workflow when v1 receipts are absent", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
-    getWorldMock.mockResolvedValue({ capabilities: { idempotentRunStartVersion: 1 }, runStarts: {} });
+    getWorldMock.mockResolvedValue({
+      capabilities: { idempotentRunStartVersion: 1 },
+      runStarts: {},
+    });
 
     await expect(
       buildRuntime(compiledArtifactsSource).createSession({
@@ -420,6 +423,56 @@ describe("createWorkflowRuntime#createSession", () => {
     ).rejects.toThrow("backend_unsupported");
 
     expect(startMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "idempotent child-start capability",
+    "child-start receipt store",
+    "idempotent continuation capability",
+    "continuation receipt store",
+    "keyed append capability",
+    "copied runtime identity",
+  ])("rejects exact recovery before any child/provider effect without %s", async (missing) => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    const world: {
+      capabilities: { idempotentHookResumeVersion?: 1; idempotentRunStartVersion?: 1 };
+      hookResumes?: unknown;
+      keyedStreamAppendVersion?: 1;
+      runStarts?: unknown;
+      workflowCopiedRuntimeIdentity?: unknown;
+    } = {
+      capabilities: { idempotentHookResumeVersion: 1, idempotentRunStartVersion: 1 },
+      hookResumes: {},
+      keyedStreamAppendVersion: 1,
+      runStarts: {},
+      workflowCopiedRuntimeIdentity: {},
+    };
+    if (missing === "idempotent child-start capability")
+      delete world.capabilities.idempotentRunStartVersion;
+    if (missing === "child-start receipt store") delete world.runStarts;
+    if (missing === "idempotent continuation capability")
+      delete world.capabilities.idempotentHookResumeVersion;
+    if (missing === "continuation receipt store") delete world.hookResumes;
+    if (missing === "keyed append capability") delete world.keyedStreamAppendVersion;
+    if (missing === "copied runtime identity") delete world.workflowCopiedRuntimeIdentity;
+    getWorldMock.mockResolvedValue(world);
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        capabilities: { exactRecovery: true },
+        idempotencyKey: "eve-child-start/v1/op_1",
+        input: { message: "hello" },
+        mode: "task",
+      }),
+    ).rejects.toThrow("backend_unsupported");
+
+    expect(getCompiledRuntimeAgentBundle).not.toHaveBeenCalled();
+    expect(startMock).not.toHaveBeenCalled();
+    expect(resumeHookMock).not.toHaveBeenCalled();
+    expect(cancelRunMock).not.toHaveBeenCalled();
   });
 
   it("uses an explicit title without changing the workflow model input", async () => {
