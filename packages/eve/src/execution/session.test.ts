@@ -11,7 +11,9 @@ import {
   refreshSessionFromTurnAgent,
 } from "#execution/session.js";
 
-function createTestTurnAgent(overrides?: Partial<RuntimeTurnAgent>): RuntimeTurnAgent {
+type StaticRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly model: unknown }>;
+
+function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): RuntimeTurnAgent {
   return {
     id: "test-agent",
     instructions: ["You are a helpful assistant.", "Be concise."],
@@ -46,6 +48,7 @@ describe("createCompactionConfig", () => {
     ).toEqual({
       recentWindowSize: 10,
       threshold: 180_000,
+      thresholdPercent: 0.9,
     });
   });
 
@@ -58,6 +61,7 @@ describe("createCompactionConfig", () => {
     ).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.5,
     });
   });
 
@@ -65,6 +69,7 @@ describe("createCompactionConfig", () => {
     expect(createCompactionConfig()).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.9,
     });
   });
 });
@@ -123,6 +128,34 @@ describe("createSession", () => {
     expect(session.continuationToken).toBe("root-token");
   });
 
+  it("copies static user instructions only when creating a fresh session", () => {
+    const initialMessages = [{ content: "Pinned tenant policy.", role: "user" as const }];
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent({ initialMessages }),
+    });
+    initialMessages[0] = { content: "mutated", role: "user" };
+
+    expect(session.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
+
+    const refreshed = refreshSessionFromTurnAgent({
+      session,
+      turnAgent: createTestTurnAgent({
+        initialMessages: [{ content: "New deployment policy.", role: "user" }],
+      }),
+    });
+    expect(refreshed.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
+
+    const hydrated = hydrateDurableSession({
+      durable: projectToDurableSession(refreshed),
+      turnAgent: createTestTurnAgent({
+        initialMessages: [{ content: "Another deployment policy.", role: "user" }],
+      }),
+    });
+    expect(hydrated.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
+  });
+
   it("defaults description and inputSchema when null", () => {
     const session = createSession({
       continuationToken: "root-token",
@@ -158,6 +191,7 @@ describe("createSession", () => {
     expect(session.compaction).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.9,
     });
   });
 
@@ -174,6 +208,7 @@ describe("createSession", () => {
     expect(session.compaction).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.5,
     });
   });
 
@@ -380,6 +415,25 @@ describe("mintSubagentContinuationToken", () => {
 });
 
 describe("refreshSessionFromTurnAgent", () => {
+  it("keeps session-specific system additions alongside refreshed authored instructions", () => {
+    const session = createSession({
+      continuationToken: "child-token",
+      sessionId: "child-session",
+      systemPromptAdditions: ["Background task updates"],
+      turnAgent: createTestTurnAgent({ instructions: ["Original instructions."] }),
+    });
+    expect(session.agent.system).toBe("Original instructions.\n\nBackground task updates");
+
+    const refreshed = refreshSessionFromTurnAgent({
+      session,
+      systemPromptAdditions: ["Background task updates"],
+      turnAgent: createTestTurnAgent({ instructions: ["Updated instructions."] }),
+    });
+
+    expect(refreshed.agent.system).toBe("Updated instructions.\n\nBackground task updates");
+    expect(refreshed.state).toBeUndefined();
+  });
+
   it("refreshes the current agent configuration while preserving history", () => {
     const session = createSession({
       continuationToken: "root-token",
@@ -466,6 +520,7 @@ describe("refreshSessionFromTurnAgent", () => {
       lastKnownPromptMessageCount: 7,
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.5,
     });
   });
 

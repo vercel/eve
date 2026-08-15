@@ -171,9 +171,15 @@ export function requireVercelLogin(failure?: VercelCaptureFailure): never {
  */
 const WHOAMI_TIMEOUT_MS = 10_000;
 
-/** Runs the bounded, read-only `vercel whoami` probe shared by the auth checks. */
-function probeWhoami(projectRoot: string, options: VercelProjectOperationOptions) {
-  return captureVercel(["whoami"], {
+/**
+ * Runs the bounded, read-only `vercel whoami` probe shared by the auth checks.
+ * A linked team project is the user's explicit scope choice, so authenticate
+ * against that owner instead of whichever account scope the CLI last selected.
+ */
+async function probeWhoami(projectRoot: string, options: VercelProjectOperationOptions) {
+  const link = await readProjectLink(projectRoot);
+  const args = ["whoami", ...(link?.orgId.startsWith("team_") ? ["--scope", link.orgId] : [])];
+  return captureVercel(args, {
     cwd: projectRoot,
     signal: options.signal,
     timeoutMs: WHOAMI_TIMEOUT_MS,

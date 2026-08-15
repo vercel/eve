@@ -21,15 +21,26 @@ const SPAN_FILE_PATTERN = /^[0-9a-f]{16}\.otlp\.json$/u;
 const MAX_SEGMENT_BYTES = 8 * 1024 * 1024;
 const MAX_UINT64 = 18_446_744_073_709_551_615n;
 
+export interface LocalTraceSpanEvent {
+  readonly attributes: Readonly<Record<string, unknown>>;
+  readonly name: string;
+  readonly timeNs: bigint;
+}
+
 export interface LocalTraceSpan {
   readonly attributes: Readonly<Record<string, unknown>>;
   readonly endTimeNs: bigint;
+  readonly events: readonly LocalTraceSpanEvent[];
+  /** OTLP span kind (1 internal … 5 consumer); undefined when absent. */
+  readonly kind?: number;
   readonly name: string;
   readonly parentSpanId?: string;
   readonly scope?: string;
   readonly spanId: string;
   readonly startTimeNs: bigint;
   readonly statusCode: number;
+  /** Message carried by an ERROR status, when the span recorded one. */
+  readonly statusMessage?: string;
   readonly traceId: string;
 }
 
@@ -272,6 +283,8 @@ function parseLocalTraceSpan(
   return {
     attributes: parseAttributes(raw.attributes),
     endTimeNs,
+    events: parseEvents(raw.events),
+    kind: typeof raw.kind === "number" ? raw.kind : undefined,
     name: raw.name,
     parentSpanId:
       typeof raw.parentSpanId === "string" && /^[0-9a-f]{16}$/u.test(raw.parentSpanId)
@@ -281,8 +294,27 @@ function parseLocalTraceSpan(
     spanId: raw.spanId,
     startTimeNs,
     statusCode: parseStatusCode(raw.status),
+    statusMessage: parseStatusMessage(raw.status),
     traceId: expectedTraceId,
   };
+}
+
+function parseEvents(value: unknown): LocalTraceSpanEvent[] {
+  if (!Array.isArray(value)) return [];
+  const events: LocalTraceSpanEvent[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.name !== "string") continue;
+    const timeNs = parseNanos(entry.timeUnixNano);
+    if (timeNs === undefined) continue;
+    events.push({ attributes: parseAttributes(entry.attributes), name: entry.name, timeNs });
+  }
+  return events.sort((left, right) =>
+    left.timeNs === right.timeNs
+      ? left.name.localeCompare(right.name)
+      : left.timeNs < right.timeNs
+        ? -1
+        : 1,
+  );
 }
 
 function parseAttributes(value: unknown): Record<string, unknown> {
@@ -320,6 +352,11 @@ function parseStatusCode(value: unknown): number {
   if (!isRecord(value)) return 0;
   if (typeof value.code === "number") return value.code;
   return value.code === "STATUS_CODE_ERROR" ? 2 : 0;
+}
+
+function parseStatusMessage(value: unknown): string | undefined {
+  if (!isRecord(value) || typeof value.message !== "string") return undefined;
+  return value.message.length === 0 ? undefined : value.message;
 }
 
 function firstAttribute(

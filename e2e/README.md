@@ -29,7 +29,7 @@ Fixture agents author their harness-owned configuration through the private
 - `e2eSubagentConfig({ mock? })` — the same model resolution for subagents,
   without root-only settings.
 - `e2eModel({ mock? })` — a bare model handle for nested slots such as
-  compaction models and dynamic fallbacks.
+  compaction models and dynamic selections.
 - `e2eJudgeModel()` — the judge model for `evals.config.ts`.
 
 When `EVE_E2E_MODEL=mock`, all of these return a deterministic `mockModel()`

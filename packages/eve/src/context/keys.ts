@@ -4,11 +4,12 @@
  * `#runtime/sessions/runtime-context-keys.ts`.
  */
 
-import type { LanguageModel, SystemModelMessage } from "ai";
+import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 
 import type { JsonObject } from "#shared/json.js";
 import type {
   ChannelInstrumentationProjection,
+  ChannelDeliveryMetadata,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
@@ -17,8 +18,10 @@ import type {
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
+import type { InstrumentationChannelDeliveryRef } from "#harness/instrumentation/lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -66,6 +69,18 @@ export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.i
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
+export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
+export interface ActiveChannelDelivery {
+  readonly agentName?: string;
+  readonly delivery: InstrumentationChannelDeliveryRef;
+  readonly rootSessionId: string;
+  readonly sequence: number;
+  readonly sessionId: string;
+  readonly turnId: string;
+}
+export const ActiveChannelDeliveriesKey = new ContextKey<readonly ActiveChannelDelivery[]>(
+  "eve.activeChannelDeliveries",
+);
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",
 );
@@ -108,6 +123,18 @@ export const TurnDynamicModelReferenceKey = new ContextKey<RuntimeModelReference
   "eve.turnDynamicModelReference",
 );
 
+export interface CachedModelMetadata {
+  readonly contextWindowTokens: number;
+  readonly expiresAt: number;
+  readonly maxOutputTokens?: number;
+  readonly resolvedModelId: string;
+}
+
+/** Successful runtime catalog selections cached in durable workflow state. */
+export const RuntimeModelMetadataCacheKey = new ContextKey<
+  Readonly<Record<string, CachedModelMetadata>>
+>("eve.runtimeModelMetadataCache");
+
 export interface LiveDynamicModelSelection {
   /** Live provider instance; absent for string selections, which resolve through the reference. */
   readonly model?: LanguageModel;
@@ -132,6 +159,7 @@ export interface DurableDynamicToolMetadata {
   readonly entryKey: string;
   readonly executeStepFnName?: string;
   readonly approvalStepFnName?: string;
+  readonly approvalResponseStepFnName?: string;
   readonly closureVars?: Record<string, unknown>;
 }
 
@@ -167,10 +195,20 @@ export const TurnDynamicToolMetadataKey = new ContextKey<readonly DurableDynamic
  */
 export const LiveStepToolsKey = new ContextKey<HarnessToolDefinition[]>("eve.liveStepTools");
 
-export type DurableDynamicSubagentSelection = {
-  readonly agentConfig: DynamicSubagentAgentConfig;
-  readonly prepared: PreparedRuntimeDelegationTool;
-} | null;
+export type DurableDynamicSubagentSelection =
+  | {
+      readonly agentConfig: DynamicSubagentAgentConfig;
+      readonly kind: "subagent";
+      readonly prepared: PreparedRuntimeDelegationTool;
+      readonly remoteAgent?: never;
+    }
+  | {
+      readonly agentConfig?: never;
+      readonly kind: "remote";
+      readonly prepared: PreparedRuntimeDelegationTool;
+      readonly remoteAgent: DynamicRemoteAgentConfig;
+    }
+  | null;
 
 export const SessionDynamicSubagentSelectionsKey = new ContextKey<
   Readonly<Record<string, DurableDynamicSubagentSelection>>
@@ -228,3 +266,13 @@ export const SessionDynamicInstructionsKey = new ContextKey<
 export const TurnDynamicInstructionsKey = new ContextKey<
   Record<string, readonly SystemModelMessage[]>
 >("eve.turnDynamicInstructions");
+
+/** Existing history exposed only to instructions resolvers during a preamble. */
+export const DynamicInstructionResolveMessagesKey = new ContextKey<readonly ModelMessage[]>(
+  "eve.dynamicInstructionResolveMessages",
+);
+
+/** User-role results waiting to be committed immediately after a preamble. */
+export const PendingDynamicInstructionUserMessagesKey = new ContextKey<readonly ModelMessage[]>(
+  "eve.pendingDynamicInstructionUserMessages",
+);

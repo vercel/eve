@@ -78,13 +78,14 @@ export interface AgentInfoSkillEntry extends AgentInfoSource {
 }
 
 export interface AgentInfoInstructionsEntry extends AgentInfoSource {
-  readonly markdown: string;
+  readonly content: string;
   readonly name: string;
+  readonly role: "system" | "user";
 }
 
 export interface AgentInfoInstructions {
   readonly dynamic: readonly AgentInfoDynamicResolverEntry[];
-  readonly static: AgentInfoInstructionsEntry | null;
+  readonly static: readonly AgentInfoInstructionsEntry[];
 }
 
 export interface AgentInfoScheduleEntry extends AgentInfoSource {
@@ -162,22 +163,35 @@ export interface AgentInfoDiagnostics {
   readonly discoveryWarnings: number;
 }
 
+interface AgentInfoModelBase {
+  readonly contextWindowTokens?: number;
+  readonly providerOptions?: unknown;
+  /** The agent's authored reasoning effort, forwarded to the model call. */
+  readonly reasoning?: AgentReasoningDefinition;
+  readonly source?: AgentInfoSource;
+}
+
+export type AgentInfoModel = AgentInfoModelBase &
+  (
+    | {
+        readonly id: string;
+        readonly routing: ModelRouting;
+        readonly endpoint?: ModelEndpointStatus;
+      }
+    | {
+        readonly id?: never;
+        readonly routing: { readonly kind: "dynamic" };
+        readonly endpoint?: never;
+      }
+  );
+
 export interface AgentInfoResponse {
   readonly agent: {
     readonly agentRoot: string;
     readonly appRoot: string;
     readonly configSource?: AgentInfoSource;
     readonly description?: string;
-    readonly model: {
-      readonly contextWindowTokens?: number;
-      readonly id: string;
-      readonly providerOptions?: unknown;
-      /** The agent's authored reasoning effort, forwarded to the model call. */
-      readonly reasoning?: AgentReasoningDefinition;
-      readonly source?: AgentInfoSource;
-      readonly routing?: ModelRouting;
-      readonly endpoint?: ModelEndpointStatus;
-    };
+    readonly model: AgentInfoModel;
     readonly name: string;
     readonly outputSchema?: unknown;
   };
@@ -202,7 +216,7 @@ export interface AgentInfoResponse {
     readonly total: number;
   };
   readonly tools: AgentInfoTools;
-  readonly version: 1;
+  readonly version: 2;
   readonly workflow: {
     readonly enabled: boolean;
     readonly toolName: string;
@@ -220,23 +234,34 @@ export function buildAgentInfoResponse(
   },
 ): AgentInfoResponse {
   const agent = data.agent;
+  const config = agent.config;
+  if (config === undefined) {
+    throw new Error("Cannot inspect unresolved dynamic subagent resources as a root agent.");
+  }
   const tools = buildToolInfo(agent, getRootDelegationToolNames(data.manifest));
 
   return {
     agent: {
       agentRoot: agent.metadata.agentRoot,
       appRoot: agent.metadata.appRoot,
-      configSource: agent.config.source ? toSource(agent.config.source) : undefined,
-      description: agent.config.description,
-      model: {
-        contextWindowTokens: agent.config.model.contextWindowTokens,
-        id: agent.config.model.id,
-        providerOptions: agent.config.model.providerOptions,
-        reasoning: agent.config.reasoning,
-        source: agent.config.model.source ? toSource(agent.config.model.source) : undefined,
-      },
-      name: agent.config.name,
-      outputSchema: agent.config.outputSchema,
+      configSource: config.source ? toSource(config.source) : undefined,
+      description: config.description,
+      model:
+        config.dynamicModel === undefined
+          ? {
+              contextWindowTokens: config.model.contextWindowTokens,
+              id: config.model.id,
+              providerOptions: config.model.providerOptions,
+              reasoning: config.reasoning,
+              source: config.model.source ? toSource(config.model.source) : undefined,
+              routing: resolveStaticAgentModelRouting(data.manifest),
+            }
+          : {
+              reasoning: config.reasoning,
+              routing: { kind: "dynamic" },
+            },
+      name: config.name,
+      outputSchema: config.outputSchema,
     },
     capabilities: {
       devRoutes: input.mode === "development",
@@ -266,13 +291,12 @@ export function buildAgentInfoResponse(
       dynamic: agent.dynamicInstructionsResolvers.map((resolver) =>
         renderDynamicResolver(resolver, { origin: "authored" }),
       ),
-      static: agent.instructions
-        ? {
-            ...toSource(agent.instructions),
-            markdown: agent.instructions.markdown,
-            name: agent.instructions.name,
-          }
-        : null,
+      static: agent.instructions.map((instructions) => ({
+        ...toSource(instructions),
+        content: instructions.content,
+        name: instructions.name,
+        role: instructions.role,
+      })),
     },
     kind: "eve-agent-info",
     mode: input.mode,
@@ -289,7 +313,7 @@ export function buildAgentInfoResponse(
       total: data.manifest.subagents.length,
     },
     tools,
-    version: 1,
+    version: 2,
     workflow: {
       enabled: agent.workflowTool !== undefined,
       toolName: WORKFLOW_TOOL_NAME,
@@ -299,6 +323,13 @@ export function buildAgentInfoResponse(
       rootEntries: [...agent.workspaceSpec.rootEntries],
     },
   };
+}
+
+function resolveStaticAgentModelRouting(manifest: CompiledAgentManifest): ModelRouting {
+  if (manifest.config.model === undefined) {
+    throw new Error("Resolved static agent config does not match its compiled manifest.");
+  }
+  return manifest.config.model.routing;
 }
 
 function buildChannelInfo(agent: ResolvedAgent): AgentInfoChannels {
@@ -529,7 +560,7 @@ export function renderSubagent(subagent: CompiledSubagentNode): AgentInfoSubagen
       channels: subagent.agent.channels.length,
       connections: subagent.agent.connections.length,
       hooks: subagent.agent.hooks.length,
-      instructions: subagent.agent.instructions !== undefined,
+      instructions: subagent.agent.instructions.length > 0,
       schedules: subagent.agent.schedules.length,
       skills: subagent.agent.skills.length,
       tools: subagent.agent.tools.length,

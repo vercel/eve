@@ -307,8 +307,12 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
 
   const recent = state.lines.slice(-FLOW_PANEL_LINE_CAP);
   for (const line of recent) {
-    const body = line.tone === "info" ? c.dim(line.text) : line.text;
-    rows.push(`  ${toneGlyph(line.tone, theme)} ${body}`);
+    const text = line.text.split("\n");
+    for (const [index, part] of text.entries()) {
+      const body = line.tone === "info" ? c.dim(part) : part;
+      const prefix = index === 0 ? `${toneGlyph(line.tone, theme)} ` : "  ";
+      rows.push(`  ${prefix}${body}`);
+    }
   }
   if (recent.length > 0) {
     rows.push("");
@@ -325,14 +329,17 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
     case "status":
       rows.push(`  ${renderFlowPanelStatus(state.content.status, theme)}`);
       if (state.content.preview !== undefined) {
-        rows.push(`    ${c.dim(state.content.preview)}`);
+        for (const line of state.content.preview.split("\n")) {
+          rows.push(`    ${c.dim(line)}`);
+        }
       }
       break;
-    case "preview":
-      rows.push(
-        `  ${renderIndicator(state.content.indicator, theme)} ${c.dim(state.content.text)}`,
-      );
+    case "preview": {
+      const [first, ...rest] = state.content.text.split("\n");
+      rows.push(`  ${renderIndicator(state.content.indicator, theme)} ${c.dim(first ?? "")}`);
+      for (const line of rest) rows.push(`    ${c.dim(line)}`);
       break;
+    }
     case "idle":
       // A flow between phases must never look dead: boxes run subprocesses
       // without narrating every gap, so the panel keeps a live pulse.

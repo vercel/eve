@@ -5,20 +5,27 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import type { HookPayload } from "#channel/types.js";
 import { ChannelRequestIdKey, SubagentDepthKey } from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
-import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
+import {
+  notifyDelegatedParentStep,
+  notifyTurnCallerStep,
+  resolveInitialTurnCallerStep,
+} from "#execution/delegated-parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import {
   createSessionTimeoutControl,
   type SessionTimeoutControl,
 } from "#execution/session-timeout-control.js";
+import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
-import { dispatchTurnStep } from "#execution/workflow-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
+import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
+import { sessionCommandHookToken } from "#execution/session-command-token.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
@@ -51,17 +58,32 @@ vi.mock("./create-session-step.js", () => ({
 }));
 
 vi.mock("./route-child-delivery.js", () => ({
-  routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads }) => ({
-    kind: "continue",
-    remainder: payloads[0],
-  })),
+  routeDeliverToChildren: vi
+    .fn()
+    .mockImplementation(async ({ delivery, serializedContext = {}, sessionState }) => ({
+      kind: "continue",
+      remainder: delivery,
+      serializedContext,
+      sessionState,
+    })),
 }));
 
 vi.mock("./delegated-parent-notification.js", () => ({
+  bindTurnCallerContextStep: vi
+    .fn()
+    .mockImplementation(async ({ serializedContext }) => serializedContext),
+  notifyCancelledTaskCallerStep: vi.fn().mockResolvedValue(undefined),
   notifyDelegatedParentStep: vi.fn().mockResolvedValue(undefined),
+  notifyTaskTurnStartedStep: vi.fn().mockResolvedValue(undefined),
+  notifyTurnCallerStep: vi.fn().mockResolvedValue(undefined),
+  resolveInitialTurnCallerStep: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("./workflow-steps.js", () => ({
+vi.mock("./terminate-child-sessions-step.js", () => ({
+  terminateChildSessionsStep: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("./dispatch-turn-step.js", () => ({
   dispatchTurnStep: vi.fn().mockImplementation(async () => ({ runId: "turn-run" })),
 }));
 
@@ -108,10 +130,10 @@ vi.mock("./session-callback-step.js", () => ({
 interface DeliveryHookConfig {
   readonly dispose?: () => void;
   readonly getConflict?: () => Promise<{ readonly runId: string } | null>;
-  readonly next?: () => Promise<IteratorResult<HookPayload>>;
-  readonly return?: () => Promise<IteratorResult<HookPayload>>;
+  readonly next?: () => Promise<IteratorResult<SessionInboxPayload>>;
+  readonly return?: () => Promise<IteratorResult<SessionInboxPayload>>;
   readonly token: string;
-  readonly values?: readonly HookPayload[];
+  readonly values?: readonly SessionInboxPayload[];
 }
 
 interface AuthHookConfig {
@@ -155,13 +177,17 @@ describe("workflowEntry", () => {
     expect(result).toEqual({ output: "ok" });
     expect(createSessionTimeoutControl).toHaveBeenCalledWith({
       deadline: new Date("2026-01-31T00:00:00.000Z"),
+      token: sessionCommandHookToken("wrun_test_123"),
     });
-    expect(createSessionStep).toHaveBeenCalledWith({
-      compiledArtifactsSource: {},
-      continuationToken: "http:test",
-      nodeId: undefined,
-      sessionId: "wrun_test_123",
-    });
+    expect(createSessionStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        compiledArtifactsSource: {},
+        continuationToken: "http:test",
+        nodeId: undefined,
+        sessionId: "wrun_test_123",
+        taskOwned: false,
+      }),
+    );
     expect(dispatchTurnStep).toHaveBeenCalledWith(
       expect.objectContaining({
         completionToken: expect.any(String),
@@ -181,9 +207,13 @@ describe("workflowEntry", () => {
     expect(getConflict.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(dispatchTurnStep).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
+    expect(terminateChildSessionsStep).toHaveBeenCalledWith({
+      serializedContext: expect.any(Object),
+      sessionState,
+    });
   });
 
-  it("fails a conflicting delivery hook before dispatching the first turn", async () => {
+  it("exits a conflicting initial continuation before dispatching the first turn", async () => {
     const sessionState = createBaseSessionState();
     const dispose = vi.fn();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
@@ -203,25 +233,14 @@ describe("workflowEntry", () => {
         input: { message: "duplicate" },
         serializedContext: createSerializedContext(),
       }),
-    ).rejects.toMatchObject({
-      message: "Agent workflow failed. Inspect the private session trace for details.",
-      name: "EveWorkflowFailure",
-    });
+    ).resolves.toEqual({ output: "" });
 
-    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: expect.objectContaining({
-          conflictingRunId: "wrun_owner",
-          name: "HookConflictError",
-          token: "http:test",
-        }),
-      }),
-    );
+    expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
     expect(dispatchTurnStep).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
   });
 
-  it("normalizes the getConflict fallback error before dispatching the first turn", async () => {
+  it("also exits when a legacy world reports the initial continuation conflict", async () => {
     const sessionState = createBaseSessionState();
     const dispose = vi.fn();
     const fallbackError = Object.assign(new Error("legacy hook conflict"), {
@@ -247,20 +266,9 @@ describe("workflowEntry", () => {
         input: { message: "duplicate" },
         serializedContext: createSerializedContext(),
       }),
-    ).rejects.toMatchObject({
-      message: "Agent workflow failed. Inspect the private session trace for details.",
-      name: "EveWorkflowFailure",
-    });
+    ).resolves.toEqual({ output: "" });
 
-    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: expect.objectContaining({
-          message: 'Hook token "http:test" is already in use',
-          name: "HookConflictError",
-          token: "http:test",
-        }),
-      }),
-    );
+    expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
     expect(dispatchTurnStep).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
   });
@@ -319,10 +327,11 @@ describe("workflowEntry", () => {
       deliveryHooks: [
         {
           dispose,
+          next: () => new Promise<IteratorResult<SessionInboxPayload>>(() => {}),
           token: "http:test",
-          values: [{ kind: "session-timeout" }],
         },
       ],
+      stableHook: { values: [{ kind: "session-timeout" }] },
       turnControls: [turnResult({ action: "park", sessionState })],
     });
 
@@ -336,9 +345,13 @@ describe("workflowEntry", () => {
 
     expect(createSessionTimeoutControl).toHaveBeenCalledWith({
       deadline: new Date("2026-01-01T00:00:01.000Z"),
+      token: sessionCommandHookToken("wrun_test_123"),
     });
-    expect(timeoutControl.rekey).toHaveBeenCalledWith("http:test");
     expect(timeoutControl.dispose).toHaveBeenCalledOnce();
+    expect(terminateChildSessionsStep).toHaveBeenCalledWith({
+      serializedContext: expect.any(Object),
+      sessionState,
+    });
     expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
     expect(emitTerminalSessionCompletionStep).toHaveBeenCalledWith({
       parentWritable: expect.any(WritableStream),
@@ -348,10 +361,12 @@ describe("workflowEntry", () => {
       vi.mocked(emitTerminalSessionCompletionStep).mock.invocationCallOrder[0] ??
         Number.POSITIVE_INFINITY,
     );
-    expect(fireSessionCallbackStep).toHaveBeenCalledWith({
-      output: "",
-      serializedContext: { "eve.sessionId": "wrun_test_123" },
-      status: "completed",
+    expect(fireSessionCallbackStep).not.toHaveBeenCalled();
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith({
+      caller: undefined,
+      lifecycle: "terminal",
+      sessionId: "wrun_test_123",
+      settled: { output: "" },
     });
   });
 
@@ -411,7 +426,7 @@ describe("workflowEntry", () => {
     expect(routeDeliverToChildren).not.toHaveBeenCalled();
   });
 
-  it("does not complete at the deadline until the active turn settles", async () => {
+  it("completes at the deadline after the active turn settles", async () => {
     const sessionState = createBaseSessionState();
     const dispose = vi.fn();
     let settleTurn: ((result: IteratorResult<TurnControlPayload>) => void) | undefined;
@@ -420,6 +435,7 @@ describe("workflowEntry", () => {
     });
 
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    let deliveredTimeout = false;
     vi.mocked(createHook).mockImplementation((options?: { readonly token?: string }) => {
       const token = options?.token ?? "";
       if (isTurnCompletionToken(token)) {
@@ -432,11 +448,25 @@ describe("workflowEntry", () => {
       if (token.endsWith(":auth")) {
         return createMockHook({ token, values: [] }) as never;
       }
-      return createMockHook({
-        dispose,
-        token,
-        values: [{ kind: "session-timeout" }],
-      }) as never;
+      return token === sessionCommandHookToken("wrun_test_123")
+        ? (createMockHook({
+            dispose,
+            next: () => {
+              if (deliveredTimeout) {
+                return new Promise<IteratorResult<SessionInboxPayload>>(() => {});
+              }
+              deliveredTimeout = true;
+              return Promise.resolve({ done: false, value: { kind: "session-timeout" } });
+            },
+            token,
+            values: [],
+          }) as never)
+        : (createMockHook({
+            dispose,
+            next: () => new Promise<IteratorResult<SessionInboxPayload>>(() => {}),
+            token,
+            values: [],
+          }) as never);
     });
 
     const result = workflowEntry({
@@ -477,7 +507,13 @@ describe("workflowEntry", () => {
 
   it("notifies a delegated parent once when a turn fails terminally", async () => {
     const sessionState = createBaseSessionState();
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-token" },
+      subagentName: "researcher",
+    };
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
     installHookMocks({
       turnControls: [
         {
@@ -512,20 +548,269 @@ describe("workflowEntry", () => {
         error: expect.objectContaining({ message: "persistent recoverable failure" }),
       }),
     );
-    expect(fireSessionCallbackStep).toHaveBeenCalledOnce();
-    expect(notifyDelegatedParentStep).toHaveBeenCalledOnce();
-    expect(notifyDelegatedParentStep).toHaveBeenCalledWith({
-      result: {
-        callId: "call-1",
+    expect(terminateChildSessionsStep).toHaveBeenCalledWith({
+      serializedContext: expect.any(Object),
+      sessionState,
+    });
+    expect(notifyDelegatedParentStep).not.toHaveBeenCalled();
+    expect(notifyTurnCallerStep).toHaveBeenCalledOnce();
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith({
+      caller,
+      lifecycle: "terminal",
+      sessionId: "wrun_test_123",
+      settled: {
         isError: true,
-        kind: "subagent-result",
-        output: {
-          code: "SUBAGENT_EXECUTION_FAILED",
+        output: expect.objectContaining({
           message: "persistent recoverable failure",
+          name: "Error",
+        }),
+      },
+    });
+    expect(fireSessionCallbackStep).not.toHaveBeenCalled();
+    // The caller cell was already populated; the crash path must reuse it
+    // instead of resolving a second time.
+    expect(resolveInitialTurnCallerStep).toHaveBeenCalledOnce();
+  });
+
+  it("rejects the delegated caller when the session fails before the caller is resolved", async () => {
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-token" },
+      subagentName: "researcher",
+    };
+    // Crash before `resolveInitialTurnCallerStep` ever runs: the cleanup
+    // cell is unpopulated, so the catch must re-resolve the caller from the
+    // serialized context or the delegated parent's call parks forever.
+    vi.mocked(createSessionStep).mockRejectedValueOnce(new Error("session creation failed"));
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
+    const serializedContext = createSerializedContext({
+      "eve.channel": {
+        kind: "subagent",
+        state: {
+          callId: "call-1",
+          parentContinuationToken: "parent-token",
+          subagentName: "researcher",
         },
+      },
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext,
+      }),
+    ).rejects.toMatchObject({ name: "EveWorkflowFailure" });
+
+    expect(resolveInitialTurnCallerStep).toHaveBeenCalledOnce();
+    expect(notifyTurnCallerStep).toHaveBeenCalledOnce();
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith({
+      caller,
+      lifecycle: "terminal",
+      sessionId: "wrun_test_123",
+      settled: {
+        isError: true,
+        output: expect.objectContaining({ message: "session creation failed" }),
+      },
+    });
+    // No snapshot was ever received, so there are no children to terminate.
+    expect(terminateChildSessionsStep).not.toHaveBeenCalled();
+  });
+
+  it("does not re-resolve a caller the loop already settled and cleared", async () => {
+    // A crash after a settled reply cleared the cell must notify no one:
+    // `caller: undefined` with the resolution flag set means "nothing left
+    // to notify", not "never resolved".
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(undefined);
+    installHookMocks({
+      turnControls: [
+        {
+          error: { message: "root turn crashed", name: "Error" },
+          kind: "turn-error",
+        },
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).rejects.toMatchObject({ name: "EveWorkflowFailure" });
+
+    expect(resolveInitialTurnCallerStep).toHaveBeenCalledOnce();
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith(
+      expect.objectContaining({ caller: undefined }),
+    );
+  });
+
+  it("notifies the latest delegated exchange when a resumed turn fails terminally", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    const serializedContext = createSerializedContext({
+      "eve.channel": {
+        kind: "subagent",
+        state: {
+          callId: "call-original",
+          parentContinuationToken: "original-parent-turn",
+          subagentName: "researcher",
+        },
+      },
+    });
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [
+            {
+              caller: {
+                callId: "call-latest",
+                replyTo: { kind: "hook", token: "latest-parent-turn" },
+                subagentName: "researcher",
+              },
+              kind: "send",
+              payload: { message: "follow up" },
+            },
+          ],
+        },
+      ],
+      turnControls: [
+        turnResult({ action: "park", sessionState }),
+        {
+          action: {
+            isError: true,
+            kind: "done",
+            output: "follow-up failed",
+            serializedContext,
+            sessionState,
+          },
+          kind: "turn-result",
+        },
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext,
+      }),
+    ).resolves.toEqual({ output: "follow-up failed" });
+
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith({
+      caller: {
+        callId: "call-latest",
+        replyTo: { kind: "hook", token: "latest-parent-turn" },
         subagentName: "researcher",
       },
-      serializedContext,
+      lifecycle: "terminal",
+      sessionId: "wrun_test_123",
+      settled: {
+        isError: true,
+        output: "follow-up failed",
+      },
+    });
+    expect(fireSessionCallbackStep).not.toHaveBeenCalled();
+  });
+
+  it("rekeys the delivery hook before notifying a delegated settled turn", async () => {
+    const initialState = createBaseSessionState({ continuationToken: "" });
+    const parkedState = createBaseSessionState({ continuationToken: "subagent:child" });
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "researcher",
+    };
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(initialState));
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
+    const serializedContext = createSerializedContext({
+      "eve.channel": {
+        kind: "subagent",
+        state: {
+          callId: "call-1",
+          parentContinuationToken: "parent-turn",
+          subagentName: "researcher",
+        },
+      },
+      "eve.continuationToken": "",
+    });
+    installHookMocks({
+      deliveryHooks: [{ token: "subagent:child", values: [] }],
+      turnControls: [
+        turnResult({
+          action: "park",
+          serializedContext,
+          sessionState: parkedState,
+          settled: { output: "settled answer" },
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext,
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    const rekeyCall = vi
+      .mocked(createHook)
+      .mock.calls.find((call) => call[0]?.token === "subagent:child");
+    expect(rekeyCall).toBeDefined();
+    expect(vi.mocked(createHook).mock.invocationCallOrder.at(-1)).toBeLessThan(
+      vi.mocked(notifyTurnCallerStep).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith({
+      caller,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { output: "settled answer" },
+    });
+  });
+
+  it("keeps the turn caller across a callerless continuation", async () => {
+    const sessionState = createBaseSessionState();
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "researcher",
+    };
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [
+            {
+              kind: "send",
+              payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
+            },
+          ],
+        },
+      ],
+      turnControls: [
+        turnResult({ action: "park", sessionState }),
+        turnResult({
+          action: "park",
+          sessionState,
+          settled: { output: "approved answer" },
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
+      caller,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { output: "approved answer" },
     });
   });
 
@@ -539,8 +824,8 @@ describe("workflowEntry", () => {
           values: [
             {
               requestId: "req_followup",
-              kind: "deliver",
-              payloads: [{ message: "follow up" }],
+              kind: "send",
+              payload: { message: "follow up" },
             },
           ],
         },
@@ -556,7 +841,7 @@ describe("workflowEntry", () => {
       serializedContext: createSerializedContext(),
     });
 
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toMatchObject({
       auth: undefined,
       requestId: "req_followup",
       kind: "deliver",
@@ -618,8 +903,8 @@ describe("workflowEntry", () => {
         token,
         values: [
           {
-            kind: "deliver",
-            payloads: [{ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }],
+            kind: "send",
+            payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
           },
         ],
       }) as never;
@@ -634,8 +919,12 @@ describe("workflowEntry", () => {
     expect(dispatchTurnStep).toHaveBeenCalledTimes(1);
     expect(resumeHook).toHaveBeenCalledWith("turn-inbox", {
       delivery: {
+        auth: undefined,
+        caller: undefined,
         kind: "deliver",
+        payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
         payloads: [{ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }],
+        requestId: undefined,
       },
       kind: "driver-delivery",
       requestId: "delivery-1",
@@ -674,7 +963,7 @@ describe("workflowEntry", () => {
       }
       return createMockHook({
         token,
-        values: [{ kind: "deliver", payloads: [{ message: "not for the child" }] }],
+        values: [{ kind: "send", payload: { message: "not for the child" } }],
       }) as never;
     });
 
@@ -685,7 +974,7 @@ describe("workflowEntry", () => {
 
     expect(result).toEqual({ output: "after delivery" });
     expect(dispatchTurnStep).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toMatchObject({
       auth: undefined,
       kind: "deliver",
       payloads: [{ message: "not for the child" }],
@@ -695,7 +984,20 @@ describe("workflowEntry", () => {
   });
 
   it("settles a cancelled turn in the driver and starts the next turn from the settled state", async () => {
-    const sessionState = createBaseSessionState();
+    const sessionState = createBaseSessionState({
+      snapshot: {
+        session: {
+          agent: { system: "" },
+          continuationToken: "http:test",
+          history: [],
+          sessionId: "wrun_test_123",
+          state: {
+            "eve.harness.settledTurn": { output: "stale prior answer" },
+          },
+        },
+        version: 1,
+      },
+    });
     const settledState = createBaseSessionState({
       emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
     });
@@ -708,7 +1010,7 @@ describe("workflowEntry", () => {
       deliveryHooks: [
         {
           token: "http:test",
-          values: [{ kind: "deliver", payloads: [{ message: "after cancel" }] }],
+          values: [{ kind: "send", payload: { message: "after cancel" } }],
         },
       ],
       turnControls: [
@@ -740,6 +1042,12 @@ describe("workflowEntry", () => {
       serializedContext: { settled: true },
       sessionState: settledState,
     });
+    expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
+      caller: undefined,
+      lifecycle: "terminal",
+      sessionId: "wrun_test_123",
+      settled: { output: "ok" },
+    });
   });
 
   it("does not settle an ordinary park as cancelled", async () => {
@@ -757,6 +1065,182 @@ describe("workflowEntry", () => {
 
     expect(result).toEqual({ output: "" });
     expect(settleCancelledTurnStep).not.toHaveBeenCalled();
+  });
+
+  it("routes every settled conversation turn without classifying the session", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      deliveryHooks: [{ token: "http:test", values: [] }],
+      turnControls: [
+        turnResult({
+          action: "park",
+          sessionState,
+          settled: { output: "hello" },
+        }),
+      ],
+    });
+    const serializedContext = createSerializedContext();
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext,
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith({
+      caller: undefined,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { output: "hello" },
+    });
+  });
+
+  it("does not re-send a settled parent turn when a delivery routes to a child", async () => {
+    const sessionState = createBaseSessionState({ hasProxyInputRequests: true });
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(routeDeliverToChildren).mockResolvedValueOnce({
+      kind: "continue",
+      remainder: undefined,
+      serializedContext: {},
+      sessionState,
+    });
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [{ kind: "send", payload: { inputResponses: [] } }],
+        },
+      ],
+      turnControls: [
+        turnResult({
+          action: "park",
+          sessionState,
+          settled: { output: "already sent" },
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(notifyTurnCallerStep).toHaveBeenCalledTimes(1);
+  });
+
+  it("adopts retired proxy state before the next parked driver turn", async () => {
+    const sessionState = createBaseSessionState({ hasProxyInputRequests: true });
+    const retiredState = createBaseSessionState({ hasProxyInputRequests: false });
+    const completedState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(routeDeliverToChildren).mockResolvedValueOnce({
+      kind: "continue",
+      remainder: undefined,
+      serializedContext: {},
+      sessionState: retiredState,
+    });
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [
+            { kind: "send", payload: { inputResponses: [] } },
+            { kind: "send", payload: { message: "next parent turn" } },
+          ],
+        },
+      ],
+      turnControls: [
+        turnResult({ action: "park", sessionState }),
+        turnResult({ action: "done", output: "ok", sessionState: completedState }),
+      ],
+    });
+
+    await workflowEntry({
+      input: { message: "hello" },
+      serializedContext: createSerializedContext(),
+    });
+
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].sessionState).toBe(retiredState);
+  });
+
+  it("runs concurrent caller deliveries as separate turns", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    const firstCaller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "caller-1" },
+      subagentName: "researcher",
+    };
+    const secondCaller = {
+      callId: "call-2",
+      replyTo: { kind: "hook" as const, token: "caller-2" },
+      subagentName: "researcher",
+    };
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [],
+        },
+      ],
+      turnControls: [
+        {
+          action: {
+            kind: "park",
+            serializedContext: { "eve.sessionId": "wrun_test_123" },
+            sessionState,
+          },
+          bufferedDeliveries: [
+            {
+              caller: firstCaller,
+              kind: "deliver",
+              payloads: [{ message: "first question" }],
+            },
+            {
+              caller: secondCaller,
+              kind: "deliver",
+              payloads: [{ message: "second question" }],
+            },
+          ],
+          kind: "turn-result",
+        },
+        turnResult({
+          action: "park",
+          sessionState,
+          settled: { output: "first answer" },
+        }),
+        turnResult({
+          action: "park",
+          sessionState,
+          settled: { output: "second answer" },
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "initial question" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(dispatchTurnStep).toHaveBeenCalledTimes(3);
+    expect(notifyTurnCallerStep).toHaveBeenNthCalledWith(1, {
+      caller: firstCaller,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { output: "first answer" },
+    });
+    expect(notifyTurnCallerStep).toHaveBeenNthCalledWith(2, {
+      caller: secondCaller,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { output: "second answer" },
+    });
   });
 
   it("skips child routing when a turn completes without yielding to a delivery", async () => {
@@ -897,8 +1381,8 @@ describe("workflowEntry", () => {
           token: "slack:C01:",
           values: [
             {
-              kind: "deliver",
-              payloads: [{ message: "follow up" }],
+              kind: "send",
+              payload: { message: "follow up" },
             },
           ],
         },
@@ -926,7 +1410,7 @@ describe("workflowEntry", () => {
 
     expect(result).toEqual({ output: "" });
     expect(nonTurnHookTokens()).toEqual(["slack:C01:", "slack:C01:1800000000.123456"]);
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toMatchObject({
       kind: "deliver",
       payloads: [{ message: "follow up" }],
     });
@@ -956,8 +1440,8 @@ describe("workflowEntry", () => {
           token: "http:test",
           values: [
             {
-              kind: "deliver",
-              payloads: [{ message: "follow up" }],
+              kind: "send",
+              payload: { message: "follow up" },
             },
           ],
         },
@@ -1030,6 +1514,10 @@ function turnResult(input: {
   readonly output?: string;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly settled?: {
+    readonly output: unknown;
+    readonly isError?: boolean;
+  };
 }): TurnControlPayload {
   const serializedContext = input.serializedContext ?? { "eve.sessionId": "wrun_test_123" };
   if (input.action === "done") {
@@ -1043,12 +1531,13 @@ function turnResult(input: {
       kind: "turn-result",
     };
   }
+  const park = {
+    kind: "park" as const,
+    serializedContext,
+    sessionState: input.sessionState,
+  };
   return {
-    action: {
-      kind: "park",
-      serializedContext,
-      sessionState: input.sessionState,
-    },
+    action: input.settled === undefined ? park : { ...park, settled: input.settled },
     kind: "turn-result",
   };
 }
@@ -1056,6 +1545,7 @@ function turnResult(input: {
 function installHookMocks(input: {
   readonly authHook?: AuthHookConfig;
   readonly deliveryHooks?: readonly DeliveryHookConfig[];
+  readonly stableHook?: Omit<DeliveryHookConfig, "token">;
   readonly symbolDispose?: () => void;
   readonly turnControls: readonly TurnControlPayload[];
 }): void {
@@ -1082,6 +1572,25 @@ function installHookMocks(input: {
       }) as never;
     }
 
+    if (token === sessionCommandHookToken("wrun_test_123")) {
+      const values = [...(input.stableHook?.values ?? [])];
+      return createMockHook({
+        dispose: input.stableHook?.dispose,
+        getConflict: input.stableHook?.getConflict,
+        next:
+          input.stableHook?.next ??
+          (async () => {
+            const value = values.shift();
+            return value === undefined
+              ? await new Promise<IteratorResult<SessionInboxPayload>>(() => {})
+              : { done: false, value };
+          }),
+        return: input.stableHook?.return,
+        token,
+        values: [],
+      }) as never;
+    }
+
     const config = deliveryHooks.shift() ?? { token, values: [] };
     if (config.token !== token) {
       throw new Error(`Expected delivery hook token "${config.token}", received "${token}".`);
@@ -1102,7 +1611,7 @@ function installHookMocks(input: {
 function createTimeoutControl(): SessionTimeoutControl {
   return {
     dispose: vi.fn(async () => undefined),
-    rekey: vi.fn(async () => undefined),
+    start: vi.fn(async () => undefined),
   };
 }
 
@@ -1143,13 +1652,11 @@ function createMockHook<T>(input: {
   });
 }
 
-function createIteratorReturn(): () => Promise<IteratorResult<HookPayload>> {
-  return vi.fn(
-    async (): Promise<IteratorResult<HookPayload>> => ({
-      done: true,
-      value: undefined,
-    }),
-  );
+function createIteratorReturn(): () => Promise<IteratorResult<never>> {
+  return vi.fn(async (): Promise<IteratorResult<never>> => ({
+    done: true,
+    value: undefined,
+  }));
 }
 
 function nonTurnHookTokens(): string[] {
@@ -1158,7 +1665,10 @@ function nonTurnHookTokens(): string[] {
     .mock.calls.map((call) => call[0]?.token)
     .filter(
       (token): token is string =>
-        token !== undefined && !token.endsWith(":auth") && !isTurnCompletionToken(token),
+        token !== undefined &&
+        token !== sessionCommandHookToken("wrun_test_123") &&
+        !token.endsWith(":auth") &&
+        !isTurnCompletionToken(token),
     );
 }
 

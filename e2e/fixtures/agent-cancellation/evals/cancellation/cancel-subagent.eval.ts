@@ -52,6 +52,18 @@ export default defineEval({
     followUp.notEvent("turn.cancelled");
     followUp.messageIncludes(/CANCELLATION-SUBAGENT-FOLLOW-UP-OK/i);
 
+    // The cancelled child must survive in the parent's model-visible
+    // [Agents] listing as a parked "(cancelled)" handle. A handle leaked as
+    // `running` never re-enters the listing, so this catches the abandoned
+    // cancelled batch regressing to a permanent leak.
+    const listing = await t.send(
+      "Look at the [Agents] listing in your context and reply with the sleeper agent's entry verbatim, including its status.",
+    );
+    listing.expectOk();
+    listing.notEvent("turn.cancelled");
+    listing.messageIncludes(/sleeper/i);
+    listing.messageIncludes(/\(cancelled\)/);
+
     t.event("turn.cancelled", { count: 2 });
   },
 });

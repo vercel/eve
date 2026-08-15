@@ -10,10 +10,6 @@ export interface DevelopmentSessionState {
    */
   readonly boundaryCount: number;
   /**
-   * V2 continuation token for resuming a parked session across turns.
-   */
-  readonly continuationToken?: string;
-  /**
    * Number of streamed workflow chunks already consumed from the session stream.
    */
   readonly streamIndex: number;
@@ -30,14 +26,12 @@ export interface DevelopmentSessionState {
 export function createDevelopmentSessionState(
   input: {
     readonly boundaryCount?: number;
-    readonly continuationToken?: string;
     readonly sessionId?: string;
     readonly streamIndex?: number;
   } = {},
 ): DevelopmentSessionState {
   return {
     boundaryCount: input.boundaryCount ?? 0,
-    continuationToken: input.continuationToken,
     sessionId: input.sessionId,
     streamIndex: input.streamIndex ?? 0,
   };
@@ -51,13 +45,6 @@ export function createDevelopmentMessageRequest(input: {
   readonly message: string;
   readonly session: DevelopmentSessionState;
 }): HandleMessageRequestBody {
-  if (input.session.continuationToken) {
-    return {
-      continuationToken: input.session.continuationToken,
-      message: input.message,
-    };
-  }
-
   return {
     message: input.message,
   };
@@ -68,7 +55,6 @@ export function createDevelopmentMessageRequest(input: {
  * observed.
  */
 export function updateDevelopmentSessionState(input: {
-  readonly continuationToken?: string;
   readonly events: readonly MessageStreamEvent[];
   readonly sessionId: string;
   readonly session: DevelopmentSessionState;
@@ -80,7 +66,6 @@ export function updateDevelopmentSessionState(input: {
   if (boundaryEvent?.type === "session.waiting") {
     return createDevelopmentSessionState({
       boundaryCount,
-      continuationToken: input.continuationToken ?? input.session.continuationToken,
       sessionId: input.sessionId,
       streamIndex,
     });

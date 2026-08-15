@@ -1,7 +1,12 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { CompiledAgentManifest, CompiledAgentNodeManifest } from "#compiler/manifest.js";
+import type {
+  CompiledAgentManifest,
+  CompiledAgentNodeManifest,
+  CompiledAgentResources,
+} from "#compiler/manifest.js";
+import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
   collectModuleRefsForManifest,
@@ -62,36 +67,66 @@ async function hydrateCompiledModuleMapFromManifest(
 
   const nodes: CompiledModuleMap["nodes"] = {};
   const nodeManifests: Array<{
+    additionalModuleRef?: ModuleSourceRef;
     agentRoot: string;
-    manifest: CompiledAgentNodeManifest;
+    externalDependencies: readonly string[];
+    manifest: CompiledAgentNodeManifest | CompiledAgentResources;
     nodeId: string;
   }> = [
     {
       agentRoot: manifest.agentRoot,
+      externalDependencies: manifest.config.build?.externalDependencies ?? [],
       manifest,
       nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     },
     ...[...manifest.subagents]
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
       .map((subagent) => ({
+        additionalModuleRef: subagent.configResolver,
         agentRoot: subagent.agent.agentRoot,
+        externalDependencies:
+          subagent.configResolver === undefined
+            ? (subagent.agent.config.build?.externalDependencies ?? [])
+            : (subagent.configResolver.build?.externalDependencies ?? []),
         manifest: subagent.agent,
         nodeId: subagent.nodeId,
       })),
   ];
+  const nodeManifestById = new Map(nodeManifests.map((entry) => [entry.nodeId, entry.manifest]));
+  const parentNodeIdByChild = new Map(
+    manifest.subagentEdges.map((edge) => [edge.childNodeId, edge.parentNodeId]),
+  );
+  const extensionNamespacesByNodeId = new Map<string, ReadonlyMap<string, string>>();
+  const extensionNamespacesForNode = (nodeId: string): ReadonlyMap<string, string> => {
+    const cached = extensionNamespacesByNodeId.get(nodeId);
+    if (cached !== undefined) return cached;
 
-  const scopeIndex: ExtensionScopeIndex = {
-    byMountNamespace: new Map(
-      manifest.extensionMounts.map((mount) => [mount.namespace, mount.packageNamespace]),
-    ),
-    byMountSourceId: new Map(
-      manifest.extensionMounts.map((mount) => [mount.mountSourceId, mount.packageNamespace]),
-    ),
+    const parentNodeId = parentNodeIdByChild.get(nodeId);
+    const namespaces = new Map(
+      parentNodeId === undefined ? [] : extensionNamespacesForNode(parentNodeId),
+    );
+    for (const mount of nodeManifestById.get(nodeId)?.extensionMounts ?? []) {
+      namespaces.set(mount.namespace, mount.packageNamespace);
+    }
+    extensionNamespacesByNodeId.set(nodeId, namespaces);
+    return namespaces;
   };
+
   for (const nodeManifest of nodeManifests) {
+    const scopeIndex: ExtensionScopeIndex = {
+      byMountNamespace: extensionNamespacesForNode(nodeManifest.nodeId),
+      byMountSourceId: new Map(
+        nodeManifest.manifest.extensionMounts.map((mount) => [
+          mount.mountSourceId,
+          mount.packageNamespace,
+        ]),
+      ),
+    };
     nodes[nodeManifest.nodeId] = {
       modules: await hydrateCompiledNodeScope({
         agentRoot: nodeManifest.agentRoot,
+        additionalModuleRef: nodeManifest.additionalModuleRef,
+        externalDependencies: nodeManifest.externalDependencies,
         manifest: nodeManifest.manifest,
         scopeIndex,
       }),
@@ -137,14 +172,16 @@ function extensionNamespaceForSourceId(
 }
 
 async function hydrateCompiledNodeScope(input: {
+  additionalModuleRef?: ModuleSourceRef;
   agentRoot: string;
-  manifest: CompiledAgentNodeManifest;
+  externalDependencies: readonly string[];
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   scopeIndex: ExtensionScopeIndex;
 }): Promise<CompiledModuleMap["nodes"][string]["modules"]> {
-  const refs = collectModuleRefsForManifest(input.manifest).sort((left, right) =>
-    left.sourceId.localeCompare(right.sourceId),
-  );
-  const externalDependencies = input.manifest.config.build?.externalDependencies ?? [];
+  const refs = [
+    ...collectModuleRefsForManifest(input.manifest),
+    ...(input.additionalModuleRef === undefined ? [] : [input.additionalModuleRef]),
+  ].sort((left, right) => left.sourceId.localeCompare(right.sourceId));
   const container = globalThis as Record<symbol, unknown>;
   const modules: CompiledModuleMap["nodes"][string]["modules"] = {};
 
@@ -163,7 +200,7 @@ async function hydrateCompiledNodeScope(input: {
     }
     try {
       modules[ref.sourceId] = await loadAuthoredModuleNamespace(modulePath, {
-        externalDependencies,
+        externalDependencies: input.externalDependencies,
         extensionScopeNamespace,
       });
     } finally {

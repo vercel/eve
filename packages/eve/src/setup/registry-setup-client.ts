@@ -1,3 +1,5 @@
+import { InteractionRequired, InvalidAnswerError } from "./ask.js";
+import { SetupPrerequisiteRequired } from "./integrations/shared/prerequisite.js";
 import type {
   EditableSelectOptions,
   MultiSelectOptions,
@@ -6,17 +8,18 @@ import type {
   SelectNotice,
   SingleSelectOptions,
 } from "./prompter.js";
+import { setupQuestionToWire } from "./setup-question-wire.js";
 import { WizardCancelledError } from "./step.js";
 import {
   REGISTRY_SETUP_PROTOCOL_VERSION,
   type RegistrySetupChildMessage,
-  type RegistrySetupFact,
+  type RegistrySetupCompletion,
   type RegistrySetupOutcome,
   type RegistrySetupParentMessage,
   type RegistrySetupPrompt,
 } from "./registry-setup-protocol.js";
 
-interface SetupProcess {
+export interface SetupProcess {
   connected?: boolean;
   send?: (message: RegistrySetupChildMessage) => boolean;
   disconnect?: () => void;
@@ -29,6 +32,25 @@ function send(process: SetupProcess, message: RegistrySetupChildMessage): void {
     throw new Error("The registry setup host disconnected.");
   }
   process.send(message);
+}
+
+function registrySetupBlocker(
+  error: unknown,
+): import("./registry-setup-protocol.js").RegistrySetupBlocker | undefined {
+  if (error instanceof InteractionRequired) {
+    return { status: "input_required", question: setupQuestionToWire(error.question) };
+  }
+  if (error instanceof InvalidAnswerError) {
+    return {
+      status: "input_required",
+      question: setupQuestionToWire(error.question),
+      issue: { code: "invalid_answer", message: error.message },
+    };
+  }
+  if (error instanceof SetupPrerequisiteRequired) {
+    return { status: "prerequisite_required", prerequisite: error.prerequisite };
+  }
+  return undefined;
 }
 
 function registrySetupError(error: unknown): { message: string; details?: readonly string[] } {
@@ -46,7 +68,7 @@ function registrySetupError(error: unknown): { message: string; details?: readon
 export interface RegistrySetupClient {
   prompter: Prompter;
   signal: AbortSignal;
-  complete(facts?: readonly RegistrySetupFact[]): void;
+  complete(completion?: RegistrySetupCompletion): void;
   cancel(): void;
   fail(error: unknown): void;
 }
@@ -212,8 +234,15 @@ export function createRegistrySetupClient(
   return {
     prompter,
     signal: controller.signal,
-    complete: (facts = []) => finish({ kind: "completed", facts }),
+    complete: (completion = { facts: [] }) => finish({ kind: "completed", ...completion }),
     cancel: () => finish({ kind: "cancelled" }),
-    fail: (error) => finish({ kind: "failed", error: registrySetupError(error) }),
+    fail(error) {
+      const blocker = registrySetupBlocker(error);
+      finish(
+        blocker === undefined
+          ? { kind: "failed", error: registrySetupError(error) }
+          : { kind: "blocked", blocker },
+      );
+    },
   };
 }

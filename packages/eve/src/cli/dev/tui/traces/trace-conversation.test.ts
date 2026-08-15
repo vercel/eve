@@ -22,6 +22,7 @@ function span(
   return {
     attributes,
     endTimeNs: BASE + BigInt(endMs) * 1_000_000n,
+    events: [],
     name,
     parentSpanId,
     spanId,
@@ -41,8 +42,21 @@ function trace(spans: readonly LocalTraceSpan[]): LocalTrace {
   };
 }
 
+function delivery(
+  spanId: string,
+  startMs: number,
+  turnId: string,
+  message: string,
+): LocalTraceSpan {
+  return span(spanId, "agent.channel.delivery", startMs, startMs, undefined, {
+    "agent.channel.delivery.input": JSON.stringify({ message }),
+    "agent.turn.id": turnId,
+  });
+}
+
 function weatherTurn(): LocalTraceSpan[] {
   const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, { "agent.turn.id": "turn_0" });
+  const inbound = delivery("0".repeat(16), 0, "turn_0", "weather in sf?");
   const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
   const messages = JSON.stringify([
     { role: "user", content: "weather in nyc?" },
@@ -56,21 +70,32 @@ function weatherTurn(): LocalTraceSpan[] {
     "agent.usage.input_tokens": 6200,
     "agent.usage.output_tokens": 50,
   });
-  const action = span("d".repeat(16), "agent.action", 2100, 2400, step.spanId, {});
-  const toolCall = span("e".repeat(16), "ai.toolCall", 2100, 2400, action.spanId, {
-    "gen_ai.tool.name": "get_weather",
+  const action = span("d".repeat(16), "agent.action", 2100, 2400, turn.spanId, {
+    "agent.action.name": "get_weather",
     "gen_ai.tool.call.arguments": '{"city":"sf"}',
     "gen_ai.tool.call.result": '{"temperatureF":72}',
   });
-  return [turn, step, model, action, toolCall];
+  return [turn, inbound, step, model, action];
 }
 
 describe("buildConversationItems", () => {
-  it("extracts the user message from the turn's first model prompt", () => {
+  it("reads the user message from the channel delivery", () => {
     const items = buildConversationItems(trace(weatherTurn()));
     expect(items[0]?.kind).toBe("user");
     expect(items[0]?.text).toBe("weather in sf?");
-    expect(items[0]?.span.name).toBe("agent.turn");
+    expect(items[0]?.span.name).toBe("agent.channel.delivery");
+  });
+
+  it("skips metadata-only channel deliveries", () => {
+    const items = buildConversationItems(
+      trace([
+        span("a".repeat(16), "agent.channel.delivery", 0, 0, undefined, {
+          "agent.channel.delivery.input": JSON.stringify({ context: ["sidebar"] }),
+        }),
+      ]),
+    );
+
+    expect(items).toEqual([]);
   });
 
   it("builds assistant and tool items in time order", () => {
@@ -139,7 +164,9 @@ describe("buildConversationItems", () => {
       "agent.parent.session.id": "session-root",
       "agent.parent.turn.id": "turn_0",
       "agent.subagent.name": "echo-marker",
+      "agent.turn.id": "turn_child",
     });
+    const childDelivery = delivery("3".repeat(16), 6000, "turn_child", "delegated task");
     const childStep = span("1".repeat(16), "agent.step", 6010, 8000, childTurn.spanId, {});
     const childModel = span(
       "2".repeat(16),
@@ -152,7 +179,9 @@ describe("buildConversationItems", () => {
         "ai.response.text": "delegated reply",
       },
     );
-    const items = buildConversationItems(trace([...parent, childTurn, childStep, childModel]));
+    const items = buildConversationItems(
+      trace([...parent, childTurn, childDelivery, childStep, childModel]),
+    );
     const parentItems = items.filter((item) => item.subagent === undefined);
     const childItems = items.filter((item) => item.subagent !== undefined);
     expect(parentItems.length).toBeGreaterThan(0);
@@ -168,7 +197,10 @@ describe("buildConversationItems", () => {
     // The parent parks while the child runs: step 1 dispatches, the child
     // works, step 2 replies with the result. Cards must read in that order,
     // not with the child appended after the parent's whole turn.
-    const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
+    const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {
+      "agent.turn.id": "turn_0",
+    });
+    const parentDelivery = delivery("0".repeat(16), 0, "turn_0", "run the subagent");
     const step1 = span("b".repeat(16), "agent.step", 10, 20, turn.spanId, {});
     const dispatch = span("c".repeat(16), "ai.streamText.doStream", 12, 18, step1.spanId, {
       "ai.prompt.messages": JSON.stringify([{ role: "user", content: "run the subagent" }]),
@@ -179,7 +211,9 @@ describe("buildConversationItems", () => {
       "agent.parent.session.id": "session-root",
       "agent.parent.turn.id": "turn_0",
       "agent.subagent.name": "echo-marker",
+      "agent.turn.id": "turn_child",
     });
+    const childDelivery = delivery("5".repeat(16), 30, "turn_child", "delegated task");
     const childStep = span("1".repeat(16), "agent.step", 32, 40, childTurn.spanId, {});
     const childModel = span("2".repeat(16), "ai.streamText.doStream", 34, 38, childStep.spanId, {
       "ai.prompt.messages": JSON.stringify([{ role: "user", content: "delegated task" }]),
@@ -190,7 +224,18 @@ describe("buildConversationItems", () => {
       "ai.response.text": "The subagent said: delegated reply",
     });
     const items = buildConversationItems(
-      trace([turn, step1, dispatch, childTurn, childStep, childModel, step2, reply]),
+      trace([
+        turn,
+        parentDelivery,
+        step1,
+        dispatch,
+        childTurn,
+        childDelivery,
+        childStep,
+        childModel,
+        step2,
+        reply,
+      ]),
     );
     expect(items.map((item) => [item.kind, item.subagent !== undefined])).toEqual([
       ["user", false],
@@ -201,14 +246,14 @@ describe("buildConversationItems", () => {
     ]);
   });
 
-  it("skips model spans with no response text", () => {
+  it("does not infer a user card from a model prompt", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
     const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
       "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
     });
     const items = buildConversationItems(trace([turn, step, model]));
-    expect(items.map((item) => item.kind)).toEqual(["user"]);
+    expect(items).toEqual([]);
   });
 
   it("keeps model spans that failed with an error", () => {
@@ -224,8 +269,8 @@ describe("buildConversationItems", () => {
       2,
     );
     const items = buildConversationItems(trace([turn, step, model]));
-    expect(items.map((item) => item.kind)).toEqual(["user", "assistant"]);
-    expect(items[1]?.error).toBe(true);
+    expect(items.map((item) => item.kind)).toEqual(["assistant"]);
+    expect(items[0]?.error).toBe(true);
   });
 
   it("keeps model spans that carry only token usage", () => {
@@ -237,8 +282,8 @@ describe("buildConversationItems", () => {
       "agent.usage.output_tokens": 10,
     });
     const items = buildConversationItems(trace([turn, step, model]));
-    expect(items.map((item) => item.kind)).toEqual(["user", "assistant"]);
-    expect(items[1]?.inputTokens).toBe(100);
+    expect(items.map((item) => item.kind)).toEqual(["assistant"]);
+    expect(items[0]?.inputTokens).toBe(100);
   });
 
   it("flags error tool calls", () => {
@@ -248,19 +293,18 @@ describe("buildConversationItems", () => {
       "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
       "agent.usage.input_tokens": 10,
     });
-    const action = span("d".repeat(16), "agent.action", 60, 200, step.spanId, {});
-    const toolCall = span(
-      "e".repeat(16),
-      "ai.toolCall",
+    const action = span(
+      "d".repeat(16),
+      "agent.action",
       60,
       200,
-      action.spanId,
-      { "gen_ai.tool.name": "explode" },
+      step.spanId,
+      { "agent.action.name": "explode" },
       2,
     );
-    const items = buildConversationItems(trace([turn, step, model, action, toolCall]));
-    expect(items.map((item) => item.kind)).toEqual(["user", "assistant", "tool"]);
-    expect(items[2]?.error).toBe(true);
+    const items = buildConversationItems(trace([turn, step, model, action]));
+    expect(items.map((item) => item.kind)).toEqual(["assistant", "tool"]);
+    expect(items[1]?.error).toBe(true);
   });
 });
 

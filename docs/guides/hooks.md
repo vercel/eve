@@ -3,7 +3,7 @@ title: "Hooks"
 description: "Subscribe to runtime stream events from agent/hooks/."
 ---
 
-Hooks are eve's authored extension points for the runtime event stream. A hook subscribes to stream events and runs side effects after each event is durably recorded, such as audit logging, metrics and alerting, or persisting every session and message to your own database for analytics. Reach for one to observe what the agent does without writing a tool, a context provider (a value made available across a step), or a channel adapter handler (a handler defined on a channel's adapter; see [Channels](../channels)).
+Hooks are eve's authored extension points for the runtime event stream. A hook subscribes to stream events and runs side effects after each event is durably recorded, such as audit logging, metrics and alerting, or persisting every session and message to your own database for analytics. Reach for one to observe what the agent does without writing a tool, a context provider (a value made available across a step), or a channel adapter handler (a handler defined on a channel's adapter; see [Channels](../channels/overview)).
 
 ## Define a hook
 
@@ -26,19 +26,41 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 `defineHook`, `HookDefinition`, and `HookContext` live on `eve/hooks`.
 
-A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, `action.partial`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
 ## Hook structure and context
 
-Every handler receives the same `HookContext`:
+Every handler receives the same `HookContext`, including the shared session
+helpers documented in [Session context](./session-context):
 
 ```ts
-interface HookContext {
+interface HookContext extends SessionContext {
   readonly agent: { readonly name: string; readonly nodeId?: string };
   readonly channel: { readonly kind?: string; readonly continuationToken?: string };
-  readonly session: { readonly id: string };
 }
 ```
+
+That means a hook can access the current sandbox and release its backing
+compute at an application-defined boundary:
+
+```ts title="agent/hooks/stop-after-turn.ts"
+import { defineHook } from "eve/hooks";
+
+export default defineHook({
+  events: {
+    async "turn.completed"(_event, ctx) {
+      const sandbox = await ctx.getSandbox();
+      await sandbox.stop();
+    },
+  },
+});
+```
+
+Every built-in backend stops its underlying compute while preserving the
+durable session and filesystem for the next callback. On Vercel, the current
+handle can also automatically resume on later I/O. A hook failure, including a
+failed stop, follows the normal
+[hook failure behavior](#what-happens-when-a-hook-throws).
 
 ### Narrowing tool results
 

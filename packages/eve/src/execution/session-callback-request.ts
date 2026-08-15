@@ -11,6 +11,9 @@ export async function postSessionCallbackRequest(input: {
       "content-type": "application/json",
     },
     method: "POST",
+    // Do not follow redirects: a validated callback host could otherwise
+    // 3xx-bounce the framework to an internal/metadata address after the
+    // path/token check has already passed.
     redirect: "error",
     signal: AbortSignal.timeout(SESSION_CALLBACK_TIMEOUT_MS),
   });

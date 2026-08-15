@@ -201,6 +201,8 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
 
     outro() {},
 
+    replaceContent: (content) => renderer.replaceContent?.(content),
+
     withInheritedStdio: (task) => renderer.withInheritedStdio(task),
 
     log: {

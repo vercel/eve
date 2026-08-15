@@ -1,5 +1,7 @@
 import type { MockLanguageModelV3 } from "ai/test";
 
+import { AGENTS_SNIPPET_LABEL } from "#harness/handles/prompt.js";
+
 export type BootstrapGenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 export type BootstrapPrompt = BootstrapGenerateOptions["prompt"];
 export type BootstrapGenerateResult = Awaited<ReturnType<MockLanguageModelV3["doGenerate"]>>;
@@ -155,6 +157,10 @@ export function getPromptContentText(content: BootstrapPrompt[number]["content"]
 
 /**
  * Returns the text from the last user message in the prompt, or `null`.
+ *
+ * Skips framework-injected `[Agents]` announcements: they ride the user
+ * role in conversation history, but they are not authored input and must
+ * not drive mock directive parsing.
  */
 export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
   for (const message of [...prompt].reverse()) {
@@ -164,12 +170,26 @@ export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
 
     const text = getPromptContentText(message.content).trim();
 
+    if (isAgentsAnnouncementText(text)) {
+      continue;
+    }
+
     if (text.length > 0) {
       return text;
     }
   }
 
   return null;
+}
+
+/**
+ * True when the text is a framework-injected `[Agents]` announcement.
+ * Announcements are user-role scaffolding, not authored input: mock model
+ * heuristics must scan past them instead of treating them as the turn's
+ * message or as a turn boundary.
+ */
+export function isAgentsAnnouncementText(text: string): boolean {
+  return text.startsWith(AGENTS_SNIPPET_LABEL);
 }
 
 /**

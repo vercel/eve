@@ -51,7 +51,7 @@
  *             durable state belongs on `ctx.eve`.
  *   rule 28 — Imports under `packages/eve/src/setup/scaffold/**` stay within
  *             their layer: node:* builtins, relative siblings, and the shared
- *             `@vercel/eve-catalog` data package. The scaffold stays free of
+ *             `@eve/catalog` data package. The scaffold stays free of
  *             framework runtime, compiler, terminal UI, and provider SDK
  *             dependencies.
  *   rule 29 — Changeset package keys must match workspace package names.
@@ -93,16 +93,30 @@
  *             dropped, every retained epoch needs a compiling fixture, and
  *             every public authoring value must belong to a capability.
  *
+ *   rule 37 — The instrumentation lifecycle contract stays provider-neutral.
+ *             `harness/instrumentation/lifecycle.ts` must not import from
+ *             `ai`: its event payloads are eve's published shape, so deriving
+ *             them from the model SDK's callback types would make an SDK
+ *             upgrade a breaking change for every provider. Map at the bridge.
+ *   rule 38 — Workspace build scripts must not launch a nested
+ *             `pnpm --filter eve build`. Turbo owns workspace dependency
+ *             ordering; nested builds race on eve's clean-and-publish dist
+ *             directory and let consumers observe a partial package.
+ *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
  */
-import { readFile, readdir, lstat } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { glob, readFile, readdir, lstat } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
 
+const require = createRequire(import.meta.url);
+const extractorRequire = createRequire(require.resolve("@microsoft/api-extractor/package.json"));
+const ts = extractorRequire("typescript");
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../..");
 const BASELINE_PATH = join(REPO_ROOT, "scripts/guard-invariants-baseline.json");
 
@@ -182,6 +196,7 @@ function isTsLike(relPath) {
  *   rule28: Violation[];
  *   rule33: Violation[];
  *   rule35: Violation[];
+ *   rule37: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -210,6 +225,7 @@ async function scanRepo(state) {
     checkRule28(posix, lines, state.rule28);
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
+    checkRule37(posix, content, state.rule37);
   }
 }
 
@@ -330,6 +346,75 @@ function checkRule35(posix, lines, violations) {
       });
     }
   });
+}
+
+// ---------- Rule 37: instrumentation lifecycle provider boundary ----------
+
+const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumentation/lifecycle.ts";
+
+/**
+ * @param {string} posix
+ * @param {string} source
+ * @param {Violation[]} violations
+ */
+function checkRule37(posix, source, violations) {
+  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT) return;
+
+  const sourceFile = ts.createSourceFile(
+    posix,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const visit = (node) => {
+    const specifier = importSpecifier(node);
+    if (specifier !== undefined && (specifier.text === "ai" || specifier.text.startsWith("ai/"))) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports from "ai". Lifecycle event payloads are eve's own shape, so an AI SDK type reaching them makes an SDK upgrade a breaking change for every provider. Add an eve type here and map to it in ai-sdk-hook-bridge.ts.`,
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+}
+
+function importSpecifier(node) {
+  if (
+    (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+    node.moduleSpecifier !== undefined &&
+    ts.isStringLiteralLike(node.moduleSpecifier)
+  ) {
+    return node.moduleSpecifier;
+  }
+  if (
+    ts.isImportEqualsDeclaration(node) &&
+    ts.isExternalModuleReference(node.moduleReference) &&
+    node.moduleReference.expression !== undefined &&
+    ts.isStringLiteralLike(node.moduleReference.expression)
+  ) {
+    return node.moduleReference.expression;
+  }
+  if (
+    ts.isImportTypeNode(node) &&
+    ts.isLiteralTypeNode(node.argument) &&
+    ts.isStringLiteralLike(node.argument.literal)
+  ) {
+    return node.argument.literal;
+  }
+  if (
+    ts.isCallExpression(node) &&
+    (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+      (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
+    node.arguments[0] !== undefined &&
+    ts.isStringLiteralLike(node.arguments[0])
+  ) {
+    return node.arguments[0];
+  }
+  return undefined;
 }
 
 // ---------- Rule 19: AsyncLocalStorage instances ----------
@@ -514,12 +599,12 @@ function checkRule27(posix, lines, violations) {
 const SCAFFOLD_PREFIX = "packages/eve/src/setup/scaffold/";
 
 // The curated connection and channel catalogs (and any future surface
-// overlays) read canonical identity from `@vercel/eve-catalog`, a
+// overlays) read canonical identity from `@eve/catalog`, a
 // dependency-free data package shared across the scaffolder and docs. It
 // carries no runtime, compiler, or provider-SDK weight, so the entire scaffold
 // layer may import it. The terminal UI adapters (which carry @clack/core and
 // picocolors) live outside the scaffold, in `packages/eve/src/setup/cli/`.
-const SCAFFOLD_ALLOWED_PACKAGES = new Set(["@vercel/eve-catalog"]);
+const SCAFFOLD_ALLOWED_PACKAGES = new Set(["@eve/catalog"]);
 
 const SCAFFOLD_ALLOWED_INTERNAL_IMPORTS = new Set([]);
 
@@ -560,7 +645,7 @@ function checkRule28(posix, lines, violations) {
             rule: 28,
             file: posix,
             line: idx + 1,
-            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and @vercel/eve-catalog. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
+            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and @eve/catalog. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
           });
         }
       }
@@ -888,6 +973,33 @@ async function checkRule34PhaseBoundary() {
   return violations;
 }
 
+// ---------- Rule 38: one owner for the eve package build ----------
+
+const NESTED_EVE_BUILD_RE = /\bpnpm\s+(?:--filter(?:=|\s+)eve|-F\s+eve)\s+(?:run\s+)?build\b/;
+
+/**
+ * @returns {Promise<Violation[]>}
+ */
+async function checkRule38NoNestedEveBuild() {
+  /** @type {Violation[]} */
+  const violations = [];
+
+  for (const dir of await readPnpmWorkspacePackageDirs()) {
+    if (dir === "packages/eve") continue;
+    const packageJson = await readJsonIfExists(join(REPO_ROOT, dir, "package.json"));
+    for (const [scriptName, command] of Object.entries(packageJson?.scripts ?? {})) {
+      if (typeof command !== "string" || !NESTED_EVE_BUILD_RE.test(command)) continue;
+      violations.push({
+        rule: 38,
+        file: `${dir}/package.json`,
+        message: `script "${scriptName}" launches a nested eve package build. Declare eve as a workspace dependency and let Turbo's ^build edge produce it once; rebuilding eve inside a consumer races its destructive dist clean against other consumers.`,
+      });
+    }
+  }
+
+  return violations;
+}
+
 /**
  * @returns {Promise<Set<string>>}
  */
@@ -915,6 +1027,11 @@ async function readPnpmWorkspacePackageDirs() {
     const excluded = rawPattern.startsWith("!");
     const pattern = excluded ? rawPattern.slice(1) : rawPattern;
     const dirs = await expandWorkspacePackagePattern(pattern);
+
+    if (!excluded && dirs.length === 0) {
+      throw new Error(`Workspace package pattern "${rawPattern}" matched no package.json files.`);
+    }
+
     const target = excluded ? excludeDirs : includeDirs;
 
     dirs.forEach((dir) => target.add(dir));
@@ -966,31 +1083,16 @@ function stripYamlString(value) {
  * @returns {Promise<string[]>}
  */
 async function expandWorkspacePackagePattern(pattern) {
-  if (pattern.endsWith("/*")) {
-    const root = pattern.slice(0, -2);
-    let entries;
-    try {
-      entries = await readdir(join(REPO_ROOT, root), { withFileTypes: true });
-    } catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-        return [];
-      }
-      throw error;
-    }
+  const normalizedPattern = pattern.replace(/\/+$/, "");
+  const dirs = [];
 
-    const dirs = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const dir = `${root}/${entry.name}`;
-      if (await readJsonIfExists(join(REPO_ROOT, dir, "package.json"))) dirs.push(dir);
-    }
-    return dirs;
+  for await (const manifestPath of glob(`${normalizedPattern}/package.json`, {
+    cwd: REPO_ROOT,
+  })) {
+    dirs.push(toPosix(dirname(manifestPath)));
   }
 
-  if (await readJsonIfExists(join(REPO_ROOT, pattern, "package.json"))) {
-    return [pattern];
-  }
-  return [];
+  return dirs.sort();
 }
 
 /**
@@ -1066,6 +1168,7 @@ async function main() {
     rule28: /** @type {Violation[]} */ ([]),
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
+    rule37: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1161,6 +1264,12 @@ async function main() {
   for (const issue of await checkExtensionCapabilityContracts()) {
     violations.push({ rule: 36, ...issue });
   }
+
+  // Rule 37
+  violations.push(...state.rule37);
+
+  // Rule 38
+  violations.push(...(await checkRule38NoNestedEveBuild()));
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

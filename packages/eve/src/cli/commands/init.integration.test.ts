@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -64,6 +64,9 @@ function logger(): InitCliLogger & { messages: string[]; errors: string[] } {
 function dependencies(
   gitResult: GitInitResult = { kind: "initialized" },
 ): InitCommandDependencies & {
+  confirmInitInNonEmptyDirectory: ReturnType<
+    typeof vi.fn<InitCommandDependencies["confirmInitInNonEmptyDirectory"]>
+  >;
   detectInvokingPackageManager: ReturnType<
     typeof vi.fn<InitCommandDependencies["detectInvokingPackageManager"]>
   >;
@@ -76,6 +79,7 @@ function dependencies(
   spawnCodingAgentRepl: ReturnType<typeof vi.fn<InitCommandDependencies["spawnCodingAgentRepl"]>>;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
   tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
+  validateModelSlug: ReturnType<typeof vi.fn<InitCommandDependencies["validateModelSlug"]>>;
 } {
   return {
     addAgentToProject: (options: AddAgentToProjectOptions) => {
@@ -85,6 +89,7 @@ function dependencies(
       }
       return addAgentToProject(merged);
     },
+    confirmInitInNonEmptyDirectory: vi.fn(async () => ({ kind: "current-directory" })),
     // Stubbed to "no visible manager" so assertions do not depend on which
     // manager launched the test runner itself.
     detectInvokingPackageManager: vi.fn(() => undefined),
@@ -110,6 +115,7 @@ function dependencies(
     spawnCodingAgentRepl: vi.fn(async () => true),
     spawnPackageManager: vi.fn(async () => true),
     tryInitializeGit: vi.fn(async () => gitResult),
+    validateModelSlug: vi.fn(async () => null),
   };
 }
 
@@ -189,6 +195,60 @@ describe("runInitCommand", () => {
     expect(output.messages[3]).toContain("$ eve dev");
   });
 
+  it("creates a new agent with model settings selected by init options", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-model-"));
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(
+      output,
+      parentDirectory,
+      "my-agent",
+      { model: "openai/gpt-5.5", reasoning: "high" },
+      deps,
+    );
+
+    const projectPath = join(parentDirectory, "my-agent");
+    const agentSource = await readFile(join(projectPath, "agent/agent.ts"), "utf8");
+    expect(agentSource).toContain('model: "openai/gpt-5.5"');
+    expect(agentSource).toContain('reasoning: "high"');
+    expect(deps.validateModelSlug).toHaveBeenCalledWith(
+      expect.stringContaining(".eve-init-"),
+      "openai/gpt-5.5",
+    );
+  });
+
+  it("omits authored reasoning when init uses the provider default", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-reasoning-default-"));
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(
+      output,
+      parentDirectory,
+      "my-agent",
+      { reasoning: "provider-default" },
+      deps,
+    );
+
+    const agentSource = await readFile(join(parentDirectory, "my-agent", "agent/agent.ts"), "utf8");
+    expect(agentSource).not.toContain("reasoning:");
+  });
+
+  it("rejects an invalid --model before creating the project", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-model-invalid-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.validateModelSlug.mockResolvedValue("Unknown model.");
+
+    await expect(
+      runInitCommand(output, parentDirectory, "my-agent", { model: "unknown/model" }, deps),
+    ).rejects.toThrow("Unknown model.");
+
+    await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+  });
+
   it("opens the selected coding-agent REPL instead of starting eve dev", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-repl-handoff-"));
     const output = logger();
@@ -228,6 +288,21 @@ describe("runInitCommand", () => {
     await expect(
       runInitCommand(output, parentDirectory, "my-agent", {}, deps),
     ).resolves.toBeUndefined();
+
+    const projectPath = join(parentDirectory, "my-agent");
+    await expect(pathExists(join(projectPath, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.errors).toEqual([]);
+  });
+
+  it("exits after init without starting a handoff when selected", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-exit-handoff-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitHandoff.mockResolvedValue("exit");
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
     const projectPath = join(parentDirectory, "my-agent");
     await expect(pathExists(join(projectPath, "agent/agent.ts"))).resolves.toBe(true);
@@ -316,6 +391,129 @@ describe("runInitCommand", () => {
       projectPath,
       expect.objectContaining({ bypassMinimumReleaseAge: true }),
     );
+    expect(deps.confirmInitInNonEmptyDirectory).not.toHaveBeenCalled();
+  });
+
+  it("confirms before scaffolding a non-empty current directory", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-nonempty-"));
+    await writeFile(join(projectPath, "notes.md"), "keep me\n", "utf8");
+    await writeFile(join(projectPath, "tsconfig.json"), "old config\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(output, projectPath, undefined, {}, deps);
+
+    expect(deps.confirmInitInNonEmptyDirectory).toHaveBeenCalledWith(
+      expect.arrayContaining(["notes.md", "tsconfig.json"]),
+    );
+    await expect(readFile(join(projectPath, "notes.md"), "utf8")).resolves.toBe("keep me\n");
+    await expect(readFile(join(projectPath, "tsconfig.json"), "utf8")).resolves.not.toBe(
+      "old config\n",
+    );
+    await expect(pathExists(join(projectPath, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.runPackageManagerInstall).toHaveBeenCalled();
+    expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
+  });
+
+  it("scaffolds in the selected subdirectory without changing the current directory", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-nonempty-subdir-"));
+    await writeFile(join(projectPath, "notes.md"), "keep me\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.confirmInitInNonEmptyDirectory.mockResolvedValue({
+      kind: "subdirectory",
+      name: "research-agent",
+    });
+
+    await runInitCommand(output, projectPath, undefined, {}, deps);
+
+    const subdirectory = join(projectPath, "research-agent");
+    await expect(readFile(join(projectPath, "notes.md"), "utf8")).resolves.toBe("keep me\n");
+    await expect(pathExists(join(projectPath, "package.json"))).resolves.toBe(false);
+    await expect(pathExists(join(subdirectory, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      subdirectory,
+      expect.any(Object),
+    );
+    expect(deps.tryInitializeGit).toHaveBeenCalledWith(subdirectory);
+  });
+
+  it("refuses a selected existing nonempty subdirectory without changing it", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-selected-existing-"));
+    await writeFile(join(projectPath, "notes.md"), "parent\n", "utf8");
+    const subdirectory = join(projectPath, "research-agent");
+    await mkdir(subdirectory);
+    await writeFile(join(subdirectory, "keep.txt"), "keep me\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.confirmInitInNonEmptyDirectory.mockResolvedValue({
+      kind: "subdirectory",
+      name: "research-agent",
+    });
+
+    await expect(runInitCommand(output, projectPath, undefined, {}, deps)).rejects.toThrow(
+      "no package.json",
+    );
+
+    await expect(readFile(join(subdirectory, "keep.txt"), "utf8")).resolves.toBe("keep me\n");
+    await expect(pathExists(join(subdirectory, "agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+  });
+
+  it("restores a selected existing empty subdirectory after install failure", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-selected-fresh-"));
+    await writeFile(join(projectPath, "notes.md"), "parent\n", "utf8");
+    const subdirectory = join(projectPath, "research-agent");
+    await mkdir(subdirectory);
+    const output = logger();
+    const deps = dependencies();
+    deps.confirmInitInNonEmptyDirectory.mockResolvedValue({
+      kind: "subdirectory",
+      name: "research-agent",
+    });
+    deps.runPackageManagerInstall.mockResolvedValue(false);
+
+    await expect(runInitCommand(output, projectPath, undefined, {}, deps)).rejects.toThrow(
+      "restored",
+    );
+
+    await expect(readdir(subdirectory)).resolves.toEqual([]);
+  });
+
+  it("leaves a non-empty current directory unchanged when location selection is cancelled", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-nonempty-cancel-"));
+    await writeFile(join(projectPath, "notes.md"), "keep me\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.confirmInitInNonEmptyDirectory.mockRejectedValue(new WizardCancelledError());
+
+    await expect(runInitCommand(output, projectPath, undefined, {}, deps)).resolves.toBeUndefined();
+
+    await expect(readFile(join(projectPath, "notes.md"), "utf8")).resolves.toBe("keep me\n");
+    await expect(pathExists(join(projectPath, "package.json"))).resolves.toBe(false);
+    await expect(pathExists(join(projectPath, "agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+  });
+
+  it("refuses a non-empty current directory when launched by a coding agent", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-nonempty-agent-"));
+    await writeFile(join(projectPath, "notes.md"), "keep me\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.isCodingAgentLaunch.mockResolvedValue(true);
+
+    await expect(runInitCommand(output, projectPath, undefined, {}, deps)).rejects.toThrow(
+      "Coding-agent launches cannot choose where to initialize a non-empty current directory. Pass a new directory name, for example: eve init my-agent.",
+    );
+
+    expect(deps.confirmInitInNonEmptyDirectory).not.toHaveBeenCalled();
+    await expect(readFile(join(projectPath, "notes.md"), "utf8")).resolves.toBe("keep me\n");
+    await expect(pathExists(join(projectPath, "package.json"))).resolves.toBe(false);
+    await expect(pathExists(join(projectPath, "agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -757,6 +955,7 @@ describe("runInitCommand", () => {
     );
     // An existing project's history is its own; only fresh scaffolds get git init.
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.confirmInitInNonEmptyDirectory).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
       "exec",
       "eve",
@@ -764,6 +963,26 @@ describe("runInitCommand", () => {
     ]);
     expect(output.messages.join("\n")).toContain("Added an eve agent to ");
     expect(output.messages.join("\n")).not.toContain("Overrode package.json engines.node");
+  });
+
+  it("adds an agent to an existing project with model settings selected by init options", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-model-"));
+    const projectRoot = await createHostProject(parentDirectory);
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(
+      output,
+      parentDirectory,
+      "host-app",
+      { model: "openai/gpt-5.5", reasoning: "high" },
+      deps,
+    );
+
+    const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
+    expect(agentSource).toContain('model: "openai/gpt-5.5"');
+    expect(agentSource).toContain('reasoning: "high"');
+    expect(deps.validateModelSlug).toHaveBeenCalledWith(projectRoot, "openai/gpt-5.5");
   });
 
   it("overrides an incompatible existing node engine declaration and warns for eve init .", async () => {
@@ -804,10 +1023,11 @@ describe("runInitCommand", () => {
     );
   });
 
-  it("refuses a target directory without package.json before writing anything", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-no-pkg-"));
+  it("refuses a preexisting Git-only named directory without changing it", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-git-only-"));
     const projectRoot = join(parentDirectory, "host-app");
-    await mkdir(projectRoot, { recursive: true });
+    await mkdir(join(projectRoot, ".git"), { recursive: true });
+    await writeFile(join(projectRoot, ".git/HEAD"), "ref: refs/heads/main\n", "utf8");
     const output = logger();
     const deps = dependencies();
 
@@ -815,9 +1035,56 @@ describe("runInitCommand", () => {
       "no package.json",
     );
 
+    await expect(readdir(projectRoot)).resolves.toEqual([".git"]);
+    await expect(readFile(join(projectRoot, ".git/HEAD"), "utf8")).resolves.toBe(
+      "ref: refs/heads/main\n",
+    );
     await expect(pathExists(join(projectRoot, "agent"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("uses a preexisting empty named directory for a fresh project", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-empty-"));
+    const projectRoot = join(parentDirectory, "host-app");
+    await mkdir(projectRoot, { recursive: true });
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(output, parentDirectory, "host-app", {}, deps);
+
+    await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectRoot);
+  });
+
+  it("restores a preexisting empty named directory when installation fails", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-empty-fail-"));
+    const projectRoot = join(parentDirectory, "host-app");
+    await mkdir(projectRoot, { recursive: true });
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockResolvedValue(false);
+
+    await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
+      "restored",
+    );
+
+    await expect(readdir(projectRoot)).resolves.toEqual([]);
+  });
+
+  it("refuses an invalid host package.json before writing agent files", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-invalid-pkg-"));
+    const projectRoot = join(parentDirectory, "host-app");
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(join(projectRoot, "package.json"), '{ "name": }\n', "utf8");
+    const output = logger();
+    const deps = dependencies();
+
+    await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
+      "not valid JSON",
+    );
+
+    await expect(pathExists(join(projectRoot, "agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -956,7 +1223,7 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
-  it("hands a coding agent the setup guide when it omits the target", async () => {
+  it("scaffolds the current directory for a coding agent that omits the target", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-bare-"));
     const output = logger();
     const deps = dependencies();
@@ -964,15 +1231,19 @@ describe("runInitCommand", () => {
 
     await runInitCommand(output, parentDirectory, undefined, {}, deps);
 
-    // A bare `eve init` from an agent means it has not chosen what to build, so
-    // we print the guide and touch nothing — no scaffold, install, Git, or dev.
-    await expect(pathExists(join(parentDirectory, "agent"))).resolves.toBe(false);
-    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(await readFile(join(parentDirectory, "agent/agent.ts"), "utf8")).toContain(
+      DEFAULT_AGENT_MODEL_ID,
+    );
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      parentDirectory,
+      expect.anything(),
+    );
+    expect(deps.tryInitializeGit).toHaveBeenCalledWith(parentDirectory);
+    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    const printed = output.messages.join("\n");
-    expect(printed).toContain("Set up an eve agent");
-    expect(printed).toContain("npx eve@latest init <name>");
+    expect(output.messages.join("\n")).toContain("Created an eve agent in");
   });
 
   it("scaffolds and initializes Git for a coding agent but does not spawn the dev server", async () => {
@@ -1030,10 +1301,42 @@ describe("runInitCommand", () => {
       "Failed to install dependencies",
     );
 
-    await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(true);
+    await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(false);
     expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("preserves a chosen nonempty in-place target after install failure", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "eve-init-nonempty-install-fail-"));
+    await writeFile(join(projectRoot, "notes.md"), "keep me\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockResolvedValue(false);
+
+    await expect(runInitCommand(output, projectRoot, ".", {}, deps)).rejects.toThrow(
+      `install dependencies with pnpm in "${projectRoot}"`,
+    );
+
+    await expect(readFile(join(projectRoot, "notes.md"), "utf8")).resolves.toBe("keep me\n");
+    await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
+  });
+
+  it("preserves an existing host after install failure and prints the retry command", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-host-install-fail-"));
+    const projectRoot = await createHostProject(parentDirectory);
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockResolvedValue(false);
+
+    await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
+      `install dependencies with pnpm in "${projectRoot}"`,
+    );
+
+    await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(true);
+    expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
+      dependencies: { eve: "^0.6.0" },
+    });
   });
 
   it("replays only the actionable npm error, dropping silly/verbose/http/timing noise", async () => {

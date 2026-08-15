@@ -1,4 +1,4 @@
-import { channelEntries } from "@vercel/eve-catalog";
+import { channelEntries } from "@eve/catalog";
 import { describe, expect, test } from "vitest";
 import { SCAFFOLDABLE_CHANNELS } from "./channels-catalog.js";
 

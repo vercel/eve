@@ -89,6 +89,7 @@ describe("buildSubagentRunInput", () => {
     });
     expect(runInput.continuationToken).toBe(childContinuationToken);
     expect(childContinuationToken).toMatch(/^subagent:parent-session:call-1$/);
+    expect(runInput.mode).toBe("task");
   });
 
   it("routes parent notifications to an active turn inbox when supplied", () => {

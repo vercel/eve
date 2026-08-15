@@ -10,6 +10,7 @@ import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
 import type { Approval } from "#public/definitions/approval.js";
 import type { ToolModelOutput } from "#public/definitions/tool.js";
+import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import type {
   AuthorizationDefinition,
   ConnectionAuthResolver,
@@ -33,6 +34,7 @@ import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { InternalAgentDefinition } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
 import type { ToolSchema } from "#shared/tool-schema.js";
@@ -47,13 +49,14 @@ export type ResolvedModuleSourceRef = Readonly<ModuleSourceRef>;
  * `instructions.{ts,...}`.
  *
  * Module-backed instructions sources are executed once at build time —
- * the resulting markdown is captured here. Runtime never re-evaluates
+ * the resulting content is captured here. Runtime never re-evaluates
  * the module.
  */
 export type ResolvedInstructionsDefinition = Readonly<
   SourceRef & {
+    content: string;
     name: string;
-    markdown: string;
+    role: "system" | "user";
   } & (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef)
 >;
 
@@ -100,6 +103,7 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
   readonly connectionName: string;
   readonly description: string;
   readonly headers?: Readonly<HeadersDefinition>;
+  readonly toolCall?: Readonly<ConnectionToolCallDefinition>;
   /**
    * Wire protocol. Selects the runtime client implementation. `tools`
    * carries the connection's operation/tool filter regardless of
@@ -225,13 +229,14 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly name: string;
   readonly method: ChannelRouteMethod;
   readonly adapter?: ChannelAdapter;
+  readonly turnPolicy?: CompiledChannel["turnPolicy"];
   readonly cors?: NormalizedChannelCorsOptions;
   readonly urlPath: string;
   readonly fetch: (req: Request, ctx: RouteContext) => Promise<Response>;
   /**
    * Universal entry point for new sessions, called by cross-channel
    * initiators (the schedule dispatcher today). Typed precisely as
-   * {@link CompiledChannel.receive} — `(input, { send }) => Session` —
+   * {@link CompiledChannel.receive} — `(input, ctx) => Session` —
    * so any caller passing the wrong context shape is a typecheck error,
    * not a runtime crash.
    *
@@ -243,7 +248,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly receive?: CompiledChannel["receive"];
   /**
    * Reference to the authored {@link CompiledChannel} value the channel
-   * module exported. Preserved so callers of `args.receive(channel, …)`
+   * module exported. Preserved so callers of `ctx.to(channel, target)`
    * can identify a target by the same imported reference. `undefined`
    * for framework-internal channels constructed without going through
    * `defineChannel`.
@@ -318,11 +323,22 @@ export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSource
 /**
  * Runtime-owned additive agent configuration resolved from `agent.ts`.
  */
+type ResolvedAgentDefinitionBase = Omit<InternalAgentDefinition, "build" | "model" | "source"> & {
+  source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
+};
+
 export type ResolvedAgentDefinition = Readonly<
-  Omit<InternalAgentDefinition, "build" | "source"> & {
-    dynamicModel?: RuntimeDynamicModelReference;
-    source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
-  }
+  ResolvedAgentDefinitionBase &
+    (
+      | {
+          dynamicModel?: never;
+          model: InternalAgentDefinition["model"];
+        }
+      | {
+          dynamicModel: RuntimeDynamicModelReference;
+          model?: never;
+        }
+    )
 >;
 
 /**
@@ -387,7 +403,7 @@ export interface ResolvedDynamicInstructionsResolver extends Readonly<ModuleSour
  */
 export interface ResolvedAgent {
   readonly channels: readonly ResolvedChannelDefinition[];
-  readonly config: ResolvedAgentDefinition;
+  readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
   /**
    * Logical names of framework-provided channels the author opted out of by
@@ -411,6 +427,8 @@ export interface ResolvedAgent {
   readonly workflowTool?: {
     readonly maxSubagents?: number;
   };
+  /** AI Gateway provider selected for the framework `web_search` tool. */
+  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructionsResolvers: readonly ResolvedDynamicInstructionsResolver[];
   readonly dynamicSkillResolvers: readonly ResolvedDynamicSkillResolver[];
   readonly dynamicToolResolvers: readonly ResolvedDynamicToolResolver[];
@@ -420,7 +438,7 @@ export interface ResolvedAgent {
    * `instructions.{ts,...}`, or `undefined` when the agent does not
    * declare one.
    */
-  readonly instructions?: ResolvedInstructionsDefinition;
+  readonly instructions: readonly ResolvedInstructionsDefinition[];
   /**
    * Authored sandbox override for this agent, when one exists. `null`
    * means the agent uses the framework default sandbox unchanged.

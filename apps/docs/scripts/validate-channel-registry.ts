@@ -1,7 +1,7 @@
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { channelEntries } from "@vercel/eve-catalog";
+import { channelEntries } from "@eve/catalog";
 
 interface RegistryFile {
   path: string;
@@ -14,12 +14,19 @@ interface RegistryItem {
   files?: RegistryFile[];
   meta?: {
     eve?: {
-      setup?: {
-        command?: string;
-        package?: string;
-        bin?: string;
-        args?: string[];
-      };
+      setup?:
+        | {
+            command?: string;
+            package?: string;
+            bin?: string;
+            args?: string[];
+          }
+        | Array<{
+            command?: string;
+            package?: string;
+            bin?: string;
+            args?: string[];
+          }>;
     };
   };
 }
@@ -35,6 +42,8 @@ const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
 
 const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
   discord: "discord",
+  github: "github",
+  "linear-agent": "linear",
   eve: "web",
   photon: "photon",
 };
@@ -78,42 +87,54 @@ const targetSlugsByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-resend": "resend",
 };
 
+const nonStreamingCatalogSlugs = new Set(["chat-sdk-sendblue"]);
+
 const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
 const items = registry.items.filter((item) => item.name.startsWith("channel/"));
-const galleryEntries = channelEntries().filter((entry) => entry.surfaces.gallery);
-const expectedSlugs = galleryEntries.map(
+const registryEntries = channelEntries().filter((entry) => entry.surfaces.registry);
+const expectedSlugs = registryEntries.map(
   (entry) => registrySlugsByCatalogSlug[entry.slug] ?? entry.slug,
 );
 const actualSlugs = items.map((item) => item.name.slice("channel/".length));
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
-    `Channel registry entries do not match the gallery.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
+    `Channel registry entries do not match the catalog.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
   );
 }
 
 for (const [index, item] of items.entries()) {
-  const setup = item.meta?.eve?.setup;
+  const declaredSetup = item.meta?.eve?.setup;
+  const setups =
+    declaredSetup === undefined
+      ? undefined
+      : Array.isArray(declaredSetup)
+        ? declaredSetup
+        : [declaredSetup];
   if (
-    setup !== undefined &&
-    (setup.command === undefined ||
-      setup.package === undefined ||
-      setup.bin === undefined ||
-      setup.args === undefined)
+    setups?.some(
+      (setup) =>
+        setup.command === undefined ||
+        setup.package === undefined ||
+        setup.bin === undefined ||
+        setup.args === undefined,
+    )
   ) {
     throw new Error(
-      `Registry item "${item.name}" setup must declare command, package, bin, and args during the migration.`,
+      `Registry item "${item.name}" setup entries must declare command, package, bin, and args.`,
     );
   }
 
-  const entry = galleryEntries[index];
+  const entry = registryEntries[index];
   if (entry === undefined) throw new Error(`Unexpected channel registry item "${item.name}".`);
   const registrySlug = expectedSlugs[index];
 
   if (
     entry.slug === "slack" ||
     entry.slug === "discord" ||
+    entry.slug === "github" ||
+    entry.slug === "linear-agent" ||
     entry.slug === "eve" ||
     entry.slug === "photon"
   ) {
@@ -123,10 +144,8 @@ for (const [index, item] of items.entries()) {
       setupKindsByCatalogSlug[entry.slug] ?? registrySlug,
     ];
     if (
-      setup?.command !== "eve" ||
-      setup.package !== "eve" ||
-      setup.bin !== "eve" ||
-      JSON.stringify(setup.args) !== JSON.stringify(expectedArgs)
+      JSON.stringify(setups) !==
+      JSON.stringify([{ command: "eve", package: "eve", bin: "eve", args: expectedArgs }])
     ) {
       throw new Error(
         `Registry item "${item.name}" must delegate setup to eve integration setup ${expectedArgs[2]}.`,
@@ -143,7 +162,10 @@ for (const [index, item] of items.entries()) {
       `Registry item "${item.name}" must write ${expectedPath} to ${expectedTarget}.`,
     );
   }
-  await access(join(docsRoot, expectedPath));
+  const source = await readFile(join(docsRoot, expectedPath), "utf8");
+  if (nonStreamingCatalogSlugs.has(entry.slug) && !source.includes("streaming: false")) {
+    throw new Error(`Registry item "${item.name}" must disable unsupported streaming edits.`);
+  }
 
   const adapterDependency = adapterDependenciesByCatalogSlug[entry.slug];
   if (entry.slug.startsWith("chat-sdk-") && adapterDependency === undefined) {

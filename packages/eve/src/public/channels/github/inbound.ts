@@ -1,5 +1,3 @@
-import type { TextPart, UserContent } from "ai";
-
 import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type {
@@ -208,18 +206,6 @@ export function formatGitHubContextBlock(input: {
     "</github_context>",
   ];
   return lines.join("\n");
-}
-
-/** Prepends a `<github_context>` block to the inbound turn message. */
-export function prependGitHubContext(
-  message: string | UserContent,
-  block: string,
-): string | UserContent {
-  if (typeof message === "string") {
-    return message.length > 0 ? `${block}\n\n${message}` : block;
-  }
-  const contextPart: TextPart = { text: block, type: "text" };
-  return [contextPart, ...message];
 }
 
 function parseIssueCommentEvent(base: GitHubInboundEventBase): GitHubIssueCommentEvent | null {

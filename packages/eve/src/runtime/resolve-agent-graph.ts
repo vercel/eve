@@ -1,6 +1,7 @@
 import type {
   CompiledAgentManifest,
   CompiledAgentNodeManifest,
+  CompiledAgentResources,
   CompiledRemoteAgentNode,
   CompiledSubagentNode,
 } from "#compiler/manifest.js";
@@ -108,7 +109,8 @@ export async function resolveRuntimeAgentGraph(
 
 interface ResolveRuntimeAgentNodeInput {
   readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
-  readonly manifest: CompiledAgentNodeManifest;
+  readonly agentId?: string;
+  readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   readonly moduleMap: CompiledModuleMap;
   readonly nodeId: string;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
@@ -215,6 +217,9 @@ async function resolveRuntimeAgentNode(
     workspaceResourceRoot: agent.workspaceResourceRoot,
   });
   const subagentRegistry = createRuntimeSubagentRegistry({
+    persistentSessions:
+      agent.config?.experimental?.tasks === true ||
+      agent.config?.experimental?.subagentPersistentSessions === true,
     reservedToolNames: [
       LOAD_SKILL_TOOL_NAME,
       ...toolRegistry.preparedTools.map((tool) => tool.name),
@@ -244,6 +249,7 @@ async function resolveRuntimeAgentNode(
     toolRegistry,
     turnAgent: createResolvedRuntimeTurnAgent({
       agent: resolvedAgent,
+      id: input.agentId,
       nodeId,
       tools: [...toolRegistry.preparedTools, ...subagentRegistry.preparedTools],
     }),
@@ -256,7 +262,7 @@ async function resolveRuntimeAgentNode(
 
 async function resolveRuntimeSubagents(input: {
   readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
-  readonly manifest: CompiledAgentNodeManifest;
+  readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   readonly moduleMap: CompiledModuleMap;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly parentNodeId: string;
@@ -309,27 +315,14 @@ async function resolveRuntimeSubagent(input: {
   readonly sourceRef: CompiledSubagentNode;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<ResolvedRuntimeSubagentNode> {
-  const dynamicSource = input.sourceRef.agent.config.source;
-  if (input.sourceRef.dynamic !== undefined && dynamicSource === undefined) {
-    throw new ResolveRuntimeAgentGraphError(
-      `Dynamic subagent "${input.sourceRef.logicalPath}" is missing its agent config source.`,
-      {
-        nodeId: toRuntimeNodeId(input.sourceRef.nodeId),
-        sourceId: input.sourceRef.sourceId,
-      },
-    );
-  }
   const variant:
     | { readonly description: string; readonly dynamic?: never }
     | { readonly description?: never; readonly dynamic: ResolvedDynamicSubagentDefinition } =
-    input.sourceRef.dynamic === undefined
+    input.sourceRef.configResolver === undefined
       ? { description: input.sourceRef.description }
       : {
           dynamic: await resolveDynamicSubagentDefinition({
-            definition: {
-              ...dynamicSource!,
-              ...input.sourceRef.dynamic,
-            },
+            definition: input.sourceRef.configResolver,
             moduleMap: input.moduleMap,
             nodeId: input.sourceRef.nodeId,
           }),
@@ -344,6 +337,7 @@ async function resolveRuntimeSubagent(input: {
     sourceKind: "module",
   };
   await resolveRuntimeAgentNode({
+    agentId: input.sourceRef.name,
     childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
     manifest: input.sourceRef.agent,
     moduleMap: input.moduleMap,

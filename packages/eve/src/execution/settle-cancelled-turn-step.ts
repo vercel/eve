@@ -3,6 +3,7 @@ import { callAdapterEventHandler } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { ChannelInstrumentationKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
   createDurableSessionState,
@@ -24,9 +25,11 @@ import {
   getProxyInputRequests,
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
+import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
-import { createInstrumentationHandleEvent } from "#harness/instrumentation-native-events.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
+import { createInstrumentationHandleEvent } from "#harness/instrumentation/native-events.js";
+import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
   encodeMessageStreamEvent,
@@ -35,10 +38,12 @@ import {
 } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 export interface CancelledTurnSettleResult {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly usage?: TokenUsage;
 }
 
 /**
@@ -101,14 +106,15 @@ export async function settleCancelledTurnStep(input: {
         };
         const emit =
           createInstrumentationHandleEvent({
-            agentName: bundle.resolvedAgent.config.name,
+            agentName: bundle.turnAgent.id,
+            channelKind: ctx.get(ChannelInstrumentationKey)?.kind,
             handleEvent: baseEmit,
             hooks: instrumentation?.hooks,
             sessionId: session.sessionId,
             turnId: activeTurnId(emissionState),
           }) ?? baseEmit;
         return {
-          result: await emitCancelledTurn(emit, emissionState, enrichedSession.continuationToken),
+          result: await emitCancelledTurn(emit, emissionState),
           session: enrichedSession,
         };
       });
@@ -126,20 +132,29 @@ export async function settleCancelledTurnStep(input: {
   // discarded turn state). The pre-model gate re-raises the prompt while the
   // violation holds, so the next delivery gets a fresh prompt instead of
   // queueing forever behind a stale one.
+  //
+  // `abandonRunningAgentTurns`: `cancelDescendantTurnsStep` already ran and
+  // the cancelled turn's inbox is gone, so a child settlement can never
+  // reach this store again. This is the last write that can move those
+  // handles out of `running`.
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
     setHarnessEmissionState(
       clearPendingSessionLimitPrompt(
         clearAllProxyInputRequests(
-          clearPendingWorkflowInterrupt(clearPendingRuntimeActionBatch(session)),
+          clearPendingWorkflowInterrupt(
+            clearPendingRuntimeActionBatch(abandonRunningAgentTurns(session)),
+          ),
         ),
       ),
       emissionState,
     ),
   );
+  const totals = getTurnUsageState(session.state)?.session;
 
-  return {
+  const base = {
     serializedContext: serializeContext(ctx),
     sessionState: createDurableSessionState({ session: cancelledSession }),
   };
+  return totals === undefined ? base : { ...base, usage: toUsage(totals) };
 }

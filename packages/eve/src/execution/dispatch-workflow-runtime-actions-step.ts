@@ -1,5 +1,6 @@
 import { deserializeContext } from "#context/serialize.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -18,7 +19,8 @@ import { createLogger } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   RuntimeActionRequest,
-  RuntimeSubagentResultActionResult,
+  RuntimeSubagentDispatchFailure,
+  RuntimeActionResult,
 } from "#runtime/actions/types.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
@@ -32,17 +34,26 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<{
-  readonly results: readonly RuntimeSubagentResultActionResult[];
+  readonly results: readonly RuntimeActionResult[];
   readonly sessionState: DurableSessionState;
+  readonly pendingTasks: readonly {
+    readonly taskInboxToken: string;
+    readonly taskId: string;
+    readonly taskRunId: string;
+  }[];
 }> {
   "use step";
 
   const durableSession = await readDurableSession(input.sessionState);
   const pending = getPendingWorkflowInterrupt(durableSession.state);
-  if (pending === undefined) return { results: [], sessionState: input.sessionState };
+  if (pending === undefined) {
+    return { results: [], sessionState: input.sessionState, pendingTasks: [] };
+  }
 
   const actions = buildRuntimeActionsFromWorkflowInterrupt(pending.interrupt);
-  if (actions.length === 0) return { results: [], sessionState: input.sessionState };
+  if (actions.length === 0) {
+    return { results: [], sessionState: input.sessionState, pendingTasks: [] };
+  }
 
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
@@ -67,7 +78,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   });
 
   if (plan.allowed.length === 0) {
-    return { results: blockedResults, sessionState: input.sessionState };
+    return { results: blockedResults, sessionState: input.sessionState, pendingTasks: [] };
   }
 
   const session = hydrateDurableSession({
@@ -85,7 +96,13 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
     session,
   });
 
-  const dispatched = await dispatchRuntimeActionsStep({
+  // Interrupt-sourced batches obey the same mode split as model-authored
+  // ones: task agents wrap every delegation in the task lifecycle.
+  const dispatchStep =
+    bundle.resolvedAgent.config?.experimental?.tasks === true
+      ? dispatchTaskStep
+      : dispatchRuntimeActionsStep;
+  const dispatched = await dispatchStep({
     callbackBaseUrl: input.callbackBaseUrl,
     parentContinuationToken: input.parentContinuationToken,
     parentWritable: input.parentWritable,
@@ -100,13 +117,14 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   return {
     results: [...dispatched.results, ...blockedResults],
     sessionState: dispatched.sessionState,
+    pendingTasks: dispatched.pendingTasks,
   };
 }
 
 function createWorkflowSubagentLimitResult(input: {
   readonly action: RuntimeActionRequest;
   readonly plan: WorkflowSubagentDispatchPlan;
-}): RuntimeSubagentResultActionResult {
+}): RuntimeSubagentDispatchFailure {
   const subagentName = isSubagentDelegationAction(input.action)
     ? getSubagentDelegationName(input.action)
     : input.action.kind;
@@ -115,6 +133,7 @@ function createWorkflowSubagentLimitResult(input: {
     callId: input.action.callId,
     isError: true,
     kind: "subagent-result",
+    origin: "dispatch",
     output: {
       code: "WORKFLOW_SUBAGENT_LIMIT_REACHED",
       maxSubagents: input.plan.maxSubagents,

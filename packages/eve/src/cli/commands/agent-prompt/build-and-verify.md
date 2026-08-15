@@ -28,8 +28,7 @@ terminal UI in a controllable background process instead:
 
 Wait for the server URL, then exercise the HTTP API: create a session with
 `POST /eve/v1/session`, attach to `GET /eve/v1/session/:id/stream`, and send a
-follow-up with the returned `continuationToken`. Stop the dev process after
-verification.
+follow-up to `POST /eve/v1/session/:id`. Stop the dev process after verification.
 
 When the user is ready to use their agent's REPL, give them the interactive
 command to run from the project directory:

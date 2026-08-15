@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createRemoteTaskInputCallbackUrl,
   createWorkflowCallbackUrl,
   resolveVercelProductionCallbackBaseUrl,
   resolveWorkflowCallbackBaseUrl,
@@ -132,5 +133,43 @@ describe("createWorkflowCallbackUrl", () => {
     ).toBe(
       "https://agent.example.com/eve/agents/support/eve/v1/connections/linear/callback/tok123?code=abc&x-vercel-protection-bypass=secret",
     );
+  });
+});
+
+describe("createRemoteTaskInputCallbackUrl", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("adds the bypass only for the current Vercel deployment host", () => {
+    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret");
+    vi.stubEnv("VERCEL_URL", "current-deployment.vercel.app");
+
+    expect(
+      createRemoteTaskInputCallbackUrl(
+        "https://current-deployment.vercel.app",
+        "/eve/v1/task-input/token",
+      ),
+    ).toBe(
+      "https://current-deployment.vercel.app/eve/v1/task-input/token?x-vercel-protection-bypass=secret",
+    );
+  });
+
+  it("does not disclose the bypass to an external remote host", () => {
+    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret");
+    vi.stubEnv("VERCEL_URL", "current-deployment.vercel.app");
+
+    expect(
+      createRemoteTaskInputCallbackUrl("https://remote.example", "/eve/v1/task-input/token"),
+    ).toBe("https://remote.example/eve/v1/task-input/token");
+  });
+
+  it("does not add the Vercel bypass to loopback HTTP", () => {
+    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret");
+    vi.stubEnv("VERCEL_URL", "127.0.0.1");
+
+    expect(
+      createRemoteTaskInputCallbackUrl("http://127.0.0.1:3000", "/eve/v1/task-input/token"),
+    ).toBe("http://127.0.0.1:3000/eve/v1/task-input/token");
   });
 });

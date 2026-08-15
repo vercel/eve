@@ -20,10 +20,7 @@ export function resolveEvalClientOptions(
     return { host: target.url };
   }
 
-  const options = {
-    ...resolveDevelopmentClientOptions(target.url),
-    preserveCompletedSessions: false,
-  };
+  const options = resolveDevelopmentClientOptions(target.url);
   const explicitToken = process.env.EVE_EVAL_AUTH_TOKEN?.trim();
   if (explicitToken) {
     return { ...options, auth: { bearer: explicitToken }, redirect: "manual" };

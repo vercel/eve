@@ -1,5 +1,5 @@
 ---
-title: "TypeScript API"
+title: "TypeScript API Reference"
 description: "The define* helpers, the runtime ctx, and where each one is imported from."
 ---
 
@@ -52,7 +52,9 @@ export default defineTool({
 | `mockModel`                                           | `eve/evals`                                          | Deterministic fixture agent models                                         | [Evals](../evals/overview)                             |
 | `useEveAgent`                                         | `eve/react`, `eve/vue`, `eve/svelte`                 | frontend                                                                   | [Frontend](../guides/frontend/overview)                |
 
-A few non-`define*` helpers round out the set: `disableTool` and `experimental_workflow` from `eve/tools` (see [Default harness](../concepts/default-harness)), `sleep` from `eve/tools/sleep`, the route verbs `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`WS` from `eve/channels`, the approval policies `always`/`once`/`never` from `eve/tools/approval`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` from `eve/channels/auth`. To wrap a built-in tool, import its default value from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `loadSkill`). `AgentReasoningDefinition` is exported from `eve` for the top-level `defineAgent({ reasoning })` setting. `AgentLimitsDefinition` is exported for `defineAgent({ limits })`. `AgentWorkflowDefinition` and `AgentWorkflowWorldDefinition` are exported from `eve` for the `defineAgent({ experimental: { workflow } })` config shape. `ExperimentalWorkflowToolInput` is exported from `eve/tools` for the `experimental_workflow(...)` config shape.
+A few non-`define*` helpers round out the set: `disableTool`, `experimental_workflow`, and `webSearch` from `eve/tools` (see [Default harness](../concepts/default-harness)), `sleep` from `eve/tools/sleep`, the route verbs `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`WS` from `eve/channels`, the approval policies `always`/`once`/`never` from `eve/tools/approval`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` from `eve/channels/auth`. To wrap a built-in tool, import its default value from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `todo`, `loadSkill`). `AgentReasoningDefinition` is exported from `eve` for the top-level `defineAgent({ reasoning })` setting. `AgentLimitsDefinition` is exported for `defineAgent({ limits })`. `AgentWorkflowDefinition` and `AgentWorkflowWorldDefinition` are exported from `eve` for the `defineAgent({ experimental: { workflow } })` config shape. `ExperimentalWorkflowToolInput`, `WebSearchToolInput`, and `WebSearchProvider` are exported from `eve/tools` for their corresponding tool configuration helpers.
+
+`defineInstructions` accepts `{ content: string, role?: "system" | "user" }`; omitted `role` means `"system"`. Its `eve/instructions` version of `defineDynamic` accepts only `session.started` and `turn.started` handlers returning `defineInstructions(...)` or `null`. The legacy `{ markdown: string }` definition remains available as a deprecated system-role form.
 
 ## Runtime context (`ctx`)
 
@@ -61,7 +63,7 @@ A few non-`define*` helpers round out the set: `disableTool` and `experimental_w
 | Member                      | Use                                                                          |
 | --------------------------- | ---------------------------------------------------------------------------- |
 | `ctx.session`               | Current session, turn, auth, and optional parent lineage (read-only)         |
-| `ctx.getSandbox()`          | Live sandbox handle for the current agent                                    |
+| `ctx.getSandbox()`          | Live sandbox handle; `stop()` releases compute but preserves durable state   |
 | `ctx.getSkill(identifier)`  | Handle for a named skill visible to the current agent                        |
 | `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`  |
 | `ctx.requireAuth(provider)` | Evict and re-authorize an inline provider, commonly after a downstream `401` |
@@ -118,4 +120,4 @@ Pass another bare OpenAI model slug to override the default. The helper reads cr
 
 - [`agent.ts`](../agent-config): the agent config these helpers configure
 - [Tools](../tools): `defineTool`, the most-used helper
-- [Project layout](./project-layout): where each define\* lives on disk
+- [Project layout](../getting-started#project-layout): where each define\* lives on disk

@@ -5,6 +5,7 @@ import {
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
+  ChannelDeliveryKey,
   ChannelRequestIdKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
@@ -41,7 +42,9 @@ export function buildRunContext(input: {
     });
   }
 
-  ctx.set(ContinuationTokenKey, run.continuationToken ?? "");
+  if (run.continuationToken !== undefined) {
+    ctx.set(ContinuationTokenKey, run.continuationToken);
+  }
   ctx.set(ModeKey, run.mode);
   ctx.set(AuthKey, auth);
   ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
@@ -56,6 +59,10 @@ export function buildRunContext(input: {
 
   if (run.requestId !== undefined) {
     ctx.set(ChannelRequestIdKey, run.requestId);
+  }
+
+  if (run.delivery !== undefined) {
+    ctx.set(ChannelDeliveryKey, run.delivery);
   }
 
   if (run.callback !== undefined) {

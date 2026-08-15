@@ -24,8 +24,9 @@ interface OrderedStreamEmitter {
 
 /**
  * Decouples model-stream consumption from the durable event sink while
- * preserving FIFO dispatch. Adjacent append events waiting behind the active
- * write are folded together; every other event remains an ordering barrier.
+ * preserving FIFO dispatch. Adjacent append events and same-call tool partials
+ * waiting behind the active write are folded together; every other event
+ * remains an ordering barrier.
  * Coalescing before the durable writer keeps one Workflow chunk per emitted
  * event, so event-count reconnect cursors remain aligned with chunk indexes.
  */
@@ -133,7 +134,7 @@ export function createOrderedStreamEmitter(
       const lastIndex = pending.length - 1;
       const last = pending[lastIndex];
       const delta = appendDelta(event);
-      if (last === undefined || !mergeAdjacentAppends(last, event, messages)) {
+      if (last === undefined || !mergeAdjacentEmissions(last, event, messages)) {
         pending.push({
           deltaCharacters: delta?.length ?? 0,
           event,
@@ -161,7 +162,7 @@ export function createOrderedStreamEmitter(
   };
 }
 
-function mergeAdjacentAppends(
+function mergeAdjacentEmissions(
   left: PendingEmission,
   right: UnstampedMessageStreamEvent,
   messages: readonly import("ai").ModelMessage[] | undefined,
@@ -179,6 +180,13 @@ function mergeAdjacentAppends(
     if (!sameCoordinates(left.event, right)) return false;
     left.deltaParts ??= [left.event.data.reasoningDelta];
     left.deltaParts.push(right.data.reasoningDelta);
+    left.event = right;
+    left.messages = messages;
+    return true;
+  }
+
+  if (left.event.type === "action.partial" && right.type === "action.partial") {
+    if (left.event.data.result.callId !== right.data.result.callId) return false;
     left.event = right;
     left.messages = messages;
     return true;

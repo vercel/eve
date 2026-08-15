@@ -36,10 +36,7 @@ export type InputRequestKind = z.infer<typeof inputRequestKindSchema>;
 /** Zod schema for the framework-owned source of an input request. */
 export const inputRequestKindSchema = z.enum(["question", "session-limit", "tool-approval"]);
 
-/**
- * Unified input request surfaced to the client when the agent needs user
- * input before continuing.
- */
+/** Unified input request surfaced when the agent needs user input. */
 export type InputRequest = z.infer<typeof inputRequestSchema>;
 
 /**

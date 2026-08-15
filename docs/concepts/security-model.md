@@ -103,3 +103,4 @@ Before exposing an agent to real traffic:
 - [Sandbox](../sandbox): backends, network policy, and brokering config
 - [Execution model and durability](./execution-model-and-durability): how durable sessions run
 - [Connections](../connections): static-token and OAuth connections
+- [Responsible use](../responsible-use): deployer responsibilities and safeguards to review before production

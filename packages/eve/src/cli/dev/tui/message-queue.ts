@@ -4,11 +4,11 @@
  *
  * Enter queues the draft (up to {@link MESSAGE_QUEUE_LIMIT}); each queued
  * message waits for the turn to end, where the whole queue coalesces into
- * the next turn's message. Esc pops the oldest message to steer the
+ * the next turn's message. Esc or Ctrl+C pops the oldest message to steer the
  * conversation instead of waiting: the renderer requests cooperative turn
  * cancellation and the runner submits the popped message as the next turn.
- * `/cancel` requests cancellation directly. Esc on an empty queue cancels the
- * turn immediately without a replacement message.
+ * `/cancel` requests cancellation directly. Either key on an empty queue
+ * cancels the turn immediately without a replacement message.
  *
  * The renderer owns lifecycle (keys, cancel requests, when the runner drains
  * the queue); this module only holds the queue state machine and paints rows.
@@ -38,7 +38,7 @@ export interface MessageQueueView {
   readonly full: boolean;
   /** A popped message is staged and turn cancellation was requested. */
   readonly steering: boolean;
-  /** Esc on an empty queue landed; cancellation was requested. */
+  /** A cancel key on an empty queue landed; cancellation was requested. */
   readonly cancelling: boolean;
 }
 
@@ -70,8 +70,8 @@ export class MessageQueue {
   }
 
   /**
-   * Applies one Esc press. Pops the oldest queued message into the staged
-   * steer payload while any remain; with an empty queue, requests
+   * Applies one Esc or Ctrl+C press. Pops the oldest queued message into the
+   * staged steer payload while any remain; with an empty queue, requests
    * cancellation immediately.
    */
   handleEscape(): MessageQueueEscapeOutcome {
@@ -161,7 +161,7 @@ export interface MessageQueuePanelRowsInput {
   readonly view: MessageQueueView;
   readonly width: number;
   readonly theme: Theme;
-  /** True while a turn streams — the only state in which Esc steers. */
+  /** True while a turn streams — the only state in which keys steer. */
   readonly working: boolean;
 }
 
@@ -205,7 +205,7 @@ function headerBody(view: MessageQueueView, working: boolean, theme: Theme): str
     return c.dim(`Steering — cancelling the running turn…${remaining}`);
   }
   const fullness = view.full ? `${dot}queue full` : "";
-  const hint = working ? `${dot}esc steers with the next message` : "";
+  const hint = working ? `${dot}esc or ctrl+c steers with the next message` : "";
   return `${c.bold("Queue")} ${c.dim(`${count}${fullness}${hint}`)}`;
 }
 

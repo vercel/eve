@@ -12,9 +12,6 @@
   },
   "dependencies": {
     "@eve-e2e/config": "workspace:*",
-    "@opentelemetry/core": "catalog:",
-    "@opentelemetry/sdk-trace-base": "catalog:",
-    "@vercel/otel": "catalog:",
     "@workflow/world-postgres": "catalog:",
     "eve": "workspace:*",
     "zod": "catalog:"
@@ -22,5 +19,8 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:"
+  },
+  "e2e": {
+    "modelMatrix": "full"
   }
 }

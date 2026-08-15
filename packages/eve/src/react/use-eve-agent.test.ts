@@ -15,7 +15,7 @@ import {
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
-import type { SessionState } from "#client/types.js";
+import type { ClientSessionState } from "#client/types.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -142,6 +142,54 @@ describe("useEveAgent", () => {
     expect(seenHelpers.at(-1)).toBe(firstHelpers);
   });
 
+  it("stops an active turn stream when the component unmounts", async () => {
+    let streamSignal: AbortSignal | null | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createStartedMessageResponse("session_1", "http:session_1");
+      }
+
+      streamSignal = init?.signal;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamSignal?.addEventListener("abort", () => controller.error(createAbortError()));
+          },
+        }),
+      );
+    });
+
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+    let root: ReturnType<typeof create> | undefined;
+
+    function TestComponent() {
+      helpers = useEveAgent();
+      return null;
+    }
+
+    await act(async () => {
+      root = create(createElement(TestComponent));
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = helpers?.send("Hello");
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    });
+
+    expect(streamSignal?.aborted).toBe(false);
+
+    await act(async () => {
+      root?.unmount();
+    });
+
+    expect(streamSignal?.aborted).toBe(true);
+
+    await act(async () => {
+      await sendPromise;
+    });
+  });
+
   it("sends a message and projects streamed events with the default reducer", async () => {
     const events = [
       createMessageReceivedEvent({
@@ -155,7 +203,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent("eve:http:session_1"),
+      createSessionWaitingEvent(),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -164,16 +212,19 @@ describe("useEveAgent", () => {
       .mockReturnValueOnce(startResponse.promise)
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
+    const lifecycle: string[] = [];
     const seenEvents: UnstampedMessageStreamEvent[] = [];
-    const seenSessions: SessionState[] = [];
+    const seenSessions: Array<ClientSessionState | undefined> = [];
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
 
     function TestComponent() {
       helpers = useEveAgent({
         onEvent(event) {
+          lifecycle.push(`event:${event.type}`);
           seenEvents.push(event);
         },
         onSessionChange(session) {
+          lifecycle.push(`session:${String(session?.streamIndex)}`);
           seenSessions.push(session);
         },
       });
@@ -186,7 +237,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({ message: "Hello" });
+      sendPromise = helpers?.send("Hello");
       await Promise.resolve();
     });
 
@@ -200,17 +251,20 @@ describe("useEveAgent", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(lifecycle[0]).toBe("session:0");
     expect(seenEvents).toEqual(stampTestEvents(events));
     expect(seenSessions).toEqual([
       {
-        continuationToken: "http:session_1",
+        sessionId: "session_1",
+        streamIndex: 0,
+      },
+      {
         sessionId: "session_1",
         streamIndex: 3,
       },
     ]);
     expect(helpers?.status).toBe("ready");
     expect(helpers?.session).toEqual({
-      continuationToken: "http:session_1",
       sessionId: "session_1",
       streamIndex: 3,
     });
@@ -223,14 +277,53 @@ describe("useEveAgent", () => {
     );
   });
 
+  it("detaches locally on unmount without cancelling the durable turn", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementationOnce((_input, init) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener("abort", () => reject(createAbortError()), {
+          once: true,
+        });
+      });
+    });
+
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+
+    function TestComponent() {
+      helpers = useEveAgent();
+      return null;
+    }
+
+    let renderer: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      renderer = create(createElement(TestComponent));
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = helpers?.send("Hello");
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+    await act(async () => {
+      await sendPromise;
+    });
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("prepares fresh clientContext before sending without projecting it optimistically", async () => {
     const startResponse = createDeferred<Response>();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
-      .mockResolvedValueOnce(
-        createEagerStreamResponse([createSessionWaitingEvent("eve:http:session_1")]),
-      );
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
 
     let randomWord = "jazz";
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
@@ -255,7 +348,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({ message: "What word is currently selected?" });
+      sendPromise = helpers?.send("What word is currently selected?");
       await Promise.resolve();
     });
 
@@ -283,9 +376,7 @@ describe("useEveAgent", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
-      .mockResolvedValueOnce(
-        createEagerStreamResponse([createSessionWaitingEvent("eve:http:session_1")]),
-      );
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
 
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
 
@@ -302,7 +393,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({ message: "Hello" });
+      sendPromise = helpers?.send("Hello");
       await Promise.resolve();
     });
 
@@ -337,7 +428,7 @@ describe("useEveAgent", () => {
     });
 
     await act(async () => {
-      await helpers?.send({ message: "Hello" });
+      await helpers?.send("Hello");
     });
 
     expect(seenErrors.map((error) => error.message)).toEqual(["Network failed"]);
@@ -361,7 +452,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_2",
       }),
-      createSessionWaitingEvent("eve:http:session_1"),
+      createSessionWaitingEvent(),
     ];
 
     vi.spyOn(globalThis, "fetch")
@@ -387,7 +478,7 @@ describe("useEveAgent", () => {
 
     let firstSendPromise: Promise<void> | undefined;
     await act(async () => {
-      firstSendPromise = helpers?.send({ message: "First" });
+      firstSendPromise = helpers?.send("First");
       await Promise.resolve();
     });
 
@@ -400,7 +491,7 @@ describe("useEveAgent", () => {
 
     let secondSendPromise: Promise<void> | undefined;
     await act(async () => {
-      secondSendPromise = helpers?.send({ message: "Second" });
+      secondSendPromise = helpers?.send("Second");
       await Promise.resolve();
     });
 
@@ -469,7 +560,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({ message: "Hello" });
+      sendPromise = helpers?.send("Hello");
       await Promise.resolve();
     });
 
@@ -511,7 +602,7 @@ describe("useEveAgent", () => {
         sequence: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent("eve:http:session_1"),
+      createSessionWaitingEvent(),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -537,7 +628,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({ message: "Hello" });
+      sendPromise = helpers?.send("Hello");
       await Promise.resolve();
     });
 
@@ -556,16 +647,13 @@ describe("useEveAgent", () => {
     const startResponse = createDeferred<Response>();
     vi.spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
-      .mockResolvedValueOnce(
-        createEagerStreamResponse([createSessionWaitingEvent("eve:http:session_1")]),
-      );
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
 
     let helpers: UseEveAgentHelpers<readonly string[]> | undefined;
 
     function TestComponent() {
       helpers = useEveAgent<readonly string[]>({
         initialSession: {
-          continuationToken: "http:session_1",
           sessionId: "session_1",
           streamIndex: 0,
         },
@@ -587,9 +675,7 @@ describe("useEveAgent", () => {
 
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      sendPromise = helpers?.send({
-        inputResponses: [{ optionId: "deny", requestId: "approval_1" }],
-      });
+      sendPromise = helpers?.respond([{ optionId: "cancel", requestId: "approval_1" }]);
       await Promise.resolve();
     });
 

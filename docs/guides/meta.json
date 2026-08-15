@@ -6,12 +6,9 @@
     "instrumentation",
     "hooks",
     "session-context",
-    "state",
     "dynamic-capabilities",
-    "dynamic-workflows",
     "remote-agents",
     "dev-tui",
-    "acp",
     "frontend",
     "client"
   ]

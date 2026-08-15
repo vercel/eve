@@ -4,7 +4,6 @@ import type { ConnectionAuthorizationChallenge } from "#public/connections/error
 
 const sessionCursorSchema = z
   .object({
-    continuationToken: z.string().optional(),
     sessionId: z.string().min(1),
     streamIndex: z.number().int().nonnegative(),
   })

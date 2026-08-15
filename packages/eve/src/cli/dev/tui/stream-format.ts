@@ -323,7 +323,7 @@ export async function* takeUntil<T>(
     // error) so abandoned generators run their cleanup — e.g. the client
     // event stream advancing its session cursor. For generator sources this
     // resolves only once the pending pull settles, so callers that stop
-    // mid-pull must also abort the underlying stream (the renderer's Ctrl+C
+    // mid-pull must also abort the underlying stream (a lifecycle interrupt
     // path fires `result.abort()` for exactly this reason).
     void iterator.return?.()?.catch(() => {});
   }

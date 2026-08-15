@@ -16,39 +16,32 @@ afterEach(() => {
 });
 
 describe("createSessionTimeoutControl", () => {
-  it("retargets one absolute deadline when the delivery hook is rekeyed", async () => {
+  it("starts one absolute deadline against the stable command inbox", async () => {
     const deadline = new Date("2026-02-01T00:00:00.000Z");
-    vi.mocked(startSessionTimeoutStep)
-      .mockResolvedValueOnce({ runId: "timer-old" })
-      .mockResolvedValueOnce({ runId: "timer-new" });
-    const control = createSessionTimeoutControl({ deadline });
+    vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timer-run" });
 
-    await control.rekey("old");
-    await control.rekey("old");
-    await control.rekey("replacement");
+    const control = createSessionTimeoutControl({
+      deadline,
+      token: "eve:session:wrun_1:inbox",
+    });
+    await control.start();
+    await control.start();
 
-    expect(startSessionTimeoutStep).toHaveBeenNthCalledWith(1, {
+    expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
+    expect(startSessionTimeoutStep).toHaveBeenCalledWith({
       deadline,
-      token: "old",
+      token: "eve:session:wrun_1:inbox",
     });
-    expect(startSessionTimeoutStep).toHaveBeenNthCalledWith(2, {
-      deadline,
-      token: "replacement",
-    });
-    expect(cancelSessionTimeoutStep).toHaveBeenCalledOnce();
-    expect(cancelSessionTimeoutStep).toHaveBeenCalledWith({ runId: "timer-old" });
-    expect(vi.mocked(cancelSessionTimeoutStep).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(startSessionTimeoutStep).mock.invocationCallOrder[1]!,
-    );
   });
 
   it("cancels the active timer when the session settles", async () => {
     vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timer-run" });
     const control = createSessionTimeoutControl({
       deadline: new Date("2026-02-01T00:00:00.000Z"),
+      token: "eve:session:wrun_1:inbox",
     });
 
-    await control.rekey("active");
+    await control.start();
     await control.dispose();
     await control.dispose();
 
@@ -56,26 +49,16 @@ describe("createSessionTimeoutControl", () => {
     expect(cancelSessionTimeoutStep).toHaveBeenCalledWith({ runId: "timer-run" });
   });
 
-  it("does not start a timer without a continuation token", async () => {
-    const control = createSessionTimeoutControl({
-      deadline: new Date("2026-02-01T00:00:00.000Z"),
-    });
-
-    await control.rekey("");
-    await control.dispose();
-
-    expect(startSessionTimeoutStep).not.toHaveBeenCalled();
-    expect(cancelSessionTimeoutStep).not.toHaveBeenCalled();
-  });
-
   it("propagates timer startup failures", async () => {
     const failure = new Error("timer startup failed");
     vi.mocked(startSessionTimeoutStep).mockRejectedValue(failure);
+
     const control = createSessionTimeoutControl({
       deadline: new Date("2026-02-01T00:00:00.000Z"),
+      token: "eve:session:wrun_1:inbox",
     });
 
-    await expect(control.rekey("active")).rejects.toBe(failure);
+    await expect(control.start()).rejects.toBe(failure);
     await control.dispose();
 
     expect(cancelSessionTimeoutStep).not.toHaveBeenCalled();

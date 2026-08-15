@@ -52,7 +52,6 @@ describe("useEveAgent (Svelte rune binding)", () => {
         }),
       ]),
       initialSession: {
-        continuationToken: "http:session_1",
         sessionId: "session_1",
         streamIndex: 2,
       },
@@ -61,7 +60,6 @@ describe("useEveAgent (Svelte rune binding)", () => {
     expect(agent.status).toBe("ready");
     expect(agent.data.messages).toHaveLength(2);
     expect(agent.session).toEqual({
-      continuationToken: "http:session_1",
       sessionId: "session_1",
       streamIndex: 2,
     });
@@ -77,7 +75,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
 
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failed"));
 
-    await agent.send({ message: "ignored" });
+    await agent.send("ignored");
 
     expect(agent.data).toBe(dataBeforeSend);
     expect(agent.status).toBe("ready");
@@ -87,7 +85,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     vi.stubGlobal("window", {});
     const events = [
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
-      createSessionWaitingEvent("eve:http:session_1"),
+      createSessionWaitingEvent(),
     ];
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))
@@ -100,7 +98,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
       },
     });
 
-    await agent.send({ message: "Hello" });
+    await agent.send("Hello");
 
     expect(seenEvents).toEqual(stampTestEvents(events));
   });

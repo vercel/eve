@@ -97,7 +97,7 @@ export async function addRegistryMappings(
   };
 
   for (const mapping of mappings) {
-    if (mapping.namespace === "@shadcn") {
+    if (mapping.namespace === "@shadcn" || mapping.namespace === "@skills") {
       result.skippedBuiltIn.push(mapping.namespace);
     } else if (configured[mapping.namespace] !== undefined) {
       result.skippedExisting.push(mapping.namespace);

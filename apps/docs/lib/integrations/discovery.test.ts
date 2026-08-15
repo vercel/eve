@@ -32,6 +32,36 @@ describe("integration discovery", () => {
     expect(markdown).toContain("eve add channel/slack");
   });
 
+  it("renders Buzz as an ACP channel with explicit authorization guidance", () => {
+    const buzz = getIntegration("buzz");
+    expect(buzz).toBeDefined();
+
+    const markdown = integrationMarkdown(buzz!);
+    expect(markdown).toContain("npm install --global @eve/buzz-acp-adapter");
+    expect(markdown).toContain("eve-buzz-acp-adapter install");
+    expect(markdown).toContain("Customize for this agent");
+    expect(markdown).toContain("Agent harness** to **eve");
+    expect(markdown).toContain("does not prefill one for custom harnesses");
+    expect(markdown).toContain("Who can talk to this agent");
+    expect(markdown).toContain("AI_GATEWAY_API_KEY");
+    expect(markdown).toContain("Parallelism** to `1`");
+    expect(markdown).toContain("Accepted senders share one eve identity");
+    expect(markdown).toContain("## Configure");
+    expect(integrationSearchText(buzz!)).toContain("acp");
+  });
+
+  it("renders the Web Chat setup for every host framework it documents", () => {
+    const web = getIntegration("eve");
+    expect(web).toBeDefined();
+
+    const markdown = integrationMarkdown(web!);
+    expect(markdown).toContain("eve add channel/web");
+    expect(markdown).toContain("/docs/guides/frontend/nextjs");
+    expect(markdown).toContain("/docs/guides/frontend/nuxt");
+    expect(markdown).toContain("/docs/guides/frontend/sveltekit");
+    expect(integrationSearchText(web!)).toContain("svelte");
+  });
+
   it("renders the Browserbase extension setup", () => {
     const browserbase = getIntegration("browserbase");
     expect(browserbase).toBeDefined();
@@ -68,6 +98,31 @@ describe("integration discovery", () => {
     expect(integrationSearchText(agentkit!)).toContain("long-term memory");
   });
 
+  it("renders the Kybernesis Arcana memory extension setup", () => {
+    const arcana = getIntegration("arcana");
+    expect(arcana).toBeDefined();
+
+    const markdown = integrationMarkdown(arcana!);
+    expect(markdown).toContain("eve add extension/arcana");
+    expect(markdown).toContain('import arcana from "@kybernesis/arcana"');
+    expect(markdown).toContain("ARCANA_API_KEY");
+    expect(markdown).toContain("ARCANA_WORKSPACE");
+    expect(integrationSearchText(arcana!)).toContain("long-term memory");
+  });
+
+  it("renders the Hindsight memory extension setup", () => {
+    const hindsight = getIntegration("hindsight");
+    expect(hindsight).toBeDefined();
+
+    const markdown = integrationMarkdown(hindsight!);
+    expect(markdown).toContain("eve add extension/hindsight");
+    expect(markdown).toContain('import { hindsightMemory } from "@vectorize-io/hindsight-eve"');
+    expect(markdown).toContain("hindsightRetainHook");
+    expect(markdown).toContain("HINDSIGHT_API_KEY");
+    expect(markdown).toContain("HINDSIGHT_BANK_ID");
+    expect(integrationSearchText(hindsight!)).toContain("long-term memory");
+  });
+
   it("renders the GitHub Tools extension setup", () => {
     const githubTools = getIntegration("github-tools");
     expect(githubTools).toBeDefined();
@@ -98,5 +153,13 @@ describe("integration discovery", () => {
     expect(markdown).toContain("eve add instrumentation/braintrust");
     expect(markdown).toContain("agent/instrumentation.ts");
     expect(markdown).toContain("BRAINTRUST_API_KEY");
+
+    const posthog = getIntegration("posthog-instrumentation");
+    expect(posthog).toBeDefined();
+
+    const posthogMarkdown = integrationMarkdown(posthog!);
+    expect(posthogMarkdown).toContain("eve add instrumentation/posthog");
+    expect(posthogMarkdown).toContain("PostHogTraceExporter");
+    expect(posthogMarkdown).toContain("POSTHOG_PROJECT_TOKEN");
   });
 });

@@ -3,14 +3,14 @@
  * `eve add channel/slack`.
  *
  * Channel *identity* (slug, name, and whether it is scaffoldable) is owned by
- * `@vercel/eve-catalog`, the cross-surface source of truth shared with the docs
+ * `@eve/catalog`, the cross-surface source of truth shared with the docs
  * gallery. This module overlays the scaffolder-only concerns — the internal
  * {@link ChannelKind} (the catalog's `eve` web-chat channel is surfaced to users
  * as `web`), the picker copy, and the picker order — and validates that the
  * overlay and the catalog cannot drift apart.
  */
 
-import { channelEntries } from "@vercel/eve-catalog";
+import { channelEntries } from "@eve/catalog";
 import type { ChannelKind } from "./update/channels.js";
 
 /** Scaffolder overlay for one catalog channel the CLI can scaffold. */
@@ -76,7 +76,7 @@ function buildScaffoldableChannels(): ScaffoldableChannel[] {
   for (const scaffold of CHANNEL_SCAFFOLDS) {
     if (!scaffoldableSlugs.delete(scaffold.slug)) {
       throw new Error(
-        `Channel overlay "${scaffold.slug}" is not a scaffoldable channel in @vercel/eve-catalog.`,
+        `Channel overlay "${scaffold.slug}" is not a scaffoldable channel in @eve/catalog.`,
       );
     }
     const channel: ScaffoldableChannel = {
@@ -101,7 +101,7 @@ function buildScaffoldableChannels(): ScaffoldableChannel[] {
 
 /**
  * Channels the CLI can scaffold, in picker order. Derived from
- * `@vercel/eve-catalog` (`surfaces.scaffoldable`) overlaid with
+ * `@eve/catalog` (`surfaces.scaffoldable`) overlaid with
  * {@link CHANNEL_SCAFFOLDS}. Throws at module load if the two disagree.
  */
 export const SCAFFOLDABLE_CHANNELS: readonly ScaffoldableChannel[] = buildScaffoldableChannels();

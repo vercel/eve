@@ -45,7 +45,6 @@ void (async () => {
   const screen = new MockScreen({ columns: 110, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    session: client.session(),
     client,
     screen,
     userInput: input,
@@ -61,10 +60,10 @@ void (async () => {
   try {
     const sessionWindow = "9".repeat(16);
     const turn = "a".repeat(16);
+    const delivery = "0".repeat(16);
     const step = "b".repeat(16);
     const model = "c".repeat(16);
     const action = "e".repeat(16);
-    const toolCall = "f".repeat(16);
     // A real capture roots turns under the session's window span, so the
     // fixture does too — turn discovery must not depend on root position.
     await writeSegment(appRoot, TRACE_ONE, {
@@ -84,7 +83,22 @@ void (async () => {
       start: 1_000,
       end: 1_000,
       parentSpanId: sessionWindow,
-      attributes: { "agent.session.id": "session-smoke", "agent.name": "smoke-agent" },
+      attributes: {
+        "agent.session.id": "session-smoke",
+        "agent.name": "smoke-agent",
+        "agent.turn.id": "turn_0",
+      },
+    });
+    await writeSegment(appRoot, TRACE_ONE, {
+      spanId: delivery,
+      name: "agent.channel.delivery",
+      start: 1_000,
+      end: 1_000,
+      parentSpanId: sessionWindow,
+      attributes: {
+        "agent.channel.delivery.input": JSON.stringify({ message: "smoke prompt" }),
+        "agent.turn.id": "turn_0",
+      },
     });
     await writeSegment(appRoot, TRACE_ONE, {
       spanId: step,
@@ -103,7 +117,6 @@ void (async () => {
       attributes: {
         "gen_ai.request.model": "smoke-model-v1",
         "ai.prompt.system": SYSTEM_PROMPT,
-        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "smoke prompt" }]),
         "ai.response.text": "smoke reply",
       },
     });
@@ -112,19 +125,12 @@ void (async () => {
       name: "agent.action",
       start: 6_000,
       end: 6_300,
-      parentSpanId: step,
-      attributes: { "agent.action.kind": "tool", "agent.action.name": "get_weather" },
-    });
-    await writeSegment(appRoot, TRACE_ONE, {
-      spanId: toolCall,
-      name: "ai.toolCall",
-      start: 6_000,
-      end: 6_300,
-      parentSpanId: action,
+      parentSpanId: turn,
       attributes: {
+        "agent.action.kind": "tool",
+        "agent.action.name": "get_weather",
         "gen_ai.tool.call.arguments": '{"city":"San Francisco"}',
         "gen_ai.tool.call.result": '{"temperature":72}',
-        "gen_ai.tool.name": "get_weather",
       },
     });
     // A subagent child turn recorded into the same trace, carrying its
@@ -141,6 +147,18 @@ void (async () => {
         "agent.parent.turn.id": "turn_0",
         "agent.parent.call_id": "call-1",
         "agent.subagent.name": "echo",
+        "agent.turn.id": "turn_child",
+      },
+    });
+    await writeSegment(appRoot, TRACE_ONE, {
+      spanId: "5".repeat(16),
+      name: "agent.channel.delivery",
+      start: 7_000,
+      end: 7_000,
+      parentSpanId: sessionWindow,
+      attributes: {
+        "agent.channel.delivery.input": JSON.stringify({ message: "delegated task" }),
+        "agent.turn.id": "turn_child",
       },
     });
     await writeSegment(appRoot, TRACE_ONE, {
@@ -159,7 +177,6 @@ void (async () => {
       parentSpanId: "7".repeat(16),
       attributes: {
         "gen_ai.request.model": "smoke-model-v1",
-        "ai.prompt.messages": JSON.stringify([{ role: "user", content: "delegated task" }]),
         "ai.response.text": "delegated reply",
       },
     });
@@ -236,7 +253,7 @@ void (async () => {
     input.enter();
     await screen.waitForText("status", 5_000);
     await screen.waitForText("duration", 5_000);
-    await screen.waitForText("gen_ai.tool.name", 5_000);
+    await screen.waitForText("agent.action.name", 5_000);
     if (!screen.snapshot().includes('"city"')) {
       throw new Error(`The tool card lost its inline payload:\n${screen.snapshot()}`);
     }
@@ -251,7 +268,7 @@ void (async () => {
     // key merges into an unfinished CSI in the input tokenizer and wedges
     // every key after it (the lone-ESC flush never fires).
     input.send("\x1b");
-    await waitForAbsence(screen, "gen_ai.tool.name", 5_000);
+    await waitForAbsence(screen, "agent.action.name", 5_000);
 
     // The subagent child turn renders below the fold; End jumps to its cards,
     // which carry the dispatch lineage badge.
@@ -297,6 +314,7 @@ void (async () => {
         await withTimeout(emptyRunner.runPromise, 5_000, "empty /exit did not terminate");
       } finally {
         emptyRunner.input.ctrlC();
+        emptyRunner.input.ctrlC();
         await emptyRunner.runPromise.catch(() => {});
       }
     } finally {
@@ -328,7 +346,6 @@ function bootRunner(appRoot: string) {
   const screen = new MockScreen({ columns: 110, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    session: client.session(),
     client,
     screen,
     userInput: input,

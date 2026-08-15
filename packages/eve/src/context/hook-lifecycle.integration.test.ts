@@ -24,7 +24,13 @@ function createMockBundle(): CompiledBundle {
     resolvedAgent: { config: { name: "test-agent" }, skills: [] } as never,
     subagentRegistry: undefined as never,
     toolRegistry: undefined as never,
-    turnAgent: undefined as never,
+    turnAgent: {
+      id: "test-agent",
+      instructions: [],
+      model: { id: "openai/gpt-5.5" },
+      tools: [],
+      workspaceSpec: { rootEntries: [] },
+    },
   };
 }
 
@@ -59,7 +65,8 @@ describe("dispatchStreamEventHooks", () => {
     const registry = createRuntimeHookRegistry([
       hook("audit", {
         events: {
-          "session.completed": async () => {
+          "session.completed": async (_event, hookContext) => {
+            expect(hookContext.channel.continuationToken).toBe("test:continuation");
             calls.push("typed");
           },
         },

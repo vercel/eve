@@ -58,7 +58,7 @@ city in the world.`,
     code: `import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "openai/gpt-5.4-mini",
+  model: "xai/grok-4.5",
 });`,
   },
   {
@@ -163,7 +163,7 @@ export default defineMcpClientConnection({
 
 export default defineAgent({
   description: "Investigate questions",
-  model: "openai/gpt-5.4",
+  model: "xai/grok-4.5",
 });`,
   },
   {
@@ -180,6 +180,25 @@ cron: "0 8 * * *"
 
 Send the user a daily weather
 digest for their saved cities.`,
+  },
+  {
+    label: "Evals",
+    name: "evals/",
+    fileName: "evals/weather/brooklyn-forecast.eval.ts",
+    lang: "typescript",
+    NavIcon: IconFileText,
+    description:
+      "Evals run the agent through real sessions and score the result, so you can catch regressions as it evolves.",
+    code: `import { defineEval } from "eve/evals";
+import { includes } from "eve/evals/expect";
+
+export default defineEval({
+  async test(t) {
+    await t.send("What is the weather in Brooklyn?");
+    t.succeeded();
+    t.check(t.reply, includes("Sunny"));
+  },
+});`,
   },
 ];
 

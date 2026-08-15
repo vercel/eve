@@ -78,6 +78,12 @@ function subagentResult(input: {
       result: {
         callId: input.callId,
         kind: "subagent-result",
+        origin: "child",
+        outcome: {
+          kind: "terminal",
+          result: { kind: "succeeded", output: input.output as never },
+          usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
+        },
         output: input.output as never,
         subagentName: input.subagentName,
       },
@@ -154,6 +160,39 @@ describe("deriveRunFacts", () => {
       },
     ]);
     expect(facts.toolCallCount).toBe(2);
+  });
+
+  it("preserves framework skill input in the eval tool-call view", () => {
+    const facts = derive([
+      turnStarted("t1", 0),
+      {
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: "skill-1",
+              input: { skill: "research" },
+              kind: "load-skill",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "t1",
+        },
+      },
+      actionResult({ callId: "skill-1", toolName: "load_skill", output: "Skill body" }),
+    ]);
+
+    expect(facts.toolCalls).toEqual([
+      {
+        input: { skill: "research" },
+        name: "load_skill",
+        output: "Skill body",
+        sessionId: undefined,
+        status: "completed",
+        turnIndex: 0,
+      },
+    ]);
   });
 
   it("uses the normalized failed lifecycle status for error results", () => {
@@ -316,6 +355,7 @@ describe("deriveRunFacts", () => {
         data: {
           callId: "c1",
           childSessionId: "s1",
+          childStreamPath: "/eve/v1/session/s0/subagents/c1/s1/stream",
           sessionId: "s0",
           sequence: 1,
           name: "weather",
@@ -428,7 +468,7 @@ describe("deriveRunFacts", () => {
       { type: "turn.completed", data: { sequence: 1, turnId: "t1" } },
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:test", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ] as UnstampedMessageStreamEvent[];
 
@@ -447,7 +487,7 @@ describe("deriveRunFacts", () => {
       { type: "turn.completed", data: { sequence: 3, turnId: "t1" } },
       {
         type: "session.waiting",
-        data: { continuationToken: "eve:test", wait: "next-user-message" },
+        data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ] as UnstampedMessageStreamEvent[];
 

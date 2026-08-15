@@ -30,7 +30,7 @@ const DISCONNECTED_GATEWAY_INFO: AgentInfoResult = {
   connections: [],
   diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
   hooks: [],
-  instructions: { dynamic: [], static: null },
+  instructions: { dynamic: [], static: [] },
   kind: "eve-agent-info",
   mode: "development",
   sandbox: null,
@@ -45,7 +45,7 @@ const DISCONNECTED_GATEWAY_INFO: AgentInfoResult = {
     framework: [],
     reserved: [],
   },
-  version: 1,
+  version: 2,
   workflow: { enabled: false, toolName: "Workflow" },
   workspace: { resourceRoot: null, rootEntries: [] },
 };
@@ -123,7 +123,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       promptCommandHandler: { handle },
       renderer,
       serverUrl: "http://localhost:3000",
-      session: client.session(),
+      session: client.sessions.attach("session_test"),
       initialInput: "/model",
     });
 

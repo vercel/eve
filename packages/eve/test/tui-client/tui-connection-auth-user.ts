@@ -142,7 +142,7 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
   const sessionId = startBody.sessionId;
 
   const client = new Client({ host: target.baseUrl });
-  const session = client.session({ sessionId, streamIndex: 0 });
+  const session = client.sessions.attach(sessionId);
   const stream = session.stream();
 
   let requiredEvent: AuthorizationRequiredStreamEvent | undefined;
@@ -222,7 +222,7 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
     }
 
     if (
-      event.type === "session.waiting" ||
+      (event.type === "session.waiting" && completedEvent !== undefined) ||
       event.type === "session.completed" ||
       event.type === "session.failed"
     ) {

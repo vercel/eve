@@ -20,7 +20,20 @@ export {
   type ToolModelOutputPart,
 } from "#public/definitions/tool.js";
 export { toolOutput, toolOutputPart } from "#public/tools/output-builders.js";
-export type { Approval, ApprovalContext, ApprovalStatus } from "#public/definitions/approval.js";
+export type {
+  Approval,
+  ApprovalConfiguration,
+  ApprovalContext,
+  ApprovalPolicy,
+  ApprovalRequest,
+  ApprovalResponse,
+  ApprovalResponseAuth,
+  ApprovalResponseContext,
+  ApprovalResponseDecision,
+  ApprovalResponsePolicy,
+  ApprovalResponseSession,
+  ApprovalStatus,
+} from "#public/definitions/approval.js";
 export type {
   DynamicToolEntry,
   DynamicEvents,
@@ -48,3 +61,9 @@ export {
   type DefineWriteFileToolInput,
   defineWriteFileTool,
 } from "#public/tools/define-write-file-tool.js";
+export {
+  type WebSearchProvider,
+  type WebSearchToolDefinition,
+  type WebSearchToolInput,
+  webSearch,
+} from "#public/tools/web-search.js";

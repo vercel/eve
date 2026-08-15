@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { connectionEntries } from "@vercel/eve-catalog";
+import { connectionEntries } from "@eve/catalog";
 
 interface RegistryFile {
   path: string;
@@ -15,12 +15,19 @@ interface RegistryItem {
   files?: RegistryFile[];
   meta?: {
     eve?: {
-      setup?: {
-        command?: string;
-        package?: string;
-        bin?: string;
-        args?: string[];
-      };
+      setup?:
+        | {
+            command?: string;
+            package?: string;
+            bin?: string;
+            args?: string[];
+          }
+        | Array<{
+            command?: string;
+            package?: string;
+            bin?: string;
+            args?: string[];
+          }>;
     };
   };
 }
@@ -33,7 +40,7 @@ const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
 const items = registry.items.filter((item) => item.name.startsWith("connection/"));
 const expectedSlugs = connectionEntries()
-  .filter((entry) => entry.surfaces.gallery)
+  .filter((entry) => entry.surfaces.registry)
   .map((entry) => entry.slug);
 const actualSlugs = items.map((item) => item.name.slice("connection/".length));
 const CONNECT_SERVICES: Readonly<Record<string, string>> = {
@@ -42,25 +49,35 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   notion: "mcp.notion.com",
   datadog: "mcp.datadoghq.com",
   honeycomb: "mcp.honeycomb.io",
+  context: "mcp.context.dev",
+  natural: "mcp.natural.com",
 };
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
-    `Connection registry entries do not match the gallery.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
+    `Connection registry entries do not match the catalog.\nExpected: ${expectedSlugs.join(", ")}\nActual: ${actualSlugs.join(", ")}`,
   );
 }
 
 for (const item of items) {
-  const setup = item.meta?.eve?.setup;
+  const declaredSetup = item.meta?.eve?.setup;
+  const setups =
+    declaredSetup === undefined
+      ? undefined
+      : Array.isArray(declaredSetup)
+        ? declaredSetup
+        : [declaredSetup];
   if (
-    setup !== undefined &&
-    (setup.command === undefined ||
-      setup.package === undefined ||
-      setup.bin === undefined ||
-      setup.args === undefined)
+    setups?.some(
+      (setup) =>
+        setup.command === undefined ||
+        setup.package === undefined ||
+        setup.bin === undefined ||
+        setup.args === undefined,
+    )
   ) {
     throw new Error(
-      `Registry item "${item.name}" setup must declare command, package, bin, and args during the migration.`,
+      `Registry item "${item.name}" setup entries must declare command, package, bin, and args.`,
     );
   }
 
@@ -72,7 +89,7 @@ for (const item of items) {
       bin: "eve",
       args: ["integration", "connect", slug, CONNECT_SERVICES[slug] ?? slug, slug],
     };
-    if (JSON.stringify(setup) !== JSON.stringify(expectedSetup)) {
+    if (JSON.stringify(setups) !== JSON.stringify([expectedSetup])) {
       throw new Error(
         `Registry item "${item.name}" must configure its Vercel Connect connector through eve.`,
       );

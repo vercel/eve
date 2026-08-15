@@ -27,10 +27,12 @@ export default defineEval({
       toolName: TOOL_NAME,
     });
 
-    const approved = await t.respond({
-      requestId: request.requestId,
-      optionId: "approve",
-    });
+    const approved = await t.respond([
+      {
+        requestId: request.requestId,
+        optionId: "approve",
+      },
+    ]);
     approved.expectOk();
 
     t.calledTool(TOOL_NAME, {

@@ -118,7 +118,7 @@ export async function changeAgentModel(input: {
     : { kind: "changed", to: result.to };
 }
 
-async function validateModelSlug(appRoot: string, slug: string): Promise<string | null> {
+export async function validateModelSlug(appRoot: string, slug: string): Promise<string | null> {
   if (!slug.includes("/")) {
     return `\`${slug}\` isn't a provider/model id (e.g. anthropic/claude-sonnet-5).`;
   }

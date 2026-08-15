@@ -12,6 +12,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveNitroRolldownVersion } from "./nitro-rolldown.mjs";
 import { collectFilesRecursively, runVendor } from "./vendor-compiled/_shared.mjs";
 import { MODULES } from "./vendor-compiled/index.mjs";
 
@@ -25,6 +26,8 @@ const vendorCompiledDir = join(here, "vendor-compiled");
 // is invalidated and vendoring re-runs.
 const scriptFiles = [
   fileURLToPath(import.meta.url),
+  join(here, "nitro-rolldown.mjs"),
+  join(here, "vendor-warning-log.mjs"),
   ...(await collectFilesRecursively(vendorCompiledDir, [".mjs", ".d.ts"])),
 ];
 
@@ -33,4 +36,5 @@ await runVendor({
   compiledRoot,
   modules: MODULES,
   scriptFiles,
+  toolVersions: { rolldown: resolveNitroRolldownVersion() },
 });

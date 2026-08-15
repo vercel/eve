@@ -5,7 +5,6 @@ import type {
 } from "#public/definitions/agent.js";
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
-import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import {
   expectFunction,
   expectObjectRecord,
@@ -67,6 +66,15 @@ export function normalizeAgentDefinition(
   const definition: Mutable<NormalizedAgentDefinition> = {
     model: normalizeAgentModelDefinition(record.model, message),
   };
+
+  if (
+    isDynamicSentinel(definition.model) &&
+    (record.modelContextWindowTokens !== undefined || record.modelOptions !== undefined)
+  ) {
+    throw new Error(
+      `${message} Dynamic model definitions do not support sibling "modelContextWindowTokens" or "modelOptions" fields. Return those overrides from the resolver selection instead.`,
+    );
+  }
 
   if (record.description !== undefined) {
     definition.description = expectString(record.description, message);
@@ -134,18 +142,12 @@ function normalizeAgentModelDefinition(
   value: unknown,
   message: string,
 ): NormalizedAgentDefinition["model"] {
-  // Bare-sentinel check so a fallback-less defineDynamic hits the
-  // actionable error below instead of the generic invalid-model path.
   if (!isDynamicSentinel(value)) {
     return value as NormalizedAgentDefinition["model"];
   }
 
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["events", "fallback", "kind"], message);
-
-  if (record.fallback === undefined) {
-    throw new Error(`${message} Dynamic model definitions must include a "fallback" model.`);
-  }
+  expectOnlyKnownKeys(record, ["events", "kind"], message);
 
   const rawEvents = expectObjectRecord(record.events, message);
   const events: MutableDynamicEvents = {};
@@ -157,7 +159,6 @@ function normalizeAgentModelDefinition(
 
   return {
     events,
-    fallback: record.fallback as PublicAgentStaticModelDefinition,
     kind: record.kind,
   } as NormalizedAgentDefinition["model"];
 }
@@ -257,14 +258,32 @@ function normalizeAgentExperimentalDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["subagentPersistentSessions", "workflow"], message);
+  expectOnlyKnownKeys(
+    record,
+    ["instrumentationProviders", "subagentPersistentSessions", "tasks", "workflow"],
+    message,
+  );
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
+
+  if (record.instrumentationProviders !== undefined) {
+    if (typeof record.instrumentationProviders !== "boolean") {
+      throw new Error(`${message} "experimental.instrumentationProviders" must be a boolean.`);
+    }
+    normalizedDefinition.instrumentationProviders = record.instrumentationProviders;
+  }
 
   if (record.subagentPersistentSessions !== undefined) {
     if (typeof record.subagentPersistentSessions !== "boolean") {
       throw new Error(`${message} "experimental.subagentPersistentSessions" must be a boolean.`);
     }
     normalizedDefinition.subagentPersistentSessions = record.subagentPersistentSessions;
+  }
+
+  if (record.tasks !== undefined) {
+    if (typeof record.tasks !== "boolean") {
+      throw new Error(`${message} "experimental.tasks" must be a boolean.`);
+    }
+    normalizedDefinition.tasks = record.tasks;
   }
 
   if (record.workflow !== undefined) {
@@ -344,11 +363,33 @@ function normalizeAgentCompactionDefinition(
 export function normalizeInstructionsDefinition(
   value: unknown,
   message: string,
-): InstructionsDefinition & { readonly markdown: string } {
+): { readonly content: string; readonly role: "system" | "user" } {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["markdown"], message);
+  expectOnlyKnownKeys(record, ["content", "markdown", "role"], message);
+
+  const hasContent = Object.hasOwn(record, "content");
+  const hasMarkdown = Object.hasOwn(record, "markdown");
+  if (hasContent === hasMarkdown) {
+    throw new Error(`${message} Provide exactly one of "content" or "markdown".`);
+  }
+
+  if (hasMarkdown) {
+    if (Object.hasOwn(record, "role")) {
+      throw new Error(`${message} The deprecated "markdown" shape does not support "role".`);
+    }
+    return {
+      content: expectString(record.markdown, message),
+      role: "system",
+    };
+  }
+
+  const role = record.role === undefined ? "system" : expectString(record.role, message);
+  if (role !== "system" && role !== "user") {
+    throw new Error(`${message} Expected "role" to be one of: system, user.`);
+  }
   return {
-    markdown: expectString(record.markdown, message),
+    content: expectString(record.content, message),
+    role,
   };
 }
 

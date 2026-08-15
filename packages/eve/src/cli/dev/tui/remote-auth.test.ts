@@ -155,10 +155,11 @@ describe("runRemoteAuthFlow", () => {
       },
     });
     let deploymentCall = 0;
-    const resolveVercelDeployment = vi.fn<RemoteAuthFlowDeps["resolveVercelDeployment"]>(async () =>
-      deploymentCall++ === 0
-        ? { kind: "not-found" }
-        : { kind: "resolved", target: SELECTED_TARGET },
+    const resolveVercelDeployment = vi.fn<RemoteAuthFlowDeps["resolveVercelDeployment"]>(
+      async () =>
+        deploymentCall++ === 0
+          ? { kind: "not-found" }
+          : { kind: "resolved", target: SELECTED_TARGET },
     );
     const resolveOidcToken = vi.fn<RemoteAuthFlowDeps["resolveOidcToken"]>(async () => ({
       kind: "resolved",

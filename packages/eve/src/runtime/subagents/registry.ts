@@ -6,6 +6,7 @@ import type {
   ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
 } from "#runtime/types.js";
+import type { JsonObject } from "#shared/json.js";
 import { serializeInputSchema } from "#shared/tool-schema.js";
 
 /**
@@ -51,16 +52,49 @@ export const SUBAGENT_TOOL_INPUT_SCHEMA = z.strictObject({
     .optional(),
 });
 
+/**
+ * Extended subagent tool input schema for agents that opt into
+ * `experimental.subagentPersistentSessions`: adds the `agentId` field the
+ * model uses to continue a previous delegation.
+ */
+export const PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA = SUBAGENT_TOOL_INPUT_SCHEMA.extend({
+  agentId: z
+    .string()
+    .nullable()
+    .describe(
+      "Only pass this to continue a previous delegation: the id of an agent from the <agents> list. To start a new agent — the common case — omit this field entirely (or pass null or an empty string).",
+    )
+    .optional(),
+});
+
 const SUBAGENT_TOOL_INPUT_JSON_SCHEMA = serializeInputSchema(SUBAGENT_TOOL_INPUT_SCHEMA);
+
+const PERSISTENT_SUBAGENT_TOOL_INPUT_JSON_SCHEMA = serializeInputSchema(
+  PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA,
+);
+
+/** Selects the serialized subagent tool input schema for one agent's opt-in state. */
+export function getSubagentToolInputJsonSchema(persistentSessions: boolean): JsonObject {
+  return persistentSessions
+    ? PERSISTENT_SUBAGENT_TOOL_INPUT_JSON_SCHEMA
+    : SUBAGENT_TOOL_INPUT_JSON_SCHEMA;
+}
 
 /**
  * Builds the runtime-owned registry for the resolved subagents visible from one
  * runtime agent node.
  */
 export function createRuntimeSubagentRegistry(input: {
+  /**
+   * Whether the owning agent opted into
+   * `experimental.subagentPersistentSessions`. Adds the model-visible
+   * `agentId` continuation field to every lowered subagent tool schema.
+   */
+  readonly persistentSessions?: boolean;
   readonly reservedToolNames?: readonly string[];
   readonly subagents: readonly ResolvedRuntimeDelegationNode[];
 }): RuntimeSubagentRegistry {
+  const inputSchema = getSubagentToolInputJsonSchema(input.persistentSessions === true);
   const preparedTools: PreparedRuntimeDelegationTool[] = [];
   const dynamicNodeIds = new Set<string>();
   const dynamicResolvers: ResolvedDynamicSubagentResolver[] = [];
@@ -87,7 +121,7 @@ export function createRuntimeSubagentRegistry(input: {
     let registeredSubagent: RuntimeRegisteredSubagent;
     const dynamic = subagentDefinition.kind === "subagent" ? subagentDefinition.dynamic : undefined;
     if (dynamic === undefined) {
-      const prepared = createPreparedRuntimeSubagentTool(subagentDefinition);
+      const prepared = createPreparedRuntimeSubagentTool(subagentDefinition, inputSchema);
       registeredSubagent = {
         definition: subagentDefinition,
         prepared,
@@ -127,13 +161,14 @@ export function createRuntimeSubagentRegistry(input: {
 
 export function createPreparedRuntimeSubagentTool(
   definition: ResolvedRuntimeDelegationNode,
+  inputSchema: JsonObject = SUBAGENT_TOOL_INPUT_JSON_SCHEMA,
 ): PreparedRuntimeDelegationTool {
   if (definition.description === undefined) {
     throw new Error(`Static subagent "${definition.name}" is missing a description.`);
   }
   return {
     description: definition.description,
-    inputSchema: SUBAGENT_TOOL_INPUT_JSON_SCHEMA,
+    inputSchema,
     kind: definition.kind,
     logicalPath: definition.logicalPath,
     name: definition.name,

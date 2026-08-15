@@ -1,7 +1,9 @@
 "use client";
 
+import { track } from "@vercel/analytics";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback } from "react";
+import { analyticsEvents } from "@/lib/analytics/events";
 import {
   type AuthMode,
   type ConnectionProtocol,
@@ -10,12 +12,16 @@ import {
 } from "@/lib/integrations/data";
 import { setupKey } from "@/lib/integrations/connection-setup";
 import { cn } from "@/lib/utils";
-import { Markdown } from "./markdown";
+import { Markdown, type IntegrationSection } from "./markdown";
 
 const PROTOCOL_PARAM = "protocol";
 const AUTH_PARAM = "auth";
 
 interface SetupTabsProps {
+  analytics: {
+    integration: string;
+    section: IntegrationSection;
+  };
   protocols: ConnectionProtocol[];
   authModes: AuthMode[];
   variants: Record<string, string>;
@@ -51,7 +57,7 @@ const SwitcherRow = <T extends string>({
   </div>
 );
 
-export const SetupTabs = ({ protocols, authModes, variants }: SetupTabsProps) => {
+export const SetupTabs = ({ analytics, protocols, authModes, variants }: SetupTabsProps) => {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -71,8 +77,13 @@ export const SetupTabs = ({ protocols, authModes, variants }: SetupTabsProps) =>
       const params = new URLSearchParams(searchParams);
       params.set(param, value);
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      track(analyticsEvents.integrationSetupOptionSelected, {
+        ...analytics,
+        option: param === PROTOCOL_PARAM ? "protocol" : "auth",
+        value,
+      });
     },
-    [pathname, router, searchParams],
+    [analytics, pathname, router, searchParams],
   );
 
   return (
@@ -97,7 +108,11 @@ export const SetupTabs = ({ protocols, authModes, variants }: SetupTabsProps) =>
           )}
         </div>
       )}
-      {body ? <Markdown key={variantKey}>{body}</Markdown> : null}
+      {body ? (
+        <Markdown analytics={analytics} key={variantKey}>
+          {body}
+        </Markdown>
+      ) : null}
     </div>
   );
 };

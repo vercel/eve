@@ -14,6 +14,16 @@ function validInput(overrides: Record<string, unknown> = {}) {
 }
 
 describe("normalizeOpenApiConnectionDefinition", () => {
+  it("preserves application-provided operation arguments", () => {
+    const tenantId = () => "tenant_1";
+    const result = normalizeOpenApiConnectionDefinition(
+      validInput({ toolCall: { providedArguments: { tenantId } } }),
+      MSG,
+    );
+
+    expect(result.toolCall?.providedArguments?.tenantId).toBe(tenantId);
+  });
+
   describe("happy path", () => {
     it("accepts a string spec URL and base URL", () => {
       const result = normalizeOpenApiConnectionDefinition(validInput(), MSG);

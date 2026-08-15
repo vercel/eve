@@ -10,9 +10,14 @@ import type {
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
-import type { AssistantStepFinishReason, RuntimeIdentity } from "#protocol/message.js";
+import type {
+  AssistantStepFinishReason,
+  RuntimeIdentity,
+  RuntimeTraceContext,
+} from "#protocol/message.js";
 import {
   createActionsRequestedEvent,
+  createActionPartialEvent,
   createActionResultEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
@@ -52,80 +57,15 @@ import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
-import type {
-  HarnessEmitFn,
-  HarnessSession,
-  HarnessToolMap,
-  SessionStateMap,
-  StepInput,
-} from "#harness/types.js";
+import type { HarnessEmissionState } from "#harness/emission-state.js";
+import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
 
-// ---------------------------------------------------------------------------
-// Emission state
-// ---------------------------------------------------------------------------
-
-/**
- * Tracks emission lifecycle state across harness step invocations.
- *
- * Persisted on `session.state` so the state survives when the durable
- * workflow runtime recreates the harness at each `"use step"` boundary.
- */
-export interface HarnessEmissionState {
-  readonly sessionStarted: boolean;
-  readonly sequence: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
-}
-
-const HARNESS_EMISSION_STATE_KEY = "eve.harness.emission";
-
-const DEFAULT_EMISSION_STATE: HarnessEmissionState = {
-  sessionStarted: false,
-  sequence: 0,
-  stepIndex: 0,
-  turnId: "",
-};
-
-/** Reads the emission state, returning defaults when absent. */
-export function getHarnessEmissionState(state: SessionStateMap | undefined): HarnessEmissionState {
-  const emissionState = state?.[HARNESS_EMISSION_STATE_KEY] as HarnessEmissionState | undefined;
-  return emissionState ?? DEFAULT_EMISSION_STATE;
-}
-
-/**
- * Returns `true` when the harness is **between turns** — either no turn
- * has started yet (initial state) or the previous turn has emitted its
- * epilogue (or recoverable failure cascade) and reset.
- *
- * Returns `false` while a turn is in progress, including during
- * tool-loop continuations and runtime-action resumes within the same
- * turn. Callers that gate per-turn work (eg. lifecycle hook dispatch)
- * use this predicate to distinguish a fresh delivery from a
- * continuation of an in-flight turn.
- *
- * Implemented over the empty-`turnId` sentinel that `emitTurnEpilogue`
- * and `emitRecoverableFailedTurn` write — clients should never read
- * `state.turnId` directly to make this distinction.
- */
-export function isHarnessBetweenTurns(session: HarnessSession): boolean {
-  return getHarnessEmissionState(session.state).turnId === "";
-}
-
-/**
- * Writes the emission state onto a new copy of the session.
- */
-export function setHarnessEmissionState(
-  session: HarnessSession,
-  state: HarnessEmissionState,
-): HarnessSession {
-  return {
-    ...session,
-    state: {
-      ...session.state,
-      [HARNESS_EMISSION_STATE_KEY]: state,
-    },
-  };
-}
+export {
+  getHarnessEmissionState,
+  isHarnessBetweenTurns,
+  setHarnessEmissionState,
+} from "#harness/emission-state.js";
+export type { HarnessEmissionState } from "#harness/emission-state.js";
 
 // ---------------------------------------------------------------------------
 // Turn lifecycle helpers
@@ -140,14 +80,15 @@ export async function emitTurnPreamble(
   input: StepInput,
   state: HarnessEmissionState,
   runtimeIdentity?: RuntimeIdentity,
+  traceContext?: RuntimeTraceContext,
 ): Promise<HarnessEmissionState> {
   const turnId = `turn_${state.sequence}`;
 
   if (!state.sessionStarted) {
-    await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity }));
+    await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity, trace: traceContext }));
   }
 
-  await emitFn(createTurnStartedEvent({ sequence: state.sequence, turnId }));
+  await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
 
   if (input.message !== undefined) {
     await emitFn(
@@ -173,10 +114,12 @@ export async function emitTurnPreamble(
 export async function emitStepStarted(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
+  modelId: string,
   messages?: readonly import("ai").ModelMessage[],
 ): Promise<void> {
   await emitFn(
     createStepStartedEvent({
+      modelId,
       sequence: state.sequence,
       stepIndex: state.stepIndex,
       turnId: state.turnId,
@@ -246,7 +189,7 @@ export async function emitRecoverableFailedTurn(
   input: FailedStepPayload & { readonly continuationToken: string },
 ): Promise<HarnessEmissionState> {
   await emitStepAndTurnFailed(emitFn, state, input);
-  await emitFn(createSessionWaitingEvent(input.continuationToken));
+  await emitFn(createSessionWaitingEvent());
 
   return {
     sessionStarted: state.sessionStarted,
@@ -274,7 +217,6 @@ export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   mode: RunMode,
-  continuationToken: string,
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCompletedEvent({
@@ -284,7 +226,7 @@ export async function emitTurnEpilogue(
   );
 
   if (mode === "conversation") {
-    await emitFn(createSessionWaitingEvent(continuationToken));
+    await emitFn(createSessionWaitingEvent());
   } else {
     await emitFn(createSessionCompletedEvent());
   }
@@ -482,6 +424,17 @@ async function consumeStreamContent(
     );
   };
 
+  const emitActionPartial = async (result: RuntimeToolResultActionResult): Promise<void> => {
+    await emitFn(
+      createActionPartialEvent({
+        result,
+        sequence: state.sequence,
+        stepIndex: state.stepIndex,
+        turnId: state.turnId,
+      }),
+    );
+  };
+
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
     if (isInvalidToolCall(toolCall)) {
       invalidInputToolCallIds.add(toolCall.toolCallId);
@@ -571,8 +524,10 @@ async function consumeStreamContent(
       }
       case "tool-result": {
         const inlineToolResult = part as TypedToolResult<ToolSet>;
-        // Preliminary chunks can be superseded by the terminal result.
         if (inlineToolResult.preliminary === true) {
+          if (inlineToolResult.providerExecuted !== true) {
+            await emitActionPartial(createRuntimeToolResultFromStepResult(inlineToolResult));
+          }
           break;
         }
         if (inlineToolResult.providerExecuted === true) {

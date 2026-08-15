@@ -59,6 +59,10 @@ export async function writeResponse(
     return;
   }
 
+  // Flush the headers now so the client can obtain / cancel the response body
+  // avoiding, the accumulation of listeners if the stream has a long delay
+  // before first byte
+  response.flushHeaders();
   const body = Readable.fromWeb(webResponse.body as import("node:stream/web").ReadableStream);
   const cancelBody = () => body.destroy(signal.reason as Error | undefined);
   signal.addEventListener("abort", cancelBody, { once: true });

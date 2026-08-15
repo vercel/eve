@@ -379,9 +379,9 @@ describe("createDockerSandboxBackend create", () => {
         sessionKey: SESSION_KEY,
       });
 
-      // Server shutdown stops the container; filesystem state survives
+      // An authored stop releases the container; filesystem state survives
       // for the next `create` to restart from.
-      await handle.shutdown();
+      await handle.stop();
       expect(findCall(calls, (args) => args[0] === "stop")?.args).toEqual([
         "stop",
         "-t",

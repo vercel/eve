@@ -16,6 +16,17 @@ const target = createEvalTargetHandle({
   url: "https://eve.test",
 });
 
+const TRACE_A = {
+  spanId: "0123456789abcdef",
+  traceFlags: 1,
+  traceId: "0123456789abcdef0123456789abcdef",
+};
+const TRACE_B = {
+  spanId: "fedcba9876543210",
+  traceFlags: 1,
+  traceId: "fedcba9876543210fedcba9876543210",
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -99,7 +110,7 @@ describe("executeTask", () => {
         const request = t.requireInputRequest({
           display: "confirmation",
           input: { command: "pwd" },
-          optionIds: ["approve", "deny"],
+          optionIds: ["approve", "cancel"],
           prompt: /Approve/,
           toolName: "bash",
         });
@@ -119,9 +130,50 @@ describe("executeTask", () => {
     expect(server.posts.map((post) => post.body)).toEqual([
       { message: "run pwd" },
       {
-        continuationToken: "eve:session_1",
         inputResponses: [{ optionId: "approve", requestId: "approval_1" }],
       },
+    ]);
+  });
+
+  it("collects every session trace and reports the first one live", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [turnStarted("turn_1", TRACE_A), turnCompleted("turn_1"), sessionWaiting()],
+      },
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_2", TRACE_B),
+          messageCompleted("done", "turn_2"),
+          turnCompleted("turn_2"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+    const onSessionStart = vi.fn();
+
+    const { result } = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("first");
+        await t.send("second");
+      }, "trace-contexts"),
+      onSessionStart,
+    });
+
+    expect(onSessionStart).toHaveBeenCalledExactlyOnceWith({
+      primary: true,
+      sessionId: "session_1",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      traceContext: TRACE_A,
+    });
+    expect(result.sessions?.[0]?.traceContexts).toEqual([TRACE_A, TRACE_B]);
+    expect(result.traceContexts).toEqual([
+      { ...TRACE_A, primary: true, sessionId: "session_1" },
+      { ...TRACE_B, primary: true, sessionId: "session_1" },
     ]);
   });
 
@@ -354,7 +406,7 @@ describe("executeTask", () => {
             turnStarted("parent-turn"),
             subagentCalled("parent-turn", "child-session", "sleeper"),
             turnCompleted("parent-turn"),
-            sessionWaiting("eve:parent-session"),
+            sessionWaiting(),
           ],
         },
         {
@@ -363,7 +415,7 @@ describe("executeTask", () => {
             turnStarted("child-follow-up"),
             messageCompleted("child continued", "child-follow-up"),
             turnCompleted("child-follow-up"),
-            sessionWaiting("eve:child-session-next"),
+            sessionWaiting(),
           ],
         },
       ],
@@ -376,7 +428,7 @@ describe("executeTask", () => {
               turnStarted("child-turn"),
               actionsRequested("child-turn", "wait-for-cancellation"),
               turnCompleted("child-turn"),
-              sessionWaiting("eve:child-session"),
+              sessionWaiting(),
             ],
           },
         ],
@@ -426,8 +478,8 @@ describe("executeTask", () => {
     expect(outcome.error).toBeUndefined();
     expect(server.cancels).toEqual(["parent-session"]);
     expect(server.posts[1]?.body).toEqual({
-      continuationToken: "eve:child-session",
       message: "continue child",
+      turnPolicy: "queue",
     });
     expect(outcome.result.sessions?.map((session) => session.sessionId)).toEqual([
       "parent-session",
@@ -502,7 +554,7 @@ describe("executeTask", () => {
     expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
   });
 
-  it("sends a follow-up on an attached session via the stream-recovered continuation token", async () => {
+  it("sends a follow-up on an attached fixed session ID", async () => {
     // The attached stream parks with a token the eval never saw from a POST
     // response: the only way the follow-up can carry it is recovery from the
     // `session.waiting` boundary event.
@@ -514,7 +566,7 @@ describe("executeTask", () => {
             turnStarted("turn_2"),
             messageCompleted("follow-up done", "turn_2"),
             turnCompleted("turn_2"),
-            sessionWaiting("eve:channel-rekeyed"),
+            sessionWaiting(),
           ],
         },
       ],
@@ -526,7 +578,7 @@ describe("executeTask", () => {
               turnStarted("turn_1"),
               messageCompleted("channel done", "turn_1"),
               turnCompleted("turn_1"),
-              sessionWaiting("eve:channel-rekeyed"),
+              sessionWaiting(),
             ],
           },
         ],
@@ -549,8 +601,8 @@ describe("executeTask", () => {
     expect(server.posts).toHaveLength(1);
     expect(new URL(server.posts[0]!.url).pathname).toBe("/eve/v1/session/channel-session");
     expect(server.posts[0]?.body).toEqual({
-      continuationToken: "eve:channel-rekeyed",
       message: "continue please",
+      turnPolicy: "queue",
     });
     expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
   });
@@ -581,7 +633,7 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        const turn = await t.send({ message: "structured", outputSchema: { type: "object" } });
+        const turn = await t.send("structured", { outputSchema: { type: "object" } });
         turn.outputMatches(z.object({ count: z.number(), title: z.string() }));
         turn.outputEquals({ count: 2, title: "Done" });
       }, "structured-output"),
@@ -646,9 +698,12 @@ function createScriptedServer(
       if (method === "POST" && pathname.endsWith("/cancel")) {
         const sessionId = decodeURIComponent(pathname.split("/").at(-2) ?? "");
         cancels.push(sessionId);
+        const status = options.cancelStatus ?? "no_active_turn";
         return Response.json(
-          { ok: true, sessionId, status: options.cancelStatus ?? "no_active_turn" },
-          { status: 202 },
+          status === "accepted"
+            ? { ok: true, sessionId, status: "accepted" }
+            : { ok: true, status: "no_active_turn" },
+          { status: status === "accepted" ? 202 : 200 },
         );
       }
 
@@ -665,7 +720,6 @@ function createScriptedServer(
 
         return Response.json(
           {
-            continuationToken: `eve:${next.sessionId}`,
             ok: true,
             sessionId: next.sessionId,
           },
@@ -698,17 +752,20 @@ function streamResponse(events: readonly UnstampedMessageStreamEvent[]): Respons
   );
 }
 
-function turnStarted(turnId: string): UnstampedMessageStreamEvent {
-  return { data: { sequence: 0, turnId }, type: "turn.started" };
+function turnStarted(
+  turnId: string,
+  trace?: { readonly spanId: string; readonly traceFlags: number; readonly traceId: string },
+): UnstampedMessageStreamEvent {
+  return { data: { sequence: 0, trace, turnId }, type: "turn.started" };
 }
 
 function turnCompleted(turnId: string): UnstampedMessageStreamEvent {
   return { data: { sequence: 3, turnId }, type: "turn.completed" };
 }
 
-function sessionWaiting(continuationToken = "eve:session_1"): UnstampedMessageStreamEvent {
+function sessionWaiting(): UnstampedMessageStreamEvent {
   return {
-    data: { continuationToken, wait: "next-user-message" },
+    data: { continuationToken: "session-id", wait: "next-user-message" },
     type: "session.waiting",
   };
 }
@@ -739,7 +796,7 @@ function inputRequested(
           kind: "tool-approval",
           options: [
             { id: "approve", label: "Approve" },
-            { id: "deny", label: "Deny" },
+            { id: "cancel", label: "Cancel" },
           ],
           prompt: "Approve?",
           requestId,
@@ -795,6 +852,7 @@ function subagentCalled(
     data: {
       callId: "call_subagent",
       childSessionId,
+      childStreamPath: `/eve/v1/session/${encodeURIComponent(childSessionId)}/stream`,
       sessionId: "parent-session",
       sequence: 1,
       name,

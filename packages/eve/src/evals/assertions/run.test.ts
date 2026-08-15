@@ -23,6 +23,7 @@ function makeResult(overrides: {
     status: overrides.status ?? "completed",
     events: stampTestEvents(overrides.events ?? []),
     derived: { ...createEmptyDerivedFacts(), ...overrides.derived },
+    traceContexts: [],
   };
 }
 
@@ -95,6 +96,7 @@ function failedSubagentResult(input: {
         callId: input.callId,
         isError: true,
         kind: "subagent-result",
+        origin: "dispatch",
         output: input.output as never,
         subagentName: input.subagentName,
       },

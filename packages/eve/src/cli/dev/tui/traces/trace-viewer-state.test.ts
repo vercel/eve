@@ -19,6 +19,7 @@ function span(overrides: Partial<LocalTraceSpan> = {}): LocalTraceSpan {
   return {
     attributes: {},
     endTimeNs: startTimeNs + 500_000n,
+    events: [],
     name: `span-${spanSequence}`,
     spanId: String(spanSequence).padStart(16, "0"),
     startTimeNs,
@@ -42,7 +43,19 @@ function trace(spans: readonly LocalTraceSpan[], traceId = "t".repeat(32)): Loca
 
 /** A turn with a user message, an assistant reply, and a tool call. */
 function conversationTrace(options: { readonly longReply?: boolean } = {}): LocalTrace {
-  const turn = span({ name: "agent.turn", spanId: "a".repeat(16) });
+  const turn = span({
+    name: "agent.turn",
+    spanId: "a".repeat(16),
+    attributes: { "agent.turn.id": "turn_0" },
+  });
+  const delivery = span({
+    name: "agent.channel.delivery",
+    spanId: "0".repeat(16),
+    attributes: {
+      "agent.channel.delivery.input": JSON.stringify({ message: "hi" }),
+      "agent.turn.id": "turn_0",
+    },
+  });
   const step = span({ name: "agent.step", spanId: "b".repeat(16), parentSpanId: turn.spanId });
   const model = span({
     name: "ai.streamText.doStream",
@@ -53,14 +66,13 @@ function conversationTrace(options: { readonly longReply?: boolean } = {}): Loca
       "ai.response.text": options.longReply === true ? "a long reply. ".repeat(60) : "reply",
     },
   });
-  const action = span({ name: "agent.action", spanId: "d".repeat(16), parentSpanId: step.spanId });
-  const toolCall = span({
-    name: "ai.toolCall",
-    spanId: "e".repeat(16),
-    parentSpanId: action.spanId,
-    attributes: { "gen_ai.tool.name": "get_weather" },
+  const action = span({
+    name: "agent.action",
+    spanId: "d".repeat(16),
+    parentSpanId: turn.spanId,
+    attributes: { "agent.action.name": "get_weather" },
   });
-  return trace([turn, step, model, action, toolCall]);
+  return trace([turn, delivery, step, model, action]);
 }
 
 function entry(traceId: string, lastActivityMs = 0): TraceStoreEntry {
@@ -487,7 +499,19 @@ describe("applyLoadedTrace", () => {
     let state = applyLoadedTrace(
       createTraceViewerState(),
       trace([
-        span({ name: "agent.turn", spanId: "a".repeat(16) }),
+        span({
+          name: "agent.turn",
+          spanId: "a".repeat(16),
+          attributes: { "agent.turn.id": "turn_0" },
+        }),
+        span({
+          name: "agent.channel.delivery",
+          spanId: "0".repeat(16),
+          attributes: {
+            "agent.channel.delivery.input": JSON.stringify({ message: "hi" }),
+            "agent.turn.id": "turn_0",
+          },
+        }),
         span({ name: "agent.step", spanId: "b".repeat(16), parentSpanId: "a".repeat(16) }),
         span({
           name: "ai.streamText.doStream",

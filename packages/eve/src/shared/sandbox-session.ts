@@ -144,6 +144,22 @@ export interface SandboxSession extends Pick<
 }
 
 /**
+ * Sandbox session exposed to authored runtime callbacks through
+ * `ctx.getSandbox()`.
+ *
+ * Unlike the I/O-only session used during sandbox initialization, this handle
+ * always exposes a provider-backed `stop()` method.
+ */
+export interface RuntimeSandboxSession extends SandboxSession {
+  /**
+   * Stops the backing sandbox compute while preserving the durable session.
+   * A later runtime callback reopens the session through its configured
+   * backend. Providers may also support resuming the same handle.
+   */
+  stop(): Promise<void>;
+}
+
+/**
  * Internal sandbox session, used to construct the public {@link SandboxSession}.
  *
  * Backend implementers only need to provide byte-oriented file I/O and

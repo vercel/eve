@@ -10,10 +10,12 @@ export {
   type AgentModelDefinition,
   type AgentModelOptionsDefinition,
   type AgentReasoningDefinition,
+  type AgentStaticModelDefinition,
   type AgentWorkflowDefinition,
   type AgentWorkflowWorldDefinition,
   type DefinedAgent,
   type DynamicSubagentDefinition,
+  type DynamicLocalSubagentDefinition,
   defineAgent,
   defineDynamic,
 } from "#public/definitions/agent.js";

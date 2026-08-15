@@ -3,6 +3,7 @@ import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
+import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { blockingCreateInPlaceEntries } from "../create-in-place.js";
@@ -36,7 +37,7 @@ export interface EvePackageContract {
 }
 
 export const DEFAULT_EVE_PACKAGE_CONTRACT: EvePackageContract = {
-  version: "__EVE_PACKAGE_VERSION__",
+  version: "__EVE_PACKAGE_DEPENDENCY_VERSION__",
   nodeEngine: "__NODE_ENGINE__",
 };
 
@@ -53,6 +54,7 @@ export function resolveEvePackageContract(
 interface TemplateContext {
   appName: string;
   model: string;
+  reasoning?: AgentReasoningDefinition;
   eveVersion: string;
   aiPackageVersion: string;
   connectPackageVersion: string;
@@ -93,18 +95,31 @@ export function byokProviderEnvVar(modelId: string): string {
  * subset `eve init` writes when adding an agent to an existing project, where
  * everything outside `agent/` belongs to the host app.
  */
-export function agentTemplateFiles(model: string): Record<string, string> {
+export function agentTemplateFiles(
+  model: string,
+  reasoning?: AgentReasoningDefinition,
+): Record<string, string> {
   return {
-    "agent/agent.ts": BASE_AGENT_TEMPLATE.replaceAll("__EVE_INIT_MODEL__", model),
+    "agent/agent.ts": BASE_AGENT_TEMPLATE.replaceAll("__EVE_INIT_MODEL__", model).replaceAll(
+      "__EVE_INIT_REASONING__",
+      reasoningTemplateLine(reasoning),
+    ),
     "agent/channels/eve.ts": WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"],
     "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
   };
+}
+
+function reasoningTemplateLine(reasoning: AgentReasoningDefinition | undefined): string {
+  return reasoning === undefined || reasoning === "provider-default"
+    ? ""
+    : `  reasoning: "${reasoning}",\n`;
 }
 
 function renderTemplate(content: string, ctx: TemplateContext): string {
   return content
     .replaceAll("__EVE_INIT_APP_NAME__", ctx.appName)
     .replaceAll("__EVE_INIT_MODEL__", ctx.model)
+    .replaceAll("__EVE_INIT_REASONING__", reasoningTemplateLine(ctx.reasoning))
     .replaceAll("__EVE_INIT_BYOK_PROVIDER__", modelProviderSlug(ctx.model))
     .replaceAll("__EVE_INIT_BYOK_ENV_VAR__", byokProviderEnvVar(ctx.model))
     .replaceAll("__EVE_INIT_PACKAGE_VERSION__", formatEveDependencySpecifier(ctx.eveVersion))
@@ -126,7 +141,7 @@ const BASE_AGENT_TEMPLATE = `import { defineAgent } from "eve";
 
 export default defineAgent({
   model: "__EVE_INIT_MODEL__",
-});
+__EVE_INIT_REASONING__});
 `;
 
 // The agent reaches the model through a provider key the user supplies via the
@@ -139,7 +154,7 @@ const BYOK_AGENT_TEMPLATE = `import { defineAgent } from "eve";
 
 export default defineAgent({
   model: "__EVE_INIT_MODEL__",
-  modelOptions: {
+__EVE_INIT_REASONING__  modelOptions: {
     providerOptions: {
       gateway: {
         byok: {
@@ -269,10 +284,50 @@ from the installed eve package docs. In most installs, those docs are at
 installed \`eve\` package location first and read its \`docs/\` directory. If
 package docs are unavailable, use https://eve.dev/docs as a fallback.
 
-Before implementing an integration yourself, use
-\`eve registry search <query>\` or \`eve registry list\` to discover available
-integrations. Inspect one with \`eve registry view <item>\`, then install it with
-\`eve add <item>\`.
+## Adding integrations
+
+Before implementing an integration yourself, discover existing integrations:
+
+\`\`\`sh
+eve registry search <query> --json
+eve registry view <item>
+\`\`\`
+
+Prefer registry items whose \`implementation\` is \`native\`; use Chat SDK adapters when no
+native channel fits. \`registry view\` provides the selected item's documentation link.
+
+Install and configure one without driving interactive terminal prompts:
+
+\`\`\`sh
+eve add <item> --non-interactive
+\`\`\`
+
+Exit code 0 means setup completed, 1 means setup failed, and 2 means setup needs
+input or a prerequisite. On exit 2, parse the final NDJSON event and use its
+\`next.command\` as the continuation.
+
+Every \`--answer\` value is JSON, so strings need JSON quotes. For an editable
+question, you may supply its nested \`editable.key\` with the parent key in one
+invocation:
+
+\`\`\`sh
+eve add channel/photon-imessage --non-interactive \\
+  --answer 'photon-project-source="create"' \\
+  --answer 'photon-project-name="eve · my-agent"'
+\`\`\`
+
+Add \`--yes\` to accept recommended setup values and reduce setup round trips;
+explicit \`--answer\` values take precedence. Use the reported \`--skip-install\`
+continuation after installation.
+A Vercel Connect setup may report \`eve link\` as a prerequisite; run it and
+retry the continuation. Never pass secrets in \`--answer\`; use the documented
+environment variable or secret store.
+
+An \`external_action\` event with \`blocking: true\` means the command is still
+running while it waits for the user. Surface its URL and code, keep the process
+alive, and wait for its matching \`external_action_resolved\` event or a terminal
+event. Do not start a continuation. When a completed event has
+\`deploymentRequired: true\`, recommend its \`next\` command to deploy the changes.
 `,
   "CLAUDE.md": `@AGENTS.md
 `,
@@ -315,6 +370,7 @@ async function assertCanCreateInPlace(
 export interface ScaffoldBaseProjectOptions {
   projectName: string;
   model: string;
+  reasoning?: AgentReasoningDefinition;
   /**
    * The manager that owns command execution and manager-specific generated
    * project files for this scaffold.
@@ -364,6 +420,7 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
   const ctx: TemplateContext = {
     appName: basename(targetRoot),
     model: options.model,
+    reasoning: options.reasoning,
     eveVersion: evePackage.version,
     aiPackageVersion: resolveVersionToken(
       "aiPackageVersion",

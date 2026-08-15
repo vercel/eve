@@ -69,6 +69,7 @@ export default defineEval({
     const liveCompaction = t.target.watchTurn(sessionId, {
       startIndex: initial.events.length,
     });
+    await new Promise((resolve) => setTimeout(resolve, 250));
     const compactedResponse = await postJson<CompactResponse>(
       t.target,
       `/threads/${threadId}/compact`,
@@ -94,6 +95,10 @@ export default defineEval({
     compacted.notEvent("turn.failed");
     compacted.notEvent("session.failed");
 
+    const followUpTurn = t.target.watchTurn(sessionId, {
+      startIndex: initial.events.length + compacted.events.length,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 250));
     const resumed = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
       message: "Reply with exactly COMPACT-FOLLOW-UP-OK.",
     });
@@ -105,11 +110,7 @@ export default defineEval({
       ),
     );
 
-    const followUp = await t.target
-      .watchTurn(sessionId, {
-        startIndex: initial.events.length + compacted.events.length,
-      })
-      .result();
+    const followUp = await followUpTurn.result();
     followUp.notEvent("turn.failed");
     followUp.notEvent("session.failed");
     followUp.messageIncludes(/COMPACT-FOLLOW-UP-OK/i);

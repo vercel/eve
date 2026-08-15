@@ -47,7 +47,7 @@ const INFO: AgentInfoResult = {
   agent: {
     agentRoot: "/tmp/weather-agent/agent",
     appRoot: "/tmp/weather-agent",
-    model: { id: "gpt-5" },
+    model: { id: "gpt-5", routing: { kind: "gateway", target: "openai" } },
     name: "Weather Agent",
   },
   capabilities: { devRoutes: true },
@@ -57,12 +57,15 @@ const INFO: AgentInfoResult = {
   hooks: [],
   instructions: {
     dynamic: [],
-    static: {
-      logicalPath: "agent/instructions.md",
-      markdown: "You are a weather assistant.",
-      name: "instructions",
-      sourceKind: "markdown",
-    },
+    static: [
+      {
+        content: "You are a weather assistant.",
+        logicalPath: "agent/instructions.md",
+        name: "instructions",
+        role: "system",
+        sourceKind: "markdown",
+      },
+    ],
   },
   kind: "eve-agent-info",
   mode: "development",
@@ -78,7 +81,7 @@ const INFO: AgentInfoResult = {
     framework: [],
     reserved: [],
   },
-  version: 1,
+  version: 2,
   workflow: { enabled: false, toolName: "Workflow" },
   workspace: { resourceRoot: null, rootEntries: [] },
 };

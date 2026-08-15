@@ -1,4 +1,7 @@
+import { mkdtemp, rm } from "node:fs/promises";
 import { connect } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -15,6 +18,12 @@ import type {
   DevelopmentRunner,
   DevelopmentRunnerFactory,
 } from "#internal/nitro/host/dev-runner.js";
+import { createDevelopmentWorkflowWorld } from "#internal/workflow/development-world-client.js";
+import { createParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-server.js";
+import {
+  DEVELOPMENT_WORKER_APP_ROOT_ENV,
+  DEVELOPMENT_WORKFLOW_SECRET_ENV,
+} from "#internal/workflow/development-world-protocol.js";
 
 const TEST_DEADLINE_MS = 5_000;
 const LOGGER = { error: () => undefined };
@@ -576,6 +585,50 @@ describe("drained Nitro dev server", () => {
     await server.close();
   });
 
+  it("cancels parent-owned Workflow streams before their first chunk", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "eve-dev-world-stream-cancel-"));
+    const secret = "scenario-workflow-transport-secret";
+    const world = createParentDevelopmentWorkflowWorld({
+      agentName: "dev-world-stream-cancel-test",
+      appRoot,
+      resolveActiveGenerationId: () => "generation-a",
+      transportSecret: secret,
+    });
+    const server = new DrainedNitroDevServer(LOGGER);
+    server.setControlHandler(async (request) => await world.handleRequest(request));
+    const listener = await listen(server);
+    const previousBaseUrl = process.env.WORKFLOW_LOCAL_BASE_URL;
+    const previousSecret = process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
+    const previousAppRoot = process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
+    process.env.WORKFLOW_LOCAL_BASE_URL = listener.url;
+    process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = secret;
+    process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = appRoot;
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+
+    try {
+      await world.start();
+      const worker = createDevelopmentWorkflowWorld();
+      const streamName = "strm_http_cancel_test_system_abort";
+      for (let index = 0; index < 12; index += 1) {
+        const stream = await withinDeadline(
+          worker.streams.get("wrun_http_cancel_test", streamName),
+          "Timed out waiting for Workflow stream response headers.",
+        );
+        await stream.cancel();
+      }
+
+      expect(maxListenerWarningTypes(emitWarning.mock.calls)).toEqual([]);
+    } finally {
+      emitWarning.mockRestore();
+      restoreEnvironmentVariable("WORKFLOW_LOCAL_BASE_URL", previousBaseUrl);
+      restoreEnvironmentVariable(DEVELOPMENT_WORKFLOW_SECRET_ENV, previousSecret);
+      restoreEnvironmentVariable(DEVELOPMENT_WORKER_APP_ROOT_ENV, previousAppRoot);
+      await server.close();
+      await world.close();
+      await rm(appRoot, { force: true, recursive: true });
+    }
+  });
+
   it("answers control requests without admitting them to the worker", async () => {
     const fetchMock = vi.fn(async () => new Response("worker"));
     const { createRunner } = createRunnerFactory(fetchMock);
@@ -597,3 +650,27 @@ describe("drained Nitro dev server", () => {
     await server.close();
   });
 });
+
+function maxListenerWarningTypes(calls: readonly (readonly unknown[])[]): string[] {
+  return calls.flatMap(([warning]) => {
+    if (
+      typeof warning !== "object" ||
+      warning === null ||
+      !("name" in warning) ||
+      warning.name !== "MaxListenersExceededWarning" ||
+      !("type" in warning) ||
+      typeof warning.type !== "string"
+    ) {
+      return [];
+    }
+    return [warning.type];
+  });
+}
+
+function restoreEnvironmentVariable(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}

@@ -8,7 +8,7 @@ import { buildSessionHandle } from "#channel/session.js";
  *
  * Populates `session` with a live {@link SessionHandle} backed by the
  * supplied accessor so handlers can read identity / auth and call
- * `setContinuationToken(...)` to re-key the parked session.
+ * `session.continuation.rekey(...)` to re-key the parked session.
  */
 export function buildAdapterContext<
   TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext,

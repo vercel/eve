@@ -1,23 +1,10 @@
-import { context, trace } from "#compiled/@opentelemetry/api/index.js";
-import { registerOTel } from "#compiled/@vercel/otel/index.js";
-
-import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
-import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
-import { AgentTraceSpanProcessor } from "#tracing/agent-trace-span-processor.js";
-import {
-  createInstrumentationHooks,
-  type InstrumentationProviderDefinition,
-} from "#harness/instrumentation-lifecycle.js";
 import {
   getInstrumentationRuntime,
-  registerInstrumentationRuntime,
   type InstrumentationRuntime,
-} from "#harness/instrumentation-runtime.js";
-import {
-  requestLocalTraceStorePrune,
-  resolveLocalTraceRetentionSettings,
-} from "#tracing/local-trace-retention.js";
-import { LocalTraceSpanProcessor } from "#tracing/local-trace-span-processor.js";
+} from "#harness/instrumentation/runtime.js";
+import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
+import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
+import { collectOtelPipeline, otel, otelIntegration } from "#tracing/otel-declaration.js";
 
 /** Installs the zero-config local OTel runtime once in an `eve dev` worker. */
 export function installLocalInstrumentationRuntime(input: {
@@ -28,65 +15,14 @@ export function installLocalInstrumentationRuntime(input: {
   const existing = getInstrumentationRuntime();
   if (existing !== undefined) return existing;
 
-  const retention = resolveLocalTraceRetentionSettings();
-  // `EVE_TRACES=off` removes the writer but keeps the runtime: agent context
-  // still has to propagate so AI SDK and user spans nest correctly.
-  const processor = new AgentTraceSpanProcessor(
-    retention.enabled ? [new LocalTraceSpanProcessor(input.appRoot)] : [],
-  );
-  registerOTel({
-    autoDetectResources: false,
-    instrumentations: [],
-    propagators: ["none"],
-    serviceName: input.serviceName,
-    spanProcessors: [processor],
-  });
-  const probe = trace.getTracer("eve.registration").startSpan("eve.otel.registration");
-  const activeContext = trace.setSpan(context.active(), probe);
-  const contextAttached = context.with(activeContext, () => trace.getActiveSpan() === probe);
-  probe.end();
-  if (!processor.isAttached() || !contextAttached) {
-    throw new Error("eve could not register OpenTelemetry because another runtime already exists.");
-  }
-  const agentOtel = createAgentOtelInstrumentation({
-    captureContent: process.env.EVE_TRACES_CONTENT !== "off",
+  const spool = createLocalTracesProcessor({ appRoot: input.appRoot });
+  return installInstrumentationRuntime({
+    collected: collectOtelPipeline([
+      otel(),
+      otelIntegration({ ...resolveLocalTracesContent(), spanProcessors: [spool] }),
+    ]),
     frameworkVersion: input.frameworkVersion,
-    stateStore: new ContextAgentTraceStateStore(),
-    tracer: trace.getTracer("eve.agent", input.frameworkVersion),
+    providers: [],
+    serviceName: input.serviceName,
   });
-  const releaseTrace: InstrumentationProviderDefinition = {
-    events: {
-      "session.completed": releaseSessionTrace,
-      "session.failed": releaseSessionTrace,
-    },
-  };
-  // Startup sweep: a store left oversized by a killed dev server is bounded
-  // before this worker adds to it.
-  requestPrune();
-
-  return registerInstrumentationRuntime({
-    forceFlush: () => processor.forceFlush(),
-    hooks: createInstrumentationHooks([agentOtel.hook, releaseTrace]),
-    runInContext: agentOtel.runInContext,
-  });
-
-  async function releaseSessionTrace(event: { readonly sessionId: string }): Promise<void> {
-    // Settle pending segment writes before dropping liveness: a sweep already
-    // running reads the same live set, so releasing first would expose the
-    // trace to eviction while it is still being written.
-    await processor.forceFlush();
-    if (!processor.releaseSession(event.sessionId)) return;
-    requestPrune();
-  }
-
-  function requestPrune(): void {
-    if (!retention.enabled) return;
-    requestLocalTraceStorePrune({
-      activeTraceIds: processor.activeTraceIds(),
-      appRoot: input.appRoot,
-      maxAgeMs: retention.maxAgeMs,
-      maxTotalBytes: retention.maxTotalBytes,
-      retainCount: retention.retainCount,
-    });
-  }
 }

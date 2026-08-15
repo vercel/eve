@@ -63,6 +63,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
         reasoningBlockCount: 0,
       },
       sessionId: "session-123",
+      traceContexts: [],
     },
     assertions: [
       { name: "succeeded", score: 1, severity: "gate", passed: true },
@@ -172,6 +173,33 @@ describe("Braintrust", () => {
               threshold: 0.8,
             },
           ],
+        }),
+      }),
+    );
+  });
+
+  it("uploads eve trace ids and contexts", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+    const result = makeEvalResult();
+    const traceContext = {
+      primary: true,
+      sessionId: "session-123",
+      spanId: "0123456789abcdef",
+      traceFlags: 1,
+      traceId: "0123456789abcdef0123456789abcdef",
+    };
+
+    reporter.onEvalComplete({
+      ...result,
+      result: { ...result.result, traceContexts: [traceContext] },
+    });
+
+    expect(braintrustMocks.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          eveTraceContexts: [traceContext],
+          eveTraceIds: [traceContext.traceId],
         }),
       }),
     );

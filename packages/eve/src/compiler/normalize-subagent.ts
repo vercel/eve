@@ -1,3 +1,5 @@
+import { join, relative } from "node:path";
+
 import {
   type AgentSourceManifest,
   createPathDerivedSourceId,
@@ -5,11 +7,14 @@ import {
 } from "#discover/manifest.js";
 import {
   type CompiledAgentNodeManifest,
+  type CompiledAgentResources,
   type CompiledRemoteAgentNode,
   type CompiledSubagentEdge,
   type CompiledSubagentNode,
   createCompiledSubagentNodeId,
 } from "#compiler/manifest.js";
+import { composeAgentSubagentSources } from "#compiler/normalize-extension.js";
+import type { CompiledDynamicSubagentDefinition } from "#compiler/remote-agent-node.js";
 import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
@@ -21,8 +26,7 @@ import {
   expectOnlyKnownKeys,
   expectString,
 } from "#internal/authored-module.js";
-import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
 import type { JsonObject } from "#shared/json.js";
 import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
@@ -44,9 +48,15 @@ export type CompileAgentNodeManifestFn = (
   options?: {
     readonly agentConfigDefinition?: unknown;
     readonly externalDependencies?: readonly string[];
-    readonly allowWorkflowConfig?: boolean;
+    readonly allowRootOnlyConfig?: boolean;
   },
 ) => Promise<CompiledAgentNodeManifest>;
+
+export type CompileAgentResourcesFn = (
+  manifest: AgentSourceManifest,
+  context: ManifestCompileContext,
+  options?: { readonly externalDependencies?: readonly string[] },
+) => Promise<CompiledAgentResources>;
 
 /**
  * Compiles every local subagent reachable from one parent node into a
@@ -59,8 +69,10 @@ export type CompileAgentNodeManifestFn = (
 export async function compileSubagentGraph(input: {
   readonly appRoot: string;
   readonly compileAgentNodeManifest: CompileAgentNodeManifestFn;
+  readonly compileAgentResources: CompileAgentResourcesFn;
   readonly context: ManifestCompileContext;
   readonly externalDependencies?: readonly string[];
+  readonly parentAgentRoot: string;
   readonly parentNodeId: string;
   readonly subagents: readonly LocalSubagentSourceRef[];
 }): Promise<{
@@ -76,8 +88,10 @@ export async function compileSubagentGraph(input: {
     const compiledSubagent = await compileSubagentDefinition({
       appRoot: input.appRoot,
       compileAgentNodeManifest: input.compileAgentNodeManifest,
+      compileAgentResources: input.compileAgentResources,
       context: input.context,
       externalDependencies: input.externalDependencies,
+      parentAgentRoot: input.parentAgentRoot,
       parentNodeId: input.parentNodeId,
       source: subagentSource,
     });
@@ -107,8 +121,10 @@ export async function compileSubagentGraph(input: {
 async function compileSubagentDefinition(input: {
   readonly appRoot: string;
   readonly compileAgentNodeManifest: CompileAgentNodeManifestFn;
+  readonly compileAgentResources: CompileAgentResourcesFn;
   readonly context: ManifestCompileContext;
   readonly externalDependencies?: readonly string[];
+  readonly parentAgentRoot: string;
   readonly parentNodeId: string;
   readonly source: LocalSubagentSourceRef;
 }): Promise<
@@ -132,7 +148,11 @@ async function compileSubagentDefinition(input: {
     throw new Error(`Subagent "${input.source.logicalPath}" is missing an agent config module.`);
   }
 
-  const configModuleSource = createSubagentConfigModuleSourceRef(input.source, configModule);
+  const configModuleSource = createSubagentConfigModuleSourceRef(
+    input.source,
+    configModule,
+    input.parentAgentRoot,
+  );
   const definition = await loadModuleBackedDefinition({
     agentRoot: input.source.manifest.agentRoot,
     displayPath: configModuleSource.logicalPath,
@@ -148,6 +168,7 @@ async function compileSubagentDefinition(input: {
     return {
       kind: "remote",
       node: compileRemoteAgent({
+        parentAgentRoot: input.parentAgentRoot,
         source: input.source,
         value: definition,
       }),
@@ -158,8 +179,11 @@ async function compileSubagentDefinition(input: {
     kind: "local",
     ...(await compileLocalSubagent({
       ...input,
-      agentConfigDefinition: dynamic === undefined ? definition : { model: DEFAULT_AGENT_MODEL_ID },
-      dynamic: dynamic?.definition,
+      agentConfigDefinition: dynamic === undefined ? definition : undefined,
+      configResolver:
+        dynamic === undefined
+          ? undefined
+          : { ...configModule, ...dynamic.definition, build: dynamic.build },
     })),
   };
 }
@@ -167,10 +191,12 @@ async function compileSubagentDefinition(input: {
 async function compileSubagent(input: {
   readonly appRoot: string;
   readonly compileAgentNodeManifest: CompileAgentNodeManifestFn;
+  readonly compileAgentResources: CompileAgentResourcesFn;
   readonly context: ManifestCompileContext;
   readonly agentConfigDefinition?: unknown;
-  readonly dynamic?: { readonly eventNames: readonly string[] };
+  readonly configResolver?: CompiledDynamicSubagentDefinition;
   readonly externalDependencies?: readonly string[];
+  readonly parentAgentRoot: string;
   readonly parentNodeId: string;
   readonly source: LocalSubagentSourceRef;
 }): Promise<{
@@ -183,62 +209,77 @@ async function compileSubagent(input: {
 }> {
   const nodeId = createCompiledSubagentNodeId(input.parentNodeId, input.source.sourceId);
   const subagentName = input.source.subagentId;
-  const agent = await input.compileAgentNodeManifest(
-    {
-      ...input.source.manifest,
-      appRoot: input.appRoot,
-    },
-    input.context,
-    {
-      agentConfigDefinition: input.agentConfigDefinition,
-      allowWorkflowConfig: false,
-      externalDependencies: input.externalDependencies,
-    },
+  const sourceManifest = {
+    ...input.source.manifest,
+    appRoot: input.appRoot,
+  };
+  const inheritedExternalDependencies = mergeExternalDependencies(
+    input.externalDependencies,
+    input.configResolver?.build?.externalDependencies,
   );
+  const nodeBase = {
+    entryPath: input.source.entryPath,
+    logicalPath: input.source.logicalPath,
+    name: subagentName,
+    nodeId,
+    rootPath: input.source.rootPath,
+    sourceId: input.source.sourceId,
+    sourceKind: "module" as const,
+  };
 
-  const description = agent.config.description;
-
-  let variant:
-    | { readonly description: string; readonly dynamic?: never }
-    | {
-        readonly description?: never;
-        readonly dynamic: { readonly eventNames: readonly string[] };
-      };
-
-  if (input.dynamic !== undefined) {
-    variant = { dynamic: input.dynamic };
-  } else {
+  if (input.configResolver === undefined) {
+    const agent = await input.compileAgentNodeManifest(sourceManifest, input.context, {
+      agentConfigDefinition: input.agentConfigDefinition,
+      allowRootOnlyConfig: false,
+      externalDependencies: inheritedExternalDependencies,
+    });
+    const description = agent.config.description;
     if (!description) {
       throw new Error(
         `Local subagent "${input.source.logicalPath}" is missing a "description" field on its agent config. Add \`description\` to \`defineAgent({ ... })\` so the parent agent can decide when to delegate to this subagent.`,
       );
     }
-    variant = { description };
+
+    const descendants = await compileSubagentGraph({
+      appRoot: input.appRoot,
+      compileAgentNodeManifest: input.compileAgentNodeManifest,
+      context: input.context,
+      compileAgentResources: input.compileAgentResources,
+      externalDependencies:
+        agent.config.build?.externalDependencies ?? inheritedExternalDependencies,
+      parentAgentRoot: input.source.manifest.agentRoot,
+      parentNodeId: nodeId,
+      subagents: composeAgentSubagentSources(input.source.manifest),
+    });
+    return {
+      descendants,
+      node: {
+        ...nodeBase,
+        agent: { ...agent, remoteAgents: [...descendants.remoteAgents] },
+        description,
+      },
+    };
   }
 
+  const resources = await input.compileAgentResources(sourceManifest, input.context, {
+    externalDependencies: inheritedExternalDependencies,
+  });
   const descendants = await compileSubagentGraph({
     appRoot: input.appRoot,
     compileAgentNodeManifest: input.compileAgentNodeManifest,
     context: input.context,
-    externalDependencies: agent.config.build?.externalDependencies,
+    compileAgentResources: input.compileAgentResources,
+    externalDependencies: inheritedExternalDependencies,
+    parentAgentRoot: input.source.manifest.agentRoot,
     parentNodeId: nodeId,
-    subagents: input.source.manifest.subagents,
+    subagents: composeAgentSubagentSources(input.source.manifest),
   });
   return {
     descendants,
     node: {
-      agent: {
-        ...agent,
-        remoteAgents: [...descendants.remoteAgents],
-      },
-      ...variant,
-      entryPath: input.source.entryPath,
-      logicalPath: input.source.logicalPath,
-      name: subagentName,
-      nodeId,
-      rootPath: input.source.rootPath,
-      sourceId: input.source.sourceId,
-      sourceKind: "module",
+      ...nodeBase,
+      agent: { ...resources, remoteAgents: [...descendants.remoteAgents] },
+      configResolver: input.configResolver,
     },
   };
 }
@@ -246,6 +287,7 @@ async function compileSubagent(input: {
 const compileLocalSubagent = compileSubagent;
 
 function compileRemoteAgent(input: {
+  readonly parentAgentRoot: string;
   readonly source: LocalSubagentSourceRef;
   readonly value: unknown;
 }): CompiledRemoteAgentNode {
@@ -257,7 +299,11 @@ function compileRemoteAgent(input: {
 
   assertRemoteAgentDefinitionHasNoLocalPackageEntries(input.source);
 
-  const moduleSource = createSubagentConfigModuleSourceRef(input.source, configModule);
+  const moduleSource = createSubagentConfigModuleSourceRef(
+    input.source,
+    configModule,
+    input.parentAgentRoot,
+  );
   const definition = normalizeRemoteAgentDefinition(
     input.value,
     `Expected the remote agent config export "${configModule.exportName ?? "default"}" from "${moduleSource.logicalPath}" to match the public eve shape.`,
@@ -280,19 +326,21 @@ function compileRemoteAgent(input: {
 function normalizeDynamicSubagentDefinition(
   value: unknown,
   message: string,
-): { readonly definition: { readonly eventNames: readonly DynamicToolEventName[] } } | undefined {
+):
+  | {
+      readonly build?: { readonly externalDependencies?: readonly string[] };
+      readonly definition: { readonly eventNames: readonly DynamicToolEventName[] };
+    }
+  | undefined {
   if (!isDynamicSentinel(value)) {
     return undefined;
   }
 
   const record = expectObjectRecord(value, message);
-  if (Object.hasOwn(record, "fallback")) {
-    throw new Error(
-      `${message} Dynamic subagent definitions do not support "fallback". Return defineAgent(...) from an event handler instead.`,
-    );
-  }
-  expectOnlyKnownKeys(record, ["events", "kind"], message);
+  expectOnlyKnownKeys(record, ["build", "events", "kind"], message);
 
+  const build =
+    record.build === undefined ? undefined : normalizeDynamicSubagentBuild(record.build, message);
   const rawEvents = expectObjectRecord(record.events, message);
   const eventNames: DynamicToolEventName[] = [];
 
@@ -306,24 +354,55 @@ function normalizeDynamicSubagentDefinition(
     eventNames.push(eventName as DynamicToolEventName);
   }
 
-  return {
+  const normalized: {
+    build?: { readonly externalDependencies?: readonly string[] };
+    readonly definition: { readonly eventNames: readonly DynamicToolEventName[] };
+  } = {
     definition: { eventNames },
   };
+  if (build !== undefined) {
+    normalized.build = build;
+  }
+  return normalized;
+}
+
+function normalizeDynamicSubagentBuild(
+  value: unknown,
+  message: string,
+): { readonly externalDependencies?: readonly string[] } {
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["externalDependencies"], message);
+  if (record.externalDependencies === undefined) return {};
+  if (!Array.isArray(record.externalDependencies)) throw new Error(message);
+  return {
+    externalDependencies: record.externalDependencies.map((entry) => expectString(entry, message)),
+  };
+}
+
+function mergeExternalDependencies(
+  ...lists: ReadonlyArray<readonly string[] | undefined>
+): readonly string[] {
+  return [...new Set(lists.flatMap((list) => list ?? []))];
 }
 
 function createSubagentConfigModuleSourceRef(
   source: LocalSubagentSourceRef,
   configModule: NonNullable<LocalSubagentSourceRef["manifest"]["configModule"]>,
+  parentAgentRoot: string,
 ): {
   readonly exportName?: string;
   readonly logicalPath: string;
   readonly sourceId: string;
   readonly sourceKind: "module";
 } {
-  const logicalPath =
-    source.logicalPath === configModule.logicalPath
-      ? configModule.logicalPath
-      : `${source.logicalPath}/${configModule.logicalPath}`;
+  const logicalPath = relative(
+    parentAgentRoot,
+    join(source.manifest.agentRoot, configModule.logicalPath),
+  ).replaceAll("\\", "/");
+  const sourceId =
+    configModule.sourceId.startsWith("ext:") || configModule.sourceId.startsWith("ext-override:")
+      ? configModule.sourceId
+      : createPathDerivedSourceId(logicalPath);
   const moduleSource: {
     exportName?: string;
     logicalPath: string;
@@ -331,7 +410,7 @@ function createSubagentConfigModuleSourceRef(
     sourceKind: "module";
   } = {
     logicalPath,
-    sourceId: createPathDerivedSourceId(logicalPath),
+    sourceId,
     sourceKind: "module",
   };
 
@@ -383,10 +462,7 @@ function normalizeRemoteAgentDefinition(
   return {
     description: expectString(record.description, message),
     outputSchema: serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined),
-    path:
-      record.path === undefined
-        ? EVE_CREATE_SESSION_ROUTE_PATH
-        : expectString(record.path, message),
+    path: record.path === undefined ? EVE_SESSION_ROUTE_PATH : expectString(record.path, message),
     // A function `url` is resolved at runtime, not baked into the manifest.
     url: typeof record.url === "function" ? undefined : expectString(record.url, message),
   };

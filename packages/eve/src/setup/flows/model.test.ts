@@ -22,6 +22,13 @@ const APP_ROOT = "/app/my-agent";
 
 const CATALOG: GatewayCatalogModel[] = [
   {
+    id: "zai/glm-5.2",
+    name: "GLM 5.2",
+    type: "language",
+    owned_by: "zai",
+    tags: ["reasoning"],
+  },
+  {
     id: "anthropic/claude-sonnet-5",
     name: "Claude Sonnet 5",
     type: "language",
@@ -251,7 +258,8 @@ describe("runModelFlow", () => {
     expect(captured?.model).toEqual({
       kind: "pick",
       options: expect.arrayContaining([
-        expect.objectContaining({ value: "anthropic/claude-sonnet-5", featured: true }),
+        expect.objectContaining({ value: "zai/glm-5.2", featured: true }),
+        expect.objectContaining({ value: "anthropic/claude-sonnet-5" }),
         expect.objectContaining({ value: "test/no-frills" }),
       ]),
       current: "anthropic/claude-sonnet-5",

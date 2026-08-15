@@ -12,4 +12,5 @@ export {
   toolOutput,
   toolOutputPart,
   toolResultFrom,
+  webSearch,
 } from "../../src/public/tools/index.ts";

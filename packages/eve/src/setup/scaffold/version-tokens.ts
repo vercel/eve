@@ -30,6 +30,7 @@ const NODE_ENGINE_TOKEN = bareToken("NODE_ENGINE");
 
 const TOKEN_SOURCES: Readonly<Record<string, TokenSource>> = {
   [versionToken("EVE_PACKAGE")]: { kind: "eve-version" },
+  [versionToken("EVE_PACKAGE_DEPENDENCY")]: { kind: "eve-version" },
   [NODE_ENGINE_TOKEN]: { kind: "eve-node-engine" },
   [versionToken("AI_SDK")]: { kind: "catalog", packageName: "ai" },
   [versionToken("VERCEL_CONNECT")]: { kind: "catalog", packageName: "@vercel/connect" },

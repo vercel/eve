@@ -1,4 +1,7 @@
 import type { Command } from "#compiled/commander/index.js";
+import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
+
+import { parseSetupAnswer } from "./setup-answers.js";
 
 interface IntegrationCommandLogger {
   error(message: string): void;
@@ -9,25 +12,67 @@ interface IntegrationCommandLogger {
 export function registerIntegrationCommands(input: {
   program: Command;
   logger: IntegrationCommandLogger;
-  appRoot: string;
+  applicationContext: CliApplicationContext;
 }): void {
-  const { appRoot, logger, program } = input;
+  const { applicationContext, logger, program } = input;
 
   const integration = program.command("integration", { hidden: true });
 
-  integration
-    .command("setup <kind>")
+  applicationCommand(integration.command("setup <kind>"), applicationContext)
     .option("-y, --yes")
-    .action(async (kind: string, options: { yes?: boolean }) => {
-      const { runIntegrationSetupCommand } = await import("./integration-setup.js");
-      await runIntegrationSetupCommand(logger, appRoot, kind, { yes: options.yes });
-    });
+    .option(
+      "--non-interactive",
+      "Run without interactive prompts, instead emit structured NDJSON when further input is required",
+    )
+    .option(
+      "--answer <key=value>",
+      "Answer a setup question; requires --non-interactive.",
+      parseSetupAnswer,
+      {},
+    )
+    .action(
+      async (
+        kind: string,
+        options: {
+          yes?: boolean;
+          nonInteractive?: boolean;
+          answer?: Record<string, unknown>;
+        },
+      ) => {
+        const { runIntegrationSetupCommand } = await import("./integration-setup.js");
+        await runIntegrationSetupCommand(logger, applicationContext.root, kind, {
+          yes: options.yes,
+          nonInteractive: options.nonInteractive,
+          answers: options.answer,
+        });
+      },
+    );
 
-  integration
-    .command("connect <slug> <service> [canonical-name]")
+  applicationCommand(
+    integration.command("connect <slug> <service> [canonical-name]"),
+    applicationContext,
+  )
     .option("-y, --yes")
-    .action(async (slug: string, service: string, canonicalName: string | undefined) => {
-      const { runIntegrationConnectCommand } = await import("./integration-connect.js");
-      await runIntegrationConnectCommand(logger, appRoot, slug, service, canonicalName);
-    });
+    .option(
+      "--non-interactive",
+      "Run without interactive prompts, instead emit structured NDJSON when further input is required",
+    )
+    .action(
+      async (
+        slug: string,
+        service: string,
+        canonicalName: string | undefined,
+        options: { nonInteractive?: boolean },
+      ) => {
+        const { runIntegrationConnectCommand } = await import("./integration-connect.js");
+        await runIntegrationConnectCommand(
+          logger,
+          applicationContext.root,
+          slug,
+          service,
+          canonicalName,
+          options,
+        );
+      },
+    );
 }

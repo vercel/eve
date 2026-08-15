@@ -250,6 +250,12 @@ export interface Prompter {
   /** Prints a final green ● end-cap with the message. */
   outro(message: string): void;
 
+  /** Replaces transient setup output with one compact current-item summary. */
+  replaceContent?(content?: {
+    headline: string;
+    facts: readonly { label: string; value: string }[];
+  }): void;
+
   /** Temporarily hands terminal ownership to a command that inherits stdio. */
   withInheritedStdio?<T>(task: () => Promise<T>): Promise<T>;
 

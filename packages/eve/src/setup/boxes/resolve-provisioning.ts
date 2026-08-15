@@ -392,6 +392,7 @@ export function resolveProvisioning(
           key: "gateway-api-key",
           message: "Enter your AI_GATEWAY_API_KEY",
           sensitive: true,
+          environment: "AI_GATEWAY_API_KEY",
           validate: (value) => (value.trim().length === 0 ? "API key cannot be empty." : null),
           required: true,
         }),

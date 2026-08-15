@@ -23,6 +23,7 @@ import {
   SiPosthog,
   SiPostman,
   SiRazorpay,
+  SiSanity,
   SiSentry,
   SiSimilarweb,
   SiStripe,
@@ -56,6 +57,23 @@ export const webLogo = (props: LogoProps) => (
       stroke="currentColor"
       strokeWidth="1.5"
     />
+  </svg>
+);
+
+export const BuzzLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 466 309" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <defs>
+      <mask id="buzz-logo-mask">
+        <circle cx="91.7" cy="154.5" fill="white" r="91.7" />
+        <circle cx="374.3" cy="154.5" fill="white" r="91.7" />
+        <rect fill="white" height="309" rx="34" width="210" x="128" />
+        <ellipse cx="193.3" cy="84.4" fill="black" rx="27" ry="27" />
+        <ellipse cx="276" cy="84.4" fill="black" rx="27" ry="27" />
+        <rect fill="black" height="38.3" rx="5" width="136.9" x="166.3" y="157.2" />
+        <rect fill="black" height="37.6" rx="5" width="136.2" x="166.9" y="235.1" />
+      </mask>
+    </defs>
+    <rect fill="currentColor" height="309" mask="url(#buzz-logo-mask)" width="466" />
   </svg>
 );
 
@@ -172,9 +190,51 @@ export const linearLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const contextLogo = (props: LogoProps) => (
+  <svg viewBox="0 0 772.32 531.2" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M260.5,27.06v240.41c-29-28.17-69.08-44.96-113.07-43.26C69.5,227.24,5.16,289.98.31,367.81c-5.56,89.26,65.18,163.38,153.24,163.38,41.58,0,79.3-16.51,106.95-43.37h0c0,13.26,10.75,24.01,24.01,24.01h129.54c-51.07,0-96.29-24.98-124.23-63.34,2.81-5.4,5.32-10.98,7.47-16.76,0,0,0,0,0,0,.02-.12.06-.23.12-.35.46-1.2.89-2.4,1.3-3.6.41-1.22.81-2.42,1.2-3.64,0-.01,0-.02.01-.03.53-1.64,1.05-3.31,1.5-4.99,0,0,0,0,0,0,.02-.12.06-.23.08-.35,0,0,0-.01,0-.02.33-1.08.61-2.18.87-3.27,0-.02,0-.03.01-.04.12-.47.23-.95.35-1.43.27-1.08.52-2.15.74-3.23.06-.25.1-.5.17-.74.06-.29.12-.58.19-.89.04-.19.08-.37.13-.54.16-.85.33-1.7.47-2.55.04-.12.06-.25.08-.37.02-.1.04-.21.06-.33.12-.7.25-1.41.37-2.11.1-.58.19-1.18.29-1.76.02-.12.04-.23.04-.35.25-1.53.46-3.06.64-4.61.08-.72.17-1.45.25-2.17.04-.23.06-.45.08-.68h0c.06-.54.1-1.1.14-1.63h0c.02-.06.02-.13.02-.17.02-.19.04-.35.04-.54.1-.97.19-1.95.23-2.92.02-.1.04-.21.02-.31.06-.52.08-1.03.1-1.55.02-.1.02-.21.02-.31.04-.52.06-1.01.08-1.53h0c.04-.62.06-1.24.06-1.86h0c.02-.15.02-.27.02-.39.06-1.59.08-3.19.08-4.78h0c0-1.05-.02-2.11-.04-3.14,0-.39,0-.79-.02-1.16,0-.35-.02-.7-.04-1.06,0-.56-.02-1.12-.06-1.68,0-.29-.02-.58-.04-.87,0-.12,0-.23-.02-.33,0-.21-.02-.41-.04-.6,0-.19,0-.37-.02-.56,0-.08,0-.17-.02-.25-.02-.37-.04-.74-.06-1.1-.02-.37-.06-.72-.08-1.08,0-.08,0-.16-.02-.23-.04-.77-.12-1.55-.21-2.34-.02-.41-.06-.81-.1-1.2-.02-.14-.02-.29-.04-.41-.12-1.2-.27-2.38-.41-3.56-.06-.48-.12-.95-.19-1.43-.08-.6-.17-1.18-.25-1.76-.06-.37-.12-.72-.17-1.08-.06-.35-.1-.7-.17-1.03-.14-.85-.29-1.7-.43-2.52-.02-.12-.04-.25-.06-.37-.19-1.01-.39-2.03-.6-3.04-.08-.39-.15-.79-.25-1.16-.12-.58-.25-1.18-.37-1.76-.12-.54-.25-1.06-.37-1.59-.1-.46-.21-.91-.31-1.35-.15-.56-.29-1.1-.43-1.66-.1-.5-.25-.97-.37-1.47-.25-.89-.5-1.8-.74-2.71-.04-.1-.06-.21-.1-.31-.12-.43-.25-.89-.39-1.32-.27-.93-.56-1.84-.87-2.77-.12-.43-.27-.89-.41-1.32-.12-.35-.23-.68-.35-1.03-.1-.29-.19-.58-.29-.87-.1-.31-.23-.62-.33-.93-.33-.93-.66-1.86-1.01-2.79-.43-1.16-.89-2.3-1.34-3.44-.48-1.18-.95-2.36-1.47-3.52-.19-.43-.37-.87-.56-1.32-.33-.72-.66-1.43-.99-2.15-.1-.23-.21-.46-.33-.68-.1-.23-.23-.43-.33-.68-.85-1.78-1.72-3.58-2.65-5.34-.02-.08-.06-.14-.1-.23-.56-1.08-1.14-2.13-1.74-3.21-.56-1.03-1.16-2.05-1.76-3.06-.02-.06-.06-.14-.1-.21-.41-.72-.85-1.43-1.3-2.15-.89-1.49-1.82-2.94-2.77-4.39-.66-.99-1.32-2.01-2.03-3-.17-.23-.31-.48-.5-.7-.33-.48-.66-.97-1.03-1.47-.02-.02-.04-.06-.08-.1-.14-.23-.29-.43-.45-.66v-.02l-.1-.1c-.27-.37-.56-.77-.83-1.14-.17-.23-.33-.43-.5-.66-.31-.39-.62-.81-.93-1.2-.64-.85-1.3-1.7-1.99-2.55-.27-.35-.56-.7-.87-1.06-.6-.77-1.22-1.51-1.86-2.26-.83-.97-1.66-1.95-2.5-2.9-.52-.58-1.03-1.16-1.57-1.72-.58-.64-1.18-1.28-1.8-1.92-.25-.29-.52-.56-.81-.85h0c.29.29.56.56.81.85.62.64,1.22,1.28,1.8,1.92.54.56,1.05,1.14,1.57,1.72.85.95,1.68,1.92,2.5,2.9.64.74,1.26,1.49,1.86,2.26.31.35.6.7.87,1.06.68.85,1.34,1.7,1.99,2.55.31.39.62.81.93,1.2.17.23.33.44.5.66.27.37.56.77.83,1.14l.1.1c26.35-50.54,79.92-84.63,141.29-82.65,78.35,2.52,143.32,65.42,148.19,143.66,5.55,89.25-65.19,163.36-153.24,163.36h331.21c14.95,0,27.06-12.12,27.06-27.06V27.06c0-14.95-12.12-27.06-27.06-27.06h-457.7c-14.95,0-27.06,12.12-27.06,27.06ZM286.24,454.89s.01-.02.02-.03c0,0,0,.02-.01.02h0ZM286.62,454.23c.69-1.19,1.34-2.41,2-3.63-.66,1.21-1.31,2.44-1.99,3.62,0,0,0,0,0,.01Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 export const notionLogo = (props: LogoProps) => <SiNotion {...props} />;
 
 export const upstashLogo = (props: LogoProps) => <SiUpstash color="default" {...props} />;
+
+export const arcanaLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <circle cx="12" cy="12" r="3" fill="#1A1C1A" />
+    <circle cx="5" cy="7" r="2" fill="#1A1C1A" />
+    <circle cx="19" cy="7" r="2" fill="#69BE8B" />
+    <circle cx="6" cy="18" r="2" fill="#69BE8B" />
+    <circle cx="18" cy="18" r="2" fill="#1A1C1A" />
+    <path
+      d="m6.7 7.8 3.4 2.7m7.2-2.7-3.4 2.7m-6.5 6 3-2.7m4.2 0 3 2.7"
+      stroke="#1A1C1A"
+      strokeWidth="1.5"
+    />
+  </svg>
+);
+
+export const hindsightLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 186 139" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <g stroke="#078BC2" strokeLinecap="round" strokeLinejoin="round" strokeWidth="8">
+      <path d="m65 53-14-23M121 53l14-23M42 69l-20-5M144 69l20-5M61 96l-16 17M125 96l16 17" />
+      <circle cx="44" cy="19" fill="white" r="11" />
+      <circle cx="142" cy="19" fill="white" r="11" />
+      <circle cx="12" cy="61" fill="white" r="9" />
+      <circle cx="174" cy="61" fill="white" r="9" />
+      <circle cx="35" cy="121" fill="white" r="9" />
+      <circle cx="151" cy="121" fill="white" r="9" />
+    </g>
+    <path d="M37 72c14-21 34-33 56-33s42 12 56 33c-14 23-34 35-56 35S51 95 37 72Z" fill="#078BC2" />
+    <ellipse cx="93" cy="73" fill="white" rx="30" ry="21" />
+    <circle cx="93" cy="73" fill="#111827" r="17" />
+    <circle cx="102" cy="64" fill="white" r="7" />
+  </svg>
+);
 
 export const datadogLogo = (props: LogoProps) => <SiDatadog color="default" {...props} />;
 
@@ -232,6 +292,8 @@ export const postmanLogo = (props: LogoProps) => <SiPostman color="default" {...
 
 export const razorpayLogo = (props: LogoProps) => <SiRazorpay {...props} />;
 
+export const sanityLogo = (props: LogoProps) => <SiSanity {...props} />;
+
 export const sentryLogo = (props: LogoProps) => <SiSentry {...props} />;
 
 export const similarwebLogo = (props: LogoProps) => <SiSimilarweb {...props} />;
@@ -241,6 +303,16 @@ export const stripeLogo = (props: LogoProps) => <SiStripe color="default" {...pr
 export const supabaseLogo = (props: LogoProps) => <SiSupabase color="default" {...props} />;
 
 export const ticktickLogo = (props: LogoProps) => <SiTicktick color="default" {...props} />;
+
+export const tinybirdLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 26 26" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M25 2.64 17.195.5 14.45 6.635zm-7.465 15.13-7.145-2.555L6.195 25.5z"
+      fill="currentColor"
+    />
+    <path d="m0 11.495 17.535 6.275L20.41 4.36z" fill="currentColor" />
+  </svg>
+);
 
 export const todoistLogo = (props: LogoProps) => <SiTodoist color="default" {...props} />;
 
@@ -300,6 +372,17 @@ export const manufactLogo = (props: LogoProps) => (
     <path
       d="M750 350.426C750 405.889 705.037 450.851 649.574 450.851C594.11 450.851 549.148 405.889 549.148 350.426C549.148 294.962 594.11 250 649.574 250C705.037 250 750 294.962 750 350.426Z"
       fill="white"
+    />
+  </svg>
+);
+
+export const naturalLogo = (props: LogoProps) => (
+  // Cropped to the square mark; the source asset is a full wordmark lockup
+  // that renders illegibly small at icon sizes.
+  <svg fill="none" viewBox="0 0 17.5 18" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M0.773438 17.7891H16.6289C17.1211 17.7891 17.4023 17.543 17.4023 17.0156V0.914062C17.4023 0.421875 17.1211 0.140625 16.6289 0.140625H0.773438C0.246094 0.140625 0 0.421875 0 0.914062V17.0156C0 17.543 0.246094 17.7891 0.773438 17.7891Z"
+      fill="currentColor"
     />
   </svg>
 );
@@ -397,9 +480,9 @@ export const kapsoLogo = (props: LogoProps) => (
 );
 
 export const photonLogo = (props: LogoProps) => (
-  <svg fill="none" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" {...props}>
+  <svg fill="none" viewBox="66 66 124 124" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
-      d="m34 13-4 16h9l4-16h-9Zm-17 13-4 16h9l4-16h-9Zm16 10-4 16h9l4-16h-9Z"
+      d="M166.88 135.896H180.416C182.864 135.896 184.592 138.2 184.016 140.36L173.648 181.544C173.36 183.128 171.92 184.28 170.192 184.28H156.512C154.352 184.28 152.624 181.976 153.056 179.816L163.424 138.632C163.856 137.048 165.152 135.896 166.88 135.896ZM139.52 71.96H153.056C155.504 71.96 157.232 74.264 156.512 76.424L146.432 117.608C145.856 119.192 144.416 120.344 142.688 120.344H129.296C126.848 120.344 125.12 118.04 125.84 115.88L136.064 74.696C136.352 73.112 137.936 71.96 139.52 71.96ZM85.376 101.624H98.912C101.216 101.624 102.944 103.928 102.368 106.232L92.144 147.272C91.712 148.856 90.272 150.008 88.688 150.008H75.008C72.704 150.008 70.832 147.848 71.552 145.544L81.776 104.504C82.208 102.776 83.648 101.624 85.376 101.624Z"
       fill="currentColor"
     />
   </svg>
@@ -464,6 +547,21 @@ export const beeperLogo = (props: LogoProps) => (
 );
 
 export const resendLogo = (props: LogoProps) => <SiResend {...props} />;
+
+export const typefullyLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="47 47 130 130" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M0 0 C0.74507813 0.00451172 1.49015625 0.00902344 2.2578125 0.01367188 C4.0885764 0.02540754 5.91929873 0.0433415 7.75 0.0625 C7.14395591 4.14584626 4.84730736 7.0612421 2.5625 10.375 C-2.19352263 17.53440191 -5.32057264 24.9903426 -8.25 33.0625 C-17.16154975 57.46763889 -17.16154975 57.46763889 -26.984375 63.03515625 C-34.07971612 66.25252645 -41.54415248 67.43087315 -49.25 68.0625 C-49.25 68.3925 -49.25 68.7225 -49.25 69.0625 C-40.52369392 69.15994014 -31.91996704 69.22961095 -23.25 68.0625 C-23.41531336 74.50972095 -26.91529318 78.6325249 -31.25 83.0625 C-38.42086001 88.95740627 -46.28954743 90.49598731 -55.25 92.0625 C-61.3099593 93.33277308 -61.3099593 93.33277308 -67.25 95.0625 C-68.2992872 96.78705409 -68.2992872 96.78705409 -69.25 99.0625 C-78.68670886 116.85047468 -78.68670886 116.85047468 -85.25 122.0625 C-86.57 122.0625 -87.89 122.0625 -89.25 122.0625 C-88.66875831 117.39360339 -87.36989252 113.68082637 -85.3984375 109.41796875 C-85.10769852 108.78353851 -84.81695953 108.14910828 -84.51741028 107.49545288 C-83.56009428 105.41041702 -82.59274339 103.33021408 -81.625 101.25 C-80.94894978 99.78473548 -80.27358667 98.31915375 -79.59887695 96.85327148 C-78.54863388 94.57166096 -77.49785805 92.29031377 -76.4443512 90.01020813 C-74.01583684 84.74952764 -71.63026619 79.47109428 -69.26953125 74.1796875 C-52.12436128 35.80891207 -52.12436128 35.80891207 -40.25 21.0625 C-39.61578125 20.26457031 -38.9815625 19.46664062 -38.328125 18.64453125 C-28.35248511 6.73361722 -15.57355722 -0.17884827 0 0 Z "
+      fill="currentColor"
+      transform="translate(153.25,50.9375)"
+    />
+    <path
+      d="M0 0 C2.70461031 1.95547181 4.45314814 4.04691917 6 7 C6.60726036 10.91345565 6.3659283 13.10550859 4.875 16.75 C1.65652764 20.61216684 -1.58840395 21.79834342 -6.5 22.5 C-11.20343225 21.82808111 -12.70404748 20.37442758 -16 17 C-17.23829052 13.28512845 -17.5503822 9.86021488 -17 6 C-12.86869485 -0.78714418 -7.42056477 -2.39662454 0 0 Z "
+      fill="currentColor"
+      transform="translate(149,151)"
+    />
+  </svg>
+);
 
 export const googlechatLogo = (props: LogoProps) => <SiGooglechat color="default" {...props} />;
 
@@ -580,6 +678,7 @@ export const raindropLogo = (props: LogoProps) => (
 export const logos = {
   eve: eveLogo,
   web: webLogo,
+  buzz: BuzzLogo,
   "browser-use": browserUseLogo,
   github: githubLogo,
   slack: slackLogo,
@@ -589,6 +688,7 @@ export const logos = {
   twilio: twilioLogo,
   vercel: vercelLogo,
   linear: linearLogo,
+  context: contextLogo,
   notion: notionLogo,
   datadog: datadogLogo,
   honeycomb: honeycombLogo,
@@ -598,6 +698,8 @@ export const logos = {
   raindrop: raindropLogo,
   kernel: kernelLogo,
   upstash: upstashLogo,
+  arcana: arcanaLogo,
+  hindsight: hindsightLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,
   brex: brexLogo,
@@ -614,18 +716,21 @@ export const logos = {
   mem0: mem0Logo,
   miro: miroLogo,
   mixpanel: mixpanelLogo,
+  natural: naturalLogo,
   netlify: netlifyLogo,
   oreilly: oreillyLogo,
   planetscale: planetscaleLogo,
   posthog: posthogLogo,
   postman: postmanLogo,
   razorpay: razorpayLogo,
+  sanity: sanityLogo,
   sentry: sentryLogo,
   similarweb: similarwebLogo,
   stripe: stripeLogo,
   supabase: supabaseLogo,
   "ticket-tailor": ticketTailorLogo,
   ticktick: ticktickLogo,
+  tinybird: tinybirdLogo,
   todoist: todoistLogo,
   webflow: webflowLogo,
   wix: wixLogo,

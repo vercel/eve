@@ -1,3 +1,4 @@
+import { isInboxSubagentResultFromRunningHandle } from "#harness/handles/query.js";
 import {
   createHook,
   getWorkflowMetadata,
@@ -5,9 +6,12 @@ import {
 } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
+import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
+import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import {
   migrateTurnWorkflowInput,
@@ -27,20 +31,11 @@ import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { resolveRuntimeActionResultsForKeys } from "#harness/runtime-actions.js";
+import { getRuntimeActionResultKey } from "#runtime/actions/keys.js";
+import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
-
-// A cancelled turn settles by parking the session, so the cancel hook is
-// only claimed where a park can land: conversation sessions always accept
-// follow-up input, and task sessions can park only when a continuation
-// token anchors them to a waiting parent (delegated subagents always have
-// one). A root task run without one is unparkable, so it stays
-// uncancellable rather than settling a cancel as `session.failed`.
-function canSettleCancelledTurnAsPark(input: TurnWorkflowInput): boolean {
-  return input.mode === "conversation" || input.stepInput.sessionState.continuationToken !== "";
-}
 
 export type { TurnWorkflowInput };
 
@@ -48,7 +43,7 @@ export type { TurnWorkflowInput };
  * Runs one complete logical turn, including child-agent waits when supported.
  *
  * The turn-owned path also owns turn cancellation: resuming the
- * session-scoped cancel hook (`{sessionId}:cancel`) mid-turn aborts the
+ * turn-private cancel hook (`{completionToken}:cancel`) mid-turn aborts the
  * signal serialized into every `turnStep` and settles the turn as
  * `turn.cancelled` → `session.waiting` — never as a failure. A late or
  * guard-mismatched cancel is a benign no-op.
@@ -98,13 +93,10 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
     // Claimed after the inbox claim so a losing duplicate run never
     // contends for the session cancel token.
-    if (
-      input.driverCapabilities?.cancelledTurnSettle === true &&
-      canSettleCancelledTurnAsPark(input)
-    ) {
+    if (input.driverCapabilities?.cancelledTurnSettle === true) {
       cancellation = await createTurnCancellationControl({
+        controlToken: input.completionToken,
         expectedTurnId: activeTurnId(input.stepInput.sessionState.emissionState),
-        sessionId: input.stepInput.sessionState.sessionId,
       });
     }
 
@@ -118,17 +110,30 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       // A cancel observed while the step was returning must still win: the
       // step may have missed the abort and completed normally. Pending
       // runtime-action batches are exempt — their wait observes the signal.
-      if (
-        result.action === "cancelled" ||
-        (cancellation?.signal.aborted === true && pendingActionKeys === undefined)
-      ) {
+      if (result.action === "cancelled") {
+        // The cancelled step returns only the context carve-outs required by
+        // the driver epilogue and later turns; adopt those before settling.
+        await cursor.adopt(result);
+        await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
+        return;
+      }
+
+      if (cancellation?.signal.aborted === true && pendingActionKeys === undefined) {
+        // Some worlds cannot interrupt a running step, so it can complete
+        // normally after the workflow observes cancellation. Roll that result
+        // back except for a session model selected by its one-time preamble.
+        await cursor.adopt({
+          serializedContext: preserveSerializedSessionDynamicModelSelection(
+            cursor.serializedContext,
+            result.serializedContext,
+          ),
+          sessionState: cursor.sessionState,
+        });
         // No `canPark` check here: that gate rejects model-authored waits
-        // (`next: null`) in task mode, whereas a cancelled turn parks by
-        // design and its parkability was already established when the
-        // cancel hook was claimed (`canSettleCancelledTurnAsPark`). The
-        // epilogue runs in the driver (`settleCancelledTurnStep`), not as
-        // a step in this run, where queued cancel wakes could re-dispatch
-        // it.
+        // (`next: null`) in task mode, whereas every session can resume by
+        // stable ID after a cancelled turn. The epilogue runs in the driver
+        // (`settleCancelledTurnStep`), not as a step in this run, where queued
+        // cancel wakes could re-dispatch it.
         await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
         return;
       }
@@ -150,6 +155,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
             output: result.output ?? "",
             isError: result.isError,
             usage: result.usage,
+            usageDelta: result.usageDelta,
           },
           bufferedDeliveries,
         );
@@ -158,13 +164,20 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
       // A pending runtime-action batch (model-driven `park` or dynamic-workflow
       // interrupt) is resolved in-line so the turn stays alive across the wait;
-      // the two arms differ only in their dispatch path.
+      // the arms differ only in their dispatch path: the workflow adapter for
+      // interrupt-sourced batches, and the task-mode sibling when the agent
+      // runs `experimental.tasks`.
       if (pendingActionKeys !== undefined) {
         await cursor.adopt(result);
-        const dispatch =
-          result.action === "dispatch-workflow-runtime-actions"
-            ? dispatchWorkflowRuntimeActionsStep
-            : dispatchRuntimeActionsStep;
+        const hasPendingTasks = result.action === "park" && result.tasksEnabled;
+        let dispatch;
+        if (result.action === "dispatch-workflow-runtime-actions") {
+          dispatch = dispatchWorkflowRuntimeActionsStep;
+        } else if (hasPendingTasks) {
+          dispatch = dispatchTaskStep;
+        } else {
+          dispatch = dispatchRuntimeActionsStep;
+        }
         const dispatchResult = await dispatch({
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
           parentContinuationToken: inbox.token,
@@ -172,13 +185,16 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           serializedContext: cursor.serializedContext,
           sessionState: cursor.sessionState,
         });
+        const initialAcceptedAtMs = dispatchResult.results.length === 0 ? undefined : Date.now();
         await cursor.adopt(dispatchResult);
+        await acknowledgeDelegatedTasksStep({ tasks: dispatchResult.pendingTasks });
 
         const results = await waitForRuntimeActionResults({
           bufferedDeliveries,
           cancellation,
           cursor,
           inboxToken: inbox.token,
+          initialAcceptedAtMs,
           initialResults: dispatchResult.results,
           iterator,
           nextDeliveryRequestId,
@@ -194,7 +210,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
           return;
         }
-        nextStepInput = { kind: "runtime-action-result", results };
+        nextStepInput = { kind: "runtime-action-result", ...results };
         continue;
       }
 
@@ -210,8 +226,10 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         await cursor.finish(
           result,
           {
+            authorizationAttemptIds: result.authorizationAttemptIds,
             authorizationNames: result.authorizationNames,
             kind: "park",
+            settled: result.settled,
           },
           bufferedDeliveries,
         );
@@ -264,18 +282,30 @@ async function waitForTurnSleep(
 // These sentinels stay outside `RuntimeActionResult`. That union is the
 // schema-validated wire type projected into harness resume calls; these are
 // turn-workflow control outcomes that never leave the workflow.
+interface AcceptedRuntimeActionBatch {
+  readonly acceptedAtMsByCallId: Readonly<Record<string, number>>;
+  readonly results: readonly RuntimeActionResult[];
+}
+
 async function waitForRuntimeActionResults(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly cancellation: TurnCancellationControl | undefined;
   readonly cursor: TurnExecutionCursor;
   readonly inboxToken: string;
+  readonly initialAcceptedAtMs: number | undefined;
   readonly initialResults: readonly RuntimeActionResult[];
   readonly iterator: AsyncIterator<TurnInboxPayload>;
   readonly nextDeliveryRequestId: () => string;
   readonly pendingActionKeys: readonly string[];
-}): Promise<readonly RuntimeActionResult[] | "cancelled" | "cancel-turn"> {
+}): Promise<AcceptedRuntimeActionBatch | "cancelled" | "cancel-turn"> {
   let pendingDeliveryRequest: string | undefined;
   const results: RuntimeActionResult[] = [...input.initialResults];
+  const acceptedAtMsByKey = new Map<string, number>();
+  if (input.initialAcceptedAtMs !== undefined) {
+    for (const result of input.initialResults) {
+      acceptedAtMsByKey.set(getRuntimeActionResultKey(result), input.initialAcceptedAtMs);
+    }
+  }
 
   while (true) {
     const ready = resolveRuntimeActionResultsForKeys({
@@ -291,7 +321,15 @@ async function waitForRuntimeActionResults(input: {
           requestId: pendingDeliveryRequest,
         });
       }
-      return ready;
+      return {
+        acceptedAtMsByCallId: Object.fromEntries(
+          ready.map((result) => [
+            result.callId,
+            acceptedAtMsByKey.get(getRuntimeActionResultKey(result))!,
+          ]),
+        ),
+        results: ready,
+      };
     }
 
     if (input.cursor.sessionState.hasProxyInputRequests && pendingDeliveryRequest === undefined) {
@@ -327,7 +365,25 @@ async function waitForRuntimeActionResults(input: {
 
     const value = next.value;
     if (value.kind === "runtime-action-result") {
-      results.push(...value.results);
+      // The inbox token is shared by every callee in the batch, so an inbox
+      // subagent result must bind to a running agent handle in the adopted
+      // session snapshot: its callId on the handle's operation and, when it
+      // claims a sessionId, that session on the handle's address (older eve
+      // deployments claim none and bind by callId alone). Anything else — a
+      // callee settling a sibling's call, or a result for a callId whose
+      // dispatch failed — is dropped; the genuine child's result (or the
+      // dispatch error already in `results`) still resolves the wait.
+      const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
+      const accepted = value.results.filter((result) =>
+        isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
+      );
+      if (accepted.length > 0) {
+        const acceptedAtMs = Date.now();
+        results.push(...accepted);
+        for (const result of accepted) {
+          acceptedAtMsByKey.set(getRuntimeActionResultKey(result), acceptedAtMs);
+        }
+      }
       continue;
     }
 
@@ -351,16 +407,20 @@ async function waitForRuntimeActionResults(input: {
       pendingDeliveryRequest = undefined;
 
       const routed = await routeDeliverToChildren({
-        auth: value.delivery.auth,
+        delivery: value.delivery,
         parentWritable: input.cursor.parentWritable,
-        payloads: value.delivery.payloads,
+        serializedContext: input.cursor.serializedContext,
         sessionState: input.cursor.sessionState,
+      });
+      await input.cursor.adopt({
+        serializedContext: routed.serializedContext ?? input.cursor.serializedContext,
+        sessionState: routed.sessionState ?? input.cursor.sessionState,
       });
       if (routed.kind === "cancel-turn") {
         return routed.kind;
       }
       if (routed.remainder !== undefined) {
-        input.bufferedDeliveries.push({ ...value.delivery, payloads: [routed.remainder] });
+        input.bufferedDeliveries.push(routed.remainder);
       }
     }
   }
@@ -388,6 +448,7 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
               serializedContext: result.serializedContext,
               sessionState: result.sessionState,
               usage: result.usage,
+              usageDelta: result.usageDelta,
             },
             kind: "turn-result",
           },
@@ -433,7 +494,9 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
                 kind: "park",
                 serializedContext: result.serializedContext,
                 sessionState: result.sessionState,
+                authorizationAttemptIds: result.authorizationAttemptIds,
                 authorizationNames: result.authorizationNames,
+                settled: result.settled,
               };
 
         await sendTurnControlStep({

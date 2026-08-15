@@ -16,6 +16,7 @@ function span(spanId: string, sessionId: string): LocalTraceSpan {
       "agent.turn.id": "turn_0",
     },
     endTimeNs: 1_000_000n,
+    events: [],
     name: "agent.turn",
     spanId,
     startTimeNs: 1_000_000n,
@@ -87,12 +88,20 @@ describe("TraceViewerSession drag copy", () => {
         "ai.response.text": "reply",
       },
     };
+    const delivery: LocalTraceSpan = {
+      ...span("c".repeat(16), "session-mine"),
+      name: "agent.channel.delivery",
+      attributes: {
+        "agent.channel.delivery.input": JSON.stringify({ message: "copy me please" }),
+        "agent.turn.id": "turn_0",
+      },
+    };
     const store = stubStore([
       {
         endTimeNs: 1_000_000n,
         sessionId: "session-mine",
         sessionIds: ["session-mine"],
-        spans: [turn, model],
+        spans: [turn, delivery, model],
         startTimeNs: 1_000_000n,
         traceId: "c".repeat(32),
       },
@@ -129,7 +138,7 @@ describe("TraceViewerSession drag copy", () => {
     session.handleKey({ type: "mouse", action: "press", button: 32, x: 75, y: 5 });
     session.handleKey({ type: "mouse", action: "release", button: 0, x: 75, y: 5 });
     expect(copied).toHaveLength(2);
-    expect(copied[1]).toContain("agent.turn");
+    expect(copied[1]).toContain("agent.channel.delivery");
     session.dispose();
   });
 });

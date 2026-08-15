@@ -7,6 +7,17 @@ import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
+const { runInitCommand, runSetCommand } = vi.hoisted(() => ({
+  runInitCommand: vi.fn(async () => {}),
+  runSetCommand: vi.fn(async () => {}),
+}));
+
+vi.mock("#cli/application-root.js", () => ({
+  resolveCliApplicationRoot: vi.fn(async (cwd: string) => cwd),
+}));
+vi.mock("#cli/commands/init.js", () => ({ runInitCommand }));
+vi.mock("#cli/commands/set.js", () => ({ runSetCommand }));
+
 async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
   const stdoutDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
@@ -50,10 +61,75 @@ describe("CLI command registration", () => {
 
     const help = output.join("\n");
     expect(help).toContain("init [options] [target]");
+    expect(help).toContain("set [options]");
     expect(help).toContain("link");
     expect(help).toContain("deploy");
     expect(help).toContain("registry");
     expect(help).not.toContain("setup [options] <item>");
+  });
+
+  it("forwards model settings to the set command", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runSetCommand.mockClear();
+
+    await runCli(["set", "--model", "openai/gpt-5.6-sol", "--reasoning", "high"], logger);
+
+    expect(runSetCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), {
+      model: "openai/gpt-5.6-sol",
+      reasoning: "high",
+    });
+  });
+
+  it("runs project commands with the resolved application root", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const resolveRoot = vi.fn(async () => "/workspace/weather");
+    runSetCommand.mockClear();
+
+    await runCli(["set", "--model", "openai/gpt-5.6-sol"], logger, {
+      resolveApplicationRoot: resolveRoot,
+    });
+
+    expect(resolveRoot).toHaveBeenCalledWith(resolve(process.cwd()));
+    expect(runSetCommand).toHaveBeenCalledWith(logger, "/workspace/weather", {
+      model: "openai/gpt-5.6-sol",
+      reasoning: undefined,
+    });
+  });
+
+  it("does not resolve an application root for command help", async () => {
+    const resolveRoot = vi.fn(async () => "/workspace/weather");
+
+    await runCli(
+      ["set", "--help"],
+      { error: vi.fn(), log: vi.fn() },
+      {
+        resolveApplicationRoot: resolveRoot,
+      },
+    );
+
+    expect(resolveRoot).not.toHaveBeenCalled();
+  });
+
+  it("lists model and reasoning options for the set command", async () => {
+    const output: string[] = [];
+
+    await runCli(["set", "--help"], {
+      error: (message) => output.push(message),
+      log: (message) => output.push(message),
+    });
+
+    const help = output.join("\n");
+    expect(help).toContain("--model <model>");
+    expect(help).toContain("--reasoning <effort>");
+  });
+
+  it("rejects unsupported reasoning before running the set command", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runSetCommand.mockClear();
+
+    await expect(runCli(["set", "--reasoning", "extreme"], logger)).rejects.toThrow();
+
+    expect(runSetCommand).not.toHaveBeenCalled();
   });
 
   it("lists registry installation and setup options", async () => {
@@ -75,7 +151,22 @@ describe("CLI command registration", () => {
     expect(help).not.toContain("--path");
   });
 
-  it("registers JSON output for registry discovery commands", async () => {
+  it("shows add help and registry search guidance when no item is provided", async () => {
+    const errors: string[] = [];
+    const output: string[] = [];
+
+    await runCli(["add"], {
+      error: (message) => errors.push(message),
+      log: (message) => output.push(message),
+    });
+
+    const help = output.join("\n");
+    expect(errors).toEqual([]);
+    expect(help).toContain("Usage: eve add [options] [item]");
+    expect(help).toContain("eve registry search <query>");
+  });
+
+  it("registers JSON output and a search result limit for registry discovery commands", async () => {
     const output: string[] = [];
     const logger = {
       error: (message: string) => output.push(message),
@@ -85,7 +176,10 @@ describe("CLI command registration", () => {
     await runCli(["registry", "list", "--help"], logger).catch(() => {});
     await runCli(["registry", "search", "--help"], logger).catch(() => {});
 
-    expect(output.join("\n")).toContain("--json");
+    const help = output.join("\n");
+    expect(help).toContain("--json");
+    expect(help).toContain("--limit <count>");
+    expect(help).toContain("default: 10");
   });
 
   it("registers only supported shadcn registry commands", async () => {
@@ -101,7 +195,7 @@ describe("CLI command registration", () => {
     expect(help).toContain("add <registries...>");
     expect(help).toContain("list [options]");
     expect(help).toContain("search [options] <query>");
-    expect(help).toContain("view <item>");
+    expect(help).toContain("view [options] <item>");
     expect(help).not.toContain("remove [arguments...]");
     expect(help).not.toContain("sources [arguments...]");
   });
@@ -136,8 +230,66 @@ describe("CLI command registration", () => {
   });
 });
 
+describe("bare eve command", () => {
+  it("runs init in the current directory when no eve project is detected", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const findApplicationRoot = vi.fn(async () => undefined);
+    runInitCommand.mockClear();
+
+    await runCli([], logger, { findApplicationRoot });
+
+    expect(findApplicationRoot).toHaveBeenCalledWith(resolve(process.cwd()));
+    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), undefined, {
+      channelWebNextjs: undefined,
+      model: undefined,
+      reasoning: undefined,
+    });
+  });
+
+  it("runs dev from the enclosing eve application", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const findApplicationRoot = vi.fn(async () => "/resolved/app");
+    const close = vi.fn(async () => {});
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close,
+    }));
+    const runDevelopmentTui = vi.fn(async () => {});
+    runInitCommand.mockClear();
+
+    await withInteractiveTerminal(() =>
+      runCli([], logger, { findApplicationRoot, runDevelopmentTui, startHost }),
+    );
+
+    expect(findApplicationRoot).toHaveBeenCalledWith(resolve(process.cwd()));
+    expect(startHost).toHaveBeenCalledWith("/resolved/app", {
+      existing: "attach-if-unconfigured",
+      host: undefined,
+      onBootProgress: expect.any(Function),
+      output: undefined,
+      port: undefined,
+    });
+    expect(runDevelopmentTui).toHaveBeenCalledOnce();
+    expect(runInitCommand).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("does not inspect the project when a command is explicit", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const findApplicationRoot = vi.fn(async () => undefined);
+
+    await runCli(["init"], logger, { findApplicationRoot });
+
+    expect(findApplicationRoot).not.toHaveBeenCalled();
+  });
+});
+
 describe("eve init compatibility flags", () => {
-  it("lists --yes as an accepted compatibility flag", async () => {
+  it("lists the supported init options", async () => {
     const output: string[] = [];
 
     await runCli(["init", "--help"], {
@@ -145,7 +297,35 @@ describe("eve init compatibility flags", () => {
       log: (message) => output.push(message),
     });
 
-    expect(output.join("\n")).toContain("-y, --yes");
+    const help = output.join("\n");
+    expect(help).toContain("-y, --yes");
+    expect(help).toContain("--model <model>");
+    expect(help).toContain("--reasoning <effort>");
+  });
+
+  it("forwards model settings to the init command", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+
+    await runCli(
+      ["init", "my-agent", "--model", "openai/gpt-5.6-sol", "--reasoning", "high"],
+      logger,
+    );
+
+    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), "my-agent", {
+      channelWebNextjs: undefined,
+      model: "openai/gpt-5.6-sol",
+      reasoning: "high",
+    });
+  });
+
+  it("rejects unsupported reasoning before running the init command", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+
+    await expect(runCli(["init", "my-agent", "--reasoning", "extreme"], logger)).rejects.toThrow();
+
+    expect(runInitCommand).not.toHaveBeenCalled();
   });
 
   it("still rejects unknown init options", async () => {
@@ -173,6 +353,15 @@ describe("eve CLI malformed argument handling", () => {
   it("still surfaces the usage error for commands other than init", async () => {
     await expect(
       runCli(["dev", "--unknown-flag"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow();
+  });
+
+  it.each(["0", "101", "many"])("rejects invalid registry search limit %s", async (limit) => {
+    await expect(
+      runCli(["registry", "search", "web", "--limit", limit], {
+        error: () => {},
+        log: () => {},
+      }),
     ).rejects.toThrow();
   });
 });
@@ -302,16 +491,18 @@ describe("eve invoke", () => {
     );
   });
 
-  it("prints the JSON schema without invoking an agent", async () => {
+  it("prints the JSON schema without resolving or invoking an agent", async () => {
     const runInvoke = vi.fn();
+    const resolveRoot = vi.fn(async () => "/workspace/weather");
     const output: string[] = [];
 
     await runCli(
       ["invoke", "--json-schema"],
       { error: () => {}, log: (message) => output.push(message) },
-      { runInvoke },
+      { resolveApplicationRoot: resolveRoot, runInvoke },
     );
 
+    expect(resolveRoot).not.toHaveBeenCalled();
     expect(runInvoke).not.toHaveBeenCalled();
     expect(JSON.parse(output[0]!)).toMatchObject({ title: "eve invoke result" });
   });
@@ -327,6 +518,16 @@ describe("eve invoke", () => {
 });
 
 describe("eve dev --url protocol", () => {
+  it("does not resolve a local application for a remote URL", async () => {
+    const resolveRoot = vi.fn(async () => "/workspace/weather");
+
+    await runInteractiveDev(["dev", "https://example.com"], {
+      resolveApplicationRoot: resolveRoot,
+    });
+
+    expect(resolveRoot).not.toHaveBeenCalled();
+  });
+
   it("preserves query parameters on the remote target URL", async () => {
     const runDevelopmentTui = await runInteractiveDev([
       "dev",

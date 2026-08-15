@@ -16,6 +16,7 @@ pnpm eve add channel/discord
 
 The setup guides you through creating a Discord application and bot, then:
 
+- signs you in to Vercel and creates or links a project when needed;
 - validates the bot token;
 - creates a Vercel Connect client and attaches `/eve/v1/discord` as its trigger destination;
 - registers an application command with a required `message` option;
@@ -55,7 +56,7 @@ Then configure the public `https://…/eve/v1/discord` route as the application'
 
 ### Dispatch
 
-`onCommand(ctx, interaction)` decides whether to dispatch and under what `auth`. Return `{ auth }` to proceed or `null` to drop the interaction. By default, auth comes from the invoking user. Event handlers receive `(eventData, channel, ctx)`, with Discord platform handles on `channel.discord`:
+`onCommand(ctx, interaction)` decides whether to dispatch and under what `auth`. Return `{ auth }` to proceed, `null` to drop the interaction, or `title` alongside `auth` to set the title when the dispatch starts a run. By default, auth comes from the invoking user. Event handlers receive `(eventData, channel, ctx)`, with Discord platform handles on `channel.discord`:
 
 ```ts
 import { discordChannel } from "eve/channels/discord";
@@ -90,7 +91,7 @@ HITL renders as Discord components. Confirmations and options become buttons, `d
 
 ### Proactive sessions
 
-Start a session without an inbound interaction through `receive(discord, { message, target, auth })` from a schedule `run` handler, or `args.receive(discord, ...)` from another channel. The proactive target shape is `{ channelId, conversationId?, initialMessage? }`. Either path needs a bot token, supplied by Connect or `DISCORD_BOT_TOKEN`.
+Start a session without an inbound interaction through `to(discord, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(discord, target).send(message, { auth })` from another channel. The proactive target shape is `{ channelId, conversationId?, initialMessage? }`. Either path needs a bot token, supplied by Connect or `DISCORD_BOT_TOKEN`.
 
 ### Attachments
 

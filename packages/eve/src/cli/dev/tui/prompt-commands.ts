@@ -71,7 +71,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "clear",
-    aliases: [],
+    aliases: ["new"],
     description: "Clear the current session context",
     takesArgument: false,
     build: () => ({ type: "clear" }),
@@ -174,10 +174,10 @@ export function isPromptCommandAvailableFor(
 
 /**
  * Recognizes the slash commands the prompt accepts. `/reset` clears the
- * session and transcript; `/cancel` stops the running turn; `/clear` clears
- * context; `/compact` queues context compaction; `/exit` (and `/quit`)
- * terminate the TUI like Ctrl+C; extension commands are dispatched outside
- * the runner. Anything else — including unknown `/text` — is a normal
+ * session and transcript; `/cancel` stops the running turn; `/clear` (and
+ * `/new`) clears context; `/compact` queues context compaction; `/exit` (and
+ * `/quit`) terminate the TUI like Ctrl+C; extension commands are dispatched
+ * outside the runner. Anything else — including unknown `/text` — is a normal
  * message.
  */
 export function parsePromptCommand(prompt: string): PromptCommand | null {

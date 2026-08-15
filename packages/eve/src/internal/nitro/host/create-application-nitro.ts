@@ -36,7 +36,7 @@ import type {
 } from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
-import { transformDynamicToolExecute } from "#internal/workflow-bundle/dynamic-tool-transform.js";
+import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
 /**
@@ -100,13 +100,14 @@ function collectHostedTraceDependencies(
   preparedHost: PreparedApplicationHost,
   configuredOptionalEnginePackages: readonly string[],
 ): string[] {
-  const agentNodes = [
-    preparedHost.compileResult.manifest,
-    ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
+  const configuredExternalDependencies = [
+    ...(preparedHost.compileResult.manifest.config.build?.externalDependencies ?? []),
+    ...preparedHost.compileResult.manifest.subagents.flatMap((subagent) =>
+      subagent.configResolver === undefined
+        ? (subagent.agent.config.build?.externalDependencies ?? [])
+        : (subagent.configResolver.build?.externalDependencies ?? []),
+    ),
   ];
-  const configuredExternalDependencies = agentNodes.flatMap(
-    (node) => node.config.build?.externalDependencies ?? [],
-  );
   // Nitro already classifies known native and non-bundleable packages through
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
@@ -503,26 +504,12 @@ function addNitroStepTransformPlugin(
   return clearCachedStepTransformTargets;
 }
 
-/**
- * Adds the dynamic tool transform plugin that hoists execute functions
- * from defineDynamic event handlers to module scope. Runs
- * unconditionally for all tool files regardless of workflow mode.
- */
-function addDynamicToolTransformPlugin(nitro: Nitro): void {
+function addDynamicCapabilityTransformPlugin(nitro: Nitro): void {
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
       return;
     }
-
-    config.plugins.unshift({
-      async transform(code: string, id: string) {
-        if (!id.includes("/tools/")) return null;
-        const result = await transformDynamicToolExecute(id, code);
-        if (result === null) return null;
-        return { code: result.code, map: null };
-      },
-      name: "eve:dynamic-tool-transform",
-    });
+    config.plugins.unshift(createDynamicCapabilityTransformPlugin());
   });
 }
 
@@ -533,9 +520,11 @@ function addDynamicToolTransformPlugin(nitro: Nitro): void {
  */
 function addInstrumentationModuleSideEffectsPlugin(
   nitro: Nitro,
-  instrumentationModulePath: string,
+  instrumentationModulePaths: readonly string[],
 ): void {
-  const normalizedInstrumentationModulePath = normalizePath(instrumentationModulePath);
+  const normalizedInstrumentationModulePaths = new Set(
+    instrumentationModulePaths.map(normalizePath),
+  );
 
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
@@ -545,7 +534,7 @@ function addInstrumentationModuleSideEffectsPlugin(
     config.plugins.unshift({
       name: "eve:instrumentation-module-side-effects",
       resolveId(source: string) {
-        if (normalizePath(source) !== normalizedInstrumentationModulePath) {
+        if (!normalizedInstrumentationModulePaths.has(normalizePath(source))) {
           return null;
         }
 
@@ -635,10 +624,15 @@ function createApplicationNitroBundlerConfiguration(
     ).push(packageName);
   }
   const extensionScopePlugin = createExtensionScopePlugin(
-    (preparedHost.compileResult.manifest.extensionMounts ?? []).map((mount) => ({
-      sourceRoot: mount.sourceRoot,
-      packageNamespace: mount.packageNamespace,
-    })),
+    [
+      preparedHost.compileResult.manifest,
+      ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
+    ].flatMap((node) =>
+      node.extensionMounts.map((mount) => ({
+        sourceRoot: mount.sourceRoot,
+        packageNamespace: mount.packageNamespace,
+      })),
+    ),
   );
   const nitroBundlerPlugins = [
     compiledSandboxBackendPrunePlugin,
@@ -688,12 +682,12 @@ function configureSharedApplicationNitro(
   addWorkflowModuleSideEffectsPlugin(nitro, preparedHost.workflowBuildDir);
   patchWorkflowTransformExcludePath(nitro, preparedHost.workflowBuildDir);
 
-  addDynamicToolTransformPlugin(nitro);
+  addDynamicCapabilityTransformPlugin(nitro);
 
-  if (preparedHost.compiledArtifacts.instrumentationSourcePath !== undefined) {
+  if (preparedHost.compiledArtifacts.instrumentationSourcePaths !== undefined) {
     addInstrumentationModuleSideEffectsPlugin(
       nitro,
-      preparedHost.compiledArtifacts.instrumentationSourcePath,
+      preparedHost.compiledArtifacts.instrumentationSourcePaths,
     );
   }
 }

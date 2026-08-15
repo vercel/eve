@@ -5,6 +5,7 @@ import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   ContextAgentTraceStateStore,
   preserveSerializedAgentTraceState,
+  readActionTraceContext,
   readSessionTraceContext,
 } from "#tracing/agent-trace-context-store.js";
 
@@ -22,8 +23,17 @@ describe("ContextAgentTraceStateStore", () => {
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
+        lineage: {
+          callId: "call-1",
+          sessionId: "parent-session",
+          subagentName: "researcher",
+          turnId: "parent-turn",
+        },
+        parentIsRemote: true,
+        parentSpanId: "2".repeat(16),
         rootSessionId: "session-1",
         sequence: 0,
+        startTimeMs: 1_700_000_000_000,
         terminal: { error: new Error("failed"), type: "turn.failed" },
       });
     });
@@ -35,7 +45,20 @@ describe("ContextAgentTraceStateStore", () => {
       expect(store.getSession("session-1")?.context).toEqual(spanContext("1", "2"));
       expect(store.getSession("session-1")).toMatchObject({ turnsInWindow: 3, window: 1 });
       expect(store.getTurn("session-1", "turn-1")?.context).toEqual(spanContext("1", "3"));
-      expect(store.getTurn("session-1", "turn-1")?.terminal?.error).toMatchObject({
+      expect(store.getTurn("session-1", "turn-1")).toMatchObject({
+        lineage: {
+          callId: "call-1",
+          sessionId: "parent-session",
+          subagentName: "researcher",
+          turnId: "parent-turn",
+        },
+        parentIsRemote: true,
+        parentSpanId: "2".repeat(16),
+        startTimeMs: 1_700_000_000_000,
+      });
+      const terminal = store.getTurn("session-1", "turn-1")?.terminal;
+      expect(terminal?.type).toBe("turn.failed");
+      expect(terminal?.type === "turn.failed" ? terminal.error : undefined).toMatchObject({
         message: "failed",
       });
     });
@@ -52,8 +75,10 @@ describe("ContextAgentTraceStateStore", () => {
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
+        parentSpanId: "2".repeat(16),
         rootSessionId: "session-1",
         sequence: 0,
+        startTimeMs: 1_700_000_000_000,
       });
 
       store.deleteTurn("session-1", "turn-1");
@@ -99,6 +124,36 @@ describe("readSessionTraceContext", () => {
     expect(readSessionTraceContext(serialized, "session-1")).toEqual(spanContext("1", "2"));
     expect(readSessionTraceContext(serialized, "session-2")).toBeUndefined();
     expect(readSessionTraceContext({}, "session-1")).toBeUndefined();
+  });
+});
+
+describe("readActionTraceContext", () => {
+  it("reads the invoking action span out of a serialized context", async () => {
+    const context = new ContextContainer();
+    await contextStorage.run(context, () => {
+      new ContextAgentTraceStateStore().setAction("action-1", {
+        attemptIndex: 0,
+        callId: "call-1",
+        kind: "subagent-call",
+        name: "researcher",
+        parent: spanContext("1", "2"),
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        spanId: "3".repeat(16),
+        startTimeMs: 1_700_000_000_000,
+        stepIndex: 0,
+        turnId: "turn-1",
+      });
+    });
+    const serialized = await serializeContext(context);
+
+    expect(readActionTraceContext(serialized, "session-1", "turn-1", "call-1")).toEqual({
+      isRemote: false,
+      spanId: "3".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    });
+    expect(readActionTraceContext(serialized, "session-1", "turn-1", "missing")).toBeUndefined();
   });
 });
 

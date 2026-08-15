@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createTurnCancellationControl } from "#execution/turn-cancellation-control.js";
-import { sessionCancelHookToken } from "#execution/turn-cancellation-token.js";
+import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 
 const createHookMock = vi.fn();
@@ -42,9 +42,11 @@ async function settles(promise: Promise<unknown>): Promise<boolean> {
   ]);
 }
 
-describe("sessionCancelHookToken", () => {
-  it("derives the stable token from the session id", () => {
-    expect(sessionCancelHookToken("wrun_abc")).toBe("wrun_abc:cancel");
+describe("turnCancellationHookToken", () => {
+  it("derives a private token from the turn control token", () => {
+    expect(turnCancellationHookToken("wrun_abc:turn-control:1")).toBe(
+      "wrun_abc:turn-control:1:cancel",
+    );
   });
 });
 
@@ -57,8 +59,8 @@ describe("createTurnCancellationControl", () => {
     installCancelHook({ conflict: { runId: "wrun_stale" } });
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_0",
-      sessionId: "session-1",
     });
 
     expect(control).toBeUndefined();
@@ -68,8 +70,8 @@ describe("createTurnCancellationControl", () => {
     installCancelHook({ payloads: [{}] });
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_0",
-      sessionId: "session-1",
     });
 
     await expect(control!.requested).resolves.toBe("cancel");
@@ -81,8 +83,8 @@ describe("createTurnCancellationControl", () => {
     installCancelHook({ payloads: [{ turnId: "turn_2" }] });
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_2",
-      sessionId: "session-1",
     });
 
     await expect(control!.requested).resolves.toBe("cancel");
@@ -93,8 +95,8 @@ describe("createTurnCancellationControl", () => {
     installCancelHook({ payloads: [{ turnId: "turn_99" }, { turnId: "turn_2" }] });
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_2",
-      sessionId: "session-1",
     });
 
     await expect(control!.requested).resolves.toBe("cancel");
@@ -105,8 +107,8 @@ describe("createTurnCancellationControl", () => {
     installCancelHook({ payloads: [{ turnId: "turn_99" }] });
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_2",
-      sessionId: "session-1",
     });
 
     expect(await settles(control!.requested)).toBe(false);
@@ -139,8 +141,8 @@ describe("createTurnCancellationControl", () => {
     });
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_0",
-      sessionId: "session-1",
     });
 
     let releaseStep!: () => void;
@@ -161,8 +163,8 @@ describe("createTurnCancellationControl", () => {
     const { dispose } = installCancelHook({});
 
     const control = await createTurnCancellationControl({
+      controlToken: "session-1",
       expectedTurnId: "turn_0",
-      sessionId: "session-1",
     });
 
     await control!.dispose();

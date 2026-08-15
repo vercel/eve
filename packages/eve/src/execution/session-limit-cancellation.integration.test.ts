@@ -44,10 +44,9 @@ function expectNoFailureEvents(events: readonly UnstampedMessageStreamEvent[]): 
 }
 
 /**
- * Delivers a payload to the session's delivery hook, retrying through the
- * park boundary's dispose/recreate window. `waitForHook` cannot gate
- * repeated deliveries on one token — it treats a hook that ever received a
- * payload as consumed — so the retry is the barrier here.
+ * Sends a command to the session inbox, retrying through its claim window.
+ * `waitForHook` cannot gate repeated commands on one token — it treats a hook
+ * that ever received a payload as consumed — so the retry is the barrier here.
  */
 async function deliver(
   continuationToken: string,
@@ -57,7 +56,7 @@ async function deliver(
   const deadline = Date.now() + timeout;
   while (true) {
     try {
-      await resumeHook(continuationToken, payload);
+      await resumeHook(continuationToken, { auth: null, kind: "send", payload });
       return;
     } catch (error) {
       if (Date.now() > deadline) throw error;
@@ -103,10 +102,7 @@ describe("session-limit continuation decline integration", () => {
         expectNoFailureEvents(firstTurn);
 
         // Turn 2 parks on the continuation prompt before any model call.
-        await deliver(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "keep going please" }],
-        });
+        await deliver(continuationToken, { message: "keep going please" });
         const promptTurn = await stream.nextTurn();
         expect(promptTurn.at(-1)?.type).toBe("session.waiting");
         const requestId = requestIdFromPromptTurn(promptTurn);
@@ -114,8 +110,7 @@ describe("session-limit continuation decline integration", () => {
         // Declining settles the turn as cancelled — a user decision, not an
         // error, and not a session end.
         await deliver(continuationToken, {
-          kind: "deliver",
-          payloads: [{ inputResponses: [{ optionId: "stop", requestId }] }],
+          inputResponses: [{ optionId: "stop", requestId }],
         });
         const declinedTurn = await stream.nextTurn();
 
@@ -133,10 +128,7 @@ describe("session-limit continuation decline integration", () => {
 
         // The session stays over budget, so the next message re-raises the
         // prompt (fail-closed) instead of running a model call.
-        await deliver(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "try again" }],
-        });
+        await deliver(continuationToken, { message: "try again" });
         const repromptTurn = await stream.nextTurn();
 
         expect(repromptTurn.at(-1)?.type).toBe("session.waiting");
@@ -192,8 +184,7 @@ describe("session-limit continuation decline integration", () => {
         // show: the turn settles as cancelled and the session stays
         // resumable -- same contract as the direct-decline case above.
         await deliver(continuationToken, {
-          kind: "deliver",
-          payloads: [{ inputResponses: [{ optionId: "stop", requestId }] }],
+          inputResponses: [{ optionId: "stop", requestId }],
         });
         const declinedTurn = await stream.nextTurn();
         expect(declinedTurn.at(-1)?.type).toBe("session.waiting");
@@ -205,10 +196,7 @@ describe("session-limit continuation decline integration", () => {
         // The session accepts the next message; the root is still over
         // budget, so it re-raises its own prompt (fail-closed) instead of
         // running a model call or re-dispatching the delegation.
-        await deliver(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up after decline" }],
-        });
+        await deliver(continuationToken, { message: "follow up after decline" });
         const followUpTurn = await stream.nextTurn();
 
         expect(followUpTurn.at(-1)?.type).toBe("session.waiting");

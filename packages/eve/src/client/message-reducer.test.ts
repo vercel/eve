@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
+  createActionPartialEvent,
   createActionResultEvent,
   createActionsRequestedEvent,
   createAuthorizationCompletedEvent,
@@ -31,6 +32,85 @@ function reduceServerEvents(
 }
 
 describe("defaultMessageReducer", () => {
+  it("replaces tool-generator snapshots and ignores a late partial after the terminal result", () => {
+    const reducer = defaultMessageReducer();
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_1",
+            input: { project: "eve" },
+            kind: "tool-call",
+            toolName: "build_report",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createActionPartialEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { phase: "collecting" },
+          toolName: "build_report",
+        },
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createActionPartialEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { phase: "writing" },
+          toolName: "build_report",
+        },
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(findToolPart(data, "call_1")).toMatchObject({
+      output: { phase: "writing" },
+      partial: true,
+      state: "output-available",
+    });
+
+    data = reduceServerEvents(reducer, data, [
+      createActionResultEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { phase: "complete" },
+          toolName: "build_report",
+        },
+        sequence: 4,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createActionPartialEvent({
+        result: {
+          callId: "call_1",
+          kind: "tool-result",
+          output: { phase: "stale" },
+          toolName: "build_report",
+        },
+        sequence: 5,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    const terminal = findToolPart(data, "call_1");
+    expect(terminal).toMatchObject({
+      output: { phase: "complete" },
+      state: "output-available",
+    });
+    expect(terminal).not.toHaveProperty("partial");
+  });
+
   it("projects messages, reasoning, and actions into UIMessage-compatible parts", () => {
     const reducer = defaultMessageReducer();
     let data = reducer.initial();
@@ -128,6 +208,17 @@ describe("defaultMessageReducer", () => {
         result: {
           callId: "call_1",
           kind: "subagent-result",
+          origin: "child",
+          outcome: {
+            kind: "terminal",
+            result: { kind: "succeeded", output: { summary: "done" } },
+            usageDelta: {
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              inputTokens: 0,
+              outputTokens: 0,
+            },
+          },
           output: { summary: "done" },
           subagentName: "research",
         },
@@ -426,6 +517,58 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
+  it("keeps an older approval answerable after a later turn", () => {
+    const reducer = defaultMessageReducer();
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createInputRequestedEvent({
+        requests: [
+          {
+            action: {
+              callId: "call_1",
+              input: { command: "pwd" },
+              kind: "tool-call",
+              toolName: "bash",
+            },
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Yes", style: "primary" },
+              { id: "cancel", label: "No", style: "danger" },
+            ],
+            prompt: "Approve tool call: bash",
+            requestId: "approval_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      {
+        data: { message: "What time is it?", sequence: 0, turnId: "turn_2" },
+        type: "message.received",
+      },
+      createMessageCompletedEvent({
+        message: "It is noon.",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+    ]);
+
+    expect(data.messages.at(-1)?.id).toBe("turn_2:assistant");
+    expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-requested" });
+
+    data = reducer.reduce(data, {
+      data: {
+        createdAt: 1,
+        responses: [{ optionId: "approve", requestId: "approval_1" }],
+      },
+      type: "client.input.responded",
+    });
+
+    expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-responded" });
+  });
+
   it("marks input requests as responded when the client submits a response", () => {
     const reducer = defaultMessageReducer();
     let data = reduceServerEvents(reducer, reducer.initial(), [
@@ -543,6 +686,7 @@ describe("defaultMessageReducer", () => {
     });
     data = reduceServerEvents(reducer, data, [
       createStepStartedEvent({
+        modelId: "openai/gpt-5.5",
         sequence: 1,
         stepIndex: 0,
         turnId: "turn_1",
@@ -830,3 +974,12 @@ describe("defaultMessageReducer", () => {
     expect(userMessage?.parts).toEqual([{ state: "done", text: "hello there", type: "text" }]);
   });
 });
+
+function findToolPart(
+  data: ReturnType<ReturnType<typeof defaultMessageReducer>["initial"]>,
+  toolCallId: string,
+) {
+  return data.messages
+    .flatMap((message) => message.parts)
+    .find((part) => part.type === "dynamic-tool" && part.toolCallId === toolCallId);
+}
