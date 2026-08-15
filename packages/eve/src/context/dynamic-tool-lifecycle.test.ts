@@ -34,164 +34,7 @@ import {
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createSessionStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 
-// Re-implement the naming logic here to test it independently
-// (the production function is unexported — testing via the public behavior)
-function qualifyDynamicToolNames(
-  slug: string,
-  isSingle: boolean,
-  entries: Readonly<Record<string, DynamicToolEntry>>,
-): Map<string, DynamicToolEntry> {
-  const keys = Object.keys(entries);
-  const result = new Map<string, DynamicToolEntry>();
-
-  if (keys.length === 0) return result;
-
-  // single entry: one tool, named after the file slug.
-  // map of entries: each named by its bare key.
-  if (isSingle) {
-    result.set(slug, entries[keys[0]!]!);
-    return result;
-  }
-
-  for (const key of keys) {
-    result.set(key, entries[key]!);
-  }
-  return result;
-}
-
 const executeOptions = { messages: [], toolCallId: "call_1" };
-
-const stubEntry = defineTool({
-  description: "test",
-  inputSchema: { type: "object" },
-  execute: async (): Promise<unknown> => ({}),
-});
-
-describe("dynamic tool naming", () => {
-  it("uses file slug for a single entry", () => {
-    const names = qualifyDynamicToolNames("analytics", true, {
-      run: stubEntry,
-    });
-    expect([...names.keys()]).toEqual(["analytics"]);
-  });
-
-  it("uses the bare key for a map entry", () => {
-    const names = qualifyDynamicToolNames("search", false, {
-      run: stubEntry,
-    });
-    expect([...names.keys()]).toEqual(["run"]);
-  });
-
-  it("uses bare keys for multiple map entries", () => {
-    const names = qualifyDynamicToolNames("tenant", false, {
-      export: stubEntry,
-      query: stubEntry,
-    });
-    expect([...names.keys()]).toEqual(["export", "query"]);
-  });
-
-  it("handles empty entries — no tools produced", () => {
-    const names = qualifyDynamicToolNames("empty", false, {});
-    expect([...names.keys()]).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// safeSerialize behavior (re-implemented for isolated testing)
-// ---------------------------------------------------------------------------
-
-function safeSerialize(obj: Record<string, unknown>): Record<string, unknown> {
-  try {
-    return JSON.parse(JSON.stringify(obj));
-  } catch {
-    return {};
-  }
-}
-
-describe("safeSerialize", () => {
-  it("preserves plain JSON-serializable values", () => {
-    const result = safeSerialize({
-      str: "hello",
-      num: 42,
-      bool: true,
-      nested: { key: "value" },
-      arr: [1, 2, 3],
-      nil: null,
-    });
-
-    expect(result).toEqual({
-      str: "hello",
-      num: 42,
-      bool: true,
-      nested: { key: "value" },
-      arr: [1, 2, 3],
-      nil: null,
-    });
-  });
-
-  it("silently drops function values", () => {
-    const result = safeSerialize({
-      name: "tenant-a",
-      callback: () => "ignored",
-      apiUrl: "https://api.example.com",
-    });
-
-    expect(result).toEqual({
-      name: "tenant-a",
-      apiUrl: "https://api.example.com",
-    });
-    expect(result.callback).toBeUndefined();
-  });
-
-  it("silently drops undefined values", () => {
-    const result = safeSerialize({
-      name: "test",
-      missing: undefined,
-    });
-
-    expect(result).toEqual({
-      name: "test",
-    });
-  });
-
-  it("silently drops symbol values", () => {
-    const result = safeSerialize({
-      name: "test",
-      sym: Symbol("test"),
-    });
-
-    expect(result).toEqual({
-      name: "test",
-    });
-  });
-
-  it("returns empty object for circular references", () => {
-    const circular: Record<string, unknown> = { name: "test" };
-    circular.self = circular;
-
-    const result = safeSerialize(circular);
-    expect(result).toEqual({});
-  });
-
-  it("strips prototype chain from class instances", () => {
-    class Config {
-      name = "test";
-      getValue() {
-        return this.name;
-      }
-    }
-
-    const result = safeSerialize({ config: new Config() });
-    expect(result).toEqual({ config: { name: "test" } });
-    expect(typeof (result.config as Record<string, unknown>).getValue).toBe("undefined");
-  });
-
-  it("preserves Date as ISO string", () => {
-    const date = new Date("2024-01-01T00:00:00.000Z");
-    const result = safeSerialize({ date });
-    expect(result.date).toBe("2024-01-01T00:00:00.000Z");
-  });
-});
 
 // ---------------------------------------------------------------------------
 // replayDynamicSessionTools — step function lookup + closure replay
@@ -658,6 +501,47 @@ describe("dispatchDynamicToolEvent", () => {
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
     expect(tools[0]!.name).toBe("forecast");
+  });
+
+  it("serializes closure vars before storing durable metadata", async () => {
+    const ctx = createCtx();
+    const entry = createReplayableTool();
+    Object.assign(entry, {
+      __closureVars: {
+        apiUrl: "https://api.example.com",
+        callback: () => "not durable",
+      },
+    });
+    const resolver = createResolver("weather", ["session.started"], () => ({ forecast: entry }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    expect(ctx.get(SessionDynamicToolMetadataKey)?.[0]?.closureVars).toEqual({
+      apiUrl: "https://api.example.com",
+    });
+  });
+
+  it("falls back to empty closure vars when serialization fails", async () => {
+    const ctx = createCtx();
+    const closureVars: Record<string, unknown> = { value: "not durable" };
+    closureVars.self = closureVars;
+    const entry = createReplayableTool();
+    Object.assign(entry, { __closureVars: closureVars });
+    const resolver = createResolver("weather", ["session.started"], () => ({ forecast: entry }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    expect(ctx.get(SessionDynamicToolMetadataKey)?.[0]?.closureVars).toEqual({});
   });
 
   it("skips resolvers that do not match the event type", async () => {
