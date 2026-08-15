@@ -119,7 +119,7 @@ describe("coordinateApprovalDelivery", () => {
     const respondedIds = (stepInput?: { inputResponses?: readonly { requestId: string }[] }) =>
       (stepInput?.inputResponses ?? []).map((response) => response.requestId).sort();
 
-    let result;
+    let result: Awaited<ReturnType<typeof coordinateApprovalDelivery>> | undefined;
     for (const [index, request] of requests.entries()) {
       result = await coordinateApprovalDelivery({
         now: 100 + index,
