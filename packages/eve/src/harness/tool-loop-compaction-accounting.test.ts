@@ -1,11 +1,15 @@
 import { generateText, jsonSchema, type LanguageModel, ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { LiveStepToolsKey, SessionDynamicInstructionsKey } from "#context/keys.js";
+import { shouldCompact } from "#harness/compaction.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
 
 vi.mock("ai", () => ({
+  asSchema: vi.fn((schema: unknown) => ({ jsonSchema: schema })),
   generateText: vi.fn(),
   ToolLoopAgent: vi.fn(),
   jsonSchema: vi.fn((schema: unknown) => schema),
@@ -122,6 +126,94 @@ function expectStepFn(value: StepNext): StepFn {
 }
 
 describe("tool-loop structured compaction accounting", () => {
+  it("compacts when the dynamic instruction and tool envelope grows", async () => {
+    vi.mocked(generateText).mockResolvedValue({
+      text: "summary",
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    setupMockAgentSequence([
+      {
+        finishReason: "stop",
+        response: {
+          messages: [{ content: "First response.", role: "assistant" }],
+        },
+        text: "First response.",
+        toolCalls: [],
+        toolResults: [],
+        usage: { inputTokens: 5_000 },
+      },
+      {
+        finishReason: "stop",
+        response: {
+          messages: [{ content: "Second response.", role: "assistant" }],
+        },
+        text: "Second response.",
+        toolCalls: [],
+        toolResults: [],
+        usage: { inputTokens: 120 },
+      },
+    ]);
+
+    const ctx = new ContextContainer();
+    ctx.set(SessionDynamicInstructionsKey, {
+      context: [{ content: "small instruction", role: "system" }],
+    });
+
+    const runStep = createToolLoopHarness(createTestConfig());
+    const first = await contextStorage.run(ctx, () =>
+      runStep(
+        createTestSession({
+          compaction: { recentWindowSize: 1, threshold: 6_000 },
+          history: [{ content: "h".repeat(12_000), role: "user" }],
+        }),
+        { message: "First request." },
+      ),
+    );
+
+    const largeDefinition = "x".repeat(6_000);
+    ctx.set(SessionDynamicInstructionsKey, {
+      context: [{ content: largeDefinition, role: "system" }],
+    });
+    ctx.setVirtualContext(LiveStepToolsKey, [
+      {
+        description: "Dynamic connector tool",
+        execute: vi.fn().mockResolvedValue("ok"),
+        inputSchema: jsonSchema({
+          properties: {
+            payload: { description: largeDefinition, type: "string" },
+          },
+          type: "object",
+        }),
+        name: "dynamic_connector_tool",
+      },
+    ]);
+
+    const second = await contextStorage.run(ctx, () =>
+      runStep(first.session, { message: "Continue." }),
+    );
+
+    expect(
+      (second.session.compaction.lastKnownRequestEnvelopeTokens ?? 0) -
+        (first.session.compaction.lastKnownRequestEnvelopeTokens ?? 0),
+    ).toBeGreaterThan(2_500);
+    expect(
+      shouldCompact(
+        [...first.session.history, { content: "Continue.", role: "user" }],
+        first.session.compaction,
+        second.session.compaction.lastKnownRequestEnvelopeTokens,
+      ),
+    ).toBe(true);
+    expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
+    expect(second.session.history[0]).toEqual({
+      content: "Summary of our conversation so far:",
+      role: "user",
+    });
+    expect(second.session.history[1]).toEqual({
+      content: "summary",
+      role: "assistant",
+    });
+  });
+
   it("compacts before the continuation step when structured tool results were appended", async () => {
     vi.mocked(generateText).mockResolvedValue({
       text: "summary",

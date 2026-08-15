@@ -71,6 +71,7 @@ import {
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
+  asSchema: vi.fn((schema: unknown) => ({ jsonSchema: schema })),
   gateway: {
     tools: {
       exaSearch: vi.fn(() => ({})),

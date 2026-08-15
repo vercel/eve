@@ -153,6 +153,60 @@ describe("getInputTokenCount", () => {
     expect(result).toBeGreaterThan(42 + 20);
     expect(result).toBeLessThan(42 + 40);
   });
+
+  it("includes the request envelope when no provider usage is available", () => {
+    const messages: ModelMessage[] = [{ content: "hello", role: "user" }];
+
+    expect(getInputTokenCount(messages, config, 250)).toBe(estimateTokens(messages) + 250);
+  });
+
+  it("adds only request-envelope growth to provider usage", () => {
+    const messages: ModelMessage[] = [{ content: "hello", role: "user" }];
+    const anchored = {
+      ...config,
+      lastKnownInputTokens: 500,
+      lastKnownPromptMessageCount: messages.length,
+      lastKnownRequestEnvelopeTokens: 200,
+    };
+
+    expect(getInputTokenCount(messages, anchored, 200)).toBeGreaterThanOrEqual(500);
+    expect(getInputTokenCount(messages, anchored, 200)).toBeLessThan(501);
+    expect(getInputTokenCount(messages, anchored, 275)).toBeGreaterThanOrEqual(575);
+    expect(getInputTokenCount(messages, anchored, 275)).toBeLessThan(576);
+  });
+
+  it("does not subtract estimated request-envelope shrinkage from provider usage", () => {
+    const messages: ModelMessage[] = [{ content: "hello", role: "user" }];
+
+    expect(
+      getInputTokenCount(
+        messages,
+        {
+          ...config,
+          lastKnownInputTokens: 500,
+          lastKnownPromptMessageCount: messages.length,
+          lastKnownRequestEnvelopeTokens: 400,
+        },
+        100,
+      ),
+    ).toBeGreaterThanOrEqual(500);
+  });
+
+  it("does not double-count a legacy session's current request envelope", () => {
+    const messages: ModelMessage[] = [{ content: "hello", role: "user" }];
+
+    expect(
+      getInputTokenCount(
+        messages,
+        {
+          ...config,
+          lastKnownInputTokens: 500,
+          lastKnownPromptMessageCount: messages.length,
+        },
+        250,
+      ),
+    ).toBeLessThan(501);
+  });
 });
 
 describe("shouldCompact", () => {

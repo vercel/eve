@@ -19,6 +19,7 @@ import { toInputSchema } from "#shared/tool-schema.js";
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
+  asSchema: vi.fn((schema: unknown) => ({ jsonSchema: schema })),
   jsonSchema: vi.fn((schema: unknown) => schema),
   isStepCount: vi.fn((count: number) => count),
   tool: vi.fn((definition: unknown) => definition),

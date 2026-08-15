@@ -33,6 +33,7 @@ export type SessionStateMap = Readonly<Record<string, unknown>>;
 export interface CompactionConfig {
   readonly lastKnownInputTokens?: number;
   readonly lastKnownPromptMessageCount?: number;
+  readonly lastKnownRequestEnvelopeTokens?: number;
   readonly recentWindowSize: number;
   readonly threshold: number;
   readonly thresholdPercent?: number;

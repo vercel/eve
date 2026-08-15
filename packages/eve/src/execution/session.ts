@@ -31,6 +31,7 @@ export function createCompactionConfig(
     readonly contextWindowTokens?: number;
     readonly lastKnownInputTokens?: number;
     readonly lastKnownPromptMessageCount?: number;
+    readonly lastKnownRequestEnvelopeTokens?: number;
     readonly thresholdPercent?: number;
   } = {},
 ) {
@@ -46,11 +47,16 @@ export function createCompactionConfig(
     thresholdPercent,
   };
 
-  if (input.lastKnownInputTokens !== undefined) {
+  if (
+    input.lastKnownInputTokens !== undefined &&
+    input.lastKnownPromptMessageCount !== undefined &&
+    input.lastKnownRequestEnvelopeTokens !== undefined
+  ) {
     return {
       ...config,
       lastKnownInputTokens: input.lastKnownInputTokens,
       lastKnownPromptMessageCount: input.lastKnownPromptMessageCount,
+      lastKnownRequestEnvelopeTokens: input.lastKnownRequestEnvelopeTokens,
     };
   }
 
@@ -164,6 +170,7 @@ export function refreshSessionFromTurnAgent(input: {
       contextWindowTokens: input.turnAgent.model?.contextWindowTokens,
       lastKnownInputTokens: input.session.compaction.lastKnownInputTokens,
       lastKnownPromptMessageCount: input.session.compaction.lastKnownPromptMessageCount,
+      lastKnownRequestEnvelopeTokens: input.session.compaction.lastKnownRequestEnvelopeTokens,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
   };
@@ -203,6 +210,7 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     compaction?: {
       lastKnownInputTokens?: number;
       lastKnownPromptMessageCount?: number;
+      lastKnownRequestEnvelopeTokens?: number;
     };
     continuationToken: string;
     history: HarnessSession["history"];
@@ -223,11 +231,13 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
 
   if (
     session.compaction.lastKnownInputTokens !== undefined ||
-    session.compaction.lastKnownPromptMessageCount !== undefined
+    session.compaction.lastKnownPromptMessageCount !== undefined ||
+    session.compaction.lastKnownRequestEnvelopeTokens !== undefined
   ) {
     durable.compaction = {
       lastKnownInputTokens: session.compaction.lastKnownInputTokens,
       lastKnownPromptMessageCount: session.compaction.lastKnownPromptMessageCount,
+      lastKnownRequestEnvelopeTokens: session.compaction.lastKnownRequestEnvelopeTokens,
     };
   }
   if (session.rootSessionId !== undefined) {
@@ -277,6 +287,7 @@ export function hydrateDurableSession(input: {
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
       lastKnownInputTokens: durable.compaction?.lastKnownInputTokens,
       lastKnownPromptMessageCount: durable.compaction?.lastKnownPromptMessageCount,
+      lastKnownRequestEnvelopeTokens: durable.compaction?.lastKnownRequestEnvelopeTokens,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: durable.continuationToken,

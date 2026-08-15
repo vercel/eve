@@ -93,6 +93,7 @@ export interface DurableSession {
   readonly compaction?: {
     readonly lastKnownInputTokens?: number;
     readonly lastKnownPromptMessageCount?: number;
+    readonly lastKnownRequestEnvelopeTokens?: number;
   };
 }
 

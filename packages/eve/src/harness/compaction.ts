@@ -30,12 +30,13 @@ const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
 
 /**
  * Best available input-token count: the model-reported count from the last
- * step, plus a rough character-based estimate of whatever messages have been
- * appended since.
+ * step, plus rough character-based estimates of messages appended since and
+ * any growth in the non-history instructions and tool-schema envelope.
  */
 export function getInputTokenCount(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
+  requestEnvelopeTokens = 0,
 ): number {
   const prior = config.lastKnownInputTokens;
   const priorCount = config.lastKnownPromptMessageCount;
@@ -47,10 +48,15 @@ export function getInputTokenCount(
     priorCount < 0 ||
     priorCount > messages.length
   ) {
-    return estimateTokens(messages);
+    return estimateTokens(messages) + requestEnvelopeTokens;
   }
 
-  return prior + estimateTokens(messages.slice(priorCount));
+  const priorEnvelope = config.lastKnownRequestEnvelopeTokens ?? requestEnvelopeTokens;
+  return (
+    prior +
+    estimateTokens(messages.slice(priorCount)) +
+    Math.max(0, requestEnvelopeTokens - priorEnvelope)
+  );
 }
 
 /**
@@ -60,10 +66,13 @@ export function getInputTokenCount(
 export function shouldCompact(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
+  requestEnvelopeTokens = 0,
 ): boolean {
   return (
     messages.length > 0 &&
-    getInputTokenCount(messages, config) + COMPACTION_PROMPT_OVERHEAD_TOKENS > config.threshold
+    getInputTokenCount(messages, config, requestEnvelopeTokens) +
+      COMPACTION_PROMPT_OVERHEAD_TOKENS >
+      config.threshold
   );
 }
 
@@ -185,9 +194,14 @@ export async function compactMessages(
   headers?: Record<string, string>,
   abortSignal?: AbortSignal,
   forceSummary = false,
+  requestEnvelopeTokens = 0,
 ): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
-  const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
+  const historyConfig = {
+    ...config,
+    threshold: Math.max(0, config.threshold - requestEnvelopeTokens),
+  };
+  const recentConfig = forceSummary ? { ...historyConfig, recentWindowSize: 1 } : historyConfig;
   let keep = selectRecentWindowSize(conversation, recentConfig);
 
   if (!forceSummary) {
@@ -197,7 +211,13 @@ export async function compactMessages(
     }
 
     for (const heuristic of COMPACTION_HEURISTICS) {
-      const outcome = heuristic({ config, conversation, older, previousCheckpoint, recent });
+      const outcome = heuristic({
+        config: historyConfig,
+        conversation,
+        older,
+        previousCheckpoint,
+        recent,
+      });
       if (outcome.type === "within-limit") {
         return outcome.messages;
       }
@@ -210,7 +230,7 @@ export async function compactMessages(
     const summaryPrompt = createCompactionPrompt({
       messages: older,
       previousCheckpoint,
-      transcriptBudgetTokens: config.threshold,
+      transcriptBudgetTokens: historyConfig.threshold,
     });
 
     const result = await generateText({
@@ -233,7 +253,7 @@ export async function compactMessages(
     // model's evidence that work already ran. Degrade to text-only, then to a
     // smaller window, only under threshold pressure.
     const verbatim = withResumptionGuard([...summaryHead, ...recent], conversation);
-    if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
+    if (evaluateThreshold(verbatim, historyConfig, "estimate").type === "within-limit") {
       return verbatim;
     }
 
@@ -241,7 +261,10 @@ export async function compactMessages(
       [...summaryHead, ...keepNonToolResultMessages(recent)],
       conversation,
     );
-    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
+    if (
+      evaluateThreshold(stripped, historyConfig, "estimate").type === "within-limit" ||
+      keep === 0
+    ) {
       return stripped;
     }
 

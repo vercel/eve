@@ -339,6 +339,52 @@ describe("createSession", () => {
     expect(hydrated.outputSchema).toEqual(runOutputSchema);
   });
 
+  it("persists the last request-envelope estimate across durable steps", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent(),
+    });
+    const withEnvelopeEstimate = {
+      ...session,
+      compaction: {
+        ...session.compaction,
+        lastKnownInputTokens: 4_000,
+        lastKnownPromptMessageCount: 3,
+        lastKnownRequestEnvelopeTokens: 750,
+      },
+    };
+
+    const durable = projectToDurableSession(withEnvelopeEstimate);
+    const hydrated = hydrateDurableSession({
+      durable,
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(durable.compaction?.lastKnownRequestEnvelopeTokens).toBe(750);
+    expect(hydrated.compaction.lastKnownRequestEnvelopeTokens).toBe(750);
+  });
+
+  it("drops legacy provider counters that have no request-envelope baseline", () => {
+    const hydrated = hydrateDurableSession({
+      durable: {
+        agent: { system: "Legacy system prompt" },
+        compaction: {
+          lastKnownInputTokens: 4_000,
+          lastKnownPromptMessageCount: 3,
+        },
+        continuationToken: "root-token",
+        history: [],
+        sessionId: "sess-root",
+      },
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(hydrated.compaction.lastKnownInputTokens).toBeUndefined();
+    expect(hydrated.compaction.lastKnownPromptMessageCount).toBeUndefined();
+    expect(hydrated.compaction.lastKnownRequestEnvelopeTokens).toBeUndefined();
+  });
+
   it("persists subagent depth through durable session projection and hydration", () => {
     const session = createSession({
       continuationToken: "root-token",
@@ -508,6 +554,7 @@ describe("refreshSessionFromTurnAgent", () => {
           ...session.compaction,
           lastKnownInputTokens: 321,
           lastKnownPromptMessageCount: 7,
+          lastKnownRequestEnvelopeTokens: 123,
         },
       },
       turnAgent: createTestTurnAgent({
@@ -518,6 +565,7 @@ describe("refreshSessionFromTurnAgent", () => {
     expect(refreshed.compaction).toEqual({
       lastKnownInputTokens: 321,
       lastKnownPromptMessageCount: 7,
+      lastKnownRequestEnvelopeTokens: 123,
       recentWindowSize: 10,
       threshold: 100_000,
       thresholdPercent: 0.5,
