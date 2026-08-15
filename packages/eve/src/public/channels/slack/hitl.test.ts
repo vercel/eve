@@ -85,6 +85,33 @@ describe("isHitlAction", () => {
 });
 
 describe("renderInputRequestBlocks", () => {
+  it("converts GFM markdown in the freeform prompt section to Slack mrkdwn", () => {
+    const blocks = renderInputRequestBlocks(
+      makeRequest({ prompt: "Approve edit to **file.ts**?" }),
+    );
+
+    const section = blocks[0] as { type: string; text: { type: string; text: string } };
+    expect(section.type).toBe("section");
+    expect(section.text.text).toBe("Approve edit to *file.ts*?");
+  });
+
+  it("converts GFM markdown in the option-card body to Slack mrkdwn", () => {
+    const blocks = renderInputRequestBlocks(
+      makeRequest({
+        prompt: "Run **rm -rf**?",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Deny" },
+        ],
+      }),
+    );
+
+    const card = blocks[0] as { type: string; body: { text: string } };
+    expect(card.type).toBe("card");
+    expect(card.body.text).toContain("*Run *rm -rf*?*");
+    expect(card.body.text).not.toContain("**");
+  });
+
   it("emits a card block for an option list with no display hint", () => {
     const blocks = renderInputRequestBlocks(
       makeRequest({
@@ -520,5 +547,26 @@ describe("buildAnsweredBlocks", () => {
     const answer = blocks[0] as { text: { text: string } };
     expect(answer.text.text.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
     expect(answer.text.text).toMatch(/^:white_check_mark: \*x+\.\.\.\*$/u);
+  });
+});
+
+describe("buildFreeformModalView", () => {
+  it("converts GFM markdown in the re-displayed prompt to Slack mrkdwn", () => {
+    const view = buildFreeformModalView({
+      metadata: {
+        continuationToken: "tok",
+        channelId: "C1",
+        threadTs: "1.1",
+        messageTs: "1.2",
+        requestId: "call_abc123",
+      },
+      prompt: "Confirm **delete** now",
+    });
+
+    const blocks = view.blocks as Array<{ type: string; text?: { type: string; text: string } }>;
+    expect(blocks[0]).toMatchObject({
+      type: "section",
+      text: { type: "mrkdwn", text: "Confirm *delete* now" },
+    });
   });
 });
