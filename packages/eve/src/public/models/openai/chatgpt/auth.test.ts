@@ -5,7 +5,7 @@ import {
   parseCodexAuth,
   readCodexJwtExpirationMs,
 } from "./auth.js";
-import { createUnsignedJwt } from "./unsigned-jwt.js";
+import { createUnsignedJwt } from "#internal/testing/unsigned-jwt.js";
 
 const PATHS = { authPath: "/home/user/.codex/auth.json", codexHome: "/home/user/.codex" };
 
