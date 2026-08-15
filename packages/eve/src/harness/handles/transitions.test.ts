@@ -113,14 +113,25 @@ describe("prepareAgentStart", () => {
     ]);
   });
 
-  it("throws when the identity already exists", () => {
+  it("throws when the identity is reused for a different start", () => {
     expect(() =>
       prepareAgentStart(preparedSession(), {
         identity,
         operation: startOperation,
-        target: { continuationToken: "continuation_child", kind: "agent/local" },
+        target: { continuationToken: "continuation_child", kind: "agent/self" },
       }),
     ).toThrow(identity.id);
+  });
+
+  it("adopts an identical committed starting claim on replay", () => {
+    const prepared = preparedSession();
+    expect(
+      prepareAgentStart(prepared, {
+        identity,
+        operation: startOperation,
+        target: { continuationToken: "continuation_child", kind: "agent/local" },
+      }),
+    ).toBe(prepared);
   });
 });
 

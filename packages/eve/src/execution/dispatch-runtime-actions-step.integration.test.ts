@@ -27,12 +27,14 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 
 const mocks = vi.hoisted(() => ({
   continueRemoteAgentSession: vi.fn(),
+  assertExactRecoveryWorkflowCapabilities: vi.fn(),
   createDurableSessionState: vi.fn(),
   deserializeContext: vi.fn(),
   dispatchSession: vi.fn(),
   hydrateDurableSession: vi.fn(),
   readDurableSession: vi.fn(),
   createSession: vi.fn(),
+  publishPublicEvent: vi.fn(),
   startRemoteAgentSession: vi.fn(),
 }));
 
@@ -51,11 +53,18 @@ vi.mock("#execution/session.js", () => ({
 }));
 
 vi.mock("#execution/workflow-runtime.js", () => ({
+  assertExactRecoveryWorkflowCapabilities: mocks.assertExactRecoveryWorkflowCapabilities,
   createWorkflowRuntime: () => ({
     createSession: mocks.createSession,
     dispatchSession: mocks.dispatchSession,
   }),
   workflowEntryReference: { workflowId: "workflow//eve//workflowEntry" },
+}));
+
+vi.mock("#execution/keyed-public-event-publisher.js", () => ({
+  createKeyedPublicEventPublisher: () => ({
+    publish: mocks.publishPublicEvent,
+  }),
 }));
 
 // Only the network calls are mocked; error classification and registry
@@ -133,6 +142,11 @@ beforeEach(() => {
   mocks.startRemoteAgentSession.mockResolvedValue({
     sessionId: "remote-session-123456789012",
   });
+  mocks.assertExactRecoveryWorkflowCapabilities.mockResolvedValue(undefined);
+  mocks.publishPublicEvent.mockImplementation(async (event) => ({
+    event: { ...event, meta: { at: "2026-08-14T00:00:00.000Z", id: "event-1" } },
+    inserted: true,
+  }));
   mocks.hydrateDurableSession.mockImplementation(({ durable }) => durable);
   mocks.createDurableSessionState.mockImplementation(({ session }) => ({
     ...BASE_STATE,
@@ -187,7 +201,8 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         },
       ],
     });
-    expect(writes).toHaveLength(1);
+    expect(writes).toHaveLength(0);
+    expect(mocks.publishPublicEvent).toHaveBeenCalledTimes(1);
   });
 
   it("uses the active session turn when pending batch metadata has an empty turn id", async () => {
@@ -304,6 +319,30 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         }),
       ],
     });
+  });
+
+  it("fails an exact-recovery remote start before remote resolution or effect", async () => {
+    const session = createStartSession({ kind: "remote" });
+    installContext(
+      session,
+      { definition: REMOTE_REGISTRY_DEFINITION, nodeId: "remote/research" },
+      { exactRecovery: true },
+    );
+
+    const result = await dispatchRuntimeActionsStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(result.results[0]).toMatchObject({
+      isError: true,
+      output: { code: "REMOTE_AGENT_START_FAILED" },
+    });
+    expect(mocks.startRemoteAgentSession).not.toHaveBeenCalled();
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toBeUndefined();
   });
 
   it("rejects the prepared handle when the remote start fails", async () => {
@@ -443,6 +482,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
           outputSchema: undefined,
         },
       },
+      idempotencyKey: `eve-continuation/v1/${continueOperationId}`,
       sessionId: CHILD_SESSION_ID,
     });
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
@@ -461,7 +501,8 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
         },
       ],
     });
-    expect(writes).toHaveLength(1);
+    expect(writes).toHaveLength(0);
+    expect(mocks.publishPublicEvent).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -657,6 +698,34 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
     });
   });
 
+  it("fails an exact-recovery remote continuation before remote resolution or effect", async () => {
+    const session = createPendingSession({
+      handle: REMOTE_PARKED_HANDLE,
+      agentId: REMOTE_PARKED_HANDLE.identity.id,
+    });
+    installContext(
+      session,
+      { definition: REMOTE_REGISTRY_DEFINITION, nodeId: REMOTE_PARKED_HANDLE.identity.nodeId },
+      { exactRecovery: true },
+    );
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(result.results[0]).toMatchObject({
+      isError: true,
+      output: { code: "AGENT_UNREACHABLE" },
+    });
+    expect(mocks.continueRemoteAgentSession).not.toHaveBeenCalled();
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
+      handles: [REMOTE_PARKED_HANDLE],
+    });
+  });
+
   it("surfaces a transient remote continue failure without retrying and restores the parked handle", async () => {
     const session = createPendingSession({
       handle: REMOTE_PARKED_HANDLE,
@@ -808,6 +877,7 @@ function createPendingSession(input: {
 function installContext(
   session: HarnessSession,
   remote?: { readonly definition: unknown; readonly nodeId: string },
+  capabilities?: { readonly exactRecovery: true },
 ): void {
   const subagentsByNodeId = new Map<string, { definition: unknown }>();
   if (remote !== undefined) {
@@ -829,7 +899,7 @@ function installContext(
   const values = new Map<unknown, unknown>([
     [AuthKey, null],
     [BundleKey, bundle],
-    [CapabilitiesKey, undefined],
+    [CapabilitiesKey, capabilities],
     [ChannelInstrumentationKey, undefined],
     [InitiatorAuthKey, null],
     [ChannelKey, ADAPTER],

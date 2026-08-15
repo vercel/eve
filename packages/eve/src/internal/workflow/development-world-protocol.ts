@@ -1,5 +1,6 @@
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
+import type { WorkflowCopiedRuntimeIdentityV1 } from "#internal/workflow/copied-runtime-identity.js";
 
 export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = "/eve/v1/dev/internal/workflow-world";
 
@@ -32,11 +33,14 @@ export const DEVELOPMENT_WORKFLOW_DELIVERY_HEADER = "x-eve-dev-workflow-delivery
  * the worker, and `start`/`close` belong to the parent's lifecycle.
  */
 export const DEVELOPMENT_WORLD_OPERATIONS = [
+  "capabilities.get",
   "events.create",
   "events.get",
   "events.list",
   "events.listByCorrelationId",
   "hooks.get",
+  "hookResumes.drain",
+  "hookResumes.resumeOrAdopt",
   "hooks.getByToken",
   "hooks.list",
   "getDeploymentId",
@@ -45,6 +49,9 @@ export const DEVELOPMENT_WORLD_OPERATIONS = [
   "runs.experimentalSetAttributes",
   "runs.get",
   "runs.list",
+  "runStarts.drain",
+  "runStarts.finalizeOrAdoptRunStart",
+  "runStarts.reserveOrAdoptRunStart",
   "steps.get",
   "steps.list",
   "streams.close",
@@ -61,4 +68,13 @@ export type DevelopmentWorldOperation = (typeof DEVELOPMENT_WORLD_OPERATIONS)[nu
 export interface DevelopmentWorldCall {
   readonly arguments: readonly unknown[];
   readonly operation: DevelopmentWorldOperation;
+}
+
+export interface DevelopmentWorldCapabilitiesV1 {
+  readonly hookResumeDedup: boolean;
+  readonly idempotentHookResumeVersion: 1 | undefined;
+  readonly idempotentRunStartVersion: 1 | undefined;
+  readonly keyedStreamAppendVersion: 1 | undefined;
+  readonly version: 1;
+  readonly workflowCopiedRuntimeIdentity: WorkflowCopiedRuntimeIdentityV1 | undefined;
 }

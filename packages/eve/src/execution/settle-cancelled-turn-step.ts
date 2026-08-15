@@ -1,5 +1,5 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler } from "#channel/adapter.js";
+import { callAdapterEventHandler, normalizeAdapterEvent } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -92,10 +92,10 @@ export async function settleCancelledTurnStep(input: {
     try {
       const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
         const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-          const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-          setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-          const emitted = await publisher.publish(transformed);
+          const emitted = await publisher.publish(normalizeAdapterEvent(event, adapterCtx));
           if (!emitted.inserted) return;
+          await callAdapterEventHandler(adapter, emitted.event, adapterCtx);
+          setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
           await dispatchStreamEventHooks({
             ctx,
             event: emitted.event,

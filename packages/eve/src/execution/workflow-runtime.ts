@@ -30,6 +30,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import {
   getHookByToken,
   getRun,
+  getWorld,
   resumeHook,
   start,
   type Run,
@@ -122,6 +123,9 @@ export function createWorkflowRuntime(config: {
 }): Runtime {
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
+      if (input.capabilities?.exactRecovery === true) {
+        await assertExactRecoveryWorkflowCapabilities();
+      }
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
@@ -166,6 +170,7 @@ export function createWorkflowRuntime(config: {
         run = await startWorkflowPreferLatest(workflowEntryReference, [workflowInput], {
           allowReservedAttributes: true,
           attributes: normalizeEveAttributes(attributes),
+          ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
         });
       } catch (error) {
         logError(log, "failed to start workflow run", error, {
@@ -203,13 +208,17 @@ export function createWorkflowRuntime(config: {
     async dispatchContinuation<TCommand extends SessionCommand>(
       input: DispatchContinuationInput<TCommand>,
     ): Promise<SessionCommandResult<TCommand>> {
-      return await dispatchWorkflowCommand(input.continuationToken, input.command);
+      return await dispatchWorkflowCommand(input.continuationToken, input.command, input.idempotencyKey);
     },
 
     async dispatchSession<TCommand extends SessionCommand>(
       input: DispatchSessionInput<TCommand>,
     ): Promise<SessionCommandResult<TCommand>> {
-      return await dispatchWorkflowCommand(sessionCommandHookToken(input.sessionId), input.command);
+      return await dispatchWorkflowCommand(
+        sessionCommandHookToken(input.sessionId),
+        input.command,
+        input.idempotencyKey,
+      );
     },
 
     async getEventStream(
@@ -250,13 +259,58 @@ export function createWorkflowRuntime(config: {
   };
 }
 
+/**
+ * Admission gate for the synthetic exact-recovery path. The dev worker only
+ * exposes these fields after its live parent handshake; an absent or older
+ * backend must fail before a child start or continuation is attempted.
+ */
+export async function assertExactRecoveryWorkflowCapabilities(): Promise<void> {
+  const world = (await getWorld()) as {
+    capabilities?: {
+      idempotentHookResumeVersion?: 1;
+      idempotentRunStartVersion?: 1;
+    };
+    hookResumes?: unknown;
+    keyedStreamAppendVersion?: 1;
+    runStarts?: unknown;
+    workflowCopiedRuntimeIdentity?: unknown;
+  };
+  if (
+    world.capabilities?.idempotentRunStartVersion !== 1 ||
+    world.runStarts === undefined ||
+    world.capabilities?.idempotentHookResumeVersion !== 1 ||
+    world.hookResumes === undefined ||
+    world.keyedStreamAppendVersion !== 1 ||
+    world.workflowCopiedRuntimeIdentity === undefined
+  ) {
+    throw new Error(
+      "backend_unsupported: exact recovery requires local Workflow v1 start and continuation receipts",
+    );
+  }
+}
+
 async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   token: string,
   command: TCommand,
+  idempotencyKey?: string,
 ): Promise<SessionCommandResult<TCommand>> {
   let hook: WorkflowHookRecord;
   try {
-    hook = normalizeWorkflowHook(await resumeHook(token, sessionHookPayload(command)));
+    const payload = sessionHookPayload(command);
+    if (idempotencyKey !== undefined) {
+      const world = (await getWorld()) as {
+        capabilities?: { idempotentHookResumeVersion?: 1 };
+        hookResumes?: unknown;
+      };
+      if (world.capabilities?.idempotentHookResumeVersion !== 1 || world.hookResumes === undefined) {
+        throw new Error("backend_unsupported: caller-keyed hook resume requires v1 support");
+      }
+    }
+    hook = normalizeWorkflowHook(
+      idempotencyKey === undefined
+        ? await resumeHook(token, payload)
+        : await resumeHookWithIdempotencyKey(token, payload, idempotencyKey),
+    );
   } catch (error) {
     if (isInactiveCommandTarget(error)) {
       return inactiveCommandResult(command);
@@ -273,6 +327,20 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   }
 
   return activeCommandResult(command, hook.runId);
+}
+
+function resumeHookWithIdempotencyKey(
+  token: string,
+  payload: SessionCommand | DeliverHookPayload,
+  idempotencyKey: string,
+): ReturnType<typeof resumeHook> {
+  const exactResumeHook = resumeHook as unknown as (
+    token: string,
+    payload: SessionCommand | DeliverHookPayload,
+    encryptionKeyOverride: undefined,
+    options: { readonly idempotencyKey: string },
+  ) => ReturnType<typeof resumeHook>;
+  return exactResumeHook(token, payload, undefined, { idempotencyKey });
 }
 
 function sessionHookPayload(command: SessionCommand): SessionCommand | DeliverHookPayload {

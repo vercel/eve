@@ -29,17 +29,38 @@ import {
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
   DEVELOPMENT_WORLD_OPERATIONS,
+  type DevelopmentWorldCapabilitiesV1,
   type DevelopmentWorldCall,
   type DevelopmentWorldOperation,
 } from "#internal/workflow/development-world-protocol.js";
+import {
+  isWorkflowCopiedRuntimeIdentityV1,
+  readWorkflowCopiedRuntimeIdentity,
+  workflowCopiedRuntimeIdentitiesMatch,
+  type WorkflowCopiedRuntimeIdentityV1,
+} from "#internal/workflow/copied-runtime-identity.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
 
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 
-/** The keyed append v1 extension is supplied by Eve's linked Workflow core. */
-type KeyedDevelopmentWorld = Omit<World, "keyedStreamAppendVersion"> & {
-  readonly keyedStreamAppendVersion: 1;
+/** Versioned extensions are exposed only after the live parent attests them. */
+type KeyedDevelopmentWorld = World & {
+  capabilities?: World["capabilities"] & {
+    idempotentHookResumeVersion?: 1;
+    idempotentRunStartVersion?: 1;
+  };
+  hookResumes?: {
+    drain(): Promise<void>;
+    resumeOrAdopt(request: unknown): Promise<unknown>;
+  };
+  keyedStreamAppendVersion?: 1;
+  workflowCopiedRuntimeIdentity?: WorkflowCopiedRuntimeIdentityV1;
+  runStarts?: {
+    drain(): Promise<void>;
+    finalizeOrAdoptRunStart(request: unknown): Promise<unknown>;
+    reserveOrAdoptRunStart(request: unknown): Promise<unknown>;
+  };
 };
 
 /**
@@ -94,8 +115,7 @@ async function call<T>(
 export function createDevelopmentWorkflowWorld(): KeyedDevelopmentWorld {
   const forwarded = buildForwardedOperations();
   const world: KeyedDevelopmentWorld = {
-    capabilities: { hookResumeDedup: true },
-    keyedStreamAppendVersion: 1 as const,
+    capabilities: {},
     specVersion: 5 as SpecVersion,
     processExitTriggersQueueRedelivery: false,
     async getDeploymentId() {
@@ -111,9 +131,11 @@ export function createDevelopmentWorkflowWorld(): KeyedDevelopmentWorld {
     queue: forwarded.topLevel.queue as World["queue"],
     createQueueHandler,
     runs: forwarded.groups.runs as World["runs"],
+    runStarts: forwarded.groups.runStarts as KeyedDevelopmentWorld["runStarts"],
     steps: forwarded.groups.steps as World["steps"],
     events: forwarded.groups.events as World["events"],
     hooks: forwarded.groups.hooks as World["hooks"],
+    hookResumes: forwarded.groups.hookResumes as KeyedDevelopmentWorld["hookResumes"],
     streams: {
       ...forwarded.groups.streams,
       // A live stream cannot ride the value codec; it flows through a
@@ -138,6 +160,63 @@ export function createDevelopmentWorkflowWorld(): KeyedDevelopmentWorld {
   } satisfies KeyedDevelopmentWorld;
 
   return world;
+}
+
+/** Applies only a live parent capability attestation to a worker World. */
+export async function negotiateDevelopmentWorkflowWorld(world: KeyedDevelopmentWorld): Promise<void> {
+  Object.assign(world, {
+    capabilities: {},
+    keyedStreamAppendVersion: undefined,
+    workflowCopiedRuntimeIdentity: undefined,
+  });
+  const capability = await call<unknown>("capabilities.get");
+  const localIdentity = await readWorkflowCopiedRuntimeIdentity();
+  if (
+    !isDevelopmentWorldCapabilitiesV1(capability) ||
+    !workflowCopiedRuntimeIdentitiesMatch(
+      localIdentity,
+      capability.workflowCopiedRuntimeIdentity,
+    )
+  ) {
+    return;
+  }
+  Object.assign(world, {
+    capabilities: {
+      ...(capability.hookResumeDedup ? { hookResumeDedup: true } : {}),
+      ...(capability.idempotentHookResumeVersion === 1
+        ? { idempotentHookResumeVersion: 1 as const }
+        : {}),
+      ...(capability.idempotentRunStartVersion === 1
+        ? { idempotentRunStartVersion: 1 as const }
+        : {}),
+    },
+  });
+  if (capability.keyedStreamAppendVersion === 1) {
+    Object.assign(world, {
+      keyedStreamAppendVersion: 1,
+      workflowCopiedRuntimeIdentity: localIdentity,
+    });
+  }
+}
+
+function isDevelopmentWorldCapabilitiesV1(value: unknown): value is DevelopmentWorldCapabilitiesV1 {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { version?: unknown }).version === 1 &&
+    typeof (value as { hookResumeDedup?: unknown }).hookResumeDedup === "boolean" &&
+    ((value as { idempotentHookResumeVersion?: unknown }).idempotentHookResumeVersion === 1 ||
+      (value as { idempotentHookResumeVersion?: unknown }).idempotentHookResumeVersion === undefined) &&
+    ((value as { idempotentRunStartVersion?: unknown }).idempotentRunStartVersion === 1 ||
+      (value as { idempotentRunStartVersion?: unknown }).idempotentRunStartVersion === undefined) &&
+    ((value as { keyedStreamAppendVersion?: unknown }).keyedStreamAppendVersion === 1 ||
+      (value as { keyedStreamAppendVersion?: unknown }).keyedStreamAppendVersion === undefined) &&
+    ((value as { workflowCopiedRuntimeIdentity?: unknown }).workflowCopiedRuntimeIdentity ===
+      undefined ||
+      isWorkflowCopiedRuntimeIdentityV1(
+        (value as { workflowCopiedRuntimeIdentity?: unknown }).workflowCopiedRuntimeIdentity,
+      ))
+  );
 }
 
 type ForwardedOperation = (...args: unknown[]) => Promise<unknown>;

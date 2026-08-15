@@ -190,10 +190,14 @@ export type SessionCommandResult<TCommand extends SessionCommand = SessionComman
 export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
   readonly command: TCommand;
   readonly continuationToken: string;
+  /** Stable internal operation key for an exact delegated continuation. */
+  readonly idempotencyKey?: string;
 }
 
 export interface DispatchSessionInput<TCommand extends SessionCommand = SessionCommand> {
   readonly command: TCommand;
+  /** Stable internal operation key for an exact delegated continuation. */
+  readonly idempotencyKey?: string;
   readonly sessionId: string;
 }
 
@@ -350,6 +354,13 @@ export interface SessionCapabilities {
    *    approvals and `ask_question` prompts the model has already emitted.
    */
   readonly requestInput?: boolean;
+  /**
+   * Internal admission for the synthetic exact-recovery path. This is never
+   * accepted from public channel input: callers that opt in require the
+   * locally negotiated Workflow v1 start and continuation receipts before a
+   * child effect is attempted. All ordinary sessions leave it unset.
+   */
+  readonly exactRecovery?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,6 +374,11 @@ export interface SessionCapabilities {
  */
 export interface RunInput {
   readonly adapter: ChannelAdapter<any>;
+  /**
+   * Stable internal operation key for a delegated local child start. Root
+   * sessions omit it and retain ordinary Workflow start behavior.
+   */
+  readonly idempotencyKey?: string;
   /**
    * Registered channel name for root sessions started from an authored
    * channel route. Framework runs omit this and use their framework

@@ -22,7 +22,9 @@ import {
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
   DEVELOPMENT_WORLD_OPERATIONS,
   type DevelopmentWorldCall,
+  type DevelopmentWorldCapabilitiesV1,
 } from "#internal/workflow/development-world-protocol.js";
+import { readWorkflowCopiedRuntimeIdentity } from "#internal/workflow/copied-runtime-identity.js";
 
 /**
  * The application's one local Workflow World, owned by the CLI parent.
@@ -226,6 +228,43 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     }
     if (call.operation === "queue") {
       return await this.#queue(...(args as Parameters<World["queue"]>));
+    }
+    if (call.operation === "capabilities.get") {
+      const keyed = this.#world as World & {
+        capabilities?: {
+          idempotentHookResumeVersion?: 1;
+          idempotentRunStartVersion?: 1;
+        };
+        hookResumes?: { resumeOrAdopt?: unknown };
+        keyedStreamAppendVersion?: 1;
+        runStarts?: {
+          drain?: unknown;
+          finalizeOrAdoptRunStart?: unknown;
+          reserveOrAdoptRunStart?: unknown;
+        };
+      };
+      return {
+        hookResumeDedup: this.#world.capabilities?.hookResumeDedup === true,
+        idempotentHookResumeVersion:
+          keyed.capabilities?.idempotentHookResumeVersion === 1 &&
+          typeof keyed.hookResumes?.resumeOrAdopt === "function"
+            ? 1
+            : undefined,
+        idempotentRunStartVersion:
+          keyed.capabilities?.idempotentRunStartVersion === 1 &&
+          typeof keyed.runStarts?.reserveOrAdoptRunStart === "function" &&
+          typeof keyed.runStarts?.finalizeOrAdoptRunStart === "function" &&
+          typeof keyed.runStarts?.drain === "function"
+            ? 1
+            : undefined,
+        keyedStreamAppendVersion:
+          keyed.keyedStreamAppendVersion === 1 &&
+          typeof (this.#world.streams as { appendKeyed?: unknown }).appendKeyed === "function"
+            ? 1
+            : undefined,
+        version: 1,
+        workflowCopiedRuntimeIdentity: await readWorkflowCopiedRuntimeIdentity(),
+      } satisfies DevelopmentWorldCapabilitiesV1;
     }
     if (call.operation === "streams.writeMulti" && this.#world.streams.writeMulti === undefined) {
       for (const chunk of args[2] as readonly (string | Uint8Array)[]) {

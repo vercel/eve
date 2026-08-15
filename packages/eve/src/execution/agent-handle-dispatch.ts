@@ -12,6 +12,7 @@ import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#harness/agent-ha
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import type { AgentAddress, AgentHandle, ContinueOperation } from "#harness/handles/store.js";
 import { prepareAgentContinuation, rejectAgentEffect } from "#harness/handles/transitions.js";
+import { getAgentHandleStore } from "#harness/handles/store.js";
 import type {
   RuntimeActionRequest,
   RuntimeRemoteAgentCallActionRequest,
@@ -27,7 +28,10 @@ import {
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { hydrateDurableSession } from "#execution/session.js";
 import { normalizeRequestedOutputSchema } from "#execution/subagent-invocation.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import {
+  assertExactRecoveryWorkflowCapabilities,
+  createWorkflowRuntime,
+} from "#execution/workflow-runtime.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
@@ -91,12 +95,47 @@ export async function dispatchToAgentHandle(input: {
   readonly agentId: string;
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
+  readonly exactRecovery: boolean;
   readonly parentToken: string;
   readonly parentTurnId: string;
 }): Promise<DispatchOutcome> {
   const { action, agentId, bundle } = input;
   const invokedName =
     action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
+  const existing = getAgentHandleStore(input.currentSession.state)?.handles.find(
+    (handle) => handle.identity.id === agentId,
+  );
+  if (
+    input.exactRecovery &&
+    existing?.identity.name === invokedName &&
+    existing?.phase !== "starting" &&
+    existing.address.kind === "agent/remote"
+  ) {
+    return {
+      kind: "error",
+      result: createAgentErrorResult({
+        action,
+        code: AGENT_UNREACHABLE,
+        message: `Agent "${invokedName}" cannot continue through a remote backend in exact recovery mode.`,
+      }),
+      session: input.currentSession,
+    };
+  }
+  if (input.exactRecovery && existing?.identity.name === invokedName) {
+    try {
+      await assertExactRecoveryWorkflowCapabilities();
+    } catch (error) {
+      return {
+        kind: "error",
+        result: createAgentErrorResult({
+          action,
+          code: AGENT_UNREACHABLE,
+          message: `Agent "${invokedName}" cannot continue because exact recovery is unavailable.`,
+        }),
+        session: input.currentSession,
+      };
+    }
+  }
   const operation: ContinueOperation = {
     callId: action.callId,
     id: deriveAgentOperationId({
@@ -168,6 +207,7 @@ export async function dispatchToAgentHandle(input: {
     action,
     bundle,
     handle,
+    idempotencyKey: `eve-continuation/v1/${operation.id}`,
     parentToken: input.parentToken,
   });
   if (!delivery.ok) {
@@ -222,6 +262,7 @@ async function deliverToAgentHandle(input: {
   readonly action: RuntimeAgentHandleAction;
   readonly bundle: CompiledBundle;
   readonly handle: Extract<AgentHandle, { phase: "running" }>;
+  readonly idempotencyKey: string;
   readonly parentToken: string;
 }): Promise<Result<void, { readonly cause: unknown; readonly permanent: boolean }>> {
   const { action, bundle, handle } = input;
@@ -283,6 +324,7 @@ async function deliverToAgentHandle(input: {
           outputSchema: normalizeRequestedOutputSchema(action.input.outputSchema),
         },
       },
+      idempotencyKey: input.idempotencyKey,
       sessionId: address.sessionId,
     });
     if (result.status === "session_not_active") {

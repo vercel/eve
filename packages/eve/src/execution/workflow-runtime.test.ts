@@ -350,6 +350,78 @@ describe("createWorkflowRuntime#createSession", () => {
     );
   });
 
+  it("passes a stable continuation key to Workflow", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "session-1" });
+    getWorldMock.mockResolvedValue({
+      capabilities: { idempotentHookResumeVersion: 1 },
+      hookResumes: {},
+    });
+
+    await buildRuntime({} as RuntimeCompiledArtifactsSource).dispatchSession({
+      command: { kind: "clear" },
+      idempotencyKey: "eve-continuation/v1/op_1",
+      sessionId: "session-1",
+    });
+
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      sessionCommandHookToken("session-1"),
+      { kind: "clear" },
+      undefined,
+      { idempotencyKey: "eve-continuation/v1/op_1" },
+    );
+  });
+
+  it("rejects keyed continuation before delivery when the backend is unsupported", async () => {
+    getWorldMock.mockResolvedValue({ capabilities: {} });
+
+    await expect(
+      buildRuntime({} as RuntimeCompiledArtifactsSource).dispatchSession({
+        command: { kind: "clear" },
+        idempotencyKey: "eve-continuation/v1/op_1",
+        sessionId: "session-1",
+      }),
+    ).rejects.toThrow("backend_unsupported");
+
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("passes a stable local child start key to Workflow", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      adapter,
+      auth: null,
+      idempotencyKey: "eve-child-start/v1/op_1",
+      input: { message: "hello" },
+      mode: "task",
+    });
+
+    expect(startMock.mock.calls[0]?.[2]).toMatchObject({
+      idempotencyKey: "eve-child-start/v1/op_1",
+    });
+  });
+
+  it("rejects an exact-recovery child start before Workflow when v1 receipts are absent", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    getWorldMock.mockResolvedValue({ capabilities: { idempotentRunStartVersion: 1 }, runStarts: {} });
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        capabilities: { exactRecovery: true },
+        idempotencyKey: "eve-child-start/v1/op_1",
+        input: { message: "hello" },
+        mode: "task",
+      }),
+    ).rejects.toThrow("backend_unsupported");
+
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
   it("uses an explicit title without changing the workflow model input", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);

@@ -418,7 +418,7 @@ export async function runVendor({ packageRoot, compiledRoot, modules, scriptFile
 
   const desiredStamp = await computeStamp({ scriptFiles, modules, packageRoot });
 
-  if (stampMatches(desiredStamp, await readExistingStamp(stampPath))) {
+  if (await stampMatches(desiredStamp, await readExistingStamp(stampPath), compiledRoot)) {
     console.log("Compiled vendor modules are already up to date.");
     return;
   }
@@ -426,7 +426,7 @@ export async function runVendor({ packageRoot, compiledRoot, modules, scriptFile
   await acquireLock(lockPath);
   try {
     // A peer process may have completed while we waited for the lock.
-    if (stampMatches(desiredStamp, await readExistingStamp(stampPath))) {
+    if (await stampMatches(desiredStamp, await readExistingStamp(stampPath), compiledRoot)) {
       console.log("Compiled vendor modules are already up to date.");
       return;
     }
@@ -441,7 +441,16 @@ export async function runVendor({ packageRoot, compiledRoot, modules, scriptFile
       await writeTypeOnlyModule({ module, compiledRoot, packageRoot });
     }
 
-    await writeFile(stampPath, `${JSON.stringify(desiredStamp, null, 2)}\n`, "utf8");
+    await writeWorkflowCoreIdentity({ compiledRoot, desiredStamp, modules, packageRoot });
+    await writeFile(
+      stampPath,
+      `${JSON.stringify(
+        { ...desiredStamp, generatedOutputDigest: await digestTree(compiledRoot, [".vendor-lock", ".vendor-stamp.json"]) },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
 
     const compiledPaths = modules
       .map((module) => relative(packageRoot, join(compiledRoot, module.compiledPath)))
@@ -790,7 +799,7 @@ async function writeTypeOnlyModule({ module, compiledRoot, packageRoot }) {
 
 /**
  * Stable fingerprint of every input that drives the vendored output:
- * resolved package versions plus the content of every file in `scriptFiles`.
+ * resolved package bytes plus the content of every file in `scriptFiles`.
  * When the fingerprint matches the previously recorded stamp the work is
  * a no-op, which makes `build:compiled` safe to invoke concurrently from
  * sibling Turbo tasks without racing on shared destination directories.
@@ -808,13 +817,19 @@ async function computeStamp({ scriptFiles, modules, packageRoot }) {
   }
 
   const moduleVersions = {};
+  const moduleInputDigests = {};
   for (const module of modules) {
-    const { packageJson } = await findPackageJson(module.packageName, packageRoot);
+    const { packageJson, packageRoot: resolvedPackageRoot } = await findPackageJson(
+      module.packageName,
+      packageRoot,
+    );
     moduleVersions[module.packageName] = packageJson.version ?? "0.0.0";
+    moduleInputDigests[module.packageName] = await digestTree(resolvedPackageRoot);
   }
 
   return {
     moduleVersions,
+    moduleInputDigests,
     scriptHash: scriptHash.digest("hex"),
   };
 }
@@ -827,9 +842,54 @@ async function readExistingStamp(stampPath) {
   }
 }
 
-function stampMatches(a, b) {
+async function stampMatches(a, b, compiledRoot) {
   if (a === null || b === null) return false;
-  return JSON.stringify(a) === JSON.stringify(b);
+  const { generatedOutputDigest, ...recordedInputs } = b;
+  return (
+    typeof generatedOutputDigest === "string" &&
+    JSON.stringify(a) === JSON.stringify(recordedInputs) &&
+    generatedOutputDigest ===
+      (await digestTree(compiledRoot, [".vendor-lock", ".vendor-stamp.json"]))
+  );
+}
+
+async function writeWorkflowCoreIdentity({ compiledRoot, desiredStamp, modules, packageRoot }) {
+  const core = modules.find((module) => module.packageName === "@workflow/core");
+  if (core === undefined) return;
+  const { packageJson } = await findPackageJson(core.packageName, packageRoot);
+  const destinationRoot = join(compiledRoot, core.compiledPath);
+  const outputFile = ".eve-copied-runtime-identity.json";
+  const identity = {
+    codecContract: "workflow-public-codec-v1",
+    emittedDigest: await digestTree(destinationRoot, [outputFile]),
+    inputDigest: desiredStamp.moduleInputDigests[core.packageName],
+    packageVersion: packageJson.version ?? "0.0.0",
+    version: 1,
+  };
+  await writeFile(join(destinationRoot, outputFile), `${JSON.stringify(identity, null, 2)}\n`, "utf8");
+}
+
+async function digestTree(root, excludedNames = []) {
+  const hash = createHash("sha256");
+  const excluded = new Set(excludedNames);
+  const visit = async (current) => {
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (excluded.has(entry.name)) continue;
+      const fullPath = join(current, entry.name);
+      const relativePath = relative(root, fullPath).replaceAll("\\", "/");
+      if (entry.isDirectory()) {
+        hash.update(`d:${relativePath}\0`);
+        await visit(fullPath);
+      } else if (entry.isFile()) {
+        hash.update(`f:${relativePath}\0`);
+        hash.update(await readFile(fullPath));
+        hash.update("\0");
+      }
+    }
+  };
+  await visit(root);
+  return hash.digest("hex");
 }
 
 /**

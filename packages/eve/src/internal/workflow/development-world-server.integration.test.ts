@@ -11,7 +11,10 @@ import {
   decodeDevelopmentWorldValue,
   encodeDevelopmentWorldValue,
 } from "#internal/workflow/development-world-codec.js";
-import { createDevelopmentWorkflowWorld } from "#internal/workflow/development-world-client.js";
+import {
+  createDevelopmentWorkflowWorld,
+  negotiateDevelopmentWorkflowWorld,
+} from "#internal/workflow/development-world-client.js";
 import {
   createParentDevelopmentWorkflowWorld,
   type ParentDevelopmentWorkflowWorld,
@@ -52,8 +55,12 @@ describe("parent development Workflow World", () => {
 
     try {
       const worker = createDevelopmentWorkflowWorld();
+      expect(worker.keyedStreamAppendVersion).toBeUndefined();
+      await negotiateDevelopmentWorkflowWorld(worker);
       expect(worker.keyedStreamAppendVersion).toBe(1);
-      const appendKeyed = worker.streams.appendKeyed;
+      const appendKeyed = (
+        worker.streams as typeof worker.streams & { appendKeyed?: (...args: any[]) => Promise<any> }
+      ).appendKeyed;
       if (appendKeyed === undefined) throw new Error("Expected keyed stream append v1.");
       const first = await appendKeyed(RUN_ID, "events", {
         chunk: new Uint8Array([1]),
@@ -79,7 +86,76 @@ describe("parent development Workflow World", () => {
     connectWorkerToWorld(world, appRoot);
 
     try {
-      expect(createDevelopmentWorkflowWorld().capabilities?.hookResumeDedup).toBe(true);
+      const worker = createDevelopmentWorkflowWorld();
+      expect(worker.capabilities?.hookResumeDedup).toBeUndefined();
+      await negotiateDevelopmentWorkflowWorld(worker);
+      expect(worker.capabilities?.hookResumeDedup).toBe(true);
+    } finally {
+      await world.close();
+    }
+  });
+
+  it("attests all three exact-recovery capabilities only from the live local parent", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-exact-recovery-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+
+    try {
+      const worker = createDevelopmentWorkflowWorld();
+      await negotiateDevelopmentWorkflowWorld(worker);
+
+      expect(worker.capabilities).toMatchObject({
+        idempotentHookResumeVersion: 1,
+        idempotentRunStartVersion: 1,
+      });
+      expect(worker.hookResumes).toBeDefined();
+      expect(worker.keyedStreamAppendVersion).toBe(1);
+      expect(worker.runStarts).toBeDefined();
+      expect(
+        (worker as typeof worker & { workflowCopiedRuntimeIdentity?: unknown })
+          .workflowCopiedRuntimeIdentity,
+      ).toMatchObject({ codecContract: "workflow-public-codec-v1", version: 1 });
+    } finally {
+      await world.close();
+    }
+  });
+
+  it("fails closed when the parent and worker copied-runtime identities differ", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-identity-mismatch-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+    const connectedFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const response = await connectedFetch(input, init);
+      const request = new Request(input, init);
+      if (request.url !== `http://eve-dev.local${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}`) {
+        return response;
+      }
+      const value = decodeDevelopmentWorldValue(await response.text()) as {
+        readonly workflowCopiedRuntimeIdentity?: { readonly inputDigest?: string };
+      };
+      if (value.workflowCopiedRuntimeIdentity === undefined) return response;
+      return new Response(
+        encodeDevelopmentWorldValue({
+          ...value,
+          workflowCopiedRuntimeIdentity: {
+            ...value.workflowCopiedRuntimeIdentity,
+            inputDigest: "0".repeat(64),
+          },
+        }),
+      );
+    }) as typeof fetch;
+
+    try {
+      const worker = createDevelopmentWorkflowWorld();
+      await negotiateDevelopmentWorkflowWorld(worker);
+
+      expect(worker.capabilities).toEqual({});
+      expect(worker.keyedStreamAppendVersion).toBeUndefined();
+      expect(
+        (worker as typeof worker & { workflowCopiedRuntimeIdentity?: unknown })
+          .workflowCopiedRuntimeIdentity,
+      ).toBeUndefined();
     } finally {
       await world.close();
     }

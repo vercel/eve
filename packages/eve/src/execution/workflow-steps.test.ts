@@ -635,6 +635,7 @@ describe("dispatchRuntimeActionsStep", () => {
           "$eve.type": "subagent",
         }),
         deploymentId: "latest",
+        idempotencyKey: expect.stringMatching(/^eve-child-start\/v1\/[a-f0-9]{64}$/),
       },
     );
     expect(startMock).toHaveBeenCalledWith(
@@ -2338,6 +2339,43 @@ describe("runProxySubagentEventStep", () => {
     // stop draining the stream and prompt the user for HITL input.
     const writes = workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? [];
     expect(writes).toHaveLength(3);
+  });
+
+  it("does not redeliver a proxied adapter effect after keyed commit-response loss", async () => {
+    const deliveries: unknown[] = [];
+    const adapter: ChannelAdapter = {
+      kind: "thread-context",
+      async "input.requested"(data) {
+        deliveries.push(data);
+      },
+    };
+    const session = createStubSession({
+      continuationToken: "http:proxy-test",
+      sessionId: "parent-session",
+    });
+    const sessionState = createStubSessionState({
+      sessionId: "parent-session",
+      continuationToken: "http:proxy-test",
+    });
+    installSessionStoreMocks([session, session]);
+    let appendCount = 0;
+    appendKeyedStreamChunk.mockImplementation(async (_runId, _name, request) => ({
+      canonicalChunk: request.chunk,
+      index: appendCount++,
+      inserted: appendCount <= 3,
+    }));
+    const input = {
+      hookPayload: buildHookPayload(),
+      parentWritable: createTestWritable(),
+      serializedContext: buildSerializedContextForAdapter(adapter),
+      sessionState,
+    };
+
+    await runProxySubagentEventStep(input);
+    await runProxySubagentEventStep(input);
+
+    expect(deliveries).toHaveLength(1);
+    expect(appendKeyedStreamChunk).toHaveBeenCalledTimes(6);
   });
 
   it("re-stamps the returned session when the input.requested handler re-keys", async () => {

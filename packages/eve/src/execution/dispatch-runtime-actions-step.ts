@@ -5,7 +5,8 @@
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler } from "#channel/adapter.js";
+import { callAdapterEventHandler, normalizeAdapterEvent } from "#channel/adapter.js";
+import type { RunInput } from "#channel/types.js";
 import {
   AuthKey,
   CapabilitiesKey,
@@ -66,7 +67,11 @@ import {
 import { mintStartOperation } from "#execution/dispatch-start-operation.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
-import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
+import {
+  assertExactRecoveryWorkflowCapabilities,
+  createWorkflowRuntime,
+  workflowEntryReference,
+} from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
@@ -204,6 +209,7 @@ export async function dispatchRuntimeActionsStep(input: {
               dynamicRemoteAgent: entry.dynamicRemoteAgent,
             }),
             currentSession: nextSession,
+            exactRecovery: capabilities?.exactRecovery === true,
             parentToken: input.parentContinuationToken ?? session.continuationToken,
             parentTurnId,
           });
@@ -238,9 +244,9 @@ export async function dispatchRuntimeActionsStep(input: {
       // escape the loop, because a durable-step retry would re-dispatch the
       // children that already started.
       try {
-        const parentEvent = await callAdapterEventHandler(
-          adapter,
-          createSubagentCalledEvent({
+        const emitted = await publisher.publish(
+          normalizeAdapterEvent(
+            createSubagentCalledEvent({
             callId: outcome.callId,
             childSessionId: outcome.address.sessionId,
             name: outcome.name,
@@ -251,10 +257,13 @@ export async function dispatchRuntimeActionsStep(input: {
             toolName: outcome.toolName,
             turnId: parentTurnId,
             workflowId: workflowEntryReference.workflowId,
-          }),
-          adapterCtx,
+            }),
+            adapterCtx,
+          ),
         );
-        await publisher.publish(parentEvent);
+        if (emitted.inserted) {
+          await callAdapterEventHandler(adapter, emitted.event, adapterCtx);
+        }
       } catch (error) {
         logError(log, "subagent.called emission failed", error, {
           callId: outcome.callId,
@@ -456,6 +465,7 @@ async function startSubagent(input: {
         dynamicSubagentAgentConfig: input.target.dynamicSubagentAgentConfig,
         fanoutSize: input.fanoutSize,
         initiatorAuth: input.initiatorAuth,
+        exactRecovery: input.capabilities?.exactRecovery === true,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext: input.parentTraceContext,
         persistentSessions: input.persistentSessions,
@@ -471,6 +481,7 @@ async function startSubagent(input: {
         callbackBaseUrl: input.callbackBaseUrl,
         currentSession: input.currentSession,
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
+        exactRecovery: input.capabilities?.exactRecovery === true,
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         persistentSessions: input.persistentSessions,
@@ -492,6 +503,7 @@ async function startLocalSubagent(input: {
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
   readonly currentSession: RuntimeSession;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
+  readonly exactRecovery: boolean;
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
@@ -501,11 +513,27 @@ async function startLocalSubagent(input: {
   readonly source: SubagentInputSource;
 }): Promise<DispatchOutcome> {
   const { action, source } = input;
-  const childRuntime = createWorkflowRuntime({
-    compiledArtifactsSource: input.bundle.compiledArtifactsSource,
-    dynamicSubagentAgentConfig: input.dynamicSubagentAgentConfig,
-    nodeId: action.nodeId,
-  });
+  if (input.exactRecovery) {
+    try {
+      await assertExactRecoveryWorkflowCapabilities();
+    } catch (error) {
+      return {
+        kind: "error",
+        result: {
+          callId: action.callId,
+          isError: true,
+          kind: "subagent-result",
+          origin: "dispatch",
+          output: {
+            code: SUBAGENT_START_FAILED,
+            message: toErrorMessage(error),
+          },
+          subagentName: action.subagentName,
+        },
+        session: input.currentSession,
+      };
+    }
+  }
   const { childContinuationToken, runInput } = buildSubagentRunInput({
     action,
     auth: input.auth,
@@ -529,12 +557,24 @@ async function startLocalSubagent(input: {
     parentSessionId: input.session.sessionId,
     parentTurnId: input.batchEvent.turnId,
   });
-  // Ownership is recorded before the start side effect, and the prepared
-  // (or rejected) store rides every outcome into the step result. The
-  // guarantee is intra-step: a crash between the accepted start and the
-  // step-result commit still replays the whole dispatch step, so the
-  // orphan window shrinks to that boundary rather than disappearing.
-  const preparedSession = prepareAgentStart(input.currentSession, {
+  const existing = getAgentHandleStore(input.currentSession.state)?.handles.find(
+    (handle) =>
+      handle.phase !== "parked" &&
+      handle.identity.id === identity.id &&
+      handle.operation.id === operation.id,
+  );
+  if (existing?.phase === "running") {
+    return {
+      address: existing.address,
+      callId: action.callId,
+      kind: "called",
+      name: action.name,
+      session: input.currentSession,
+      toolName: action.subagentName,
+    };
+  }
+  const preparedSession = await commitLocalSubagentStart({
+    currentSession: input.currentSession,
     identity,
     operation,
     target: { continuationToken: childContinuationToken, kind: targetKind },
@@ -542,8 +582,13 @@ async function startLocalSubagent(input: {
 
   let childSessionId: string;
   try {
-    const handle = await childRuntime.createSession(runInput);
-    childSessionId = handle.sessionId;
+    childSessionId = await createLocalSubagentSession({
+      compiledArtifactsSource: input.bundle.compiledArtifactsSource,
+      dynamicSubagentAgentConfig: input.dynamicSubagentAgentConfig,
+      nodeId: action.nodeId,
+      operationId: operation.id,
+      runInput,
+    });
   } catch (error) {
     logError(log, "local subagent start failed", error, {
       callId: action.callId,
@@ -563,10 +608,7 @@ async function startLocalSubagent(input: {
         },
         subagentName: action.subagentName,
       },
-      session: rejectAgentEffect(preparedSession, {
-        disposition: "dead",
-        operationId: operation.id,
-      }),
+      session: await rejectLocalSubagentStart({ preparedSession, operationId: operation.id }),
     };
   }
 
@@ -580,12 +622,61 @@ async function startLocalSubagent(input: {
     callId: action.callId,
     kind: "called",
     name: action.name,
-    session: confirmAgentStarted(preparedSession, {
-      address,
-      operationId: operation.id,
-    }),
+    session: await confirmLocalSubagentStart({ address, preparedSession, operationId: operation.id }),
     toolName: action.subagentName,
   };
+}
+
+/** Commits the durable local child claim before any Workflow start effect. */
+async function commitLocalSubagentStart(input: {
+  readonly currentSession: RuntimeSession;
+  readonly identity: Parameters<typeof prepareAgentStart>[1]["identity"];
+  readonly operation: Parameters<typeof prepareAgentStart>[1]["operation"];
+  readonly target: Parameters<typeof prepareAgentStart>[1]["target"];
+}): Promise<RuntimeSession> {
+  "use step";
+  return prepareAgentStart(input.currentSession, input);
+}
+
+/** Executes the already-claimed local child start through Workflow's receipt. */
+async function createLocalSubagentSession(input: {
+  readonly compiledArtifactsSource: CompiledBundle["compiledArtifactsSource"];
+  readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
+  readonly nodeId: string;
+  readonly operationId: string;
+  readonly runInput: RunInput;
+}): Promise<string> {
+  "use step";
+  const handle = await createWorkflowRuntime({
+    compiledArtifactsSource: input.compiledArtifactsSource,
+    dynamicSubagentAgentConfig: input.dynamicSubagentAgentConfig,
+    nodeId: input.nodeId,
+  }).createSession({
+    ...input.runInput,
+    idempotencyKey: `eve-child-start/v1/${input.operationId}`,
+  });
+  return handle.sessionId;
+}
+
+/** Records the canonical Workflow address after start/adoption completes. */
+async function confirmLocalSubagentStart(input: {
+  readonly address: Parameters<typeof confirmAgentStarted>[1]["address"];
+  readonly operationId: string;
+  readonly preparedSession: RuntimeSession;
+}): Promise<RuntimeSession> {
+  "use step";
+  return confirmAgentStarted(input.preparedSession, input);
+}
+
+async function rejectLocalSubagentStart(input: {
+  readonly operationId: string;
+  readonly preparedSession: RuntimeSession;
+}): Promise<RuntimeSession> {
+  "use step";
+  return rejectAgentEffect(input.preparedSession, {
+    disposition: "dead",
+    operationId: input.operationId,
+  });
 }
 
 async function startRemoteSubagent(input: {
@@ -596,12 +687,24 @@ async function startRemoteSubagent(input: {
   readonly callbackBaseUrl: string | undefined;
   readonly currentSession: RuntimeSession;
   readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
+  readonly exactRecovery: boolean;
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly persistentSessions: boolean;
   readonly session: RuntimeSession;
 }): Promise<DispatchOutcome> {
   const { action } = input;
+
+  if (input.exactRecovery) {
+    const error = new Error(
+      "backend_unsupported: exact recovery only supports locally negotiated Workflow receipts",
+    );
+    return {
+      kind: "error",
+      result: createRemoteAgentStartFailureResult({ action, error }),
+      session: input.currentSession,
+    };
+  }
 
   // Preflight resolution failures happen before ownership exists, so they
   // reject without touching the handle store.

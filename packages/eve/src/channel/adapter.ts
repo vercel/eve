@@ -232,7 +232,7 @@ export async function callAdapterEventHandler(
   event: UnstampedMessageStreamEvent,
   ctx: ChannelAdapterContext,
 ): Promise<UnstampedMessageStreamEvent> {
-  const eventForHandler = withWaitingContinuationToken(event, ctx);
+  const eventForHandler = normalizeAdapterEvent(event, ctx);
   const handler = adapter[event.type] as
     | ((data: unknown, ctx: ChannelAdapterContext) => void | Promise<void>)
     | undefined;
@@ -249,7 +249,15 @@ export async function callAdapterEventHandler(
     }
   }
 
-  return withWaitingContinuationToken(eventForHandler, ctx);
+  return eventForHandler;
+}
+
+/** Prepares an event for its keyed receipt without delivering it externally. */
+export function normalizeAdapterEvent(
+  event: UnstampedMessageStreamEvent,
+  ctx: ChannelAdapterContext,
+): UnstampedMessageStreamEvent {
+  return withWaitingContinuationToken(event, ctx);
 }
 
 function withWaitingContinuationToken(

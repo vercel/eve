@@ -1,5 +1,5 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler } from "#channel/adapter.js";
+import { callAdapterEventHandler, normalizeAdapterEvent } from "#channel/adapter.js";
 import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
@@ -88,8 +88,9 @@ export async function emitProxiedSubagentEvent(input: {
     // A re-emitted child event is a distinct event on the parent stream, so it
     // gets its own id rather than the child's.
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-      const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-      await publisher.publish(transformed);
+      const emitted = await publisher.publish(normalizeAdapterEvent(event, adapterCtx));
+      if (!emitted.inserted) return;
+      await callAdapterEventHandler(adapter, emitted.event, adapterCtx);
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {

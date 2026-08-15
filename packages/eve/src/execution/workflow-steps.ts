@@ -1,5 +1,9 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
+import {
+  callAdapterEventHandler,
+  defaultDeliverResult,
+  normalizeAdapterEvent,
+} from "#channel/adapter.js";
 import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
@@ -319,9 +323,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     sessionId: initialSession.sessionId,
   });
   const emit = async (event: UnstampedMessageStreamEvent) => {
-    const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
+    const emitted = await publisher.publish(normalizeAdapterEvent(event, adapterCtx));
+    if (!emitted.inserted) return emitted;
+    await callAdapterEventHandler(adapter, emitted.event, adapterCtx);
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-    return publisher.publish(toEmit);
+    return emitted;
   };
 
   const handleEvent = async (
