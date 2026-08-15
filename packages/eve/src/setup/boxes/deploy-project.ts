@@ -13,6 +13,7 @@ import {
   type ProjectResolution,
 } from "../project-resolution.js";
 import { hasVercelProject, requireProjectPath, type SetupState } from "../state.js";
+import { VERCEL_ENV_PULL_TIMEOUT_MS } from "../run-vercel-link.js";
 import type { SetupBox } from "../step.js";
 import { syncHostFrameworkPreset } from "../vercel-project-framework.js";
 
@@ -203,9 +204,13 @@ export function deployProject(
         () =>
           deps.runVercel(["env", "pull", "--yes"], {
             cwd: projectPath,
-            nonInteractive: input.headless,
+            // `env pull --yes` never needs a prompt. Always detach its stdin:
+            // the CLI has been observed retaining an inherited terminal after
+            // writing .env.local, which otherwise leaves init stuck forever.
+            nonInteractive: true,
             onOutput,
             signal,
+            timeoutMs: VERCEL_ENV_PULL_TIMEOUT_MS,
           }),
       );
       signal?.throwIfAborted();

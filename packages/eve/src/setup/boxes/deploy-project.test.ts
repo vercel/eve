@@ -9,6 +9,7 @@ import type { Prompter } from "../prompter.js";
 import { createDefaultSetupState, type SetupState } from "../state.js";
 import type { OutputSink } from "../step.js";
 import { runHeadless, runInteractive } from "../runner.js";
+import { VERCEL_ENV_PULL_TIMEOUT_MS } from "../run-vercel-link.js";
 import { deployProject, type DeployProjectDeps } from "./deploy-project.js";
 
 const silentSink: OutputSink = { write: () => {} };
@@ -113,6 +114,23 @@ describe("deployProject box", () => {
       1,
       ["deploy", "--prod", "--yes", "--non-interactive"],
       expect.objectContaining({ cwd: "/tmp/project", nonInteractive: true }),
+    );
+  });
+
+  it("closes stdin and bounds the env pull after deployment", async () => {
+    const deps = createDeps();
+    const box = headlessBox({ deps });
+
+    await runHeadless([box], pendingState(), silentSink);
+
+    expect(deps.runVercel).toHaveBeenNthCalledWith(
+      2,
+      ["env", "pull", "--yes"],
+      expect.objectContaining({
+        cwd: "/tmp/project",
+        nonInteractive: true,
+        timeoutMs: VERCEL_ENV_PULL_TIMEOUT_MS,
+      }),
     );
   });
 
