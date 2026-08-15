@@ -5,9 +5,8 @@ import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import {
   createSessionFailedEvent,
-  encodeMessageStreamEvent,
-  stampMessageStreamEvent,
 } from "#protocol/message.js";
+import { createKeyedPublicEventPublisher } from "#execution/keyed-public-event-publisher.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.workflow-entry");
@@ -47,36 +46,20 @@ export async function emitTerminalSessionFailureStep(input: {
 
   const event = createSessionFailedEvent({ code, details, message, sessionId });
 
-  // Best-effort: invoke the adapter handler so channels surface the
-  // failure. Errors are logged, never rethrown — the outer workflow
-  // throw must still reach the run handle.
   try {
+    const emitted = await createKeyedPublicEventPublisher({
+      parentWritable: input.parentWritable,
+      sessionId,
+    }).publish(event);
+    if (!emitted.inserted) return;
     const ctx = await deserializeContext(input.serializedContext);
     const adapter = ctx.get(ChannelKey);
     if (adapter !== undefined) {
       const adapterCtx = buildAdapterContext(adapter, ctx);
-      await callAdapterEventHandler(adapter, event, adapterCtx);
-    }
-  } catch (notificationError) {
-    log.error("adapter failed to handle terminal session.failed event", {
-      errorId: typeof details.errorId === "string" ? details.errorId : undefined,
-      sessionId,
-      error: notificationError,
-    });
-  }
-
-  // Always write the event to the durable stream so downstream
-  // consumers see a canonical terminal event instead of an abrupt
-  // stream close.
-  try {
-    const writer = input.parentWritable.getWriter();
-    try {
-      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
-    } finally {
-      writer.releaseLock();
+      await callAdapterEventHandler(adapter, emitted.event, adapterCtx);
     }
   } catch (writeError) {
-    log.error("failed to write terminal session.failed event to durable stream", {
+    log.error("failed to publish terminal session.failed event", {
       errorId: typeof details.errorId === "string" ? details.errorId : undefined,
       sessionId,
       error: writeError,

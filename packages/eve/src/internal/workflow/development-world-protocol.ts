@@ -48,6 +48,7 @@ export const DEVELOPMENT_WORLD_OPERATIONS = [
   "steps.get",
   "steps.list",
   "streams.close",
+  "streams.appendKeyed",
   "streams.getChunks",
   "streams.getInfo",
   "streams.list",

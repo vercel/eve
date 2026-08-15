@@ -233,6 +233,13 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       }
       return undefined;
     }
+    if (
+      call.operation === "streams.appendKeyed" &&
+      ((this.#world as World & { keyedStreamAppendVersion?: 1 }).keyedStreamAppendVersion !== 1 ||
+        typeof (this.#world.streams as { appendKeyed?: unknown }).appendKeyed !== "function")
+    ) {
+      throw new Error("Keyed stream append v1 is unavailable for this Workflow World");
+    }
     const separator = call.operation.indexOf(".");
     const receiver: unknown = this.#world[call.operation.slice(0, separator) as keyof World];
     const operation =

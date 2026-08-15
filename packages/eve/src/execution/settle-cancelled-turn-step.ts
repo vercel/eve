@@ -30,10 +30,9 @@ import { createInstrumentationHandleEvent } from "#harness/instrumentation-nativ
 import { getInstrumentationRuntime } from "#harness/instrumentation-runtime.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
-  encodeMessageStreamEvent,
   type UnstampedMessageStreamEvent,
-  stampMessageStreamEvent,
 } from "#protocol/message.js";
+import { createKeyedPublicEventPublisher } from "#execution/keyed-public-event-publisher.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
@@ -86,17 +85,20 @@ export async function settleCancelledTurnStep(input: {
 
   if (!alreadyEpilogued) {
     const writer = input.parentWritable.getWriter();
+    const publisher = createKeyedPublicEventPublisher({
+      parentWritable: input.parentWritable,
+      sessionId: session.sessionId,
+    });
     try {
       const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
         const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
           const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
           setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-          // Stamp once: the persisted chunk and the hooks must agree on the id.
-          const stamped = stampMessageStreamEvent(transformed);
-          await writer.write(encodeMessageStreamEvent(stamped));
+          const emitted = await publisher.publish(transformed);
+          if (!emitted.inserted) return;
           await dispatchStreamEventHooks({
             ctx,
-            event: stamped,
+            event: emitted.event,
             registry: bundle.hookRegistry,
           });
         };

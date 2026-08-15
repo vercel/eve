@@ -33,11 +33,15 @@ function resolveWorkflowWorldLocalVersion() {
 }
 
 const workflowWorldLocalVersion = resolveWorkflowWorldLocalVersion();
+const workflowWorldLocalInitPath = join(
+  dirname(require.resolve("@workflow/world-local")),
+  "init.js",
+).replaceAll("\\", "/");
 
 const workflowWorldLocalVersionPlugin = {
   name: "eve-workflow-world-local-version",
   transform(source, id) {
-    if (!id.replaceAll("\\", "/").endsWith("/@workflow/world-local/dist/init.js")) {
+    if (id.replaceAll("\\", "/") !== workflowWorldLocalInitPath) {
       return undefined;
     }
 

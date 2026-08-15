@@ -37,6 +37,11 @@ import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
 
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 
+/** The keyed append v1 extension is supplied by Eve's linked Workflow core. */
+type KeyedDevelopmentWorld = Omit<World, "keyedStreamAppendVersion"> & {
+  readonly keyedStreamAppendVersion: 1;
+};
+
 /**
  * Raised when a delivery's recorded generation no longer exists on disk.
  * This never heals on retry, so the queue handler acknowledges and drops
@@ -86,9 +91,11 @@ async function call<T>(
  * HTTP handler that the parent's queue posts deliveries into, and is where a
  * delivery gets pinned to the generation its run started on.
  */
-export function createDevelopmentWorkflowWorld(): World {
+export function createDevelopmentWorkflowWorld(): KeyedDevelopmentWorld {
   const forwarded = buildForwardedOperations();
-  const world = {
+  const world: KeyedDevelopmentWorld = {
+    capabilities: { hookResumeDedup: true },
+    keyedStreamAppendVersion: 1 as const,
     specVersion: 5 as SpecVersion,
     processExitTriggersQueueRedelivery: false,
     async getDeploymentId() {
@@ -128,7 +135,7 @@ export function createDevelopmentWorkflowWorld(): World {
     } as World["streams"],
     async start() {},
     async close() {},
-  } satisfies World;
+  } satisfies KeyedDevelopmentWorld;
 
   return world;
 }

@@ -45,6 +45,46 @@ afterEach(() => {
 });
 
 describe("parent development Workflow World", () => {
+  it("forwards version-1 keyed stream receipts without falling back to ordinary writes", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-keyed-stream-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+
+    try {
+      const worker = createDevelopmentWorkflowWorld();
+      expect(worker.keyedStreamAppendVersion).toBe(1);
+      const appendKeyed = worker.streams.appendKeyed;
+      if (appendKeyed === undefined) throw new Error("Expected keyed stream append v1.");
+      const first = await appendKeyed(RUN_ID, "events", {
+        chunk: new Uint8Array([1]),
+        idempotencyKey: "eve-public-event/v1/session/step/0",
+        semanticDigest: "digest-a",
+      });
+      const retry = await appendKeyed(RUN_ID, "events", {
+        chunk: new Uint8Array([1]),
+        idempotencyKey: "eve-public-event/v1/session/step/0",
+        semanticDigest: "digest-a",
+      });
+
+      expect(first).toMatchObject({ canonicalChunk: new Uint8Array([1]), index: 0, inserted: true });
+      expect(retry).toMatchObject({ canonicalChunk: new Uint8Array([1]), index: 0, inserted: false });
+    } finally {
+      await world.close();
+    }
+  });
+
+  it("exposes the local parent's hook-resume dedup capability to a worker", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-hook-resume-dedup-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+
+    try {
+      expect(createDevelopmentWorkflowWorld().capabilities?.hookResumeDedup).toBe(true);
+    } finally {
+      await world.close();
+    }
+  });
+
   it("stores local Workflow state under .eve/.workflow-data", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-data-dir-");
     const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });

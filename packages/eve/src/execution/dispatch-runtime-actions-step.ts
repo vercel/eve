@@ -39,9 +39,8 @@ import {
 } from "#harness/runtime-actions.js";
 import {
   createSubagentCalledEvent,
-  encodeMessageStreamEvent,
-  stampMessageStreamEvent,
 } from "#protocol/message.js";
+import { createKeyedPublicEventPublisher } from "#execution/keyed-public-event-publisher.js";
 import type {
   RuntimeActionRequest,
   RuntimeRemoteAgentCallActionRequest,
@@ -170,6 +169,10 @@ export async function dispatchRuntimeActionsStep(input: {
   // Acquired only once preflight can no longer throw, so a planning failure
   // never leaks the writer lock.
   const writer = input.parentWritable.getWriter();
+  const publisher = createKeyedPublicEventPublisher({
+    parentWritable: input.parentWritable,
+    sessionId: session.sessionId,
+  });
   // Split the parent's remaining token quota across the batch's freshly
   // started local subagents, the children that actually receive an enforced
   // cap. Continuations already run under their own budget, and remote agents
@@ -251,7 +254,7 @@ export async function dispatchRuntimeActionsStep(input: {
           }),
           adapterCtx,
         );
-        await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(parentEvent)));
+        await publisher.publish(parentEvent);
       } catch (error) {
         logError(log, "subagent.called emission failed", error, {
           callId: outcome.callId,

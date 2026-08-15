@@ -52,11 +52,9 @@ import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import {
   createAuthorizationCompletedEvent,
   createSessionStartedEvent,
-  encodeMessageStreamEvent,
   type UnstampedMessageStreamEvent,
-  stampMessageStreamEvent,
-  type MessageStreamEvent,
 } from "#protocol/message.js";
+import { createKeyedPublicEventPublisher } from "#execution/keyed-public-event-publisher.js";
 import {
   CallbackBaseUrlKey,
   clearPendingAuthorization,
@@ -316,14 +314,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
 
   const writer = input.parentWritable.getWriter();
-
-  // Stamp once: the persisted chunk and the hooks below must agree on the id.
-  const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
+  const publisher = createKeyedPublicEventPublisher({
+    parentWritable: input.parentWritable,
+    sessionId: initialSession.sessionId,
+  });
+  const emit = async (event: UnstampedMessageStreamEvent) => {
     const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-    const stamped = stampMessageStreamEvent(toEmit);
-    await writer.write(encodeMessageStreamEvent(stamped));
-    return stamped;
+    return publisher.publish(toEmit);
   };
 
   const handleEvent = async (
@@ -331,12 +329,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     messages?: readonly import("ai").ModelMessage[],
   ): Promise<void> => {
     const emitted = await emit(event);
-    await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted });
-    if (emitted.type !== "step.started") {
+    if (!emitted.inserted) return;
+    await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted.event });
+    if (emitted.event.type !== "step.started") {
       await dispatchDynamicModelEvent({
         ctx,
         dynamicModel: effectiveAgent.turnAgent.dynamicModel,
-        event: emitted,
+        event: emitted.event,
         messages: messages ?? [],
         scope: {
           moduleMap: bundle.moduleMap,
@@ -347,26 +346,26 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     await dispatchDynamicSubagentEvent({
       ctx,
       resolvers: dynamicSubagentResolvers,
-      event: emitted,
+      event: emitted.event,
       messages: messages ?? [],
       persistentSessions: persistentSubagentSessions,
     });
     await dispatchDynamicToolEvent({
       ctx,
       resolvers: dynamicToolResolvers,
-      event: emitted,
+      event: emitted.event,
       messages: messages ?? [],
     });
     await dispatchDynamicSkillEvent({
       ctx,
       resolvers: dynamicSkillResolvers,
-      event: emitted,
+      event: emitted.event,
       messages: messages ?? [],
     });
     await dispatchDynamicInstructionEvent({
       ctx,
       resolvers: dynamicInstructionsResolvers,
-      event: emitted,
+      event: emitted.event,
       messages: messages ?? [],
     });
   };

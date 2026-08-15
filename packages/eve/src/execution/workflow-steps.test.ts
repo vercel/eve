@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
@@ -50,6 +50,16 @@ import {
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
+
+const { appendKeyedStreamChunk, getStepMetadata } = vi.hoisted(() => ({
+  appendKeyedStreamChunk: vi.fn(),
+  getStepMetadata: vi.fn(),
+}));
+
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  appendKeyedStreamChunk,
+  getStepMetadata,
+}));
 
 vi.mock("./durable-session-store.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./durable-session-store.js")>();
@@ -106,13 +116,18 @@ const workflowWritesByNamespace = new Map<string, unknown[]>();
 function createTestWritable(
   namespace = DEFAULT_WORKFLOW_STREAM_NAMESPACE,
 ): WritableStream<Uint8Array> {
-  return new WritableStream<Uint8Array>({
+  const writable = new WritableStream<Uint8Array>({
     write(chunk) {
       const existing = workflowWritesByNamespace.get(namespace) ?? [];
       existing.push(chunk);
       workflowWritesByNamespace.set(namespace, existing);
     },
   });
+  Object.defineProperties(writable, {
+    [Symbol.for("WORKFLOW_STREAM_NAME")]: { value: namespace },
+    [Symbol.for("WORKFLOW_STREAM_SERVER_RUN_ID")]: { value: "workflow-test-run" },
+  });
+  return writable;
 }
 
 vi.mock("./node-step.js", () => ({
@@ -158,6 +173,16 @@ const threadContextAdapter: ChannelAdapter = {
     return { message: `thread=${thread}; user=${message}` };
   },
 };
+
+beforeEach(() => {
+  getStepMetadata.mockReturnValue({ attempt: 1, stepId: "step-test" });
+  appendKeyedStreamChunk.mockImplementation(async (_runId, name, request) => {
+    const existing = workflowWritesByNamespace.get(name) ?? [];
+    existing.push(request.chunk);
+    workflowWritesByNamespace.set(name, existing);
+    return { canonicalChunk: request.chunk, index: existing.length - 1, inserted: true };
+  });
+});
 
 function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSession {
   return {
@@ -205,6 +230,8 @@ afterEach(() => {
   resumeHookMock.mockReset();
   startMock.mockReset();
   workflowWritesByNamespace.clear();
+  appendKeyedStreamChunk.mockReset();
+  getStepMetadata.mockReset();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();

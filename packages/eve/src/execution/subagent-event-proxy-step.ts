@@ -22,7 +22,7 @@ import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
+import { createKeyedPublicEventPublisher } from "#execution/keyed-public-event-publisher.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
@@ -77,6 +77,10 @@ export async function emitProxiedSubagentEvent(input: {
   });
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const writer = input.parentWritable.getWriter();
+  const publisher = createKeyedPublicEventPublisher({
+    parentWritable: input.parentWritable,
+    sessionId: session.sessionId,
+  });
 
   let proxyEntries: ProxyInputRequestEntries | undefined;
   let scopedSession: HarnessSession;
@@ -85,7 +89,7 @@ export async function emitProxiedSubagentEvent(input: {
     // gets its own id rather than the child's.
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
       const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(transformed)));
+      await publisher.publish(transformed);
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {

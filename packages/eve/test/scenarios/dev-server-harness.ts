@@ -117,9 +117,9 @@ export async function startEveDev(
         return;
       }
       await withinDeadline(
-        new Promise<void>((resolve) => {
+        new Promise<void>((resolve, reject) => {
           child.once("exit", () => resolve());
-          child.kill("SIGKILL");
+          void forceCrashEveDevChild(child).catch(reject);
         }),
         "Timed out waiting for the dev server process to crash.",
       );
@@ -149,6 +149,26 @@ export async function startEveDev(
     },
     url,
   };
+}
+
+async function forceCrashEveDevChild(
+  child: ChildProcessByStdio<null, Readable, Readable>,
+): Promise<void> {
+  if (process.platform !== "win32") {
+    child.kill("SIGKILL");
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const taskkill = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+    });
+    taskkill.once("error", reject);
+    taskkill.once("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`taskkill failed to terminate Eve dev process tree (exit ${String(code)}).`));
+    });
+  });
 }
 
 async function stopEveDevChild(
