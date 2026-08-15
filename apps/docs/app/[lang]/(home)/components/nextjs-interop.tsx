@@ -59,8 +59,8 @@ export async function NextjsInterop() {
   return (
     <section className="px-4 py-24">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40">
-          Works natively with Next.js
+        <h2 className="text-center text-heading-32 text-gray-1000 sm:text-heading-40">
+          Works natively with React and Next.js
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
           Wrap your config with <span className="text-gray-1000">withEve()</span> and the agent

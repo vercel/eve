@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#runtime/actions/types.js";
 
 const startSpanMock = vi.fn();
 const endSpanMock = vi.fn();
@@ -23,12 +23,16 @@ vi.mock("#compiled/@opentelemetry/api/index.js", async (importOriginal) => {
 
 const USAGE = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 };
 
-function subagentResult(
-  overrides: Partial<Extract<RuntimeActionResult, { kind: "subagent-result" }>> = {},
-): RuntimeActionResult {
+function subagentResult(overrides: Partial<RuntimeSubagentChildResult> = {}): RuntimeActionResult {
   return {
     callId: "call-1",
     kind: "subagent-result",
+    origin: "child",
+    outcome: {
+      kind: "terminal",
+      result: { kind: "succeeded", output: "done" },
+      usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
+    },
     output: "done",
     subagentName: "research",
     ...overrides,

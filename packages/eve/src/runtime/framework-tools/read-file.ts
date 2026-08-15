@@ -14,7 +14,9 @@ import type { ToolExecuteOptions } from "#shared/tool-definition.js";
  * model input contracts in sync without duplication.
  */
 export const READ_FILE_INPUT_SCHEMA = z.strictObject({
-  filePath: z.string().describe("The absolute path to the file to read."),
+  filePath: z
+    .string()
+    .describe("The absolute path to the file to read. A leading $HOME is supported."),
   limit: z
     .number()
     .int()
@@ -56,7 +58,7 @@ export const READ_FILE_TOOL_DEFINITION: ResolvedToolDefinition = {
     "Read a file from the local filesystem. If the path does not exist, an error is returned.",
     "",
     "Usage:",
-    "- The filePath parameter should be an absolute path.",
+    "- The filePath parameter should be an absolute path or begin with $HOME/.",
     "- By default, this tool returns up to 2000 lines from the start of the file.",
     "- The offset parameter is the line number to start from (1-indexed).",
     "- To read later sections, call this tool again with a larger offset.",

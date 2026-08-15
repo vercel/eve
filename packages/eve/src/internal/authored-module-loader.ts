@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
@@ -9,6 +9,7 @@ import { assertNoWorkflowDirectivePrologue } from "#internal/authored-directive-
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
 import { createAuthoredModuleEvaluationError } from "#internal/authored-module-evaluation-error.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
+import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
 import {
   createExtensionScopePlugin,
   createFixedNamespaceScopePlugin,
@@ -20,7 +21,6 @@ import {
   createGenerationPackageBoundaryPlugin,
   createRuntimeLoaderPackageBoundaryPlugin,
   isNodeModulesPath,
-  isPathImport,
   normalizeExternalDependencies,
   type RolldownResolveContext,
 } from "#internal/authored-package-boundary.js";
@@ -30,6 +30,7 @@ import {
   buildWithNitroRolldown,
 } from "#internal/bundler/nitro-rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
+import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
 const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
@@ -258,26 +259,33 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   readonly moduleMapPath: string;
 }): Promise<string> {
   const packageRoot = resolveAuthoredPackageRoot(input.manifest.agentRoot);
-  const externalDependencies = normalizeExternalDependencies(
-    [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
-      (node) => node.config.build?.externalDependencies ?? [],
+  const externalDependencies = normalizeExternalDependencies([
+    ...(input.manifest.config.build?.externalDependencies ?? []),
+    ...input.manifest.subagents.flatMap((subagent) =>
+      subagent.configResolver === undefined
+        ? (subagent.agent.config.build?.externalDependencies ?? [])
+        : (subagent.configResolver.build?.externalDependencies ?? []),
     ),
-  );
+  ]);
   const moduleMapSource = createCompiledModuleMapSource({
     manifest: input.manifest,
     moduleMapPath: input.moduleMapPath,
   });
   const extensionScopePlugin = createExtensionScopePlugin(
-    input.manifest.extensionMounts.map((mount) => ({
-      packageNamespace: mount.packageNamespace,
-      sourceRoot: mount.sourceRoot,
-    })),
+    [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
+      (node) =>
+        node.extensionMounts.map((mount) => ({
+          packageNamespace: mount.packageNamespace,
+          sourceRoot: mount.sourceRoot,
+        })),
+    ),
   );
   const plugins = [
     createVirtualGenerationModuleMapPlugin({
       id: input.moduleMapPath,
       source: moduleMapSource,
     }),
+    createDynamicCapabilityTransformPlugin({ dynamicTools: false }),
     createAuthoredDirectiveGuardPlugin(),
     extensionScopePlugin,
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
@@ -480,50 +488,6 @@ async function loadBundledAuthoredModule(
   }
 }
 
-function createAuthoredRelativeExtensionResolverPlugin(input: {
-  readonly extensions: readonly string[];
-}): Record<string, unknown> {
-  return {
-    name: "eve-authored-relative-extension-resolver",
-    resolveId(source: string, importer: string | undefined) {
-      if (
-        importer === undefined ||
-        importer.startsWith("\0") ||
-        importer.startsWith(CACHED_CHANNEL_PREFIX) ||
-        !isPathImport(source)
-      ) {
-        return undefined;
-      }
-
-      const candidate = isAbsolute(source) ? source : resolve(dirname(importer), source);
-      const resolvedPath = resolveExistingImportPath(candidate, input.extensions);
-
-      if (resolvedPath === undefined) {
-        return undefined;
-      }
-
-      // Standard resolvers realpath resolved modules, so a module reached
-      // through a node_modules symlink resolves its own dependencies from its
-      // real location — with pnpm's store layout they are store siblings that
-      // only exist there. Path imports probed here (the compiled module map
-      // reaches store-installed extension source through the consumer's
-      // node_modules symlink) must get the same treatment, and it keeps one
-      // canonical module identity per real file.
-      return {
-        id: isNodeModulesPath(resolvedPath) ? toRealModulePath(resolvedPath) : resolvedPath,
-      };
-    },
-  };
-}
-
-function toRealModulePath(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
-
 function createInFlightModuleLoadKey(
   modulePath: string,
   options: AuthoredModuleLoadOptions,
@@ -531,41 +495,6 @@ function createInFlightModuleLoadKey(
   const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
 
   return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extensionScopeNamespace ?? ""}`;
-}
-
-function resolveExistingImportPath(
-  path: string,
-  extensions: readonly string[],
-): string | undefined {
-  if (isFile(path)) {
-    return path;
-  }
-
-  for (const extension of extensions) {
-    const candidate = `${path}${extension}`;
-
-    if (isFile(candidate)) {
-      return candidate;
-    }
-  }
-
-  for (const extension of extensions) {
-    const candidate = join(path, `index${extension}`);
-
-    if (isFile(candidate)) {
-      return candidate;
-    }
-  }
-
-  return undefined;
-}
-
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
 }
 
 function resolveAuthoredTsConfigPath(packageRoot: string): string | false {

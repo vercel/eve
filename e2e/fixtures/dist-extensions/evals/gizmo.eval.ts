@@ -1,6 +1,7 @@
 import { defineEval } from "eve/evals";
 
 export default defineEval({
+  tags: ["real-model"],
   description:
     "A dist-only extension installed with a registry-style store layout loads and its tool runs.",
   async test(t) {

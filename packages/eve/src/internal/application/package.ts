@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 
 let cachedPackageInfo: InstalledPackageInfo | undefined;
+let cachedPackageLocation: PackageLocation | undefined;
 // The package build stamps the published version into `dist` so bundled
 // deployments can still report package metadata without resolving package.json.
 const BUNDLED_FALLBACK_PACKAGE_VERSION: string = "__EVE_PACKAGE_VERSION__";
@@ -30,6 +31,11 @@ const FALLBACK_PACKAGE_INFO: InstalledPackageInfo = {
 interface InstalledPackageInfo {
   name: string;
   version: string;
+}
+
+interface PackageLocation {
+  packageBuildRoot: string | null;
+  packageRoot: string;
 }
 
 function resolveCurrentModulePath(): string {
@@ -61,58 +67,160 @@ function resolveCurrentModulePathFromStack(): string {
 
 const require = createRequire(resolveCurrentModulePath());
 
-function isBuildOutputPackageRoot(directoryPath: string): boolean {
-  return (
-    basename(directoryPath) === "dist" && existsSync(join(dirname(directoryPath), "package.json"))
-  );
-}
+function tryResolveVerifiedPackageRoot(packageJsonPath: string): string | undefined {
+  try {
+    const canonicalPackageJsonPath = realpathSync.native(packageJsonPath);
+    const packageInfo = tryReadInstalledPackageInfo(canonicalPackageJsonPath, EVE_PACKAGE_NAME);
 
-function resolvePackageBuildRoot(): string | null {
-  let currentDirectory = dirname(realpathSync(resolveCurrentModulePath()));
-
-  while (true) {
-    if (isBuildOutputPackageRoot(currentDirectory)) {
-      return currentDirectory;
-    }
-
-    const parentDirectory = dirname(currentDirectory);
-
-    if (parentDirectory === currentDirectory) {
-      return null;
-    }
-
-    currentDirectory = parentDirectory;
+    return packageInfo === undefined ? undefined : dirname(canonicalPackageJsonPath);
+  } catch {
+    return undefined;
   }
 }
 
-function findNearestPackageRoot(startDirectory: string): string {
+function findNearestVerifiedPackageRoot(startDirectory: string): string | undefined {
   let currentDirectory = startDirectory;
 
   while (true) {
-    if (
-      existsSync(join(currentDirectory, "package.json")) &&
-      !isBuildOutputPackageRoot(currentDirectory)
-    ) {
-      return currentDirectory;
+    const packageRoot = tryResolveVerifiedPackageRoot(join(currentDirectory, "package.json"));
+
+    if (packageRoot !== undefined) {
+      return packageRoot;
     }
 
     const parentDirectory = dirname(currentDirectory);
 
     if (parentDirectory === currentDirectory) {
-      throw new Error(`Failed to resolve package root from "${startDirectory}".`);
+      return undefined;
     }
 
     currentDirectory = parentDirectory;
   }
+}
+
+function tryResolveDirectBuildLocation(currentModulePath: string): PackageLocation | undefined {
+  let currentDirectory = dirname(currentModulePath);
+
+  while (true) {
+    if (basename(currentDirectory) === "dist") {
+      const packageRoot = tryResolveVerifiedPackageRoot(
+        join(dirname(currentDirectory), "package.json"),
+      );
+
+      if (packageRoot !== undefined) {
+        return {
+          packageBuildRoot: currentDirectory,
+          packageRoot,
+        };
+      }
+    }
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      return undefined;
+    }
+
+    currentDirectory = parentDirectory;
+  }
+}
+
+function isSourceCheckout(packageRoot: string): boolean {
+  // Published packages exclude `src`, so this marker distinguishes a checkout
+  // without depending on how its parent directories are named.
+  return existsSync(join(packageRoot, "src", "internal", "application", "package.ts"));
+}
+
+function tryCreatePackageLocation(packageRoot: string): PackageLocation | undefined {
+  if (isSourceCheckout(packageRoot)) {
+    return {
+      packageBuildRoot: null,
+      packageRoot,
+    };
+  }
+
+  const packageBuildRoot = join(packageRoot, "dist");
+
+  if (!existsSync(packageBuildRoot)) {
+    return undefined;
+  }
+
+  return {
+    packageBuildRoot,
+    packageRoot,
+  };
+}
+
+function resolveSelfPackageJsonPath(currentModulePath: string): string {
+  return createRequire(currentModulePath).resolve(`${EVE_PACKAGE_NAME}/package.json`);
+}
+
+/**
+ * Resolves eve's package location relative to an executing module.
+ *
+ * Direct source and build executions retain their package-local behavior.
+ * Bundled executions resolve the installed eve manifest through Node's module
+ * resolver instead of treating the bundle owner's manifest as eve's.
+ */
+export function resolvePackageLocationFromModulePath(
+  currentModulePath: string,
+  resolvePackageJsonPath: (currentModulePath: string) => string = resolveSelfPackageJsonPath,
+): PackageLocation {
+  const canonicalModulePath = realpathSync.native(currentModulePath);
+  const directBuildLocation = tryResolveDirectBuildLocation(canonicalModulePath);
+
+  if (directBuildLocation !== undefined) {
+    return directBuildLocation;
+  }
+
+  const nearestPackageRoot = findNearestVerifiedPackageRoot(dirname(canonicalModulePath));
+
+  if (nearestPackageRoot !== undefined && isSourceCheckout(nearestPackageRoot)) {
+    return {
+      packageBuildRoot: null,
+      packageRoot: nearestPackageRoot,
+    };
+  }
+
+  try {
+    const resolvedPackageRoot = tryResolveVerifiedPackageRoot(
+      resolvePackageJsonPath(canonicalModulePath),
+    );
+    const resolvedLocation =
+      resolvedPackageRoot === undefined ? undefined : tryCreatePackageLocation(resolvedPackageRoot);
+
+    if (resolvedLocation !== undefined) {
+      return resolvedLocation;
+    }
+  } catch {
+    // A verified package root surrounding the current module remains a safe
+    // fallback when module resolution is unavailable in generated output.
+  }
+
+  const fallbackLocation =
+    nearestPackageRoot === undefined ? undefined : tryCreatePackageLocation(nearestPackageRoot);
+
+  if (fallbackLocation !== undefined) {
+    return fallbackLocation;
+  }
+
+  throw new Error(`Failed to resolve the eve package root from "${currentModulePath}".`);
+}
+
+function resolvePackageLocation(): PackageLocation {
+  cachedPackageLocation ??= resolvePackageLocationFromModulePath(resolveCurrentModulePath());
+  return cachedPackageLocation;
+}
+
+function resolvePackageBuildRoot(): string | null {
+  return resolvePackageLocation().packageBuildRoot;
 }
 
 /**
  * Resolves the installed eve package root.
  */
 export function resolvePackageRoot(): string {
-  // Canonicalize the current module path so workspace symlinks such as
-  // app-local `node_modules/<package-name>` resolve back to the real package root.
-  return findNearestPackageRoot(dirname(realpathSync(resolveCurrentModulePath())));
+  return resolvePackageLocation().packageRoot;
 }
 
 function tryResolvePackageRoot(): string | undefined {

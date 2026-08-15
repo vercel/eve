@@ -7,7 +7,7 @@ import {
 import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
 
-import { probeAgentInfo } from "./agent-info-probe.js";
+import { probeAgentInfo } from "#services/dev-client/agent-info-probe.js";
 import type { RemoteConnectionState } from "./remote-connection-types.js";
 
 export type RemoteProbeResult = Extract<

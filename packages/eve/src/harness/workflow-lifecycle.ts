@@ -8,14 +8,14 @@ import { createLogger } from "#internal/logging.js";
 import {
   createActionResultEvent,
   createActionsRequestedEvent,
-  type HandleMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { WorkflowSandboxLifecycle } from "#shared/workflow-sandbox.js";
 
 const log = createLogger("harness.workflow-lifecycle");
 
-type EmitWorkflowLifecycleEvent = (event: HandleMessageStreamEvent) => Promise<void>;
+type EmitWorkflowLifecycleEvent = (event: UnstampedMessageStreamEvent) => Promise<void>;
 
 /** Projects sandboxed subagent calls onto eve's existing action event stream. */
 export function createWorkflowLifecycle(input: {

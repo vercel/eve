@@ -64,6 +64,7 @@ export function createJustBashSandboxBackend(
   input: CreateJustBashSandboxBackendInput = {},
 ): SandboxBackend {
   const autoInstall = input.createOptions?.autoInstall ?? true;
+  const filesystem = input.createOptions?.filesystem;
   return {
     name: JUST_BASH_BACKEND_NAME,
     async prewarm(prewarmInput: SandboxBackendPrewarmInput): Promise<SandboxBackendPrewarmResult> {
@@ -92,6 +93,8 @@ export function createJustBashSandboxBackend(
       );
 
       try {
+        await writeSandboxSeedFiles(templateSession, prewarmInput.seedFiles);
+
         if (prewarmInput.bootstrap !== undefined) {
           prewarmInput.log?.("running sandbox bootstrap");
           await prewarmInput.bootstrap({
@@ -102,8 +105,6 @@ export function createJustBashSandboxBackend(
               }),
           });
         }
-
-        await writeSandboxSeedFiles(templateSession, prewarmInput.seedFiles);
 
         const captured = await templateSandbox.captureState();
         if (captured === null) {
@@ -157,6 +158,7 @@ export function createJustBashSandboxBackend(
       const sandbox = await createBashSandbox({
         appRoot: createInput.runtimeContext.appRoot,
         autoInstall,
+        filesystem,
         rootPath: sessionRootPath,
         sessionKey: createInput.sessionKey,
       });

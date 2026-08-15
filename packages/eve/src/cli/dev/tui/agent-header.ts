@@ -28,10 +28,9 @@ export interface AgentHeaderInput {
  * slash commands, so callers only attach a tip to local `eve dev` sessions.
  */
 export const AGENT_HEADER_TIPS: readonly string[] = [
-  "Use /channels to add more ways to reach your agent.",
+  "Use /add to install integrations from the registry.",
   "Use /deploy to see your agent go live.",
   "Type /help to see every command.",
-  "Tip: /connect to seamlessly add MCP Connections to your agent",
 ];
 
 /** Picks one tip; `random` is a test seam over Math.random. */

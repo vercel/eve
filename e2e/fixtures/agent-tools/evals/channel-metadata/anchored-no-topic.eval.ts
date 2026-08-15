@@ -8,6 +8,7 @@ import { METADATA_TOOL, PROMPT, startChannelSession } from "./shared";
 // returns null and no tool registers: the turn completes without a
 // dynamic-channel-metadata result and without failures.
 export default defineEval({
+  tags: ["real-model"],
   description: "Channel metadata smoke: missing topic metadata takes the null-resolve path.",
   async test(t) {
     const threadId = `thread-${randomBytes(4).toString("hex")}`;

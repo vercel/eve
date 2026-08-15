@@ -7,6 +7,7 @@ import {
   connectionProtocols,
   extensionEntries,
   getIntegrationEntry,
+  instrumentationEntries,
 } from "./index.js";
 
 describe("integration catalog", () => {
@@ -15,10 +16,19 @@ describe("integration catalog", () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  it("partitions cleanly into channels, connections, and extensions", () => {
-    expect(channelEntries().length + connectionEntries().length + extensionEntries().length).toBe(
-      INTEGRATIONS.length,
-    );
+  it("partitions cleanly into every integration kind", () => {
+    expect(
+      channelEntries().length +
+        connectionEntries().length +
+        extensionEntries().length +
+        instrumentationEntries().length,
+    ).toBe(INTEGRATIONS.length);
+  });
+
+  it("makes every scaffoldable integration available through the registry", () => {
+    for (const entry of INTEGRATIONS.filter((candidate) => candidate.surfaces.scaffoldable)) {
+      expect(entry.surfaces.registry).toBe(true);
+    }
   });
 
   it("gives every connection a transport and description", () => {
@@ -37,6 +47,13 @@ describe("integration catalog", () => {
 
   it("keeps extensions free of connection identity", () => {
     for (const entry of extensionEntries()) {
+      expect(entry.connection).toBeUndefined();
+    }
+  });
+
+  it("keeps instrumentation providers free of connection identity", () => {
+    expect(instrumentationEntries().length).toBeGreaterThan(0);
+    for (const entry of instrumentationEntries()) {
       expect(entry.connection).toBeUndefined();
     }
   });
@@ -77,6 +94,28 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("jetty")?.connection).toBeUndefined();
   });
 
+  it("exposes Upstash AgentKit as an extension", () => {
+    expect(getIntegrationEntry("upstash-agentkit")?.kind).toBe("extension");
+    expect(getIntegrationEntry("upstash-agentkit")?.connection).toBeUndefined();
+  });
+
+  it("exposes Kybernesis Arcana as an extension", () => {
+    expect(getIntegrationEntry("arcana")?.kind).toBe("extension");
+    expect(getIntegrationEntry("arcana")?.connection).toBeUndefined();
+  });
+
+  it("exposes Hindsight as an extension", () => {
+    expect(getIntegrationEntry("hindsight")?.kind).toBe("extension");
+    expect(getIntegrationEntry("hindsight")?.connection).toBeUndefined();
+  });
+
+  it("exposes Buzz as a gallery-only channel", () => {
+    expect(getIntegrationEntry("buzz")).toMatchObject({
+      kind: "channel",
+      surfaces: { scaffoldable: false, registry: false, gallery: true },
+    });
+  });
+
   it("exposes GitHub Tools as an extension distinct from the GitHub channel", () => {
     expect(getIntegrationEntry("github")?.kind).toBe("channel");
     expect(getIntegrationEntry("github-tools")?.kind).toBe("extension");
@@ -86,6 +125,12 @@ describe("integration catalog", () => {
   it("uses Browser Use's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("browser-use")!.connection!.mcp!.url).toBe(
       "https://api.browser-use.com/v3/mcp",
+    );
+  });
+
+  it("uses Natural's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("natural")!.connection!.mcp!.url).toBe(
+      "https://mcp.natural.com/mcp",
     );
   });
 });

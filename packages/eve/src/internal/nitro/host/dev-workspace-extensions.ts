@@ -40,18 +40,18 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
   const appRoot = resolve(input.appRoot);
   const project = await resolveDiscoveryProject(appRoot);
   const source = createDiskProjectSource();
-  const discovered = await discoverExtensionMountDeclarations({
+  const discoveredMounts = await discoverExtensionMountGraph({
     agentRoot: project.agentRoot,
     source,
   });
   const workspaceSourceRoot = await toCanonicalPath(resolveDevelopmentSourceRoot(appRoot));
   const extensionsByPackageRoot = new Map<string, DevelopmentWorkspaceExtension>();
 
-  for (const mount of discovered.mounts) {
+  for (const discovered of discoveredMounts) {
     const extension = await resolveWorkspaceExtension({
       appRoot,
-      agentRoot: project.agentRoot,
-      mount,
+      agentRoot: discovered.agentRoot,
+      mount: discovered.mount,
       source,
       workspaceSourceRoot,
     });
@@ -87,6 +87,30 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
   );
 
   return extensions;
+}
+
+async function discoverExtensionMountGraph(input: {
+  readonly agentRoot: string;
+  readonly source: ReturnType<typeof createDiskProjectSource>;
+}): Promise<readonly { agentRoot: string; mount: ExtensionMountDescriptor }[]> {
+  const discovered = await discoverExtensionMountDeclarations(input);
+  const mounts = discovered.mounts.map((mount) => ({ agentRoot: input.agentRoot, mount }));
+  const subagentsRoot = join(input.agentRoot, "subagents");
+  if ((await input.source.stat(subagentsRoot)) !== "directory") return mounts;
+
+  const entries = await input.source.readDirectory(subagentsRoot);
+  const nestedMounts = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map(
+        async (entry) =>
+          await discoverExtensionMountGraph({
+            agentRoot: join(subagentsRoot, entry.name),
+            source: input.source,
+          }),
+      ),
+  );
+  return [...mounts, ...nestedMounts.flat()];
 }
 
 async function resolveWorkspaceExtension(input: {

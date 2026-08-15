@@ -2,6 +2,7 @@ import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  emitTurnPreamble,
   emitStreamContent,
   getHarnessEmissionState,
   type HarnessEmissionState,
@@ -123,6 +124,32 @@ describe("setHarnessEmissionState", () => {
     const retrieved = getHarnessEmissionState(session.state);
 
     expect(retrieved).toEqual(state);
+  });
+});
+
+describe("emitTurnPreamble", () => {
+  it("attaches one trace context to the session and turn start events", async () => {
+    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
+    const trace = {
+      spanId: "0123456789abcdef",
+      traceFlags: 1,
+      traceId: "0123456789abcdef0123456789abcdef",
+    };
+
+    await emitTurnPreamble(
+      async (event) => {
+        events.push(event);
+      },
+      { message: "hello" },
+      { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
+      undefined,
+      trace,
+    );
+
+    expect(events.slice(0, 2)).toEqual([
+      { data: { trace }, type: "session.started" },
+      { data: { sequence: 0, trace, turnId: "turn_0" }, type: "turn.started" },
+    ]);
   });
 });
 
@@ -381,7 +408,7 @@ describe("emitStreamContent action requests", () => {
     });
   });
 
-  it("projects local and provider tool results at the same stream position", async () => {
+  it("emits local preliminary results and drops provider preliminary results", async () => {
     const tools = new Map<string, HarnessToolDefinition>([
       [
         "web_search",
@@ -440,8 +467,24 @@ describe("emitStreamContent action requests", () => {
     const localEvents = vi.mocked(localEmit).mock.calls.map(([event]) => event);
     const providerEvents = vi.mocked(providerEmit).mock.calls.map(([event]) => event);
 
-    expect(localEvents).toEqual(providerEvents);
     expect(localEvents.map((event) => event.type)).toEqual([
+      "message.appended",
+      "message.completed",
+      "actions.requested",
+      "action.partial",
+      "action.result",
+      "message.appended",
+      "message.completed",
+    ]);
+    expect(localEvents[3]).toMatchObject({
+      data: { result: { output: { results: ["partial"] } } },
+      type: "action.partial",
+    });
+    expect(localEvents[4]).toMatchObject({
+      data: { result: { output: { results: ["eve"] } } },
+      type: "action.result",
+    });
+    expect(providerEvents.map((event) => event.type)).toEqual([
       "message.appended",
       "message.completed",
       "actions.requested",
@@ -449,10 +492,6 @@ describe("emitStreamContent action requests", () => {
       "message.appended",
       "message.completed",
     ]);
-    expect(localEvents[3]).toMatchObject({
-      data: { result: { output: { results: ["eve"] } } },
-      type: "action.result",
-    });
   });
 
   it("projects local and provider tool failures at the same stream position", async () => {
@@ -557,7 +596,7 @@ describe("emitStreamContent action requests", () => {
       EMISSION_STATE,
       streamOf([
         {
-          input: "not an object",
+          input: '"not an object"',
           toolCallId: "call-bad",
           toolName: "web_search",
           type: "tool-call",
@@ -571,6 +610,65 @@ describe("emitStreamContent action requests", () => {
     );
 
     const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          error: { code: "ACTION_RESULT_FAILED", message },
+          result: {
+            callId: "call-bad",
+            isError: true,
+            kind: "tool-result",
+            output: message,
+            toolName: "web_search",
+          },
+          status: "failed",
+        }),
+        type: "action.result",
+      }),
+    ]);
+    expect([...result.invalidInputToolCallIds]).toEqual(["call-bad"]);
+    expect(result.trailingInlineToolResultParts).toEqual([
+      {
+        output: { type: "error-text", value: message },
+        toolCallId: "call-bad",
+        toolName: "web_search",
+        type: "tool-result",
+      },
+    ]);
+  });
+
+  it("turns malformed provider-executed tool call input into a failed tool result", async () => {
+    const emit = createEmitStub();
+
+    const result = await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          // Opus 5 has emitted syntactically invalid JSON for provider
+          // web_search arguments: an unquoted bare value.
+          input: '{"objective": "Find the champion.", "search_queries": 2025 NBA Finals}',
+          providerExecuted: true,
+          toolCallId: "call-bad",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools: new Map<string, HarnessToolDefinition>(),
+      },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    const actionResult = events.find((event) => event.type === "action.result");
+    if (actionResult?.data.error === undefined) {
+      throw new Error("Expected a failed action.result event.");
+    }
+    const { message } = actionResult.data.error;
+    expect(message).toMatch(/Failed to parse tool-call arguments for "web_search" \(call-bad\):/u);
+    expect(message).not.toContain("Expected a JSON-serializable object.");
     expect(events).toEqual([
       expect.objectContaining({
         data: expect.objectContaining({

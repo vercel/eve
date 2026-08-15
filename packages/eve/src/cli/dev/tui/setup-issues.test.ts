@@ -23,7 +23,11 @@ function infoWithRouting(
   endpoint?: AgentInfo["agent"]["model"]["endpoint"],
 ): AgentInfo {
   const model: AgentInfo["agent"]["model"] =
-    endpoint === undefined ? { id: "m", routing } : { endpoint, id: "m", routing };
+    routing.kind === "dynamic"
+      ? { routing }
+      : endpoint === undefined
+        ? { id: "m", routing }
+        : { endpoint, id: "m", routing };
 
   return {
     agent: {
@@ -37,7 +41,7 @@ function infoWithRouting(
     connections: [],
     diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
     hooks: [],
-    instructions: { dynamic: [], static: null },
+    instructions: { dynamic: [], static: [] },
     kind: "eve-agent-info",
     mode: "development",
     sandbox: null,
@@ -52,7 +56,7 @@ function infoWithRouting(
       framework: [],
       reserved: [],
     },
-    version: 1,
+    version: 2,
     workflow: { enabled: false, toolName: "Workflow" },
     workspace: { resourceRoot: null, rootEntries: [] },
   };

@@ -4,8 +4,6 @@ import { detectProjectIdentity, type ProjectIdentity } from "#setup/project-reso
 export interface VercelStatusSnapshot {
   /** Resolved link identity; absent while unlinked or while a probe is in flight. */
   identity?: ProjectIdentity;
-  /** A /channels run added ≥1 channel this session and no /deploy has shipped since. */
-  pendingDeploy: boolean;
 }
 
 /**
@@ -13,10 +11,7 @@ export interface VercelStatusSnapshot {
  * Session-scoped by design: a deploy from another terminal or channels added
  * before this session escape it — accepted v1 limits.
  */
-export type VercelStatusEffect =
-  | { kind: "channels-added" }
-  | { kind: "deployed" }
-  | { kind: "refresh-identity" };
+export type VercelStatusEffect = { kind: "deployed" } | { kind: "refresh-identity" };
 
 export interface VercelStatusTrackerOptions {
   /** Absolute local application root holding the `.vercel` link directory. */
@@ -29,8 +24,7 @@ export interface VercelStatusTrackerOptions {
 
 /**
  * Owns the Vercel segment of the dev TUI status line: one cached link
- * identity and the session-scoped pending-deploy flag. The identity probe is
- * network-bound (it shells `vercel api`), so it runs only at startup and
+ * identity. The identity probe is network-bound (it shells `vercel api`), so it runs only at startup and
  * after provider setup or a /deploy — never on a poll. A linked directory
  * whose `vercel` CLI call fails resolves to the raw project id as the name
  * (see {@link detectProjectIdentity}); an unlinked one resolves to no identity,
@@ -51,7 +45,6 @@ export function createVercelStatusTracker(
 ): VercelStatusTracker {
   const detectIdentity = options.detectIdentity ?? detectProjectIdentity;
   let identity: ProjectIdentity | undefined;
-  let pendingDeploy = false;
   // Incremented on every refresh and on dispose, so a slow probe that loses
   // the race (e.g. startup probe vs. a /vercel re-link's probe) can never
   // overwrite the newer result.
@@ -59,11 +52,7 @@ export function createVercelStatusTracker(
   let disposed = false;
   let identityProbeAbort: AbortController | undefined;
 
-  const snapshot = (): VercelStatusSnapshot => {
-    const current: VercelStatusSnapshot = { pendingDeploy };
-    if (identity !== undefined) current.identity = identity;
-    return current;
-  };
+  const snapshot = (): VercelStatusSnapshot => (identity === undefined ? {} : { identity });
 
   const emit = (): void => {
     if (disposed) return;
@@ -101,12 +90,7 @@ export function createVercelStatusTracker(
     applyEffect(effect) {
       if (disposed) return;
       switch (effect.kind) {
-        case "channels-added":
-          pendingDeploy = true;
-          emit();
-          return;
         case "deployed":
-          pendingDeploy = false;
           emit();
           // A deploy can create the link (the flow walks the pickers when
           // unlinked), so the identity may have just come into existence.

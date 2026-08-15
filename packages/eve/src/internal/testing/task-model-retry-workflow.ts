@@ -46,7 +46,7 @@ export async function createTaskModelRetrySessionStep(input: {
       system: "You are a test assistant.",
       tools: [],
     },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: { recentWindowSize: 10, threshold: 100_000, thresholdPercent: 0.9 },
     continuationToken: `subagent:${input.sessionId}`,
     history: [...PRIOR_HISTORY],
     sessionId: input.sessionId,

@@ -11,6 +11,10 @@ import { createSession } from "#execution/session.js";
 import { resolveInheritedTokenLimit } from "#execution/run-session-limits.js";
 import type { RunSessionLimits } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
+import { resolveEffectiveAgentRuntimeFromConfig } from "#execution/effective-agent-config.js";
+import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { TASK_UPDATE_SESSION_INSTRUCTION } from "#execution/tasks/child/instructions.js";
+import { isTaskToolAvailable, TASK_UPDATE_TOOL_NAME } from "#runtime/framework-tools/tasks.js";
 
 /**
  * Result returned by {@link createSessionStep}.
@@ -31,12 +35,14 @@ export interface CreateSessionStepResult {
 export async function createSessionStep(input: {
   readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
   readonly continuationToken: string;
+  readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly inheritedLimits?: RunSessionLimits;
   readonly outputSchema?: JsonObject;
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly subagentDepth?: number;
+  readonly taskOwned?: boolean;
 }): Promise<CreateSessionStepResult> {
   "use step";
 
@@ -44,13 +50,27 @@ export async function createSessionStep(input: {
     compiledArtifactsSource: resolveDurableCompiledArtifactsSource(input.compiledArtifactsSource),
     nodeId: input.nodeId,
   });
+  const effectiveAgent = resolveEffectiveAgentRuntimeFromConfig(
+    bundle,
+    input.dynamicSubagentAgentConfig,
+  );
+  const taskUpdatesEnabled =
+    input.taskOwned === true &&
+    isTaskToolAvailable({
+      disabledFrameworkTools: bundle.resolvedAgent.disabledFrameworkTools ?? [],
+      hasAuthoredTool: effectiveAgent.turnAgent.tools.some(
+        (tool) => tool.name === TASK_UPDATE_TOOL_NAME,
+      ),
+      tasksEnabled: bundle.resolvedAgent.config?.experimental?.tasks === true,
+      toolName: TASK_UPDATE_TOOL_NAME,
+    });
 
   // Both token axes resolve tighter-wins against the cap inherited from the
   // delegating parent: a child may narrow what its parent granted, never widen
   // it. Root runs have no inherited limits, so their configured values apply.
   const session = createSession({
     compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+      thresholdPercent: effectiveAgent.thresholdPercent,
     },
     continuationToken: input.continuationToken,
     limits: {
@@ -58,11 +78,11 @@ export async function createSessionStep(input: {
       // dispatch time; an authored `false` uncaps only when there is nothing
       // to inherit.
       maxInputTokensPerSession: resolveInheritedTokenLimit({
-        configured: bundle.resolvedAgent.config.limits?.maxInputTokensPerSession,
+        configured: effectiveAgent.limits?.maxInputTokensPerSession,
         inherited: input.inheritedLimits?.maxInputTokensPerSession,
       }),
       maxOutputTokensPerSession: resolveInheritedTokenLimit({
-        configured: bundle.resolvedAgent.config.limits?.maxOutputTokensPerSession,
+        configured: effectiveAgent.limits?.maxOutputTokensPerSession,
         inherited: input.inheritedLimits?.maxOutputTokensPerSession,
       }),
     },
@@ -70,7 +90,8 @@ export async function createSessionStep(input: {
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
     subagentDepth: input.subagentDepth,
-    turnAgent: bundle.turnAgent,
+    systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
+    turnAgent: effectiveAgent.turnAgent,
     workflowMaxSubagents: bundle.resolvedAgent.workflowTool?.maxSubagents,
   });
 

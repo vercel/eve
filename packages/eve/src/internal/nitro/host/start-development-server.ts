@@ -12,7 +12,9 @@ import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-wo
 import { createDevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import {
   EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
+  EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
+  EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH,
 } from "#protocol/routes.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
 import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
@@ -206,12 +208,27 @@ function addDevelopmentControlHandler(input: {
     if (url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH && request.method === "GET") {
       return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
     }
-    if (url.pathname !== EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH || request.method !== "GET") {
+    const isSuspendRequest =
+      url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH && request.method === "POST";
+    const isResumeRequest =
+      url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH && request.method === "POST";
+    const isRebuildRequest =
+      url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH &&
+      (request.method === "GET" || request.method === "POST");
+    if (!isSuspendRequest && !isResumeRequest && !isRebuildRequest) {
       return undefined;
     }
     const watcher = input.getWatcher();
     if (watcher === undefined) {
       return Response.json({ error: "The development server is still starting." }, { status: 503 });
+    }
+    if (isSuspendRequest) {
+      await watcher.suspend();
+      return Response.json({ suspended: true });
+    }
+    if (isResumeRequest) {
+      await watcher.resume({ silent: url.searchParams.get("silent") === "1" });
+      return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
     }
     if (url.searchParams.get("force") === "1") {
       await watcher.rebuild();
@@ -245,12 +262,12 @@ async function closeDevelopmentServerResources(input: {
   if (authoredSourceWatcher !== undefined) {
     await attempt(() => authoredSourceWatcher.close());
   }
-  const devServer = input.devServer;
-  const listenerClosed = devServer === undefined ? true : await attempt(() => devServer.close());
   const workflowWorld = input.workflowWorld;
   if (workflowWorld !== undefined) {
     await attempt(() => workflowWorld.close());
   }
+  const devServer = input.devServer;
+  const listenerClosed = devServer === undefined ? true : await attempt(() => devServer.close());
   const nitro = input.nitro;
   if (nitro !== undefined) {
     await attempt(() => nitro.close());

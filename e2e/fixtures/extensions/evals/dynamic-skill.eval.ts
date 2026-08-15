@@ -10,6 +10,7 @@ const TOOLKIT_INCIDENT_TOKEN = "toolkit-incident-dynamic-ok-7T2X";
  * dynamic tools.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Map-produced dynamic skill from an extension is namespaced (toolkit__incident).",
   async test(t) {
     await t.send(

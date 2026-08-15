@@ -6,6 +6,7 @@ import { BOOTSTRAP_MARKER_PATH, BOOTSTRAP_MARKER_TOKEN } from "./shared";
 // non-error result containing the marker token proves the bootstrap-written
 // file is visible inside the sandbox.
 export default defineEval({
+  tags: ["real-model"],
   description: "Sandbox smoke: `defineSandbox({ bootstrap })` runs before the first bash call.",
   async test(t) {
     await t.send(

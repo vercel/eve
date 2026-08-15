@@ -1,6 +1,7 @@
 import { defineEval } from "eve/evals";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Static tools smoke: authored modules and dependencies can use dynamic imports.",
   async test(t) {
     await t.send(

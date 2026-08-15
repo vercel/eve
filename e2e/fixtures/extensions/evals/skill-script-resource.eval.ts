@@ -3,6 +3,7 @@ import { defineEval } from "eve/evals";
 const TOOLKIT_SKILL_SCRIPT_TOKEN = "toolkit-skill-script-ok-8M3P";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "A dist-only extension preserves JavaScript files inside packaged skills.",
   async test(t) {
     await t.send(

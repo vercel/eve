@@ -5,8 +5,8 @@ import { ContextKey } from "#context/key.js";
 import {
   type AuthorizationChallenge,
   type AuthorizationSignal,
-  getAuthorizationResult,
-  getHookUrl,
+  consumeAuthorizationResult,
+  createAuthorizationAttempt,
   requestAuthorization,
 } from "#harness/authorization.js";
 import {
@@ -14,6 +14,7 @@ import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
 } from "#public/connections/errors.js";
+import { defineDynamic, defineTool } from "#public/definitions/tool.js";
 import type { JsonValue } from "#public/types/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
@@ -29,9 +30,8 @@ import {
   type InteractiveAuthorizationDefinition,
   supportsInteractiveAuthorization,
 } from "#runtime/connections/types.js";
-import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
+import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
-import type { DynamicToolEvents, DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import { toError } from "#shared/errors.js";
 import type { ModelMessage } from "ai";
 
@@ -147,15 +147,18 @@ async function resolveInteractiveAuth(
  * following load, the freshly minted token is itself being rejected, so
  * the connection must fail terminally rather than re-challenge forever.
  */
-async function completePendingAuthorizations(registry: ConnectionRegistry): Promise<Set<string>> {
+async function completePendingAuthorizations(
+  registry: ConnectionRegistry,
+  connections: readonly ResolvedConnectionDefinition[],
+): Promise<Set<string>> {
   const ctx = loadContext();
   const completed = new Set<string>();
-  for (const conn of registry.getConnections()) {
-    const result = getAuthorizationResult(conn.connectionName);
+  for (const conn of connections) {
+    const result = consumeAuthorizationResult(conn.connectionName);
     if (!result) continue;
     const auth = await resolveInteractiveAuth(registry, conn.connectionName);
     if (!auth) continue;
-    const principal = resolveConnectionPrincipal(conn.connectionName, auth);
+    const principal = result.principal ?? resolveConnectionPrincipal(conn.connectionName, auth);
     const token = await (
       auth as InteractiveAuthorizationDefinition<JsonValue>
     ).completeAuthorization({
@@ -180,8 +183,6 @@ async function executeConnectionSearch(
     return [];
   }
 
-  const justAuthorized = await completePendingAuthorizations(registry);
-
   const limit = input.limit ?? 10;
   const queryTokens = tokenize(input.keywords);
   const results: Array<{ item: ConnectionSearchResultItem; score: number }> = [];
@@ -197,6 +198,8 @@ async function executeConnectionSearch(
       `Connection "${input.connection}" is not registered. Available connections: ${registry.getConnectionNames().join(", ")}.`,
     );
   }
+
+  const justAuthorized = await completePendingAuthorizations(registry, targetConnections);
 
   const authChallenges: AuthorizationChallenge[] = [];
 
@@ -225,12 +228,12 @@ async function executeConnectionSearch(
 
         const auth = await resolveInteractiveAuth(registry, conn.connectionName);
         if (auth) {
-          const hookUrl = getHookUrl(conn.connectionName);
-          if (hookUrl) {
+          const attempt = createAuthorizationAttempt(conn.connectionName);
+          if (attempt) {
             const principal = resolveConnectionPrincipal(conn.connectionName, auth);
             const callbackUrl = resolveAuthorizationCallbackUrl({
               authorization: auth,
-              callbackUrl: hookUrl,
+              callbackUrl: attempt.hookUrl,
             });
             try {
               const { challenge, resume } = await auth.startAuthorization({
@@ -239,9 +242,11 @@ async function executeConnectionSearch(
                 principal,
               });
               authChallenges.push({
+                attemptId: attempt.attemptId,
                 name: conn.connectionName,
                 challenge: stampChallengeDisplayName(challenge, auth),
                 hookUrl: callbackUrl,
+                principal,
                 resume,
               });
             } catch (startErr) {
@@ -389,16 +394,10 @@ export function extractDiscoveredTools(
   return [...byQualifiedName.values()];
 }
 
-/**
- * Creates the connection search dynamic tool resolver events.
- *
- * The resolver subscribes to `step.started` so it re-derives the tool
- * set from conversation history on every step. After compaction, old
- * `connection_search` results disappear from messages and discovered
- * tools naturally drop from the toolset.
- */
-export function createConnectionSearchEvents(): DynamicToolEvents {
-  return {
+// The step-scoped definition re-derives its tools from conversation history.
+// After compaction removes old search results, those tools naturally disappear.
+const connectionSearchDynamicDefinition = defineDynamic({
+  events: {
     "step.started": async (_event, ctx) => {
       const registry = loadContext().get(ConnectionRegistryKey);
       if (!registry || registry.getConnections().length === 0) return null;
@@ -416,10 +415,9 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
       }
       const discovered = [...mergedMap.values()];
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tools: Record<string, DynamicToolEntry<any, any>> = {};
+      const tools: Record<string, object> = {};
 
-      tools["connection_search"] = {
+      tools["connection_search"] = defineTool({
         description:
           "Search for tools across your connections. " +
           "Discovered tools become directly callable by their qualified name " +
@@ -430,14 +428,14 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
           return executeConnectionSearch(input);
         },
         outputSchema: CONNECTION_SEARCH_OUTPUT_SCHEMA,
-      };
+      });
 
       for (const result of discovered) {
         const connectionName = result.connection;
         const toolName = result.tool!;
         const approval = registry.getConnectionApproval(connectionName);
 
-        tools[qualifiedConnectionToolName(connectionName, toolName)] = {
+        tools[qualifiedConnectionToolName(connectionName, toolName)] = defineTool({
           description: result.description,
           inputSchema: (result.inputSchema ?? {
             type: "object",
@@ -453,11 +451,13 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
 
             let justCompletedAuth = false;
             if (interactiveAuth) {
-              const authResult = getAuthorizationResult(connectionName);
+              const authResult = consumeAuthorizationResult(connectionName);
               if (authResult) {
                 justCompletedAuth = true;
                 const ctx = loadContext();
-                const principal = resolveConnectionPrincipal(connectionName, interactiveAuth);
+                const principal =
+                  authResult.principal ??
+                  resolveConnectionPrincipal(connectionName, interactiveAuth);
                 const token = await interactiveAuth.completeAuthorization({
                   callbackUrl: authResult.hookUrl,
                   connection: { url: conn?.url ?? "" },
@@ -490,13 +490,13 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
                 });
               }
 
-              const hookUrl = getHookUrl(connectionName);
-              if (!hookUrl) throw err;
+              const attempt = createAuthorizationAttempt(connectionName);
+              if (!attempt) throw err;
 
               const principal = resolveConnectionPrincipal(connectionName, interactiveAuth);
               const callbackUrl = resolveAuthorizationCallbackUrl({
                 authorization: interactiveAuth,
-                callbackUrl: hookUrl,
+                callbackUrl: attempt.hookUrl,
               });
               const { challenge, resume } = await interactiveAuth.startAuthorization({
                 callbackUrl,
@@ -506,35 +506,22 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
 
               return requestAuthorization([
                 {
+                  attemptId: attempt.attemptId,
                   name: connectionName,
                   challenge: stampChallengeDisplayName(challenge, interactiveAuth),
                   hookUrl: callbackUrl,
+                  principal,
                   resume,
                 },
               ]);
             }
           },
-        };
+        });
       }
 
       return tools;
     },
-  };
-}
+  },
+});
 
-/**
- * Creates a `ResolvedDynamicToolResolver` for the framework connection
- * search tool. Used by graph resolution to register alongside authored
- * dynamic tool resolvers.
- */
-export function createConnectionSearchResolver(): ResolvedDynamicToolResolver {
-  const events = createConnectionSearchEvents();
-  return {
-    slug: "connection",
-    eventNames: Object.keys(events),
-    events: events as ResolvedDynamicToolResolver["events"],
-    sourceId: "eve:connection-search-dynamic",
-    sourceKind: "module",
-    logicalPath: "eve:framework/connection-search-dynamic",
-  };
-}
+export default connectionSearchDynamicDefinition;

@@ -11,10 +11,10 @@ import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "../../src/internal/workflow/local-world-data-directory.js";
 import {
-  EVE_CONTINUE_SESSION_ROUTE_PATTERN,
-  EVE_CREATE_SESSION_ROUTE_PATH,
   EVE_HEALTH_ROUTE_PATH,
-  EVE_MESSAGE_STREAM_ROUTE_PATTERN,
+  EVE_SESSION_ROUTE_PATH,
+  EVE_SESSION_ROUTE_PATTERN,
+  EVE_SESSION_STREAM_ROUTE_PATTERN,
 } from "../../src/protocol/routes.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
@@ -245,9 +245,9 @@ describe("runCli", () => {
     expect(getLogOutput(logger)).toContain("eve Info");
     expect(getLogOutput(logger)).toContain("Application");
     expect(getLogOutput(logger)).toContain("Workflow ID");
-    expect(getLogOutput(logger)).toContain(`POST ${EVE_CREATE_SESSION_ROUTE_PATH}`);
-    expect(getLogOutput(logger)).toContain(`POST ${EVE_CONTINUE_SESSION_ROUTE_PATTERN}`);
-    expect(getLogOutput(logger)).toContain(`GET ${EVE_MESSAGE_STREAM_ROUTE_PATTERN}`);
+    expect(getLogOutput(logger)).toContain(`POST ${EVE_SESSION_ROUTE_PATH}`);
+    expect(getLogOutput(logger)).toContain(`POST ${EVE_SESSION_ROUTE_PATTERN}`);
+    expect(getLogOutput(logger)).toContain(`GET ${EVE_SESSION_STREAM_ROUTE_PATTERN}`);
   });
 
   it("prints compiled discovery metadata when run inside an eve app", async () => {
@@ -278,11 +278,12 @@ describe("runCli", () => {
     expect(output).toContain("0 errors, 0 warnings");
   });
 
-  it("defaults to dev when no command is provided", async () => {
+  it("defaults to dev when no command is provided in an eve project", async () => {
     const logger = {
       error: vi.fn(),
       log: vi.fn(),
     };
+    const findApplicationRoot = vi.fn(async () => process.cwd());
     const startHost = vi.fn(() => ({
       start: async () => {
         throw new Error("dev started");
@@ -292,10 +293,12 @@ describe("runCli", () => {
 
     await expect(
       runCli([], logger, {
+        findApplicationRoot,
         startHost,
       }),
     ).rejects.toThrow("dev started");
 
+    expect(findApplicationRoot).toHaveBeenCalledOnce();
     expect(startHost).toHaveBeenCalledOnce();
   });
 

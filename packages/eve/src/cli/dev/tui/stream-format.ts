@@ -25,6 +25,15 @@ export type TerminalKey =
   | { type: "end" }
   | { type: "tab" }
   | { type: "escape" }
+  | {
+      type: "mouse";
+      action: "press" | "release";
+      /** SGR button code (0 = left). */
+      button: number;
+      /** 1-based terminal cell coordinates. */
+      x: number;
+      y: number;
+    }
   | { type: "ctrl-a" }
   | { type: "ctrl-e" }
   | { type: "ctrl-d" }
@@ -36,6 +45,15 @@ export type TerminalKey =
   | { type: "ctrl-l" }
   | { type: "ctrl-r" }
   | { type: "ctrl-c" }
+  | {
+      /**
+       * An OSC sequence from the terminal (`ESC ] … BEL`/`ST`) — a reply to a
+       * query such as the OSC 11 background-color probe, never a keypress.
+       * `value` is the payload between the opener and the terminator.
+       */
+      type: "osc";
+      value: string;
+    }
   | { type: "ignore" };
 
 /** One decoded key plus the UTF-16 code units it consumed from the input buffer. */
@@ -87,6 +105,15 @@ export function isIncompletePaste(buffer: string): boolean {
 /** Drops a leading bracketed-paste start marker, leaving the buffered payload. */
 export function stripPasteStart(buffer: string): string {
   return buffer.startsWith(PASTE_START) ? buffer.slice(PASTE_START.length) : buffer;
+}
+
+/**
+ * True when `buffer` opens an OSC sequence whose terminator hasn't arrived.
+ * {@link nextKey} reports such a buffer as `incomplete` indefinitely, so the
+ * caller needs this to recover if the terminator never comes.
+ */
+export function isIncompleteOsc(buffer: string): boolean {
+  return buffer.startsWith("\x1b]") && !buffer.includes("\x07", 2) && !buffer.includes("\x1b\\", 2);
 }
 
 /** Removes C0 control characters and DEL from text intended for the prompt. */
@@ -142,6 +169,19 @@ export function nextKey(buffer: string): KeyToken {
       }
       return { consumed: 0, incomplete: true };
     }
+    if (second === "]") {
+      // OSC (`ESC ] … BEL` or `ESC ] … ESC \`): a terminal's reply to a query
+      // (e.g. the OSC 11 background-color probe). Tokenized whole so a reply
+      // never garbles the key stream; the payload excludes the terminator.
+      const bel = buffer.indexOf("\x07", 2);
+      const st = buffer.indexOf("\x1b\\", 2);
+      if (bel === -1 && st === -1) return { consumed: 0, incomplete: true };
+      const end = bel === -1 ? st : st === -1 ? bel : Math.min(bel, st);
+      return {
+        key: { type: "osc", value: buffer.slice(2, end) },
+        consumed: end + (end === bel ? 1 : 2),
+      };
+    }
     // `ESC` + another byte (e.g. Alt+key): surface the Escape and re-tokenize.
     return { key: { type: "escape" }, consumed: 1 };
   }
@@ -162,8 +202,24 @@ export function nextKey(buffer: string): KeyToken {
   return { key: parseKey(Buffer.from(buffer.slice(0, end))), consumed: end };
 }
 
+// SGR mouse reporting (1006): `ESC [ < Cb ; Cx ; Cy M` press, lowercase
+// `m` release. Only decoded while mouse reporting is enabled (the trace
+// viewer's alt screen).
+const SGR_MOUSE = new RegExp(`^${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])$`, "u");
+
 export function parseKey(chunk: Buffer): TerminalKey {
   const value = chunk.toString("utf8");
+
+  const mouse = SGR_MOUSE.exec(value);
+  if (mouse !== null) {
+    return {
+      type: "mouse",
+      action: mouse[4] === "M" ? "press" : "release",
+      button: Number(mouse[1]),
+      x: Number(mouse[2]),
+      y: Number(mouse[3]),
+    };
+  }
 
   switch (value) {
     case "\u0001":
@@ -267,7 +323,7 @@ export async function* takeUntil<T>(
     // error) so abandoned generators run their cleanup — e.g. the client
     // event stream advancing its session cursor. For generator sources this
     // resolves only once the pending pull settles, so callers that stop
-    // mid-pull must also abort the underlying stream (the renderer's Ctrl+C
+    // mid-pull must also abort the underlying stream (a lifecycle interrupt
     // path fires `result.abort()` for exactly this reason).
     void iterator.return?.()?.catch(() => {});
   }

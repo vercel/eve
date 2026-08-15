@@ -28,6 +28,16 @@ The judges live under `t.judge.autoevals`. The namespace names the [Braintrust a
 | `t.judge.autoevals.closedQA(criteria)`   | Whether the reply satisfies a free-form yes/no criterion (no expected answer to match) |
 | `t.judge.autoevals.sql(expected)`        | Semantic equivalence of two SQL statements                                             |
 
+A failed `closedQA` assertion prints the input and judge explanation:
+
+```text
+✗ judge.autoevals.closedQA [citation] (0% < 80%): prompt: "Name the source."
+  criteria: "cites a source"
+  response: "It is widely believed."
+  rationale: "The response does not cite a source."
+  choice: "N"
+```
+
 The reference or criteria is the positional argument. An options object follows:
 
 - `on` is the value to grade, defaulting to `t.reply`. Pass an intermediate draft or parsed value to grade it instead.
@@ -48,7 +58,7 @@ Judge assertions are soft, so the threshold rides on the assertion handle. There
 
 ```ts
 t.judge.autoevals.closedQA("cites a source"); // tracked, never fails
-t.judge.autoevals.closedQA("cites a source").atLeast(0.6); // soft, fails under --strict below 0.6
+t.judge.autoevals.closedQA("cites a source").label("citation").atLeast(0.6);
 t.judge.autoevals.factuality(reference).gate(0.8); // hard gate at 0.8
 ```
 

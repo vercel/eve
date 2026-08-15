@@ -1,5 +1,8 @@
 export const EVE_SHARED_SERVER_FUNCTION_PATH = "eve/__server.func";
 
+/** Route Nitro's Vercel preset emits as the queue-triggered workflow function. */
+export const EVE_WORKFLOW_FLOW_ROUTE_PATH = "/.well-known/workflow/v1/flow";
+
 const EVE_SHARED_SERVER_ROUTE_DESTINATION = "/eve/__server";
 const EVE_VERCEL_FUNCTION_PREFIXES = ["eve/", ".well-known/workflow/"] as const;
 

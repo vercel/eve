@@ -40,11 +40,32 @@ describe("renderFlowPanel", () => {
     );
     const text = rows.join("\n");
 
-    expect(rows[0]).toBe("▔".repeat(60));
+    expect(rows[0]).toBe("▔".repeat(59));
     expect(rows[1]).toBe("   /deploy");
     expect(text).toContain("   · Creating Vercel project…");
     expect(text).toContain("   ✓ Linked");
     expect(text).toContain("   ▷ Create a new project");
+  });
+
+  it("renders multiline diagnostics as separate terminal rows", () => {
+    const rows = renderFlowPanel(
+      {
+        title: "Add to your agent",
+        lines: [
+          {
+            text: "Linear connector creation failed:\nError: connector already exists.",
+            tone: "error",
+          },
+        ],
+        content: { kind: "idle", indicator: { glyph: "▪", color: "green" } },
+      },
+      theme,
+      60,
+    );
+
+    expect(rows).toContain("   ⨯ Linear connector creation failed:");
+    expect(rows).toContain("     Error: connector already exists.");
+    expect(rows.every((row) => !row.includes("\n"))).toBe(true);
   });
 
   it("keeps only the freshest progress lines in view", () => {
@@ -138,6 +159,42 @@ describe("renderFlowPanel", () => {
 });
 
 describe("renderSelectQuestion", () => {
+  it("renders question context beneath the heading and above compact actions", () => {
+    const rows = renderSelectQuestion(
+      {
+        kind: "single",
+        message: "extension/agent-browser",
+        description: "Add browser automation tools backed by agent-browser to an eve agent.",
+        metadata: [
+          { label: "Source", value: "Official eve registry" },
+          { label: "Packages", value: "@agent-browser/eve" },
+        ],
+        options: [
+          { value: "add", label: "Add to project" },
+          { value: "back", label: "Back" },
+        ],
+        select: initialSelectState({
+          options: [
+            { value: "add", label: "Add to project" },
+            { value: "back", label: "Back" },
+          ],
+        }),
+      },
+      theme,
+      100,
+    );
+
+    expect(rows.slice(0, 7)).toEqual([
+      "  extension/agent-browser",
+      "  Add browser automation tools backed by agent-browser to an eve agent.",
+      "  Source: Official eve registry",
+      "  Packages: @agent-browser/eve",
+      "",
+      "   ▶ Add to project ",
+      "     Back",
+    ]);
+  });
+
   it("shows a stacked menu's selected-row description beneath that option", () => {
     const options: SetupPanelOption[] = [
       { value: "model", label: "Change model", description: "The model your agent uses" },

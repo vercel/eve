@@ -1,9 +1,12 @@
 {
   "title": "Channels",
+  "defaultOpen": false,
   "pages": [
     "overview",
     "eve",
+    "mcp",
     "slack",
+    "photon",
     "discord",
     "teams",
     "telegram",

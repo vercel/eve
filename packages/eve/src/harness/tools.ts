@@ -1,19 +1,13 @@
-import {
-  type JSONValue,
-  type ToolApprovalConfiguration,
-  type ToolApprovalStatus,
-  type ToolSet,
-  tool,
-} from "ai";
+import { type ToolApprovalConfiguration, type ToolApprovalStatus, type ToolSet, tool } from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { isObject } from "#shared/guards.js";
-import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { ApprovalStatus } from "#public/definitions/approval.js";
+import { resolveApprovalPolicy, type ApprovalStatus } from "#public/definitions/approval.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -25,12 +19,9 @@ import {
   modelFacingAuthorizationOutput,
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
-import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
+import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
-
-type ToolModelOutputValue =
-  | { readonly type: "json"; readonly value: JSONValue }
-  | { readonly type: "text"; readonly value: string };
+import { isAsyncIterable } from "#shared/async-iterable.js";
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
@@ -174,79 +165,53 @@ export function buildToolSetFromDefinitions(input: {
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
-): ((input: any, options: ToolExecuteOptions) => Promise<any>) | undefined {
+): ((input: any, options: ToolExecuteOptions) => Promise<any> | AsyncIterable<any>) | undefined {
   const execute = definition.execute;
   if (execute === undefined) return undefined;
-  return async (input, options) => {
-    const output = await execute(input, options);
-    if (isAuthorizationSignal(output)) {
-      stashToolInterrupt(loadContext(), options.toolCallId, output);
-      return modelFacingAuthorizationOutput(output);
+
+  return (input, options) => {
+    let output: unknown;
+    try {
+      output = execute(input, options);
+    } catch (error) {
+      return Promise.reject(error);
     }
-    return normalizeToolJsonOutput({
-      boundary: "execute",
-      output,
-      toolCallId: options.toolCallId,
-      toolName: definition.name,
-    });
+
+    if (isAsyncIterable(output)) {
+      return normalizeToolExecuteIterable(output, definition.name, options);
+    }
+
+    return Promise.resolve(output).then((value) =>
+      normalizeToolExecuteOutput(value, definition.name, options),
+    );
   };
 }
 
-function normalizeToolJsonOutput(input: {
-  readonly boundary: "execute" | "toModelOutput";
-  readonly output: unknown;
-  readonly toolCallId?: string;
-  readonly toolName: string;
-}): JsonValue {
-  const candidate = input.output === undefined ? null : input.output;
-
-  return withToolOutputSerializationError(input, () => {
-    parseJsonValue(candidate);
-    return candidate as JsonValue;
-  });
+async function* normalizeToolExecuteIterable(
+  output: AsyncIterable<unknown>,
+  toolName: string,
+  options: ToolExecuteOptions,
+): AsyncIterable<unknown> {
+  for await (const value of output) {
+    yield normalizeToolExecuteOutput(value, toolName, options);
+  }
 }
 
-function normalizeToolModelOutput(input: {
-  readonly output: unknown;
-  readonly toolCallId?: string;
-  readonly toolName: string;
-}): ToolModelOutputValue {
-  return withToolOutputSerializationError(
-    {
-      boundary: "toModelOutput",
-      toolCallId: input.toolCallId,
-      toolName: input.toolName,
-    },
-    () => {
-      if (input.output === null || typeof input.output !== "object") {
-        throw new TypeError("Expected a tool model output object.");
-      }
-
-      const output = input.output as { readonly type?: unknown; readonly value?: unknown };
-
-      if (output.type === "text") {
-        if (typeof output.value !== "string") {
-          throw new TypeError('Expected text model output to include a string "value".');
-        }
-
-        return { type: "text", value: output.value };
-      }
-
-      if (output.type === "json") {
-        return {
-          type: "json",
-          value: normalizeToolJsonOutput({
-            boundary: "toModelOutput",
-            output: output.value,
-            toolCallId: input.toolCallId,
-            toolName: input.toolName,
-          }) as JSONValue,
-        };
-      }
-
-      throw new TypeError('Expected tool model output type to be "text" or "json".');
-    },
-  );
+function normalizeToolExecuteOutput(
+  output: unknown,
+  toolName: string,
+  options: ToolExecuteOptions,
+): unknown {
+  if (isAuthorizationSignal(output)) {
+    stashToolInterrupt(loadContext(), options.toolCallId, output);
+    return modelFacingAuthorizationOutput(output);
+  }
+  return normalizeToolJsonOutput({
+    boundary: "execute",
+    output,
+    toolCallId: options.toolCallId,
+    toolName,
+  });
 }
 
 /**
@@ -274,6 +239,7 @@ export async function buildToolSetWithProviderTools(input: {
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly modelReference: RuntimeModelReference;
   readonly tools: HarnessToolMap;
+  readonly webSearchProvider?: WebSearchProvider;
 }): Promise<ToolSet> {
   const disabled = input.disabledProviderTools;
   const tools: ToolSet = {
@@ -290,7 +256,7 @@ export async function buildToolSetWithProviderTools(input: {
   if (!disabled?.has(WEB_SEARCH_TOOL_DEFINITION.name)) {
     const webSearchTool = input.tools.get(WEB_SEARCH_TOOL_DEFINITION.name);
     if (webSearchTool !== undefined && webSearchTool.execute === undefined) {
-      const backend = resolveWebSearchBackend(input.modelReference);
+      const backend = resolveWebSearchBackend(input.modelReference, input.webSearchProvider);
       if (backend === null) {
         delete tools[WEB_SEARCH_TOOL_DEFINITION.name];
       } else {
@@ -311,7 +277,7 @@ function buildApprovalFn(
 
     const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
 
-    const status = await definition.approval({
+    const status = await resolveApprovalPolicy(definition.approval)({
       ...buildCallbackContext(),
       approvedTools: input.approvedTools ?? new Set(),
       callId,

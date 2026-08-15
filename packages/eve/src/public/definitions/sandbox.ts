@@ -13,6 +13,7 @@ export type {
   SandboxReadTextFileOptions,
   SandboxRunOptions,
   SandboxSession,
+  RuntimeSandboxSession,
   SandboxSpawnOptions,
   SandboxWriteBinaryFileOptions,
   SandboxWriteFileOptions,

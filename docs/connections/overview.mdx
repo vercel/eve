@@ -22,7 +22,21 @@ Read [OpenAPI connections](/docs/connections/openapi) for `defineOpenAPIConnecti
 
 ## Static-token auth
 
-`getToken` returns a `TokenResult` (`{ token, expiresAt? }`), and eve sends it as `Authorization: Bearer <token>` on every request. Because it runs on each connection attempt, you can mint a fresh token from wherever you keep secrets, including an env var, a secrets manager, an internal vault, or your own OAuth exchange. If the token has a known TTL, set `expiresAt` (milliseconds since epoch) and eve refreshes ahead of time rather than waiting for a `401`.
+`getToken` returns a `TokenResult` (`{ token, expiresAt? }`), and eve sends it as `Authorization: Bearer <token>` on every request. Because it runs on each connection attempt, you can mint a fresh token from wherever you keep secrets, including an env var, a secrets manager, an internal vault, or your own OAuth exchange:
+
+```ts title="agent/connections/linear.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.linear.app/mcp",
+  description: "Linear workspace.",
+  auth: {
+    getToken: async () => ({ token: process.env.LINEAR_API_TOKEN! }),
+  },
+});
+```
+
+If the token has a known TTL, set `expiresAt` (milliseconds since epoch) and eve refreshes ahead of time rather than waiting for a `401`.
 
 When `getToken` is the only auth, `principalType` defaults to `"app"`: one shared credential keyed across all sessions. Switch to `principalType: "user"` when each end-user carries their own token.
 
@@ -123,7 +137,19 @@ For connection tools that can create, modify, delete, transmit, purchase, messag
 
 ## Interactive OAuth via Vercel Connect
 
-When the server uses OAuth and you want each end-user to sign in through their own browser, turn on interactive authorization with [Vercel Connect](https://vercel.com/docs/connect). The `connect()` helper from `@vercel/connect/eve` handles consent, encrypted token storage, and refresh, then hooks all of that into eve's authorization flow:
+When the server uses OAuth and you want each end-user to sign in through their own browser, turn on interactive authorization with [Vercel Connect](https://vercel.com/docs/connect). The `connect()` helper from `@vercel/connect/eve` handles consent, encrypted token storage, and refresh, then hooks all of that into eve's authorization flow.
+
+Create and attach the connector from the Vercel project or agent app that will use it:
+
+```bash
+npm install @vercel/connect
+vercel link
+vercel connect create <service> --name <name>
+vercel connect attach <connector-uid> --yes
+vercel env pull
+```
+
+Use the connector UID returned by the CLI in `connect("<connector-uid>")`. The service identifier accepted by `vercel connect create` depends on the provider; it is not necessarily the same as an MCP runtime URL or OpenAPI base URL.
 
 ```ts title="agent/connections/linear.ts"
 import { connect } from "@vercel/connect/eve";
@@ -155,7 +181,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-App-scoped Connect auth is non-interactive. eve asks Vercel Connect for an app token and does not emit a browser consent challenge; if the connector is not installed or cannot issue an app token, the tool call fails terminally so an operator can fix the connector setup. The full setup (Connect client provisioning, project linking, the runtime consent flow) lives in [Auth & route protection](/docs/guides/auth-and-route-protection).
+App-scoped Connect auth is non-interactive. eve asks Vercel Connect for an app token and does not emit a browser consent challenge; if the connector is not installed or cannot issue an app token, the tool call fails terminally so an operator can fix the connector setup. See [Authentication](/docs/guides/auth-and-route-protection) when a user-scoped connection needs your HTTP channel to establish the caller's identity.
 
 ### Troubleshooting Vercel Connect auth
 
@@ -274,6 +300,6 @@ A tool can require both sign-in (`auth`) and a human approval. The model's appro
 
 - [MCP connections](/docs/connections/mcp): connect to remote MCP servers.
 - [OpenAPI connections](/docs/connections/openapi): generate tools from OpenAPI operations.
-- [Integrations](/integrations): browse every channel and connection eve ships, in one gallery.
+- [Integrations](/integrations): browse every connection eve ships using the Connections filter.
 - [Tools](/docs/tools): authored tools live alongside connection-provided tools; the same approval helpers apply.
 - [Security model](/docs/concepts/security-model): how connection credentials stay out of the model's reach.

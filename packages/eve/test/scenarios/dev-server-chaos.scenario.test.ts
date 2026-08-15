@@ -87,6 +87,7 @@ function toolSource(marker: string): string {
 
 interface HealthProbe {
   readonly failures: readonly string[];
+  count(): number;
   stop(): Promise<number>;
 }
 
@@ -114,6 +115,9 @@ function startHealthProbe(serverUrl: string): HealthProbe {
 
   return {
     failures,
+    count() {
+      return probes;
+    },
     async stop() {
       stopped = true;
       await run;
@@ -155,7 +159,13 @@ describe("eve dev server chaos", () => {
       const probe = startHealthProbe(server.url);
 
       try {
+        await waitForCondition(
+          () => probe.count() > 0,
+          "Timed out waiting for the initial chaos health probe.",
+        );
+
         for (let round = 1; round <= 3; round += 1) {
+          const probesBeforeRound = probe.count();
           await writeFile(toolPath, toolSource(`storm-${String(round)}-a`));
           await writeFile(toolPath, toolSource(`storm-${String(round)}-b`));
           const revisionBeforeBreak = await readDevelopmentRevision(server.url);
@@ -171,19 +181,25 @@ describe("eve dev server chaos", () => {
             forceDevelopmentRebuild(server.url),
             forceDevelopmentRebuild(server.url),
           ]);
+          await waitForCondition(
+            () => probe.count() > probesBeforeRound,
+            `Health probe did not run during chaos round ${String(round)}.`,
+          );
         }
 
+        const probesBeforeStructuralReload = probe.count();
         await writeFile(join(app.appRoot, ".env.local"), "EVE_CHAOS_STRUCTURAL=1\n");
         await writeFile(toolPath, toolSource("storm-final"));
         await forceDevelopmentRebuild(server.url);
         await waitForToolMarker(server.url, "storm-final");
         await completeStreamedTurn(server, "What's the weather in Lisbon?");
+        await waitForCondition(
+          () => probe.count() > probesBeforeStructuralReload,
+          "Health probe did not run during the structural chaos reload.",
+        );
 
-        const probes = await probe.stop();
+        await probe.stop();
         expect(probe.failures, probe.failures.join("\n")).toEqual([]);
-        // The floor proves the probe ran continuously through the storm;
-        // the storm itself is deterministic-length now, not wall-clock.
-        expect(probes).toBeGreaterThan(30);
         expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
       } finally {
         await probe.stop();

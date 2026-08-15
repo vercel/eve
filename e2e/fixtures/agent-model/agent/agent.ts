@@ -1,17 +1,18 @@
-import { defineAgent, defineDynamic, type DynamicResolveContext } from "eve";
+import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
+import { defineAgent, defineDynamic, type AgentDefinition, type DynamicResolveContext } from "eve";
 
-const model = process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol";
+const model = e2eModel();
+const { experimental } = e2eAgentConfig();
 
 /**
- * Dynamic-model e2e fixture. Resolves at `turn.started` (not the usual
- * `session.started`) so one session can exercise selection, null fallback,
- * and resolver-failure degradation.
+ * Dynamic-model e2e fixture. Resolves at `step.started` so live model objects
+ * exercise the same selection, omission, and failure paths as gateway ids.
  */
-export default defineAgent({
+const agent: AgentDefinition = defineAgent({
+  experimental,
   model: defineDynamic({
-    fallback: model,
     events: {
-      "turn.started": (_event, ctx) => {
+      "step.started": (_event, ctx) => {
         const text = lastUserText(ctx.messages);
 
         if (text.includes("[model: boom]")) {
@@ -25,11 +26,21 @@ export default defineAgent({
           };
         }
 
-        return null;
+        if (text.includes("[model: catalog]")) {
+          return model;
+        }
+
+        if (text.includes("[model: missing]")) {
+          return null as never;
+        }
+
+        return { model, modelContextWindowTokens: 1_000_000 };
       },
     },
   }),
 });
+
+export default agent;
 
 function lastUserText(messages: DynamicResolveContext["messages"]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {

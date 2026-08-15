@@ -5,7 +5,8 @@ import type { DevelopmentCredentialGate } from "./credential-gate.js";
 
 type DevelopmentClientHeaders = Readonly<Record<string, string>>;
 
-function hasAuthorizationHeader(
+/** Returns whether development request headers explicitly own HTTP authorization. */
+export function hasDevelopmentAuthorizationHeader(
   headers: DevelopmentClientHeaders | undefined,
 ): headers is DevelopmentClientHeaders {
   return (
@@ -61,7 +62,7 @@ export function resolveLocalDevelopmentClientOptions(input: {
     redirect: "manual",
   } satisfies ClientOptions;
 
-  if (hasAuthorizationHeader(input.headers)) {
+  if (hasDevelopmentAuthorizationHeader(input.headers)) {
     return { ...options, headers: input.headers };
   }
 
@@ -88,7 +89,7 @@ export function resolveRemoteDevelopmentClientOptions(input: {
       `Credential gate origin ${input.credentials.serverOrigin} does not match client origin ${serverOrigin}.`,
     );
   }
-  if (hasAuthorizationHeader(input.headers)) {
+  if (hasDevelopmentAuthorizationHeader(input.headers)) {
     return {
       headers: () =>
         resolveRemoteHeaders({

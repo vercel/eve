@@ -10,6 +10,7 @@ import { equals, satisfies } from "eve/evals/expect";
  * client, so the eval works against local and deployed targets alike.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Session stream resume: ?startIndex replays missed events after a reconnect.",
 
   async test(t) {

@@ -1,0 +1,5 @@
+{
+  "title": "Subagents",
+  "defaultOpen": false,
+  "pages": ["index", "workflow-tool"]
+}

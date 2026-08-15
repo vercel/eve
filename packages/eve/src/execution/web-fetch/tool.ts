@@ -1,6 +1,7 @@
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { truncateHead } from "#execution/sandbox/truncate-output.js";
 import { convertHtmlToMarkdown, extractTextFromHtml } from "#execution/web-fetch/html.js";
+import { requestPublicUrl } from "#execution/web-fetch/request.js";
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024; // 5 MB
 const DEFAULT_TIMEOUT_MS = 30_000; // 30 seconds
@@ -60,10 +61,6 @@ export async function executeWebFetchTool(
 ): Promise<WebFetchResult> {
   const { url, format = "markdown", timeout } = args;
 
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    throw new Error("URL must start with http:// or https://");
-  }
-
   const timeoutMs = Math.min(
     timeout !== undefined ? timeout * 1000 : DEFAULT_TIMEOUT_MS,
     MAX_TIMEOUT_MS,
@@ -76,15 +73,20 @@ export async function executeWebFetchTool(
       : AbortSignal.any([options.abortSignal, timeoutSignal]);
   const headers = buildHeaders(format);
 
-  const initial = await fetch(url, { headers, signal });
+  const initial = await requestPublicUrl(url, {
+    headers,
+    maxResponseSize: MAX_RESPONSE_SIZE,
+    signal,
+  });
 
   // Cloudflare may reject browser-like UA strings from Node.js runtimes
   // because the TLS fingerprint does not match a real browser. Retry with
   // an honest UA to bypass the challenge.
   const response =
     initial.status === 403 && initial.headers.get("cf-mitigated") === "challenge"
-      ? await fetch(url, {
+      ? await requestPublicUrl(url, {
           headers: { ...headers, "User-Agent": EVE_PACKAGE_NAME },
+          maxResponseSize: MAX_RESPONSE_SIZE,
           signal,
         })
       : initial;
@@ -93,17 +95,7 @@ export async function executeWebFetchTool(
     throw new Error(`Request failed with status code: ${response.status}`);
   }
 
-  const declaredLength = response.headers.get("content-length");
-
-  if (declaredLength !== null && parseInt(declaredLength, 10) > MAX_RESPONSE_SIZE) {
-    throw new Error("Response too large (exceeds 5 MB limit).");
-  }
-
   const buffer = await response.arrayBuffer();
-
-  if (buffer.byteLength > MAX_RESPONSE_SIZE) {
-    throw new Error("Response too large (exceeds 5 MB limit).");
-  }
 
   const contentType = response.headers.get("content-type") ?? "";
   const isHtml = contentType.includes("text/html");

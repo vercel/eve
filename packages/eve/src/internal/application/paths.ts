@@ -3,7 +3,6 @@ import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
-import type { NitroBuildSurface } from "#internal/nitro/host/types.js";
 import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
@@ -45,31 +44,12 @@ export function isVercelBuildEnvironment(): boolean {
 /**
  * Resolves the programmatic Nitro build directory for an app.
  */
-export function resolveNitroBuildDirectory(
-  appRoot: string,
-  surface: NitroBuildSurface = "all",
-): string {
-  const rootDirectory = join(appRoot, ".eve", "nitro");
-
-  if (surface === "all") {
-    return rootDirectory;
-  }
-
-  return join(rootDirectory, surface);
+export function resolveNitroBuildDirectory(appRoot: string): string {
+  return join(appRoot, ".eve", "nitro");
 }
 
 export function resolveApplicationHostArtifactsDirectory(appRoot: string): string {
   return join(appRoot, ".eve", "host");
-}
-
-/**
- * Resolves the staged Nitro output directory for one isolated build surface.
- */
-export function resolveNitroSurfaceOutputDirectory(
-  appRoot: string,
-  surface: Exclude<NitroBuildSurface, "all">,
-): string {
-  return join(appRoot, ".eve", "nitro-output", surface);
 }
 
 /**

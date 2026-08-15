@@ -10,7 +10,31 @@ interface FetchCall {
   contentType: string | null;
 }
 
-function buildFetchMock(): { fetch: ReturnType<typeof vi.fn>; calls: FetchCall[] } {
+function buildFetchMock(
+  threadMessages: readonly Record<string, unknown>[] = [
+    {
+      text: "Hello from user",
+      ts: "1700000000.123456",
+      thread_ts: "1700000000.000001",
+      user: "U01",
+      files: [
+        {
+          id: "F1",
+          name: "report.csv",
+          mimetype: "text/csv",
+          url_private: "https://files.slack.com/a/b/report.csv",
+          size: 128,
+        },
+      ],
+    },
+    {
+      text: "Hello from bot",
+      ts: "1700000001.000000",
+      thread_ts: "1700000000.000001",
+      bot_id: "B01",
+    },
+  ],
+): { fetch: ReturnType<typeof vi.fn>; calls: FetchCall[] } {
   const calls: FetchCall[] = [];
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
@@ -44,29 +68,7 @@ function buildFetchMock(): { fetch: ReturnType<typeof vi.fn>; calls: FetchCall[]
       return new Response(
         JSON.stringify({
           ok: true,
-          messages: [
-            {
-              text: "Hello from user",
-              ts: "1700000000.123456",
-              thread_ts: "1700000000.000001",
-              user: "U01",
-              files: [
-                {
-                  id: "F1",
-                  name: "report.csv",
-                  mimetype: "text/csv",
-                  url_private: "https://files.slack.com/a/b/report.csv",
-                  size: 128,
-                },
-              ],
-            },
-            {
-              text: "Hello from bot",
-              ts: "1700000001.000000",
-              thread_ts: "1700000000.000001",
-              bot_id: "B01",
-            },
-          ],
+          messages: threadMessages,
         }),
         { headers: { "content-type": "application/json" } },
       );
@@ -437,7 +439,7 @@ describe("SlackThread.refresh", () => {
       botId: "B01",
       ts: "1700000001.000000",
       threadTs: "1700000000.000001",
-      isMe: true,
+      isMe: false,
     });
 
     const firstMessage = thread.recentMessages[0]!;
@@ -445,6 +447,163 @@ describe("SlackThread.refresh", () => {
     expect("attachments" in firstMessage).toBe(false);
     expect("author" in firstMessage).toBe(false);
     expect("metadata" in firstMessage).toBe(false);
+  });
+
+  it("shares one conversations.replies request across overlapping refreshes", async () => {
+    let resolveReplies!: (response: Response) => void;
+    const replies = new Promise<Response>((resolve) => {
+      resolveReplies = resolve;
+    });
+    mock.fetch.mockImplementation(async (input: string | URL | Request) => {
+      if (String(input) === "https://slack.com/api/conversations.replies") {
+        return replies;
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    const first = thread.refresh();
+    const second = thread.refresh();
+
+    expect(second).toBe(first);
+    await vi.waitFor(() => {
+      expect(mock.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    resolveReplies(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          messages: [{ text: "loaded once", ts: "1.0", user: "U01" }],
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    await Promise.all([first, second]);
+
+    expect(thread.recentMessages).toHaveLength(1);
+  });
+
+  it("starts a new request after the previous refresh completes", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.refresh();
+    const firstSnapshot = thread.recentMessages;
+    await thread.refresh();
+
+    expect(
+      mock.calls.filter((call) => call.url === "https://slack.com/api/conversations.replies"),
+    ).toHaveLength(2);
+    expect(thread.recentMessages).not.toBe(firstSnapshot);
+    expect(firstSnapshot).toHaveLength(2);
+  });
+
+  it("preserves loaded messages when a later refresh fails", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+    await thread.refresh();
+    const loadedMessages = [...thread.recentMessages];
+    mock.fetch.mockRejectedValueOnce(new Error("Slack unavailable"));
+
+    await thread.refresh();
+
+    expect(thread.recentMessages).toEqual(loadedMessages);
+  });
+
+  it("marks only replies from the bound Slack app as mine", async () => {
+    mock.fetch.mockImplementation(async (input: string | URL | Request) => {
+      if (String(input) === "https://slack.com/api/conversations.replies") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            messages: [
+              {
+                app_id: "A_SELF",
+                bot_id: "B_SELF",
+                text: "own user-attributed reply",
+                ts: "1.1",
+                user: "U_SELF",
+              },
+              {
+                app_id: "A_OTHER",
+                bot_id: "B_OTHER",
+                text: "other bot reply",
+                ts: "1.2",
+                user: "U_OTHER",
+              },
+              {
+                app_id: "A_SELF",
+                bot_id: "B_SELF",
+                text: "own app-attributed reply",
+                ts: "1.3",
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const { thread } = buildSlackBinding({
+      appId: "A_SELF",
+      botToken: "xoxb-test",
+      botUserId: "U_SELF",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.refresh();
+
+    expect(thread.recentMessages.map((message) => message.isMe)).toEqual([true, false, true]);
+  });
+});
+
+describe("SlackThread.listParticipants", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns unique human user ids in first-appearance order", async () => {
+    const mock = buildFetchMock([
+      { text: "root", ts: "1.0", user: "U01" },
+      { text: "bot reply", ts: "1.1", thread_ts: "1.0", user: "UAPP", bot_id: "B01" },
+      { text: "second person", ts: "1.2", thread_ts: "1.0", user: "U02" },
+      { text: "starter again", ts: "1.3", thread_ts: "1.0", user: "U01" },
+      { text: "system message", ts: "1.4", thread_ts: "1.0" },
+    ]);
+    vi.stubGlobal("fetch", mock.fetch);
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await expect(thread.listParticipants()).resolves.toEqual(["U01", "U02"]);
+
+    expect(thread.recentMessages).toHaveLength(5);
+    expect(
+      mock.calls.filter((call) => call.url === "https://slack.com/api/conversations.replies"),
+    ).toHaveLength(1);
   });
 });
 

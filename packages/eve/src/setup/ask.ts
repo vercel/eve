@@ -14,7 +14,27 @@
 // Boxes only ever see `Asker`. Policies are presence/absence of decorators,
 // which also unlocks combinations a monolithic factory could not express.
 
+import { SetupPrerequisiteRequired } from "./integrations/shared/prerequisite.js";
+import {
+  renderEditableQuestion,
+  type EditableSelectAnswer,
+  type EditableSelectQuestion,
+} from "./ask-editable.js";
+import {
+  InteractionRequired,
+  InvalidAnswerError,
+  SkippedSignal,
+  type AnyQuestion,
+} from "./ask-signals.js";
+export type { EditableSelectAnswer, EditableSelectQuestion } from "./ask-editable.js";
+export {
+  InteractionRequired,
+  InvalidAnswerError,
+  SkippedSignal,
+  type AnyQuestion,
+} from "./ask-signals.js";
 import type { Prompter } from "./prompter.js";
+import { optionById, optionByValue, requiredOptionId } from "./question-options.js";
 
 /** One choice in a select question. */
 export interface SelectOption<T> {
@@ -90,7 +110,15 @@ export type Question<T> = {
   | {
       kind: "text";
       validate?: (raw: string) => string | null;
-      sensitive?: boolean;
+      sensitive?: false;
+      /** Presentation hint: ghost text shown while the input is empty. */
+      placeholder?: string;
+    }
+  | {
+      kind: "text";
+      validate?: (raw: string) => string | null;
+      sensitive: true;
+      environment: string;
       /** Presentation hint: ghost text shown while the input is empty. */
       placeholder?: string;
     }
@@ -148,21 +176,35 @@ export const confirm = (q: {
   kind: "confirm",
 });
 
-/** Builds a text question without spelling the discriminant at call sites. */
-export const text = (q: {
+interface TextQuestionInput {
   key: string;
   message: string;
   detected?: string;
   recommended?: string;
   required?: boolean;
   validate?: (raw: string) => string | null;
-  sensitive?: boolean;
   placeholder?: string;
-}): Question<string> => ({ ...q, kind: "text" });
+}
+
+/** Builds a text question without spelling the discriminant at call sites. */
+export function text(
+  q: TextQuestionInput & { sensitive: true; environment: string },
+): Question<string>;
+export function text(
+  q: TextQuestionInput & { sensitive?: false; environment?: never },
+): Question<string>;
+export function text(
+  q: TextQuestionInput &
+    ({ sensitive: true; environment: string } | { sensitive?: false; environment?: never }),
+): Question<string> {
+  return { ...q, kind: "text" };
+}
 
 /** The capability boxes see. Pure and flow-agnostic: Prompter's successor. */
 export interface Asker {
   ask<T>(question: Question<T>): Promise<T>;
+  /** A single choice whose one row carries an editable string value. */
+  askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>>;
   /**
    * The multi-select channel. Paired with {@link ask} instead of being a
    * question kind because the answer type (`T[]`) differs from the option type
@@ -180,42 +222,6 @@ export type AskerDecorator = (inner: Asker) => Asker;
 // already has a repo-wide signal, WizardCancelledError in step.ts, which the
 // interactive prompter throws and the runner folds; the channel lets it
 // propagate instead of introducing a second cancel signal.
-
-/** Thrown when a skippable question is skipped, so the box can branch on it. */
-export class SkippedSignal extends Error {
-  readonly key: string;
-  constructor(key: string) {
-    super(`Skipped: ${key}`);
-    this.name = "SkippedSignal";
-    this.key = key;
-  }
-}
-
-/** Any question the channel can carry, for signals that quote one. */
-export type AnyQuestion = Question<unknown> | MultiSelectQuestion<unknown>;
-
-/**
- * Headless refusal that keeps the whole question: an agent driver can relay
- * exactly what is missing (key, message, options) instead of a bare string.
- */
-export class InteractionRequired extends Error {
-  readonly question: AnyQuestion;
-  constructor(question: AnyQuestion) {
-    super(`Interaction required for "${question.key}": ${question.message}`);
-    this.name = "InteractionRequired";
-    this.question = question;
-  }
-}
-
-/** Thrown when a pre-supplied answer fails the question's own validation. */
-export class InvalidAnswerError extends Error {
-  readonly key: string;
-  constructor(key: string, message: string) {
-    super(message);
-    this.name = "InvalidAnswerError";
-    this.key = key;
-  }
-}
 
 /** How a question got its value, so nothing is silently assumed. */
 export type ResolutionSource = "answer" | "detected" | "assumed" | "asked" | "skipped";
@@ -245,11 +251,11 @@ function announce<T>(
 function coerceAnswer<T>(question: Question<T>, raw: unknown): T {
   if (question.kind === "select") {
     const id = String(raw);
-    const match = question.options.find((option) => option.id === id);
+    const match = optionById(question, id);
     if (!match) {
       const ids = question.options.map((option) => option.id).join(", ");
       throw new InvalidAnswerError(
-        question.key,
+        question,
         `Invalid answer for "${question.key}": ${id}. Expected one of: ${ids}.`,
       );
     }
@@ -260,7 +266,7 @@ function coerceAnswer<T>(question: Question<T>, raw: unknown): T {
       typeof raw === "boolean" ? raw : raw === "true" ? true : raw === "false" ? false : null;
     if (value === null) {
       throw new InvalidAnswerError(
-        question.key,
+        question,
         `Invalid answer for "${question.key}": expected a boolean.`,
       );
     }
@@ -268,7 +274,7 @@ function coerceAnswer<T>(question: Question<T>, raw: unknown): T {
   }
   const value = String(raw);
   const problem = question.validate?.(value);
-  if (problem) throw new InvalidAnswerError(question.key, problem);
+  if (problem) throw new InvalidAnswerError(question, problem);
   return value as T;
 }
 
@@ -282,25 +288,25 @@ function coerceAnswer<T>(question: Question<T>, raw: unknown): T {
 function coerceManyAnswer<T>(question: MultiSelectQuestion<T>, raw: unknown): T[] {
   if (!Array.isArray(raw)) {
     throw new InvalidAnswerError(
-      question.key,
+      question,
       `Invalid answer for "${question.key}": expected an array of option ids.`,
     );
   }
   const values: T[] = [];
   for (const item of raw) {
     const id = String(item);
-    const match = question.options.find((option) => option.id === id);
+    const match = optionById(question, id);
     if (!match) {
       const ids = question.options.map((option) => option.id).join(", ");
       throw new InvalidAnswerError(
-        question.key,
+        question,
         `Invalid answer for "${question.key}": ${id}. Expected one of: ${ids}.`,
       );
     }
     if (match.disabled) {
       const reason = match.disabledReason === undefined ? "" : ` (${match.disabledReason})`;
       throw new InvalidAnswerError(
-        question.key,
+        question,
         `Invalid answer for "${question.key}": ${id} is unavailable${reason}.`,
       );
     }
@@ -330,7 +336,11 @@ async function renderQuestion<T>(prompter: Prompter, question: Question<T>): Pro
       initialValue:
         preselected === undefined
           ? undefined
-          : question.options.find((option) => option.value === preselected)?.id,
+          : requiredOptionId(
+              question,
+              preselected,
+              question.detected !== undefined ? "detected value" : "recommendation",
+            ),
       search: question.search,
       placeholder: question.placeholder,
     });
@@ -392,9 +402,13 @@ async function renderManyQuestion<T>(
     initialValues:
       premarked === undefined
         ? undefined
-        : question.options
-            .filter((option) => premarked.includes(option.value))
-            .map((option) => option.id),
+        : premarked.map((value) =>
+            requiredOptionId(
+              question,
+              value,
+              question.detected !== undefined ? "detected value" : "recommendation",
+            ),
+          ),
     required: question.requireSelection,
     search: question.search,
     placeholder: question.placeholder,
@@ -404,10 +418,10 @@ async function renderManyQuestion<T>(
   // re-judging its output would move box-level guards (e.g. the Slack/Vercel
   // assert in select-channels) behind a different error.
   return chosen.map((id) => {
-    const match = question.options.find((option) => option.id === id);
+    const match = optionById(question, id);
     if (!match) {
       throw new InvalidAnswerError(
-        question.key,
+        question,
         `Invalid answer for "${question.key}": ${id} is not an option id.`,
       );
     }
@@ -428,6 +442,12 @@ export function interactiveAsker(prompter: Prompter, events?: AskerEvents): Aske
       const value = await renderQuestion(prompter, question);
       if (question.internal) return value;
       return announce(events, question.key, value, "asked");
+    },
+    async askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>> {
+      const result = await renderEditableQuestion(prompter, question);
+      announce(events, question.key, result.value, "asked");
+      if (result.text !== undefined) announce(events, question.editable.key, result.text, "asked");
+      return result;
     },
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
       const value = await renderManyQuestion(prompter, question);
@@ -453,10 +473,13 @@ export function headlessAsker(events?: AskerEvents): Asker {
   return {
     // Async so refusal and skip surface as rejections, like every other rung.
     async ask<T>(question: Question<T>): Promise<T> {
-      return refuse(question as Question<unknown>);
+      return refuse(question);
+    },
+    async askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>> {
+      return refuse(question);
     },
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
-      return refuse(question as MultiSelectQuestion<unknown>);
+      return refuse(question);
     },
   };
 }
@@ -477,7 +500,59 @@ export function withAnswers(
         const value = coerceAnswer(question, answers[question.key]);
         return announce(events, question.key, value, "answer");
       }
+      if (question.kind === "text" && question.sensitive === true) {
+        const environmentValue = process.env[question.environment];
+        if (environmentValue !== undefined) return coerceAnswer(question, environmentValue);
+        try {
+          return await inner.ask(question);
+        } catch (error) {
+          if (!(error instanceof InteractionRequired)) throw error;
+          throw new SetupPrerequisiteRequired({
+            kind: "environment",
+            code: question.key,
+            message: `Set ${question.environment}, then retry setup.`,
+            variable: question.environment,
+            sensitive: true,
+          });
+        }
+      }
       return inner.ask(question);
+    },
+    async askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>> {
+      if (!(question.key in answers)) return inner.askEditable(question);
+      const selection = coerceAnswer(
+        select({ key: question.key, message: question.message, options: question.options }),
+        answers[question.key],
+      );
+      announce(events, question.key, selection, "answer");
+      if (selection !== question.editable.value) return { value: selection };
+      if (!(question.editable.key in answers)) {
+        const value = await inner.ask(
+          text({
+            key: question.editable.key,
+            message: optionByValue(question, selection)?.label ?? question.message,
+            recommended: question.editable.recommended,
+            required: question.required,
+            validate: question.editable.validate,
+          }),
+        );
+        return { value: selection, text: value.trim() };
+      }
+      const raw = String(answers[question.editable.key]);
+      const problem = question.editable.validate?.(raw);
+      if (problem) {
+        throw new InvalidAnswerError(
+          text({
+            key: question.editable.key,
+            message: question.editable.label,
+            required: question.required,
+          }),
+          problem,
+        );
+      }
+      const value = raw.trim();
+      announce(events, question.editable.key, value, "answer");
+      return { value: selection, text: value };
     },
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
       if (question.key in answers) {
@@ -503,6 +578,13 @@ export function withRequired(keys: readonly string[]): AskerDecorator {
       }
       return inner.ask(question);
     },
+    async askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>> {
+      return inner.askEditable(
+        !question.required && keys.includes(question.key)
+          ? { ...question, required: true }
+          : question,
+      );
+    },
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
       if (!question.required && keys.includes(question.key)) {
         return inner.askMany({ ...question, required: true });
@@ -527,9 +609,15 @@ export function withPolicy(policy: AnswerPolicy, events?: AskerEvents): AskerDec
     async ask<T>(question: Question<T>): Promise<T> {
       if (policy === "assume") {
         if (question.detected !== undefined) {
+          if (question.kind === "select") {
+            requiredOptionId(question, question.detected, "detected value");
+          }
           return announce(events, question.key, question.detected, "detected");
         }
         if (question.recommended !== undefined) {
+          if (question.kind === "select") {
+            requiredOptionId(question, question.recommended, "recommendation");
+          }
           return announce(events, question.key, question.recommended, "assumed");
         }
         // Assume minimizes interaction: the unknowable is skipped when the
@@ -552,12 +640,34 @@ export function withPolicy(policy: AnswerPolicy, events?: AskerEvents): AskerDec
       }
       return inner.ask(question);
     },
+    async askEditable<T>(question: EditableSelectQuestion<T>): Promise<EditableSelectAnswer<T>> {
+      if (policy !== "assume" || question.recommended === undefined) {
+        return inner.askEditable(question);
+      }
+      requiredOptionId(question, question.editable.value, "configured editable value");
+      requiredOptionId(question, question.recommended, "recommendation");
+      const result: EditableSelectAnswer<T> =
+        question.recommended === question.editable.value
+          ? { value: question.recommended, text: question.editable.recommended }
+          : { value: question.recommended };
+      announce(events, question.key, result.value, "assumed");
+      if (result.text !== undefined) {
+        announce(events, question.editable.key, result.text, "assumed");
+      }
+      return result;
+    },
     async askMany<T>(question: MultiSelectQuestion<T>): Promise<T[]> {
       if (policy === "assume") {
         if (question.detected !== undefined) {
+          for (const value of question.detected) {
+            requiredOptionId(question, value, "detected value");
+          }
           return announce(events, question.key, [...question.detected], "detected");
         }
         if (question.recommended !== undefined) {
+          for (const value of question.recommended) {
+            requiredOptionId(question, value, "recommendation");
+          }
           return announce(events, question.key, [...question.recommended], "assumed");
         }
         if (!question.required) {

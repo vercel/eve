@@ -277,12 +277,7 @@ function readHitlPayload(value: Record<string, unknown>): Record<string, unknown
 }
 
 function formatApprovalInput(request: InputRequest): string | null {
-  if (
-    request.display !== "confirmation" ||
-    request.options?.length !== 2 ||
-    request.options[0]?.id !== "approve" ||
-    request.options[1]?.id !== "deny"
-  ) {
+  if (request.kind !== "tool-approval") {
     return null;
   }
   const json = JSON.stringify(request.action.input, null, 2);

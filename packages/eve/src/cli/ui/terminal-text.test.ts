@@ -61,6 +61,26 @@ describe("editable input geometry", () => {
     expect(wrapVisibleLine("\x1b[31m🇺🇸\x1b[0m", 1)).toEqual(["\x1b[31m🇺🇸\x1b[0m"]);
   });
 
+  it("keeps an empty line as one empty row", () => {
+    expect(wrapVisibleLine("", 10)).toEqual([""]);
+    expect(wrapVisibleLine("", 0)).toEqual([""]);
+  });
+
+  it("word-wraps on the last space that fits and collapses the break whitespace", () => {
+    expect(wrapVisibleLine("alpha beta gamma", 10)).toEqual(["alpha beta", "gamma"]);
+    expect(wrapVisibleLine("alpha  beta   gamma", 6)).toEqual(["alpha", "beta", "gamma"]);
+    expect(wrapVisibleLine("abcdefghij", 4)).toEqual(["abcd", "efgh", "ij"]);
+  });
+
+  it("wraps a long unbreakable payload in linear time", () => {
+    const line = JSON.stringify({ excerpts: "x".repeat(64 * 1024) });
+    const start = performance.now();
+    const lines = wrapVisibleLine(line, 120);
+    expect(performance.now() - start).toBeLessThan(500);
+    expect(lines.length).toBeGreaterThan(500);
+    expect(lines.join("")).toBe(line);
+  });
+
   it("maps terminal columns to grapheme boundaries", () => {
     expect(offsetAtVisibleColumn("界x", 2)).toBe(1);
     expect(offsetAtVisibleColumn("e\u0301x", 1)).toBe(2);

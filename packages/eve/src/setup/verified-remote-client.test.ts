@@ -15,15 +15,23 @@ describe("resolveVerifiedRemoteDevelopmentClient", () => {
       kind: "resolved" as const,
       token: " fresh-token ",
     }));
+    const resolveVercelDeployment = vi.fn(async () => ({ kind: "resolved" as const, target }));
     const { options } = await resolveVerifiedRemoteDevelopmentClient({
       serverUrl: "https://example.vercel.app/path",
+      vercelScope: "target-team",
       workspaceRoot: "/workspace",
       deps: {
-        resolveVercelDeployment: async () => ({ kind: "resolved", target }),
+        resolveVercelDeployment,
         resolveDevelopmentOidcToken,
       },
     });
 
+    expect(resolveVercelDeployment).toHaveBeenCalledWith({
+      host: "example.vercel.app",
+      scope: "target-team",
+      signal: undefined,
+      workspaceRoot: "/workspace",
+    });
     expect(options.redirect).toBe("manual");
     // The OIDC token rides the higher-level vercelOidc auth; the client expands
     // it into the Authorization + trusted-OIDC headers (covered in client.test.ts).
@@ -58,6 +66,59 @@ describe("resolveVerifiedRemoteDevelopmentClient", () => {
     const { token } = options.auth.vercelOidc;
     expect(typeof token === "function" ? await token() : token).toBe("");
     expect(lastOidcTokenFailure()).toEqual(failure);
+  });
+
+  it("preserves explicit non-authorization headers with verified ambient credentials", async () => {
+    const { options } = await resolveVerifiedRemoteDevelopmentClient({
+      headers: { "x-tenant": "acme" },
+      serverUrl: "https://example.vercel.app/path",
+      workspaceRoot: "/workspace",
+      deps: {
+        resolveVercelDeployment: async () => ({ kind: "resolved", target }),
+        resolveDevelopmentOidcToken: async () => ({
+          kind: "resolved" as const,
+          token: "ambient-token",
+        }),
+      },
+    });
+
+    expect(options.auth).toEqual({ vercelOidc: { token: expect.any(Function) } });
+    if (typeof options.headers !== "function") throw new Error("Expected dynamic headers.");
+    await expect(options.headers()).resolves.toEqual({ "x-tenant": "acme" });
+  });
+
+  it("lets explicit authorization bypass ambient credential discovery", async () => {
+    const resolveVercelDeployment = vi.fn(async () => ({ kind: "resolved" as const, target }));
+    const { options } = await resolveVerifiedRemoteDevelopmentClient({
+      headers: { authorization: "Bearer explicit", "x-tenant": "acme" },
+      serverUrl: "https://example.vercel.app/path",
+      workspaceRoot: "/workspace",
+      deps: {
+        resolveVercelDeployment,
+        resolveDevelopmentOidcToken: vi.fn(),
+      },
+    });
+
+    expect(resolveVercelDeployment).not.toHaveBeenCalled();
+    expect(options.auth).toBeUndefined();
+    if (typeof options.headers !== "function") throw new Error("Expected dynamic headers.");
+    await expect(options.headers()).resolves.toEqual({
+      authorization: "Bearer explicit",
+      "x-tenant": "acme",
+    });
+  });
+
+  it("exposes a missed deployment lookup to callers", async () => {
+    const result = await resolveVerifiedRemoteDevelopmentClient({
+      serverUrl: "https://arbitrary.example.com",
+      workspaceRoot: "/workspace",
+      deps: {
+        resolveVercelDeployment: async () => ({ kind: "not-found" }),
+        resolveDevelopmentOidcToken: vi.fn(),
+      },
+    });
+
+    expect(result.deploymentResolution).toEqual({ kind: "not-found" });
   });
 
   it("keeps an unverified remote anonymous", async () => {

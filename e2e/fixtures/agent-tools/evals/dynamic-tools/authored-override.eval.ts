@@ -7,6 +7,7 @@ import { defineEval } from "eve/evals";
 const OVERRIDE_TOKEN = "dynamic-override-ok-K2P7";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Dynamic tools smoke: a dynamic tool overrides a same-named authored tool.",
   async test(t) {
     await t.send("Call the `override-target` tool and report the `source` value it returns.");

@@ -8,6 +8,7 @@ const FILE_TOOLS_TOKEN = "sandbox-file-tools-ok-Q2H";
 const FILE_TOOLS_PATH = "/workspace/file-tools-note.txt";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Sandbox: built-in write_file/grep tools operate on the sandbox filesystem.",
   async test(t) {
     await t.send(

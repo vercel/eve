@@ -1,4 +1,5 @@
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { HarnessToolMap } from "#harness/types.js";
 import type { ContextKey } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
@@ -8,7 +9,12 @@ import {
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createLogger } from "#internal/logging.js";
-import type { ApprovalContext, ApprovalStatus } from "#public/definitions/approval.js";
+import type {
+  ApprovalContext,
+  ApprovalResponseDecision,
+  ApprovalResponseContext,
+  ApprovalStatus,
+} from "#public/definitions/approval.js";
 import { toInputSchema, toOutputSchema } from "#shared/tool-schema.js";
 
 const log = createLogger("dynamic-tools");
@@ -79,8 +85,30 @@ function buildReplayedApproval(
     return () => "user-approval";
   }
 
-  return async (approvalCtx: ApprovalContext) =>
+  const policy = async (approvalCtx: ApprovalContext) =>
     (await approvalStepFn(metadata.closureVars ?? {}, approvalCtx)) as ApprovalStatus;
+  if (metadata.approvalResponseStepFnName === undefined) return policy;
+
+  const responseStepFn = lookupStepFunction(metadata.approvalResponseStepFnName);
+  if (responseStepFn === null) {
+    log.warn(
+      `Dynamic tool "${metadata.name}" references response authorizer ` +
+        `"${metadata.approvalResponseStepFnName}" which is not registered — rejecting responses.`,
+    );
+    return {
+      request: policy,
+      response: async () => ({
+        reason: "Approval response authorization is temporarily unavailable.",
+        status: "rejected" as const,
+      }),
+    };
+  }
+
+  return {
+    request: policy,
+    response: async (responseCtx: ApprovalResponseContext) =>
+      (await responseStepFn(metadata.closureVars ?? {}, responseCtx)) as ApprovalResponseDecision,
+  };
 }
 
 /**
@@ -91,6 +119,20 @@ function buildReplayedApproval(
  * `LiveStepToolsKey`). Session/turn tools are replayed from durable
  * metadata via the bundler's registered step functions.
  */
+export function buildResponseAuthorizationTools(input: {
+  readonly authoredTools: HarnessToolMap;
+  readonly context?: { get<T>(key: ContextKey<T>): T | undefined };
+}): HarnessToolMap {
+  const tools = new Map<string, HarnessToolDefinition>();
+  for (const tool of input.context === undefined ? [] : buildDynamicTools(input.context)) {
+    if (!tools.has(tool.name)) tools.set(tool.name, tool);
+  }
+  for (const [name, tool] of input.authoredTools) {
+    if (!tools.has(name)) tools.set(name, tool);
+  }
+  return tools;
+}
+
 export function buildDynamicTools(ctx: {
   get<T>(key: ContextKey<T>): T | undefined;
 }): readonly HarnessToolDefinition[] {

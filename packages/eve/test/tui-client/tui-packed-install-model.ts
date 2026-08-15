@@ -98,12 +98,7 @@ void (async () => {
     const screen = new MockScreen({ columns: 100, rows: 40 });
     const input = new MockUserInput();
     const runner = new EveTUIRunner({
-      // `/model` never dispatches a turn; a turn in this test is a bug.
-      session: {
-        send: async () => {
-          throw new Error("unexpected turn dispatched during /model smoke test");
-        },
-      },
+      // `/model` runs before the first chat turn, so no client session exists yet.
       screen,
       userInput: input,
       name: "Packed install model command",
@@ -144,6 +139,15 @@ void (async () => {
       await screen.waitForText("Change model", 5_000);
       input.send("\x1b");
       await screen.waitForText("/model dismissed.", 5_000);
+      // Fresh-model onboarding now follows the picker with the registry hub.
+      // Dismiss it too before asserting that the runner returns to chat.
+      await screen.waitForText("Add to your agent", 5_000);
+      // The title paints before registry loading necessarily yields to the
+      // category picker. Wait for a real option so Escape belongs to the
+      // question rather than the setup flow's between-questions interrupt trap.
+      await screen.waitForText("Channels", 5_000);
+      input.send("\x1b");
+      await screen.waitForText("/add dismissed.", 5_000);
       await screen.waitForIdlePrompt(5_000);
 
       input.type("/exit");

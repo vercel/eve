@@ -4,7 +4,7 @@ import type { WorkflowManifest } from "./workflow-builders.js";
 
 // Step names whose `stepId` must be emitted as the bare function name,
 // not `step//<idBase>//<name>`. The workflow-body shim's
-// `experimental_setAttributes` (and Workflow's compiled equivalent)
+// `setAttributes` (and Workflow's compiled equivalent)
 // dispatches builtins via `useStep("<name>")` with the unqualified
 // identifier — if the registry stored these under their version-stamped
 // `step//...//name` ids, the lookup would miss and the runtime would

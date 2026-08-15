@@ -9,6 +9,7 @@ const typeLabel: Record<Integration["type"], string> = {
   channel: "Channel",
   connection: "Connection",
   extension: "Extension",
+  instrumentation: "Instrumentation",
 };
 
 const section = (title: string, content: string): string => `## ${title}\n\n${content}`;

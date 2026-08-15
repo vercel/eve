@@ -5,6 +5,7 @@ import { defineEval } from "eve/evals";
 // A correct sum proves the full authored-sandbox path works end-to-end with a
 // real Python interpreter, not a simulated shell.
 export default defineEval({
+  tags: ["real-model"],
   description: "Sandbox: an authored tool runs real Python via ctx.getSandbox().",
   async test(t) {
     await t.send(

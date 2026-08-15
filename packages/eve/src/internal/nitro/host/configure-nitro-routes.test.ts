@@ -171,7 +171,7 @@ describe("Nitro route configuration", () => {
   it("registers package-owned route files through file-url virtual handlers", async () => {
     const nitro = createNitroStub();
 
-    await configureProductionNitroRoutes(nitro, createPreparedHost(), "app");
+    await configureProductionNitroRoutes(nitro, createPreparedHost());
 
     const healthHandler = nitro.options.handlers.find(
       (handler) => handler.route === EVE_HEALTH_ROUTE_PATH && handler.method === "GET",
@@ -188,11 +188,7 @@ describe("Nitro route configuration", () => {
   it("bakes the agent name into the home page route", async () => {
     const nitro = createNitroStub();
 
-    await configureProductionNitroRoutes(
-      nitro,
-      createPreparedHost({ agentName: "support-agent" }),
-      "app",
-    );
+    await configureProductionNitroRoutes(nitro, createPreparedHost({ agentName: "support-agent" }));
 
     const homeHandler = nitro.options.handlers.find(
       (handler) => handler.route === "/" && handler.method === "GET",
@@ -207,7 +203,7 @@ describe("Nitro route configuration", () => {
   it("registers the health route for HEAD so load balancers probing with HEAD see 200", async () => {
     const nitro = createNitroStub();
 
-    await configureProductionNitroRoutes(nitro, createPreparedHost(), "app");
+    await configureProductionNitroRoutes(nitro, createPreparedHost());
 
     const healthMethods = nitro.options.handlers
       .filter((handler) => handler.route === EVE_HEALTH_ROUTE_PATH)
@@ -317,7 +313,7 @@ describe("Nitro route configuration", () => {
     const prodNitro = createNitroStub({ dev: false });
 
     await configureDevelopmentNitroRoutes(devNitro, createPreparedHost());
-    await configureProductionNitroRoutes(prodNitro, createPreparedHost(), "app");
+    await configureProductionNitroRoutes(prodNitro, createPreparedHost());
 
     expect(devNitro.options.handlers).toContainEqual({
       handler: "#eve-route/eve/v1/dev/runtime-artifacts",
@@ -341,7 +337,7 @@ describe("Nitro route configuration", () => {
     const prodNitro = createNitroStub({ dev: false });
 
     await configureDevelopmentNitroRoutes(devNitro, createPreparedHost());
-    await configureProductionNitroRoutes(prodNitro, createPreparedHost(), "app");
+    await configureProductionNitroRoutes(prodNitro, createPreparedHost());
 
     expect(devNitro.options.handlers).toContainEqual({
       handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`,
@@ -384,7 +380,6 @@ describe("Nitro route configuration", () => {
         workflowBuildDir,
         workflowWorld: "@workflow/world-postgres",
       }),
-      "all",
     );
 
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
@@ -410,7 +405,6 @@ describe("Nitro route configuration", () => {
         workflowBuildDir,
         workflowWorld: "@workflow/world-postgres",
       }),
-      "all",
     );
 
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
@@ -436,7 +430,6 @@ describe("Nitro route configuration", () => {
     await configureProductionNitroRoutes(
       nitro,
       createPreparedHost({ appRoot: root, workflowBuildDir }),
-      "all",
     );
 
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");

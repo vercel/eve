@@ -1,4 +1,5 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { e2eAgentConfig, MOCK_MODEL_SENTINEL } from "@eve-e2e/config";
 import { type AgentDefinition, defineAgent } from "eve";
 import { vercelOidc } from "eve/agents/auth";
 
@@ -21,10 +22,10 @@ import { vercelOidc } from "eve/agents/auth";
  * Vercel OIDC as the fallback.
  */
 const resolveVercelOidc = vercelOidc();
-const matrixModel = process.env.EVE_E2E_MODEL ?? "anthropic/claude-opus-4.8";
+const matrixModel = process.env.EVE_E2E_MODEL ?? "anthropic/claude-opus-5";
 const promptCacheModel = matrixModel.startsWith("anthropic/")
   ? matrixModel
-  : "anthropic/claude-opus-4.8";
+  : "anthropic/claude-opus-5";
 
 const anthropic = createAnthropic({
   baseURL: "https://ai-gateway.vercel.sh/v1",
@@ -43,7 +44,13 @@ const anthropic = createAnthropic({
 });
 
 const agent: AgentDefinition = defineAgent({
-  model: anthropic(promptCacheModel),
+  // Harness config wires the workflow world and supplies the mock model in
+  // the world suites; real-model runs need the direct Anthropic instance so
+  // explicit cache breakpoints stay under test (see the note above).
+  ...e2eAgentConfig(),
+  ...(process.env.EVE_E2E_MODEL === MOCK_MODEL_SENTINEL
+    ? {}
+    : { model: anthropic(promptCacheModel) }),
   modelContextWindowTokens: 200_000,
 });
 

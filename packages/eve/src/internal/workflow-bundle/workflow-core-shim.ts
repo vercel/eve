@@ -1,6 +1,7 @@
 const WORKFLOW_CONTEXT_SYMBOL = Symbol.for("WORKFLOW_CONTEXT");
 const WORKFLOW_CREATE_HOOK = Symbol.for("WORKFLOW_CREATE_HOOK");
 const WORKFLOW_GET_STREAM_ID = Symbol.for("WORKFLOW_GET_STREAM_ID");
+const WORKFLOW_SLEEP = Symbol.for("WORKFLOW_SLEEP");
 const WORKFLOW_USE_STEP = Symbol.for("WORKFLOW_USE_STEP");
 const STREAM_NAME_SYMBOL = Symbol.for("WORKFLOW_STREAM_NAME");
 const workflowGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
@@ -96,8 +97,16 @@ export function defineHook<T = unknown>(): {
 /**
  * Sleeps from inside workflow-body code.
  */
-export function sleep(): never {
-  throw new Error("`sleep()` is not available in eve workflow body bundles");
+export function sleep(duration: string | number | Date): Promise<void> {
+  const sleepFn = workflowGlobal[WORKFLOW_SLEEP] as
+    | ((sleepDuration: string | number | Date) => Promise<void>)
+    | undefined;
+
+  if (sleepFn === undefined) {
+    throw new Error("`sleep()` can only be called inside a workflow function");
+  }
+
+  return sleepFn(duration);
 }
 
 /**
@@ -115,12 +124,12 @@ export function getStepMetadata(): never {
 }
 
 /**
- * Options accepted by {@link experimental_setAttributes}.
+ * Options accepted by {@link setAttributes}.
  *
- * Mirrors `ExperimentalSetAttributesOptions` from `@workflow/core` so the
+ * Mirrors `SetAttributesOptions` from `@workflow/core` so the
  * eve workflow-body bundle does not have to pull the real type in.
  */
-export interface ExperimentalSetAttributesOptions {
+export interface SetAttributesOptions {
   /**
    * Permit attribute keys that start with the reserved `$` prefix. eve
    * framework code passes `true` so it can write the `$eve.*` namespace;
@@ -130,7 +139,7 @@ export interface ExperimentalSetAttributesOptions {
 }
 
 /**
- * Workflow-body implementation of `experimental_setAttributes` for the eve
+ * Workflow-body implementation of `setAttributes` for the eve
  * bundle. Mirrors the dispatch path of `@workflow/core`'s workflow-body
  * export (`dist/workflow/set-attributes.js`):
  *
@@ -148,9 +157,9 @@ export interface ExperimentalSetAttributesOptions {
  * validator would require pulling `@workflow/world` into the workflow body
  * bundle.
  */
-export async function experimental_setAttributes(
+export async function setAttributes(
   attrs: Record<string, string | undefined>,
-  options: ExperimentalSetAttributesOptions = {},
+  options: SetAttributesOptions = {},
 ): Promise<void> {
   const entries = Object.entries(attrs);
   if (entries.length === 0) {
@@ -166,9 +175,7 @@ export async function experimental_setAttributes(
     | undefined;
 
   if (useStep === undefined) {
-    throw new Error(
-      "`experimental_setAttributes()` can only be called inside a workflow runtime context",
-    );
+    throw new Error("`setAttributes()` can only be called inside a workflow runtime context");
   }
 
   const changes = entries.map(([key, value]) => ({

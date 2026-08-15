@@ -10,7 +10,6 @@ import {
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
   DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
   DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
-  DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
   locateExtensionMount,
   mountNamespace,
 } from "#discover/extensions.js";
@@ -182,17 +181,6 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
         }),
       );
     }
-    const [firstSchedule] = schedulesResult.schedules;
-    if (firstSchedule !== undefined) {
-      diagnostics.push(
-        createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
-          message:
-            "An extension may not declare schedules — background scheduling runs on the consuming agent's deployment under its limits, so it is the consuming agent's to own.",
-          sourcePath: join(agentRoot, firstSchedule.logicalPath),
-        }),
-      );
-    }
   }
 
   const toolsResult = await discoverNamedSourceDirectory({
@@ -264,11 +252,12 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
         ...connectionsResult.connections,
         ...skillsResult.skills,
         ...schedulesResult.schedules,
+        ...subagentsResult.subagents,
       ],
     }),
   );
 
-  const resolvedExtensions: ResolvedExtensionMount[] = [];
+  let resolvedExtensions: readonly ResolvedExtensionMount[] = [];
   if (role !== "agent") {
     // Extensions cannot mount other extensions yet. Fail loudly instead of
     // silently dropping the nested mount, and reserve the behavior so enabling
@@ -283,56 +272,14 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
       );
     }
   } else {
-    for (const descriptor of mountCollection.mounts) {
-      const located = await locateExtensionMount({
-        source,
-        agentRoot,
-        appRoot,
-        mount: descriptor.mountRef,
-        namespace: descriptor.namespace,
-      });
-      diagnostics.push(...located.diagnostics);
-      if (located.location === undefined) {
-        continue;
-      }
-
-      const extensionResult = await discoverAgent({
-        agentRoot: located.location.sourceRoot,
-        appRoot: located.location.packageRoot,
-        source,
-        role: "extension",
-      });
-      diagnostics.push(...extensionResult.diagnostics);
-
-      // The mount directory's override slots discover as an agent-shaped source;
-      // its `extension.<ext>` declaration matches no slot, so it is ignored here.
-      let overrides: AgentSourceManifest | undefined;
-      if (descriptor.overridesRoot !== undefined) {
-        const overridesResult = await discoverAgent({
-          agentRoot: descriptor.overridesRoot,
-          appRoot,
-          source,
-          role: "extension",
-        });
-        diagnostics.push(...overridesResult.diagnostics);
-        overrides = overridesResult.manifest;
-      }
-
-      const resolved: { -readonly [K in keyof ResolvedExtensionMount]: ResolvedExtensionMount[K] } =
-        {
-          namespace: located.location.namespace,
-          specifier: located.location.specifier,
-          packageName: located.location.packageName,
-          packageRoot: located.location.packageRoot,
-          sourceRoot: located.location.sourceRoot,
-          manifest: extensionResult.manifest,
-        };
-      if (overrides !== undefined) {
-        resolved.overrides = overrides;
-      }
-
-      resolvedExtensions.push(resolved);
-    }
+    const result = await resolveExtensionMounts({
+      agentRoot,
+      appRoot,
+      mounts: mountCollection.mounts,
+      source,
+    });
+    diagnostics.push(...result.diagnostics);
+    resolvedExtensions = result.mounts;
   }
 
   const manifestInput: CreateAgentSourceManifestInput = {
@@ -373,6 +320,64 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
  * file form (`extensions/crm.ts`) or the directory form
  * (`extensions/crm/extension.ts` with optional override slots).
  */
+/** Resolves extension declarations into their discovered source manifests. */
+export async function resolveExtensionMounts(input: {
+  readonly agentRoot: string;
+  readonly appRoot: string;
+  readonly mounts: readonly ExtensionMountDescriptor[];
+  readonly source: ProjectSource;
+}): Promise<{
+  readonly diagnostics: readonly DiscoverDiagnostic[];
+  readonly mounts: readonly ResolvedExtensionMount[];
+}> {
+  const diagnostics: DiscoverDiagnostic[] = [];
+  const mounts: ResolvedExtensionMount[] = [];
+
+  for (const descriptor of input.mounts) {
+    const located = await locateExtensionMount({
+      source: input.source,
+      agentRoot: input.agentRoot,
+      appRoot: input.appRoot,
+      mount: descriptor.mountRef,
+      namespace: descriptor.namespace,
+    });
+    diagnostics.push(...located.diagnostics);
+    if (located.location === undefined) continue;
+
+    const extensionResult = await discoverAgent({
+      agentRoot: located.location.sourceRoot,
+      appRoot: located.location.packageRoot,
+      source: input.source,
+      role: "extension",
+    });
+    diagnostics.push(...extensionResult.diagnostics);
+
+    let overrides: AgentSourceManifest | undefined;
+    if (descriptor.overridesRoot !== undefined) {
+      const overridesResult = await discoverAgent({
+        agentRoot: descriptor.overridesRoot,
+        appRoot: input.appRoot,
+        source: input.source,
+        role: "extension",
+      });
+      diagnostics.push(...overridesResult.diagnostics);
+      overrides = overridesResult.manifest;
+    }
+
+    mounts.push({
+      namespace: located.location.namespace,
+      specifier: located.location.specifier,
+      packageName: located.location.packageName,
+      packageRoot: located.location.packageRoot,
+      sourceRoot: located.location.sourceRoot,
+      manifest: extensionResult.manifest,
+      overrides,
+    });
+  }
+
+  return { diagnostics, mounts };
+}
+
 export interface ExtensionMountDescriptor {
   /** Mount namespace prefixed onto every composed contribution. */
   readonly namespace: string;
@@ -526,7 +531,7 @@ async function collectExtensionMounts(input: {
  * overrides, so a root-level `<ns>__…` file would override the extension from
  * outside its mount directory — rejected here.
  */
-function detectRootNamespaceCollisions(input: {
+export function detectRootNamespaceCollisions(input: {
   readonly agentRoot: string;
   readonly namespaces: readonly string[];
   readonly sources: ReadonlyArray<{ readonly logicalPath: string }>;

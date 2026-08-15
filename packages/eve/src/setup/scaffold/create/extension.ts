@@ -4,6 +4,7 @@ import { basename, resolve } from "node:path";
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
 import { pathExists, writeTextFile } from "../files.js";
+import { blockingCreateInPlaceEntries } from "../create-in-place.js";
 import { resolveVersionToken } from "../version-tokens.js";
 import {
   applyPackageManagerWorkspaceConfiguration,
@@ -20,7 +21,6 @@ import {
   type EvePackageContract,
 } from "./project.js";
 
-const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([".DS_Store", ".git", ".gitkeep", ".hg"]);
 const DEFAULT_TYPESCRIPT_PACKAGE_VERSION = "__TYPESCRIPT_VERSION__";
 
 interface ExtensionTemplateContext {
@@ -131,9 +131,9 @@ dist
 
 const AGENTS_MD_TEMPLATE = `# eve Extension Package
 
-This package is an eve extension — a reusable package of tools, connections,
-skills, hooks, and instruction fragments that a consuming agent mounts under
-\`agent/extensions/\`.
+This package is an eve extension — a reusable package of tools, channels,
+connections, skills, schedules, subagents, hooks, and instruction fragments that a consuming agent
+mounts under \`agent/extensions/\`.
 
 Before writing code, read the Extensions guide from the installed eve package
 docs. In most installs, those docs are at \`node_modules/eve/docs/extensions.md\`.
@@ -145,13 +145,14 @@ unavailable, use https://eve.dev/docs/extensions as a fallback.
 
 - Declare the extension in \`extension/extension.ts\` with \`defineExtension\` from
   \`eve/extension\`. Config is optional; read bound values via the handle's
-  \`.config\` in tools and hooks.
+  \`.config\` in tools, channels, schedules, hooks, and tools inside contributed subagents.
 - Add contributions under \`extension/\` the same way as in an agent:
-  \`tools/\`, \`connections/\`, \`skills/\`, \`hooks/\`, and optional instruction
-  fragments. Names come from file paths; the mount supplies the namespace, so
+  \`tools/\`, \`channels/\`, \`connections/\`, \`skills/\`, \`schedules/\`, \`subagents/\`, \`hooks/\`, and
+  optional instruction fragments. Names come from file paths; the mount supplies the namespace, so
   name tools for what they do (\`search\`, not \`crm_search\`).
-- An extension cannot declare \`agent.ts\`, \`sandbox\`, \`schedules\`, or nested
-  \`extensions/\` — those belong to the consuming agent.
+- The extension root cannot declare \`agent.ts\`, \`sandbox\`, or nested
+  \`extensions/\`. A subagent under \`extension/subagents/\` owns its own agent
+  configuration and sandbox.
 
 ## Build and publish
 
@@ -187,7 +188,7 @@ async function assertCanCreateInPlace(
   }
 
   const entries = await readdir(targetRoot);
-  const blocking = entries.filter((entry) => !ALLOWED_CREATE_IN_PLACE_ENTRIES.has(entry));
+  const blocking = blockingCreateInPlaceEntries(entries);
   if (blocking.length > 0 && !overwriteExisting) {
     const visible = blocking.slice(0, 5).join(", ");
     const suffix = blocking.length > 5 ? `, and ${blocking.length - 5} more` : "";

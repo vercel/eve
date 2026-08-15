@@ -25,13 +25,21 @@ describe("resolveVersionToken", () => {
     expect(manifest).toContain(`"@vercel/connect": "${resolved}"`);
   });
 
-  it("resolves the eve version token from eve's own package.json", () => {
-    const resolved = resolveVersionToken("evePackage.version", "__EVE_PACKAGE_VERSION__");
+  it("resolves eve runtime and dependency version tokens from eve's own package.json", () => {
+    const runtimeVersion = resolveVersionToken(
+      "evePackage.runtimeVersion",
+      "__EVE_PACKAGE_VERSION__",
+    );
+    const dependencyVersion = resolveVersionToken(
+      "evePackage.version",
+      "__EVE_PACKAGE_DEPENDENCY_VERSION__",
+    );
 
     const packageJson = JSON.parse(readFileSync(fileURLToPath(EVE_PACKAGE_JSON_URL), "utf8")) as {
       version: string;
     };
-    expect(resolved).toBe(packageJson.version);
+    expect(runtimeVersion).toBe(packageJson.version);
+    expect(dependencyVersion).toBe(packageJson.version);
   });
 
   it("resolves the node engine token from eve's own package.json engines.node", () => {

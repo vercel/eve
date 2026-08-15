@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getAllFrameworkToolDefinitions,
   getAllFrameworkToolNames,
+  getFrameworkDynamicToolResolvers,
   getFrameworkToolDefinitions,
 } from "#runtime/framework-tools/index.js";
 import { isToolSchema } from "#shared/tool-schema.js";
@@ -21,6 +22,8 @@ describe("framework-tools/index", () => {
     expect(names.has("load_skill")).toBe(true);
     expect(names.has("ask_question")).toBe(true);
     expect(names.has("agent")).toBe(true);
+    expect(names.has("task_update")).toBe(true);
+    expect(names.has("task_send")).toBe(false);
     // connection_search is now a dynamic tool resolver, not a framework tool
     expect(names.has("connection_search")).toBe(false);
   });
@@ -61,12 +64,14 @@ describe("framework-tools/index", () => {
     }
   });
 
-  it("returns the same registered tools regardless of hasConnections", () => {
-    const withConnections = getFrameworkToolDefinitions({ hasConnections: true });
-    const withoutConnections = getFrameworkToolDefinitions({ hasConnections: false });
-
-    expect(withConnections.map((tool) => tool.name)).toEqual(
-      withoutConnections.map((tool) => tool.name),
-    );
+  it("registers connection search through the framework dynamic tool registry", () => {
+    expect(getFrameworkDynamicToolResolvers()).toMatchObject([
+      {
+        eventNames: ["step.started"],
+        logicalPath: "eve:framework/connection-search-dynamic",
+        slug: "connection",
+        sourceId: "eve:connection-search-dynamic",
+      },
+    ]);
   });
 });

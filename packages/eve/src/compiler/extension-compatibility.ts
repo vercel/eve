@@ -21,16 +21,41 @@ interface ExtensionCapabilityContract {
 
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
-  tool: { current: 2, supported: [1, 2], dropped: {} },
-  dynamicTool: { current: 3, supported: [1, 2, 3], dropped: {} },
-  connection: { current: 2, supported: [1, 2], dropped: {} },
-  hook: { current: 2, supported: [1, 2], dropped: {} },
+  tool: { current: 13, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], dropped: {} },
+  dynamicTool: {
+    current: 17,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+    dropped: {},
+  },
+  channel: { current: 1, supported: [1], dropped: {} },
+  schedule: { current: 1, supported: [1], dropped: {} },
+  subagent: { current: 1, supported: [1], dropped: {} },
+  connection: { current: 5, supported: [1, 2, 3, 4, 5], dropped: {} },
+  hook: {
+    current: 13,
+    supported: [10, 11, 12, 13],
+    dropped: {
+      1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      3: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      4: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      5: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      6: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      7: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      8: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      9: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+    },
+  },
   skill: { current: 1, supported: [1], dropped: {} },
-  dynamicSkill: { current: 1, supported: [1], dropped: {} },
-  instructions: { current: 1, supported: [1], dropped: {} },
-  dynamicInstructions: { current: 1, supported: [1], dropped: {} },
+  dynamicSkill: { current: 11, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dropped: {} },
+  instructions: { current: 2, supported: [1, 2], dropped: {} },
+  dynamicInstructions: {
+    current: 12,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    dropped: {},
+  },
   config: { current: 1, supported: [1], dropped: {} },
-  state: { current: 2, supported: [1, 2], dropped: {} },
+  state: { current: 3, supported: [1, 2, 3], dropped: {} },
 } as const satisfies Record<string, ExtensionCapabilityContract>;
 
 /** One independently versioned extension-facing contract. */
@@ -43,7 +68,9 @@ export const EXTENSION_CAPABILITY_VERSIONS = Object.fromEntries(
     contract.current,
   ]),
 ) as {
-  readonly [TCapability in ExtensionCapability]: (typeof EXTENSION_CAPABILITY_CONTRACTS)[TCapability]["current"];
+  readonly [
+    TCapability in ExtensionCapability
+  ]: (typeof EXTENSION_CAPABILITY_CONTRACTS)[TCapability]["current"];
 };
 
 /** Capability requirements stamped by one extension build. */

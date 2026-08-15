@@ -14,7 +14,44 @@ import {
 } from "#internal/application/package.js";
 
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
+import { createWorkflowEntrypointSource } from "#internal/workflow-bundle/builder-support.js";
 import type { WorkflowManifest } from "#internal/workflow-bundle/workflow-builders.js";
+
+const REQUIRE_EXPORT_MARKER = "eve-workflow-conditional-require-export";
+const IMPORT_EXPORT_MARKER = "eve-workflow-conditional-import-export";
+
+async function writeConditionalRequirePackages(root: string): Promise<void> {
+  const parentRoot = join(root, "node_modules", "cjs-parent");
+  const baseRoot = join(root, "node_modules", "conditional-base");
+  await Promise.all([mkdir(parentRoot, { recursive: true }), mkdir(baseRoot, { recursive: true })]);
+  await Promise.all([
+    writeFile(
+      join(parentRoot, "index.cjs"),
+      'const Base = require("conditional-base");\nmodule.exports = class Child extends Base {};\n',
+    ),
+    writeFile(
+      join(parentRoot, "package.json"),
+      `${JSON.stringify({ main: "./index.cjs", name: "cjs-parent", version: "1.0.0" })}\n`,
+    ),
+    writeFile(
+      join(baseRoot, "import.mjs"),
+      `export default { source: ${JSON.stringify(IMPORT_EXPORT_MARKER)} };\n`,
+    ),
+    writeFile(
+      join(baseRoot, "package.json"),
+      `${JSON.stringify({
+        exports: { ".": { import: "./import.mjs", require: "./require.cjs" } },
+        name: "conditional-base",
+        type: "module",
+        version: "1.0.0",
+      })}\n`,
+    ),
+    writeFile(
+      join(baseRoot, "require.cjs"),
+      `module.exports = class Base { constructor() { this.source = ${JSON.stringify(REQUIRE_EXPORT_MARKER)}; } };\n`,
+    ),
+  ]);
+}
 
 class InspectableWorkflowBundleBuilder extends WorkflowBundleBuilder {
   readonly outDir: string;
@@ -59,8 +96,6 @@ class StepEntryOnlyWorkflowBundleBuilder extends WorkflowBundleBuilder {
   }
 
   protected override async createWorkflowsBundle(): Promise<{
-    bundleFinal?: (interimBundleResult: string) => Promise<void>;
-    interimBundleCtx?: undefined;
     manifest: Record<string, never>;
   }> {
     this.workflowBundleCalls += 1;
@@ -162,6 +197,120 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
+  it("writes cache and Nitro workflow entries with target-relative step imports", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-nitro-outputs-"));
+    const outDir = join(tempRoot, "workflow-cache");
+    const flowFilePath = join(tempRoot, "flow.ts");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+    const nitroWorkflowOutfile = join(tempRoot, "nitro", "workflow", "workflows.mjs");
+    const nitroStepOutfile = join(tempRoot, "nitro", "entries", "steps.mjs");
+
+    try {
+      await Promise.all([
+        writeFile(compiledArtifactsBootstrapPath, "export {};\n"),
+        writeFile(
+          flowFilePath,
+          [
+            "export async function ping() {",
+            '  "use step";',
+            '  return "pong";',
+            "}",
+            "export async function flow() {",
+            '  "use workflow";',
+            "  return ping();",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+      ]);
+
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot: tempRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: tempRoot,
+          watch: false,
+        },
+        [flowFilePath],
+      );
+
+      await builder.build({ nitroStepOutfile, nitroWorkflowOutfile });
+
+      const cacheWorkflowSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const nitroWorkflowSource = await readFile(nitroWorkflowOutfile, "utf8");
+      expect(cacheWorkflowSource).toContain('from "./steps.mjs";');
+      expect(nitroWorkflowSource).toContain('from "../entries/steps.mjs";');
+      expect(nitroWorkflowSource).toContain(resolveWorkflowModulePath("workflow/runtime"));
+      await expect(readFile(nitroStepOutfile, "utf8")).resolves.toContain(
+        "export const __steps_registered = true;",
+      );
+
+      for (const source of [cacheWorkflowSource, nitroWorkflowSource]) {
+        const encodedChunksMatch = source.match(
+          /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+        );
+        const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
+        const workflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+        expect(workflowCode).toContain("sourceMappingURL=data:application/json");
+        expect(workflowCode).toContain(";base64,");
+      }
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("preserves require exports in workflow CommonJS dependencies", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-conditions-"));
+    const outDir = join(tempRoot, "workflow-build");
+    const flowFilePath = join(tempRoot, "flow.ts");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+
+    try {
+      await writeConditionalRequirePackages(tempRoot);
+      await Promise.all([
+        writeFile(compiledArtifactsBootstrapPath, "export {};\n"),
+        writeFile(
+          flowFilePath,
+          [
+            'import Child from "cjs-parent";',
+            "export async function conditionalWorkflow() {",
+            '  "use workflow";',
+            "  return new Child().source;",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+      ]);
+
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot: tempRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: tempRoot,
+          watch: false,
+        },
+        [flowFilePath],
+      );
+
+      await builder.build();
+
+      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const encodedChunksMatch = workflowsSource.match(
+        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+      );
+      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
+      const workflowSource = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+      expect(workflowSource).toContain(REQUIRE_EXPORT_MARKER);
+      expect(workflowSource).not.toContain(IMPORT_EXPORT_MARKER);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("clears workflow cache output from a different eve version", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-version-cache-"));
     const outDir = join(tempRoot, "workflow-build");
@@ -227,7 +376,7 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
-  it("rewrites generated workflow code template literals to parser-safe base64 chunks", async () => {
+  it("writes generated workflow code as parser-safe base64 chunks", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-code-literal-"));
     const outDir = join(tempRoot, "workflow-build");
     const stepFilePath = join(tempRoot, "steps", "ping.ts");
@@ -246,14 +395,11 @@ describe("WorkflowBundleBuilder", () => {
 
         await writeFile(
           outfile,
-          [
-            "import { workflowEntrypoint } from 'workflow/runtime';",
-            "",
-            `const workflowCode = \`${workflowBundleCode.replace(/[\\`$]/g, "\\$&")}\`;`,
-            "",
-            'export const POST = workflowEntrypoint(workflowCode, { namespace: "eve746573742d6167656e74" });',
-            "",
-          ].join("\n"),
+          createWorkflowEntrypointSource({
+            code: workflowBundleCode,
+            queueNamespace: "eve746573742d6167656e74",
+            stepRegistrationsImport: "./steps.mjs",
+          }),
         );
 
         return { manifest: {} };
@@ -317,211 +463,6 @@ describe("WorkflowBundleBuilder", () => {
       const workflowsModule = await import(pathToFileURL(join(outDir, "workflows.mjs")).href);
 
       expect(typeof workflowsModule.POST).toBe("function");
-    } finally {
-      await rm(tempRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("rebuilds workflow artifacts before emitting Vercel output", async () => {
-    const rootDir = resolvePackageRoot();
-    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-vercel-"));
-    const outDir = join(tempRoot, "workflow-build");
-    const outputDir = join(tempRoot, "vercel-output");
-    const flowNitroOutputDir = join(tempRoot, "flow-output");
-
-    class BuildTrackingWorkflowBundleBuilder extends InspectableWorkflowBundleBuilder {
-      buildCalls = 0;
-
-      override async build(): Promise<void> {
-        this.buildCalls += 1;
-        await mkdir(this.outDir, { recursive: true });
-        await writeFile(join(this.outDir, "manifest.json"), "{}\n");
-      }
-    }
-
-    try {
-      const flowFunctionDir = join(flowNitroOutputDir, "functions", "__server.func");
-      const staleWebhookFunctionDir = join(
-        outputDir,
-        "functions",
-        ".well-known",
-        "workflow",
-        "v1",
-        "webhook",
-        "[token].func",
-      );
-      const staleStepFunctionDir = join(
-        outputDir,
-        "functions",
-        ".well-known",
-        "workflow",
-        "v1",
-        "step.func",
-      );
-      await Promise.all([
-        mkdir(join(outputDir, "functions", "__server.func"), { recursive: true }),
-        mkdir(flowFunctionDir, { recursive: true }),
-        mkdir(staleWebhookFunctionDir, { recursive: true }),
-        mkdir(staleStepFunctionDir, { recursive: true }),
-      ]);
-      await Promise.all([
-        writeFile(
-          join(outputDir, "functions", "__server.func", "index.js"),
-          'module.exports = { marker: "server" };\n',
-        ),
-        writeFile(join(flowFunctionDir, "index.js"), 'export const marker = "flow";\n'),
-        writeFile(join(staleWebhookFunctionDir, "index.js"), 'export const marker = "stale";\n'),
-        writeFile(
-          join(flowFunctionDir, "package.json"),
-          `${JSON.stringify(
-            {
-              dependencies: { rolldown: "1.0.0-rc.18" },
-              name: "traced-node-modules-flow",
-              private: true,
-              type: "module",
-              version: "1.0.0",
-            },
-            null,
-            2,
-          )}\n`,
-        ),
-        writeFile(
-          join(flowFunctionDir, ".vc-config.json"),
-          `${JSON.stringify(
-            {
-              environment: {
-                EVE_EXISTING_FLAG: "kept",
-                WORKFLOW_PRECONDITION_GUARD: "0",
-              },
-              handler: "index.js",
-              launcherType: "Nodejs",
-              runtime: "nodejs24.x",
-              shouldAddHelpers: false,
-              supportsResponseStreaming: true,
-            },
-            null,
-            2,
-          )}\n`,
-        ),
-        writeFile(join(staleStepFunctionDir, "index.js"), 'export const marker = "stale-step";\n'),
-      ]);
-
-      const builder = new BuildTrackingWorkflowBundleBuilder({
-        agentName: "test-agent",
-        appRoot: "/tmp/eve-app",
-        compiledArtifactsBootstrapPath: "/tmp/compiled-artifacts-bootstrap.js",
-        outDir,
-        rootDir,
-        watch: false,
-      });
-
-      await builder.buildVercelOutput({
-        flowNitroOutputDir,
-        outputDir,
-        runtime: "nodejs24.x",
-      });
-
-      const generatedFlowFunctionDir = join(
-        outputDir,
-        "functions",
-        ".well-known",
-        "workflow",
-        "v1",
-        "flow.func",
-      );
-      const flowConfig = JSON.parse(
-        await readFile(join(generatedFlowFunctionDir, ".vc-config.json"), "utf8"),
-      ) as { environment?: Record<string, unknown> };
-
-      expect(builder.buildCalls).toBe(1);
-      expect(flowConfig.environment).toEqual({
-        EVE_EXISTING_FLAG: "kept",
-        NODE_OPTIONS: "--experimental-require-module",
-        WORKFLOW_PRECONDITION_GUARD: "1",
-      });
-      const generatedFlowFunctionSource = await readFile(
-        join(outputDir, "functions", ".well-known", "workflow", "v1", "flow.func", "index.js"),
-        "utf8",
-      );
-      expect(generatedFlowFunctionSource).toContain("/.well-known/workflow/v1/flow");
-      expect(
-        await readFile(
-          join(
-            outputDir,
-            "functions",
-            ".well-known",
-            "workflow",
-            "v1",
-            "flow.func",
-            "__eve_nitro_handler__.js",
-          ),
-          "utf8",
-        ),
-      ).toContain('marker = "flow"');
-      await expect(
-        readFile(
-          join(outputDir, "functions", ".well-known", "workflow", "v1", "flow.func", "index.js"),
-          "utf8",
-        ),
-      ).resolves.not.toContain("loadAuthoredModuleNamespace");
-      await expect(
-        readFile(
-          join(
-            outputDir,
-            "functions",
-            ".well-known",
-            "workflow",
-            "v1",
-            "flow.func",
-            ".vc-config.json",
-          ),
-          "utf8",
-        ),
-      ).resolves.toContain('"__eve746573742d6167656e74_wkf_workflow_*"');
-      await expect(
-        readFile(
-          join(
-            outputDir,
-            "functions",
-            ".well-known",
-            "workflow",
-            "v1",
-            "flow.func",
-            ".vc-config.json",
-          ),
-          "utf8",
-        ),
-      ).resolves.toContain('"maxDuration": "max"');
-      await expect(
-        readFile(
-          join(
-            outputDir,
-            "functions",
-            ".well-known",
-            "workflow",
-            "v1",
-            "flow.func",
-            ".vc-config.json",
-          ),
-          "utf8",
-        ),
-      ).resolves.toContain('"supportsResponseStreaming": true');
-      await expect(
-        readFile(
-          join(
-            outputDir,
-            "functions",
-            ".well-known",
-            "workflow",
-            "v1",
-            "flow.func",
-            "package.json",
-          ),
-          "utf8",
-        ),
-      ).resolves.toContain('"rolldown": "1.0.0-rc.18"');
-      await expect(readFile(join(staleStepFunctionDir, "index.js"), "utf8")).rejects.toThrow();
-      await expect(readFile(join(staleWebhookFunctionDir, "index.js"), "utf8")).rejects.toThrow();
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }

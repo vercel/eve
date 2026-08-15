@@ -16,7 +16,6 @@ export interface ApplicationBuildWorkspace {
   };
   readonly nitro: {
     readonly buildDir: string;
-    readonly surfaceOutputDir: string;
   };
   readonly publication: {
     readonly output: {
@@ -59,7 +58,6 @@ export async function createApplicationBuildWorkspace(
     },
     nitro: {
       buildDir: join(rootDir, "nitro"),
-      surfaceOutputDir: join(rootDir, "nitro-output"),
     },
     publication: {
       output: {

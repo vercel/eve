@@ -9,6 +9,7 @@ const DYNAMIC_MULTI_ALPHA_TOKEN = "dynamic-multi-alpha-Q8V3";
  * must land in the load_skill result and the reply.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Skills smoke: dynamic skill-map resolution.",
   async test(t) {
     await t.send("Please use the dynamic multi alpha skill and follow its instructions exactly.");

@@ -10,7 +10,7 @@ import { AuthKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import { emitProxiedSubagentEvent } from "#execution/subagent-event-proxy-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { TimedHandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import {
@@ -30,7 +30,7 @@ const authorizationAdapter: ChannelAdapter<AuthorizationAdapterContext> = {
   kind: "authorization-proxy-test",
   "authorization.required"(data, ctx) {
     ctx.state.pendingName = data.name;
-    ctx.session.setContinuationToken("auth-thread");
+    ctx.session.continuation?.rekey("auth-thread");
   },
   "authorization.completed"(data, ctx) {
     delete ctx.state.pendingName;
@@ -131,11 +131,57 @@ function createCapturingWritable(chunks: Uint8Array[]): WritableStream<Uint8Arra
   });
 }
 
-function decodeEvent(chunk: Uint8Array): TimedHandleMessageStreamEvent {
-  return JSON.parse(new TextDecoder().decode(chunk).trim()) as TimedHandleMessageStreamEvent;
+function decodeEvent(chunk: Uint8Array): MessageStreamEvent {
+  return JSON.parse(new TextDecoder().decode(chunk).trim()) as MessageStreamEvent;
 }
 
 describe("subagent authorization proxy", () => {
+  it("preserves approval candidate and settlement events", async () => {
+    const parentSessionId = "parent-approval-session";
+    const session = createSession(parentSessionId);
+    const { ctx } = buildContext({ adapter: authorizationAdapter, sessionId: parentSessionId });
+    const chunks: Uint8Array[] = [];
+    const parentWritable = createCapturingWritable(chunks);
+    const candidateEvent: SubagentAuthorizationEvent = {
+      data: {
+        candidateId: "candidate-1",
+        outcome: "pending",
+        requestId: "approval-1",
+        responderPrincipalId: "slack:T1:U1",
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "child-turn",
+      },
+      type: "approval.candidate",
+    };
+    const settledEvent: SubagentAuthorizationEvent = {
+      data: {
+        outcome: "approved",
+        requestId: "approval-1",
+        responderPrincipalId: "slack:T1:U1",
+        sequence: 0,
+        stepIndex: 2,
+        turnId: "child-turn",
+      },
+      type: "approval.settled",
+    };
+
+    await emitProxiedSubagentEvent({
+      ctx,
+      durableSession: projectToDurableSession(session),
+      hookPayload: authorizationPayload(candidateEvent),
+      parentWritable,
+    });
+    await emitProxiedSubagentEvent({
+      ctx,
+      durableSession: projectToDurableSession(session),
+      hookPayload: authorizationPayload(settledEvent),
+      parentWritable,
+    });
+
+    expect(decodeEvent(chunks[0]!)).toMatchObject(candidateEvent);
+    expect(decodeEvent(chunks[1]!)).toMatchObject(settledEvent);
+  });
   it("preserves events and parent adapter state across required/completed steps", async () => {
     const parentSessionId = "parent-session";
     const session = createSession(parentSessionId);

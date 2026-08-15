@@ -10,6 +10,8 @@
     "test:e2e": "eve eval --strict"
   },
   "dependencies": {
+    "@eve-e2e/config": "workspace:*",
+    "@workflow/world-postgres": "catalog:",
     "eve": "workspace:*",
     "gadget-extension": "file:../gadget-extension",
     "gizmo-extension": "file:../gizmo-extension"

@@ -3,6 +3,7 @@ import { defineEval } from "eve/evals";
 // One resolver returns a helper-built tool (closing over the helper
 // param and handler vars) and an inline tool; both survive replay.
 export default defineEval({
+  tags: ["real-model"],
   description:
     "Dynamic tools smoke: helper-built and inline tools from one resolver survive replay.",
   async test(t) {

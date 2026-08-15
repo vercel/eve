@@ -1,5 +1,5 @@
 import { execFile, type ExecFileOptions } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -52,7 +52,19 @@ async function runGit(cwd: string, args: readonly string[]): Promise<void> {
  * failure (without failing `eve init`) is the caller's job.
  */
 export async function tryInitializeGit(projectPath: string): Promise<GitInitResult> {
-  if (!(await isGitAvailable()) || (await isInsideExistingRepository(projectPath))) {
+  const gitPath = join(projectPath, ".git");
+  const gitMetadataExists = await stat(gitPath).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return false;
+      throw error;
+    },
+  );
+  if (
+    gitMetadataExists ||
+    !(await isGitAvailable()) ||
+    (await isInsideExistingRepository(projectPath))
+  ) {
     return { kind: "skipped" };
   }
 
@@ -70,7 +82,7 @@ export async function tryInitializeGit(projectPath: string): Promise<GitInitResu
     return { kind: "initialized" };
   } catch (error) {
     if (initialized) {
-      await rm(join(projectPath, ".git"), { recursive: true, force: true }).catch(() => {});
+      await rm(gitPath, { recursive: true, force: true }).catch(() => {});
     }
 
     const reason = error instanceof Error ? error.message : String(error);

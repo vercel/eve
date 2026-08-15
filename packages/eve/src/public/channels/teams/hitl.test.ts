@@ -52,13 +52,13 @@ describe("Teams HITL helpers", () => {
       activityWithValue({
         [TEAMS_HITL_DATA_KEY]: {
           replyToActivityId: "ROOT",
-          optionId: "deny",
+          optionId: "cancel",
           requestId: "REQ",
         },
       }),
     );
     expect(message ? deriveTeamsInputResponses(message) : []).toEqual([
-      { optionId: "deny", requestId: "REQ" },
+      { optionId: "cancel", requestId: "REQ" },
     ]);
     expect(message ? readTeamsInputReplyToActivityId(message) : null).toBe("ROOT");
 
@@ -85,9 +85,10 @@ function request(): InputRequest {
   return {
     action: { callId: "TC", input: {}, kind: "tool-call", toolName: "deploy" },
     display: "confirmation",
+    kind: "tool-approval",
     options: [
       { id: "approve", label: "Approve", style: "primary" },
-      { id: "deny", label: "Deny", style: "danger" },
+      { id: "cancel", label: "Cancel", style: "danger" },
     ],
     prompt: "Approve deploy?",
     requestId: "REQ",

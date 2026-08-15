@@ -1,5 +1,6 @@
 import type { ToolSet, TypedToolCall, TypedToolError } from "ai";
 
+import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
 import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
 
 /**
@@ -54,6 +55,52 @@ export function createInvalidToolCallInputError(input: {
   }
 
   return toolError as TypedToolError<ToolSet>;
+}
+
+/**
+ * Resolves a provider-executed tool call into an observable runtime-action
+ * request, or the synthesized tool error when the model emitted arguments
+ * that cannot satisfy the JSON-object contract.
+ *
+ * Provider-executed calls skip the AI SDK's input validation, so malformed
+ * JSON argument text reaches the harness only here.
+ */
+export function resolveProviderToolCallRequest(toolCall: {
+  readonly input?: unknown;
+  readonly toolCallId: string;
+  readonly toolName: string;
+}):
+  | { readonly request: RuntimeToolCallActionRequest; readonly toolError?: undefined }
+  | { readonly request?: undefined; readonly toolError: TypedToolError<ToolSet> } {
+  try {
+    return {
+      request: {
+        callId: toolCall.toolCallId,
+        input: resolveToolCallInputObject(toolCall.input, {
+          callId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+        }),
+        kind: "tool-call",
+        toolName: toolCall.toolName,
+      },
+    };
+  } catch (error) {
+    if (!(error instanceof TypeError)) {
+      throw error;
+    }
+    return {
+      toolError: createInvalidToolCallInputError({
+        error,
+        toolCall: {
+          input: toolCall.input,
+          providerExecuted: true,
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          type: "tool-call",
+        } as TypedToolCall<ToolSet>,
+      }),
+    };
+  }
 }
 
 export function getInvalidToolCallInputError(input: {

@@ -9,12 +9,8 @@ import {
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
-import {
-  recordPendingSubagentChild,
-  setPendingRuntimeActionBatch,
-} from "#harness/runtime-actions.js";
+import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#harness/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeActionRequest } from "#runtime/actions/types.js";
 
 vi.mock("#context/serialize.js", () => ({
   deserializeContext: vi.fn(),
@@ -30,33 +26,54 @@ vi.mock("./remote-agent-dispatch.js", () => ({
   resolveRemoteAgentForAction: vi.fn(),
 }));
 
-const localAction = {
-  callId: "call-local",
-  description: "Delegate locally.",
-  input: { message: "work locally" },
-  kind: "subagent-call",
-  name: "local",
-  nodeId: "subagents/local",
-  subagentName: "local",
-} satisfies RuntimeActionRequest;
+const LOCAL_RUNNING_HANDLE: AgentHandle = {
+  address: {
+    continuationToken: "subagent:parent:call-local",
+    kind: "agent/local",
+    sessionId: "local-child",
+  },
+  identity: {
+    id: "ag_local:aaaaaaaaaaaa",
+    name: "local",
+    nodeId: "subagents/local",
+  },
+  operation: {
+    callId: "call-local",
+    id: "op-local",
+    kind: "start",
+    parentTurnId: "turn_0",
+  },
+  phase: "running",
+};
 
-const remoteAction = {
-  callId: "call-remote",
-  description: "Delegate remotely.",
-  input: { message: "work remotely" },
-  kind: "remote-agent-call",
-  name: "remote",
-  nodeId: "subagents/remote.ts",
-  remoteAgentName: "remote",
-} satisfies RuntimeActionRequest;
+const REMOTE_RUNNING_HANDLE: AgentHandle = {
+  address: {
+    callbackBaseUrl: "https://parent.example.com",
+    kind: "agent/remote",
+    sessionId: "remote-child",
+    url: "https://remote.example.com",
+  },
+  identity: {
+    id: "ag_remote:bbbbbbbbbbbb",
+    name: "remote",
+    nodeId: "subagents/remote.ts",
+  },
+  operation: {
+    callId: "call-remote",
+    id: "op-remote",
+    kind: "start",
+    parentTurnId: "turn_0",
+  },
+  phase: "running",
+};
 
 const remote = {
   kind: "remote",
   name: "remote",
   nodeId: "subagents/remote.ts",
   path: "/custom-create-path",
-  url: "https://remote.example.com",
-} as never;
+  url: "https://registry.example.com",
+} as const;
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -64,37 +81,48 @@ afterEach(() => {
 });
 
 describe("cancelDescendantTurnsStep", () => {
-  it("cancels every adopted local and remote child in parallel", async () => {
+  it("cancels every running local and remote child in parallel", async () => {
     installRemoteRegistry();
-    vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote);
-    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({ status: "accepted" });
-    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({ status: "accepted" });
+    vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote as never);
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
+      sessionId: "local-child",
+      status: "accepted",
+    });
+    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({
+      sessionId: "remote-child",
+      status: "accepted",
+    });
 
     await cancelDescendantTurnsStep({
       serializedContext: { context: "parent" },
-      sessionState: createPendingState(),
+      sessionState: createRunningState(),
     });
 
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({
       sessionId: "local-child",
     });
     expect(resolveRemoteAgentForAction).toHaveBeenCalledWith({
-      nodeId: remoteAction.nodeId,
+      dynamicRemoteAgent: undefined,
+      nodeId: REMOTE_RUNNING_HANDLE.identity.nodeId,
       registry: expect.any(Map),
-      remoteAgentName: remoteAction.remoteAgentName,
+      remoteAgentName: REMOTE_RUNNING_HANDLE.identity.name,
     });
+    // Cancels at the dispatch-recorded URL, not the registry URL.
     expect(cancelRemoteAgentTurn).toHaveBeenCalledWith({
-      remote,
+      remote: { ...remote, url: "https://remote.example.com" },
       sessionId: "remote-child",
     });
   });
 
   it("does not deserialize remote context for local-only descendants", async () => {
-    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({ status: "accepted" });
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
+      sessionId: "local-child",
+      status: "accepted",
+    });
 
     await cancelDescendantTurnsStep({
       serializedContext: {},
-      sessionState: createPendingState({ includeRemote: false }),
+      sessionState: createRunningState({ includeRemote: false }),
     });
 
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({
@@ -103,20 +131,83 @@ describe("cancelDescendantTurnsStep", () => {
     expect(deserializeContext).not.toHaveBeenCalled();
   });
 
+  it("uses the selected dynamic remote config when cancelling", async () => {
+    const dynamicRemoteAgent = {
+      description: "Selected remote.",
+      path: "/eve/v1/session",
+      url: "https://selected.example.com",
+    };
+    installRemoteRegistry({
+      agentConfig: undefined,
+      kind: "remote",
+      prepared: {} as never,
+      remoteAgent: dynamicRemoteAgent,
+    });
+    vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote as never);
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
+      sessionId: "local-child",
+      status: "accepted",
+    });
+    vi.mocked(cancelRemoteAgentTurn).mockResolvedValue({
+      sessionId: "remote-child",
+      status: "accepted",
+    });
+
+    await cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createRunningState(),
+    });
+
+    expect(resolveRemoteAgentForAction).toHaveBeenCalledWith({
+      dynamicRemoteAgent,
+      nodeId: REMOTE_RUNNING_HANDLE.identity.nodeId,
+      registry: expect.any(Map),
+      remoteAgentName: REMOTE_RUNNING_HANDLE.identity.name,
+    });
+  });
+
+  it("skips parked handles: an idle child has no turn to cancel", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const session = createSession({
+      [AGENT_HANDLES_STATE_KEY]: {
+        handles: [
+          {
+            address: LOCAL_RUNNING_HANDLE.address,
+            identity: LOCAL_RUNNING_HANDLE.identity,
+            lastStatus: "waiting",
+            phase: "parked",
+          },
+        ],
+      },
+    });
+
+    await cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createDurableSessionState({ session }),
+    });
+
+    expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
+    expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "[eve:execution.cancel-descendant-turns] no running agent handles found while cancelling descendants; nothing to cancel",
+      expect.objectContaining({ sessionId: expect.any(String) }),
+    );
+  });
+
   it("retries no-active-turn responses during the child adoption window", async () => {
     vi.useFakeTimers();
     installRemoteRegistry();
-    vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote);
+    vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote as never);
     vi.mocked(requestWorkflowTurnCancellation)
       .mockResolvedValueOnce({ status: "no_active_turn" })
-      .mockResolvedValueOnce({ status: "accepted" });
+      .mockResolvedValueOnce({ sessionId: "local-child", status: "accepted" });
     vi.mocked(cancelRemoteAgentTurn)
       .mockResolvedValueOnce({ status: "no_active_turn" })
-      .mockResolvedValueOnce({ status: "accepted" });
+      .mockResolvedValueOnce({ sessionId: "remote-child", status: "accepted" });
 
     const cancellation = cancelDescendantTurnsStep({
       serializedContext: {},
-      sessionState: createPendingState(),
+      sessionState: createRunningState(),
     });
     await vi.advanceTimersByTimeAsync(3_000);
     await cancellation;
@@ -128,7 +219,7 @@ describe("cancelDescendantTurnsStep", () => {
   it("contains unexpected local failures and exhausted remote failures", async () => {
     vi.useFakeTimers();
     installRemoteRegistry();
-    vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote);
+    vi.mocked(resolveRemoteAgentForAction).mockReturnValue(remote as never);
     vi.mocked(requestWorkflowTurnCancellation).mockRejectedValue(
       new Error("local hook storage unavailable"),
     );
@@ -138,13 +229,13 @@ describe("cancelDescendantTurnsStep", () => {
 
     const cancellation = cancelDescendantTurnsStep({
       serializedContext: {},
-      sessionState: createPendingState(),
+      sessionState: createRunningState(),
     });
-    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     await expect(cancellation).resolves.toBeUndefined();
 
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledOnce();
-    expect(cancelRemoteAgentTurn).toHaveBeenCalledTimes(12);
+    expect(cancelRemoteAgentTurn).toHaveBeenCalledTimes(8);
     expect(error).toHaveBeenCalledWith(
       "[eve:execution.cancel-descendant-turns] failed to cancel local descendant turn",
       expect.objectContaining({ callId: "call-local", childSessionId: "local-child" }),
@@ -155,66 +246,79 @@ describe("cancelDescendantTurnsStep", () => {
     );
   });
 
-  it("treats pending batches from older deployments as having no descendants", async () => {
-    const session = setPendingRuntimeActionBatch({
-      actions: [localAction],
-      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
-      responseMessages: [],
-      session: createSession(),
+  it("warns loudly when a descendant cancel is never accepted", async () => {
+    vi.useFakeTimers();
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
+      status: "no_active_turn",
     });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const cancellation = cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createRunningState({ includeRemote: false }),
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(cancellation).resolves.toBeUndefined();
+
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledTimes(8);
+    expect(warn).toHaveBeenCalledWith(
+      "[eve:execution.cancel-descendant-turns] descendant cancel was never accepted; the child may run to completion",
+      expect.objectContaining({
+        childSessionId: "local-child",
+        finalStatus: "no_active_turn",
+      }),
+    );
+  });
+
+  it("treats sessions without a handle store as having no descendants", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await cancelDescendantTurnsStep({
       serializedContext: {},
-      sessionState: createDurableSessionState({ session }),
+      sessionState: createDurableSessionState({ session: createSession() }),
     });
 
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
     expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
     expect(deserializeContext).not.toHaveBeenCalled();
+    // The skipped cancellation is observable, not silent.
+    expect(warn).toHaveBeenCalledWith(
+      "[eve:execution.cancel-descendant-turns] no running agent handles found while cancelling descendants; nothing to cancel",
+      expect.objectContaining({ sessionId: expect.any(String) }),
+    );
   });
 });
 
-function installRemoteRegistry(): void {
+function installRemoteRegistry(selection?: unknown): void {
   vi.mocked(deserializeContext).mockResolvedValue({
+    get: vi.fn(() =>
+      selection === undefined ? undefined : { [REMOTE_RUNNING_HANDLE.identity.nodeId]: selection },
+    ),
     require: vi.fn(() => ({
-      subagentRegistry: { subagentsByNodeId: new Map([[remoteAction.nodeId, remote]]) },
+      subagentRegistry: {
+        subagentsByNodeId: new Map([[REMOTE_RUNNING_HANDLE.identity.nodeId, remote]]),
+      },
     })),
   } as never);
 }
 
-function createPendingState(input: { readonly includeRemote?: boolean } = {}) {
+function createRunningState(input: { readonly includeRemote?: boolean } = {}) {
   const includeRemote = input.includeRemote ?? true;
-  let session = setPendingRuntimeActionBatch({
-    actions: includeRemote ? [localAction, remoteAction] : [localAction],
-    event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
-    responseMessages: [],
-    session: createSession(),
+  const handles = includeRemote
+    ? [LOCAL_RUNNING_HANDLE, REMOTE_RUNNING_HANDLE]
+    : [LOCAL_RUNNING_HANDLE];
+  return createDurableSessionState({
+    session: createSession({ [AGENT_HANDLES_STATE_KEY]: { handles } }),
   });
-  session = recordPendingSubagentChild({
-    callId: localAction.callId,
-    child: {
-      continuationToken: "subagent:parent:call-local",
-      kind: "local",
-      sessionId: "local-child",
-    },
-    session,
-  });
-  if (includeRemote) {
-    session = recordPendingSubagentChild({
-      callId: remoteAction.callId,
-      child: { kind: "remote", sessionId: "remote-child" },
-      session,
-    });
-  }
-  return createDurableSessionState({ session });
 }
 
-function createSession(): HarnessSession {
+function createSession(state?: HarnessSession["state"]): HarnessSession {
   return {
     agent: { modelReference: { id: "test-model" }, system: "", tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "http:parent",
     history: [],
     sessionId: "parent",
+    state,
   };
 }

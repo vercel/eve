@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { SlackThreadMessage } from "#public/channels/slack/api.js";
 import { loadThreadContextMessages } from "#public/channels/slack/thread.js";
@@ -62,6 +62,27 @@ describe("loadThreadContextMessages", () => {
         ts: "1700000000.000003",
       }),
     ).resolves.toEqual([messages[0], messages[1]]);
+  });
+
+  it("reuses messages already loaded by another thread helper", async () => {
+    const messages = [
+      threadMessage({ threadTs: "1700000000.000001", ts: "1700000000.000001", text: "root" }),
+      threadMessage({ threadTs: "1700000000.000001", ts: "1700000000.000002", text: "prior" }),
+      threadMessage({ threadTs: "1700000000.000001", ts: "1700000000.000003", text: "current" }),
+    ];
+    const refresh = vi.fn(async () => {});
+    const thread = {
+      recentMessages: messages,
+      refresh,
+    };
+
+    await expect(
+      loadThreadContextMessages(thread, {
+        threadTs: "1700000000.000001",
+        ts: "1700000000.000003",
+      }),
+    ).resolves.toEqual([messages[0], messages[1]]);
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it('with since: "last-agent-reply" returns only messages after the last agent reply', async () => {

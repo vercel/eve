@@ -9,6 +9,7 @@ const PERSIST_TOKEN = "sandbox-persist-ok-D6L";
 const PERSIST_PATH = "/workspace/persist-note.txt";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "Sandbox: workspace filesystem persists across turns in the same session.",
   async test(t) {
     const first = await t.send(

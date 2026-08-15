@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
@@ -6,18 +6,22 @@ import {
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
   type CompiledChannelEntry,
+  type CompiledInstructionsDefinition,
   type CompiledScheduleDefinition,
   type CompiledSubagentNode,
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
 import { getApplicationInfo } from "#internal/application/paths.js";
+import { inspectApplication } from "#services/inspect-application.js";
 
-import { buildApplicationInfoJson } from "./info.js";
+import { buildApplicationInfoJson, printApplicationInfo } from "./info.js";
+
+vi.mock("#services/inspect-application.js", () => ({ inspectApplication: vi.fn() }));
 
 const MESSAGING = {
   createSessionRoutePath: "/eve/v1/session",
-  continueSessionRoutePattern: "/eve/v1/session/:id",
-  streamRoutePattern: "/eve/v1/session/:id/stream",
+  sessionMessagesRoutePattern: "/eve/v1/session/:sessionId",
+  streamRoutePattern: "/eve/v1/session/:sessionId/stream",
 };
 
 const APP_ROOT = "/virtual/app";
@@ -60,7 +64,11 @@ function makeSubagent(name: string): CompiledSubagentNode {
 }
 
 function makeCompiledState(
-  options: { subagents?: CompiledSubagentNode[]; schedules?: CompiledScheduleDefinition[] } = {},
+  options: {
+    instructions?: CompiledInstructionsDefinition[];
+    subagents?: CompiledSubagentNode[];
+    schedules?: CompiledScheduleDefinition[];
+  } = {},
 ): CompileAgentResult {
   const channels: CompiledChannelEntry[] = [
     {
@@ -95,6 +103,7 @@ function makeCompiledState(
       name: "triage-bot",
     },
     channels,
+    instructions: options.instructions ?? [],
     tools: [
       {
         description: "Create a triage ticket.",
@@ -180,6 +189,37 @@ describe("buildApplicationInfoJson", () => {
     expect(json.schedules).toEqual(["morning-digest", "weekly-report"]);
   });
 
+  test("projects ordered instruction paths with their roles", () => {
+    const json = buildApplicationInfoJson({
+      application: getApplicationInfo(APP_ROOT),
+      compiledState: makeCompiledState({
+        instructions: [
+          {
+            content: "Standing rules.",
+            logicalPath: "instructions/10-rules.ts",
+            name: "instructions/10-rules",
+            role: "system",
+            sourceId: "instructions/10-rules.ts",
+            sourceKind: "module",
+          },
+          {
+            content: "Imported brief.",
+            logicalPath: "instructions/20-brief.ts",
+            name: "instructions/20-brief",
+            role: "user",
+            sourceId: "instructions/20-brief.ts",
+            sourceKind: "module",
+          },
+        ],
+      }),
+      messaging: MESSAGING,
+    });
+
+    expect(json.instructions).toBe(
+      "instructions/10-rules.ts (system), instructions/20-brief.ts (user)",
+    );
+  });
+
   test("reports an unavailable contract when the project is not compiled", () => {
     const json = buildApplicationInfoJson({
       application: getApplicationInfo(APP_ROOT),
@@ -198,6 +238,22 @@ describe("buildApplicationInfoJson", () => {
     expect(json.subagents).toEqual([]);
     expect(json.schedules).toEqual([]);
     expect(json.appRoot).toBe(APP_ROOT);
-    expect(json.messaging.stream).toBe("/eve/v1/session/:id/stream");
+    expect(json.messaging.stream).toBe("/eve/v1/session/:sessionId/stream");
+  });
+});
+
+describe("printApplicationInfo", () => {
+  test("includes the authored tool count in text output", async () => {
+    vi.mocked(inspectApplication).mockResolvedValue({
+      application: getApplicationInfo(APP_ROOT),
+      compiledState: makeCompiledState(),
+      messaging: MESSAGING,
+    });
+    const output: string[] = [];
+
+    await printApplicationInfo({ log: (message) => output.push(message) }, APP_ROOT);
+
+    expect(output).toHaveLength(1);
+    expect(output[0]).toMatch(/Tools\s+1 tool/);
   });
 });

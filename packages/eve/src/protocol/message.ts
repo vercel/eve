@@ -6,18 +6,28 @@ import {
   isSerializedUrlFilePart,
 } from "#internal/attachments/url-refs.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
+import { createEventId } from "#protocol/event-id.js";
+import {
+  createEveSessionStreamRoutePath,
+  createEveSubagentStreamRoutePath,
+} from "#protocol/routes.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
+import type {
+  RuntimeActionRequest,
+  RuntimeActionResult,
+  RuntimeToolResultActionResult,
+} from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
 export const EVE_SESSION_ID_HEADER = "x-eve-session-id";
 export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
+export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "19";
+export const EVE_MESSAGE_STREAM_VERSION = "22";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -46,11 +56,21 @@ export interface StepCompletedProviderMetadata {
 /**
  * Durable metadata attached to one persisted session stream event.
  *
- * Runtime code stamps this immediately before writing the event to the
- * workflow-owned stream so replay preserves the original timing.
+ * Stamped once, immediately before the event is written to the workflow-owned
+ * stream, and stored with it. Re-reading the stream — reconnecting, rewinding,
+ * or replaying a finished session — yields the same values every time.
  */
-export interface HandleMessageStreamEventMeta {
+export interface MessageStreamEventMeta {
+  /** ISO-8601 emission time. */
   readonly at: string;
+  /**
+   * Unique, lexicographically sortable identifier for this event.
+   *
+   * Stamped from stream version 20 on: rewinding into a session that started
+   * before the upgrade yields events whose `id` is absent despite this type,
+   * and those cannot be deduplicated.
+   */
+  readonly id: string;
 }
 
 /**
@@ -101,8 +121,17 @@ export interface RuntimeIdentity {
     readonly gitBranch?: string;
     readonly gitSha?: string;
   };
-  /** Configured model id; dynamic-model agents report `dynamic:<fallback id>`. */
-  readonly modelId: string;
+}
+
+/**
+ * Portable trace coordinates for correlating an eve run with an external
+ * observability backend. The fields follow the W3C trace-context model while
+ * remaining owned by eve rather than exposing an OpenTelemetry type.
+ */
+export interface RuntimeTraceContext {
+  readonly traceId: string;
+  readonly spanId: string;
+  readonly traceFlags: number;
 }
 
 /**
@@ -116,26 +145,14 @@ export interface RuntimeIdentity {
  */
 export type HandleMessageRequestBody =
   | {
+      readonly inputResponses?: never;
       readonly message: string | UserContent;
       readonly clientContext?: string | readonly string[] | JsonObject;
       readonly outputSchema?: JsonObject;
     }
   | {
-      readonly continuationToken: string;
-      readonly message: string | UserContent;
-      readonly clientContext?: string | readonly string[] | JsonObject;
-      readonly outputSchema?: JsonObject;
-    }
-  | {
-      readonly continuationToken: string;
       readonly inputResponses: readonly InputResponse[];
-      readonly clientContext?: string | readonly string[] | JsonObject;
-      readonly outputSchema?: JsonObject;
-    }
-  | {
-      readonly continuationToken: string;
-      readonly inputResponses: readonly InputResponse[];
-      readonly message: string | UserContent;
+      readonly message?: never;
       readonly clientContext?: string | readonly string[] | JsonObject;
       readonly outputSchema?: JsonObject;
     };
@@ -147,6 +164,7 @@ export interface SessionStartedStreamEvent {
   data: {
     invocation?: SubagentSessionInvocationMetadata;
     runtime?: RuntimeIdentity;
+    trace?: RuntimeTraceContext;
   };
   type: "session.started";
 }
@@ -157,6 +175,7 @@ export interface SessionStartedStreamEvent {
 export interface TurnStartedStreamEvent {
   data: {
     sequence: number;
+    trace?: RuntimeTraceContext;
     turnId: string;
   };
   type: "turn.started";
@@ -212,6 +231,36 @@ export interface ActionsRequestedStreamEvent {
   type: "actions.requested";
 }
 
+export type ApprovalCandidateOutcome = "pending" | "rejected" | "failed" | "timed-out" | "stale";
+
+/** Safe lifecycle event for one responder-bound approval candidate. */
+export interface ApprovalCandidateStreamEvent {
+  data: {
+    candidateId: string;
+    outcome: ApprovalCandidateOutcome;
+    requestId: string;
+    responderPrincipalId: string;
+    reason?: string;
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "approval.candidate";
+}
+
+/** Terminal durable settlement for one approval request. */
+export interface ApprovalSettledStreamEvent {
+  data: {
+    outcome: "approved" | "cancelled";
+    requestId: string;
+    responderPrincipalId: string;
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "approval.settled";
+}
+
 /**
  * Stream event emitted when the harness needs human input before it can
  * continue the run.
@@ -243,16 +292,42 @@ export interface ActionResultStreamEvent {
 }
 
 /**
+ * Stream event emitted for a preliminary snapshot from a locally executed
+ * tool generator. The final snapshot is emitted as `action.result`.
+ */
+export interface ActionPartialStreamEvent {
+  data: {
+    result: RuntimeToolResultActionResult;
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "action.partial";
+}
+
+/**
  * Stream event emitted when the parent workflow starts a child subagent session.
  */
 export interface SubagentCalledStreamEvent {
   data: {
     callId: string;
     childSessionId: string;
+    childStreamPath: string;
     sessionId: string;
     sequence: number;
     name: string;
     remote?: {
+      /**
+       * Key to the authored credential functions (`auth`/`headers`) for this
+       * remote child, resolved at stream-proxy time by
+       * `resolveRemoteAgentStreamHeaders`. Static subagent → the node id in
+       * `subagentRegistry.subagentsByNodeId`; dynamic subagent → its
+       * `credentialsStepId` in the step registry. The event stores this key —
+       * never resolved header values — because tokens expire and this event
+       * is persisted and streamed to clients. Absent when the remote child
+       * has no authored credentials.
+       */
+      resolverId?: string;
       url: string;
     };
     toolName: string;
@@ -281,7 +356,7 @@ export interface SubagentStartedStreamEvent {
 export interface SubagentChildEventStreamEvent {
   data: {
     callId: string;
-    event: HandleMessageStreamEvent;
+    event: UnstampedMessageStreamEvent;
     subagentName: string;
   };
   type: "subagent.event";
@@ -292,6 +367,15 @@ export interface SubagentChildEventStreamEvent {
  */
 export interface SubagentCompletedStreamEvent {
   data: {
+    /**
+     * Present when the originating call completed with a background-task
+     * receipt while the child itself kept running. Consumers must not treat
+     * this as the child's terminal boundary; the child stream owns that.
+     */
+    backgroundTask?: {
+      taskId: string;
+      status: "working";
+    };
     callId: string;
     output: string;
     subagentName: string;
@@ -381,6 +465,7 @@ export interface ResultCompletedStreamEvent {
  */
 export interface StepStartedStreamEvent {
   data: {
+    readonly modelId: string;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -464,6 +549,19 @@ export interface TurnCancelledStreamEvent {
 }
 
 /**
+ * Stream event emitted after the durable model-message history is cleared.
+ * The session itself and its non-message state remain active.
+ */
+export interface ContextClearedStreamEvent {
+  data: {
+    sequence: number;
+    sessionId: string;
+    turnId: string;
+  };
+  type: "context.cleared";
+}
+
+/**
  * Stream event emitted when the workflow decides to compact the current
  * visible session history before the next model fragment runs.
  */
@@ -498,7 +596,10 @@ export interface CompactionCompletedStreamEvent {
  */
 export interface AuthorizationRequiredStreamEvent {
   data: {
+    /** Stable identity of this exact authorization attempt. */
+    attemptId?: string;
     authorization?: ConnectionAuthorizationChallenge;
+    candidateId?: string;
     description: string;
     name: string;
     sequence: number;
@@ -530,6 +631,9 @@ export type ConnectionAuthorizationOutcome = AuthorizationOutcome;
  */
 export interface AuthorizationCompletedStreamEvent {
   data: {
+    /** Stable identity shared with the matching required event. */
+    attemptId?: string;
+    candidateId?: string;
     /**
      * The challenge from the matching `authorization.required` event,
      * journaled across the park. Lets channels keep rendering the
@@ -552,7 +656,7 @@ export interface AuthorizationCompletedStreamEvent {
  */
 export interface SessionWaitingStreamEvent {
   data: {
-    /** Channel-owned resume handle for the next user turn. */
+    /** Channel-local continuation token, or the immutable session ID for an ID-only session. */
     continuationToken: string;
     wait: "next-user-message";
   };
@@ -580,9 +684,15 @@ export interface SessionCompletedStreamEvent {
 }
 
 /**
- * Serializable stream event union for the durable message session flow.
+ * Serializable event before eve stamps the durable stream envelope.
+ *
+ * Internal emitters use this type while constructing events. Public stream
+ * consumers receive {@link MessageStreamEvent}.
  */
-export type HandleMessageStreamEvent = (
+export type UnstampedMessageStreamEvent =
+  | ApprovalCandidateStreamEvent
+  | ApprovalSettledStreamEvent
+  | ContextClearedStreamEvent
   | CompactionCompletedStreamEvent
   | CompactionRequestedStreamEvent
   | AuthorizationCompletedStreamEvent
@@ -602,6 +712,7 @@ export type HandleMessageStreamEvent = (
   | SubagentStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
+  | ActionPartialStreamEvent
   | ActionResultStreamEvent
   | ReasoningCompletedStreamEvent
   | StepCompletedStreamEvent
@@ -610,10 +721,7 @@ export type HandleMessageStreamEvent = (
   | TurnCancelledStreamEvent
   | TurnCompletedStreamEvent
   | TurnFailedStreamEvent
-  | TurnStartedStreamEvent
-) & {
-  readonly meta?: HandleMessageStreamEventMeta;
-};
+  | TurnStartedStreamEvent;
 
 /**
  * Stream events that represent an unrecovered turn/session failure.
@@ -624,14 +732,18 @@ export type TurnFailureStreamEvent =
   | TurnFailedStreamEvent;
 
 /**
- * One public session stream event after runtime metadata has been stamped.
+ * One event read from an eve session stream.
  *
- * Runtime/execution code owns this stamping boundary. Replays must preserve the
- * original `meta.at` value instead of recomputing it.
+ * eve stamps the durable identity and emission time before writing the event.
  */
-export type TimedHandleMessageStreamEvent = HandleMessageStreamEvent & {
-  readonly meta: HandleMessageStreamEventMeta;
+export type MessageStreamEvent = UnstampedMessageStreamEvent & {
+  readonly meta: MessageStreamEventMeta;
 };
+
+/**
+ * @deprecated Use {@link MessageStreamEvent}.
+ */
+export type HandleMessageStreamEvent = MessageStreamEvent;
 
 const textEncoder = new TextEncoder();
 
@@ -639,7 +751,7 @@ const textEncoder = new TextEncoder();
  * Returns true when the current stream has reached a turn boundary or terminal
  * session outcome.
  */
-export function isCurrentTurnBoundaryEvent(event: HandleMessageStreamEvent): boolean {
+export function isCurrentTurnBoundaryEvent(event: UnstampedMessageStreamEvent): boolean {
   return (
     event.type === "session.completed" ||
     event.type === "session.failed" ||
@@ -649,10 +761,13 @@ export function isCurrentTurnBoundaryEvent(event: HandleMessageStreamEvent): boo
 
 /**
  * Narrows a stream event to the failure events that terminate or poison a turn.
+ *
+ * Generic so narrowing keeps the input's stamping: a
+ * {@link MessageStreamEvent} narrows to a stamped failure event.
  */
-export function isTurnFailureEvent(
-  event: HandleMessageStreamEvent,
-): event is TurnFailureStreamEvent {
+export function isTurnFailureEvent<TEvent extends UnstampedMessageStreamEvent>(
+  event: TEvent,
+): event is TEvent & TurnFailureStreamEvent {
   return (
     event.type === "session.failed" || event.type === "step.failed" || event.type === "turn.failed"
   );
@@ -664,6 +779,7 @@ export function isTurnFailureEvent(
 export function createSessionStartedEvent(input?: {
   readonly invocation?: SubagentSessionInvocationMetadata;
   readonly runtime?: RuntimeIdentity;
+  readonly trace?: RuntimeTraceContext;
 }): SessionStartedStreamEvent {
   const data: SessionStartedStreamEvent["data"] = {};
 
@@ -673,6 +789,10 @@ export function createSessionStartedEvent(input?: {
 
   if (input?.runtime !== undefined) {
     data.runtime = input.runtime;
+  }
+
+  if (input?.trace !== undefined) {
+    data.trace = input.trace;
   }
 
   return {
@@ -686,13 +806,20 @@ export function createSessionStartedEvent(input?: {
  */
 export function createTurnStartedEvent(input: {
   readonly sequence: number;
+  readonly trace?: RuntimeTraceContext;
   readonly turnId: string;
 }): TurnStartedStreamEvent {
+  const data: TurnStartedStreamEvent["data"] = {
+    sequence: input.sequence,
+    turnId: input.turnId,
+  };
+
+  if (input.trace !== undefined) {
+    data.trace = input.trace;
+  }
+
   return {
-    data: {
-      sequence: input.sequence,
-      turnId: input.turnId,
-    },
+    data,
     type: "turn.started",
   };
 }
@@ -937,7 +1064,9 @@ export function createActionsRequestedEvent(input: {
  * for `getToken`-only authorization sources that authorize out of band.
  */
 export function createAuthorizationRequiredEvent(input: {
+  readonly attemptId?: string;
   readonly authorization?: ConnectionAuthorizationChallenge;
+  readonly candidateId?: string;
   readonly description: string;
   readonly name: string;
   readonly sequence: number;
@@ -952,8 +1081,14 @@ export function createAuthorizationRequiredEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.attemptId !== undefined) {
+    data.attemptId = input.attemptId;
+  }
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
+  }
+  if (input.candidateId !== undefined) {
+    data.candidateId = input.candidateId;
   }
   if (input.webhookUrl !== undefined) {
     data.webhookUrl = input.webhookUrl;
@@ -970,7 +1105,9 @@ export function createAuthorizationRequiredEvent(input: {
  * authorization deadline has expired.
  */
 export function createAuthorizationCompletedEvent(input: {
+  readonly attemptId?: string;
   readonly authorization?: ConnectionAuthorizationChallenge;
+  readonly candidateId?: string;
   readonly name: string;
   readonly outcome: AuthorizationOutcome;
   readonly reason?: string;
@@ -985,8 +1122,14 @@ export function createAuthorizationCompletedEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.attemptId !== undefined) {
+    data.attemptId = input.attemptId;
+  }
   if (input.authorization !== undefined) {
     data.authorization = input.authorization;
+  }
+  if (input.candidateId !== undefined) {
+    data.candidateId = input.candidateId;
   }
   if (input.reason !== undefined) {
     data.reason = input.reason;
@@ -995,6 +1138,20 @@ export function createAuthorizationCompletedEvent(input: {
     data,
     type: "authorization.completed",
   };
+}
+
+/** Creates a safe candidate lifecycle event. */
+export function createApprovalCandidateEvent(
+  input: ApprovalCandidateStreamEvent["data"],
+): ApprovalCandidateStreamEvent {
+  return { data: input, type: "approval.candidate" };
+}
+
+/** Creates a terminal approval settlement event. */
+export function createApprovalSettledEvent(
+  input: ApprovalSettledStreamEvent["data"],
+): ApprovalSettledStreamEvent {
+  return { data: input, type: "approval.settled" };
 }
 
 /**
@@ -1041,11 +1198,29 @@ export function createActionResultEvent(input: {
       error: outcome.error,
       result: input.result,
       sequence: input.sequence,
-      stepIndex: input.stepIndex,
       status: outcome.status,
+      stepIndex: input.stepIndex,
       turnId: input.turnId,
     },
     type: "action.result",
+  };
+}
+
+/** Creates an `action.partial` event for one preliminary tool-result snapshot. */
+export function createActionPartialEvent(input: {
+  readonly result: RuntimeToolResultActionResult;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}): ActionPartialStreamEvent {
+  return {
+    data: {
+      result: input.result,
+      sequence: input.sequence,
+      stepIndex: input.stepIndex,
+      turnId: input.turnId,
+    },
+    type: "action.partial",
   };
 }
 
@@ -1059,6 +1234,7 @@ export function createSubagentCalledEvent(input: {
   readonly sequence: number;
   readonly name: string;
   readonly remote?: {
+    readonly resolverId?: string;
     readonly url: string;
   };
   readonly toolName: string;
@@ -1069,6 +1245,14 @@ export function createSubagentCalledEvent(input: {
     data: {
       callId: input.callId,
       childSessionId: input.childSessionId,
+      childStreamPath:
+        input.remote === undefined
+          ? createEveSessionStreamRoutePath(input.childSessionId)
+          : createEveSubagentStreamRoutePath({
+              callId: input.callId,
+              childSessionId: input.childSessionId,
+              parentSessionId: input.sessionId,
+            }),
       sessionId: input.sessionId,
       sequence: input.sequence,
       name: input.name,
@@ -1191,12 +1375,14 @@ export function createResultCompletedEvent(input: {
  * Creates the `step.started` event for one model call.
  */
 export function createStepStartedEvent(input: {
+  readonly modelId: string;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
 }): StepStartedStreamEvent {
   return {
     data: {
+      modelId: input.modelId,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
@@ -1318,6 +1504,22 @@ export function createTurnCancelledEvent(input: {
   };
 }
 
+/** Creates the `context.cleared` event for one manual history clear. */
+export function createContextClearedEvent(input: {
+  readonly sequence: number;
+  readonly sessionId: string;
+  readonly turnId: string;
+}): ContextClearedStreamEvent {
+  return {
+    data: {
+      sequence: input.sequence,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+    },
+    type: "context.cleared",
+  };
+}
+
 /**
  * Creates the `compaction.requested` event for one runtime compaction pass.
  */
@@ -1365,7 +1567,7 @@ export function createCompactionCompletedEvent(input: {
  * wait.
  */
 export function createSessionWaitingEvent(
-  namespacedContinuationToken: string,
+  namespacedContinuationToken: string = "",
 ): SessionWaitingStreamEvent {
   return {
     data: {
@@ -1404,21 +1606,18 @@ export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
 }
 
 /**
- * Stamps one session event with durable timing metadata immediately before it
- * is written to the workflow-owned stream.
+ * Stamps one session event with its durable identity and emission time.
  *
- * Only runtime/execution code should call this. Keeping one stamping seam
- * ensures every persisted event shares the same clock contract and replay never
- * invents new timestamps.
+ * Runtime/execution code only, once per event, immediately before the write.
+ * One stamping seam is what makes the persisted stream and authored hooks
+ * observe the same `meta.id`.
  */
-export function timestampHandleMessageStreamEvent(
-  event: HandleMessageStreamEvent,
-  at = new Date().toISOString(),
-): TimedHandleMessageStreamEvent {
+export function stampMessageStreamEvent(event: UnstampedMessageStreamEvent): MessageStreamEvent {
   return {
     ...event,
     meta: {
-      at,
+      at: new Date().toISOString(),
+      id: createEventId(),
     },
   };
 }
@@ -1426,7 +1625,7 @@ export function timestampHandleMessageStreamEvent(
 /**
  * Encodes one message stream event as newline-delimited JSON.
  */
-export function encodeMessageStreamEvent(event: TimedHandleMessageStreamEvent): Uint8Array {
+export function encodeMessageStreamEvent(event: MessageStreamEvent): Uint8Array {
   return textEncoder.encode(`${JSON.stringify(event)}\n`);
 }
 

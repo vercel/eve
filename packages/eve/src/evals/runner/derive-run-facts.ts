@@ -1,4 +1,5 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
+import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { EveEvalDerivedFacts, EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
@@ -36,7 +37,7 @@ export interface DeriveRunFactsOptions {
  * before this epilogue is `input.requested`, the run ended parked on
  * unanswered HITL input.
  */
-const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<HandleMessageStreamEvent["type"]> = new Set([
+const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
   "turn.completed",
   "session.waiting",
   "session.completed",
@@ -51,7 +52,7 @@ const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<HandleMessageStreamEvent["type"]> =
  * power checks, scorers, and reporters.
  */
 export function deriveRunFacts(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
   options?: DeriveRunFactsOptions,
 ): EveEvalDerivedFacts {
   const sessionId = options?.sessionId;
@@ -107,8 +108,11 @@ export function deriveRunFacts(
 
       case "actions.requested": {
         for (const action of event.data.actions) {
-          if (action.kind !== "tool-call") continue;
-          ensureToolCall(action.callId, action.toolName, action.input);
+          if (action.kind === "tool-call") {
+            ensureToolCall(action.callId, action.toolName, action.input);
+          } else if (action.kind === "load-skill") {
+            ensureToolCall(action.callId, LOAD_SKILL_TOOL_NAME, action.input);
+          }
         }
         break;
       }
@@ -210,7 +214,7 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
  * (`turn.completed` → `session.waiting`) is `input.requested`: the harness
  * surfaced HITL requests and stopped without resolving them.
  */
-function endedParkedOnInput(events: readonly HandleMessageStreamEvent[]): boolean {
+function endedParkedOnInput(events: readonly MessageStreamEvent[]): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event === undefined || TURN_EPILOGUE_EVENT_TYPES.has(event.type)) continue;

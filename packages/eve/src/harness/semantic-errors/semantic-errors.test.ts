@@ -152,6 +152,29 @@ describe("summarizeKnownError (catalog table)", () => {
       error: new TypeError("fetch failed"),
       id: "network-request-failed",
     },
+    {
+      title: "undici body timeout on the cause chain",
+      error: new TypeError("terminated", {
+        cause: Object.assign(new Error("Body Timeout Error"), {
+          code: "UND_ERR_BODY_TIMEOUT",
+        }),
+      }),
+      id: "network-request-failed",
+    },
+    {
+      title: "undici headers timeout on the cause chain",
+      error: new TypeError("request aborted", {
+        cause: Object.assign(new Error("Headers Timeout Error"), {
+          code: "UND_ERR_HEADERS_TIMEOUT",
+        }),
+      }),
+      id: "network-request-failed",
+    },
+    {
+      title: "bare undici termination without a structured code",
+      error: new TypeError("terminated"),
+      id: "network-request-failed",
+    },
   ];
 
   for (const testCase of cases) {
@@ -205,6 +228,7 @@ describe("summarizeKnownError (catalog table)", () => {
 
   it("requires exact message equality, never containment", () => {
     expect(summarizeKnownError(new Error("upstream fetch failed for user 42"))).toBeNull();
+    expect(summarizeKnownError(new Error("upstream terminated unexpectedly"))).toBeNull();
     expect(summarizeKnownError(new Error("network configuration invalid"))).toBeNull();
   });
 
@@ -225,6 +249,7 @@ describe("summary tags", () => {
       "transient",
     );
     expect(summarizeKnownError(new TypeError("fetch failed"))?.tags).toContain("transient");
+    expect(summarizeKnownError(new TypeError("terminated"))?.tags).toContain("transient");
   });
 });
 

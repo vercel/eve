@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "channels/**/*.ts",
+    "connections/**/*.ts",
+    "extensions/**/*.ts",
+    "instrumentation/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}

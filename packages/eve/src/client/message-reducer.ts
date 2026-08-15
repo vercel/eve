@@ -168,6 +168,42 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       return next;
     }
 
+    case "approval.candidate":
+      // Candidate progress is responder-specific. Applications can consume the
+      // raw stream event for private UI without changing the shared tool part.
+      return data;
+
+    case "approval.settled": {
+      const existing = findToolPartByApprovalId(data, event.data.requestId);
+      if (existing === undefined) return data;
+      if (event.data.outcome === "approved") {
+        return updateToolPart(data, existing.toolCallId, {
+          approval: { approved: true, id: event.data.requestId, reason: undefined },
+          input: existing.input,
+          state: "approval-responded",
+          stepIndex: existing.stepIndex,
+          toolCallId: existing.toolCallId,
+          toolMetadata: existing.toolMetadata,
+          toolName: existing.toolName,
+          type: "dynamic-tool",
+        });
+      }
+      return updateToolPart(data, existing.toolCallId, {
+        approval: {
+          approved: false,
+          id: event.data.requestId,
+          reason: "Tool execution was cancelled.",
+        },
+        input: existing.input,
+        state: "output-denied",
+        stepIndex: existing.stepIndex,
+        toolCallId: existing.toolCallId,
+        toolMetadata: existing.toolMetadata,
+        toolName: existing.toolName,
+        type: "dynamic-tool",
+      });
+    }
+
     case "action.result": {
       const descriptor = normalizeActionResult(event.data.result);
       const existing = findToolPart(data, event.data.result.callId);
@@ -217,6 +253,35 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       if (existing !== undefined) {
         // Approved tool results can arrive on a later runtime turn; keep
         // the UI lifecycle anchored to the original tool call.
+        return updateToolPart(data, event.data.result.callId, nextPart);
+      }
+
+      return updateAssistantMessage(data, event.data.turnId, (message) =>
+        upsertPart(ensureStepStartPart(message, event.data.stepIndex), nextPart),
+      );
+    }
+
+    case "action.partial": {
+      const existing = findToolPart(data, event.data.result.callId);
+      if (existing !== undefined && isSettledToolPart(existing)) {
+        return data;
+      }
+
+      const descriptor = normalizeActionResult(event.data.result);
+      const nextPart: EveDynamicToolPart = {
+        approval: approvedApproval(existing),
+        input: existing?.input,
+        output: event.data.result.output,
+        partial: true,
+        state: "output-available",
+        stepIndex: event.data.stepIndex,
+        toolCallId: event.data.result.callId,
+        toolMetadata: mergeToolMetadata(existing?.toolMetadata, createToolMetadata(descriptor)),
+        toolName: existing?.toolName ?? descriptor.toolName,
+        type: "dynamic-tool",
+      };
+
+      if (existing !== undefined) {
         return updateToolPart(data, event.data.result.callId, nextPart);
       }
 
@@ -507,6 +572,14 @@ function findToolPart(data: EveMessageData, toolCallId: string): EveDynamicToolP
     }
   }
   return undefined;
+}
+
+function isSettledToolPart(part: EveDynamicToolPart): boolean {
+  return (
+    part.state === "output-denied" ||
+    part.state === "output-error" ||
+    (part.state === "output-available" && part.partial !== true)
+  );
 }
 
 function findLatestPendingAuthorizationPart(

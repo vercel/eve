@@ -3,6 +3,7 @@ import { defineEval } from "eve/evals";
 import { SECOND_CHECKPOINT_MARKER } from "../constants";
 
 export default defineEval({
+  tags: ["real-model"],
   description: "The model does not redo completed work because a stale todo stayed pending.",
   async test(t) {
     const turn = await t.send(

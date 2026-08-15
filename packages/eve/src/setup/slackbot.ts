@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { readProjectLink } from "#setup/project-resolution.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#setup/scaffold/index.js";
 import {
   createPromptCommandOutput,
@@ -21,10 +22,10 @@ import {
   CONNECT_LOOKUP_TIMEOUT_MS,
   fetchSlackWorkspace,
   findSlackConnector,
-  readProjectLink,
   listSlackConnectors,
   type SlackConnectLifecycleDeps,
   type SlackConnectorCleanupResult,
+  type SlackConnectorLookup,
 } from "./slack-connect-lifecycle.js";
 
 // Re-exported so the Connect parsers remain importable from the provisioning
@@ -313,12 +314,40 @@ async function raceAttemptAgainstChoice(input: {
  * flow. Existing connectors are verified through their team-scoped detail
  * payload before attachment.
  */
+export type SlackConnectorSelection = SlackConnectorRef | "create";
+
+/** Read-only connector inventory used to resolve the create/reuse decision before provisioning. */
+export async function inspectSlackbotConnectors(
+  log: ChannelSetupLog,
+  projectRoot: string,
+  slug: string,
+  signal?: AbortSignal,
+  deps: SlackbotProvisionDeps = defaultDeps,
+): Promise<Extract<SlackConnectorLookup, { state: "found" | "not-found" }>> {
+  const projectLink = await (deps.readProjectLink ?? readProjectLink)(projectRoot);
+  const lookup = await findSlackConnector(
+    deps,
+    projectRoot,
+    projectLink?.projectId,
+    `slack/${slug}`,
+    createPromptCommandOutput(log),
+    signal,
+  );
+  if (lookup.state === "failed") throw new Error(lookup.message);
+  return lookup;
+}
+
 export interface ProvisionSlackbotOptions {
   /**
    * Cancels the caller's whole operation. The promise rejects after attempting
    * cleanup; only the explicit interactive Cancel action returns `cancelled`.
    */
   signal?: AbortSignal;
+  /** Chooses a project-attached connector or requests a new one. */
+  selectConnector?: (
+    connectors: readonly SlackConnectorRef[],
+    preferred: SlackConnectorRef | undefined,
+  ) => Promise<SlackConnectorSelection>;
   /** Concurrent retry/cancel controls supplied by an interactive prompter. */
   awaitChoice?: ChannelSetupAwaitChoice;
 }
@@ -607,7 +636,14 @@ export async function provisionSlackbot(
   }
 
   if (existing.state === "found") {
-    return runExistingConnector({ state: "existing", ref: existing.connector });
+    const selection =
+      options.selectConnector === undefined
+        ? (existing.preferred ?? existing.connectors[0]!)
+        : await options.selectConnector(existing.connectors, existing.preferred);
+    options.signal?.throwIfAborted();
+    if (selection !== "create") {
+      return runExistingConnector({ state: "existing", ref: selection });
+    }
   }
 
   let source: NewAttemptSource = {

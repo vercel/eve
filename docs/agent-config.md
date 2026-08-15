@@ -1,9 +1,9 @@
 ---
-title: "agent.ts"
-description: "Set the agent's runtime config in agent.ts with defineAgent, including the model, reasoning effort, and compaction."
+title: "Agents"
+description: "Configure an eve agent's model, reasoning effort, compaction, limits, and runtime behavior in agent.ts."
 ---
 
-An agent's `agent.ts` calls `defineAgent` (from `eve`) to set its runtime config.
+An eve app has one root agent assembled from the files under `agent/`. Its optional `agent.ts` calls `defineAgent` (from `eve`) when you need to configure the model or other runtime behavior. Declared [subagents](./subagents) have their own `agent.ts` and capabilities; this page covers the configuration shared by root agents and subagents.
 
 ## Set the model
 
@@ -17,8 +17,15 @@ export default defineAgent({
 });
 ```
 
+For a static AI Gateway model ID, you can make the same source change from the
+project root with `eve set --model anthropic/claude-opus-4.8` or from the local
+dev TUI with `/model anthropic/claude-opus-4.8`.
+
 The root `agent.ts` can be omitted when no runtime config is needed. In that case, eve defaults
-to `anthropic/claude-sonnet-5`. When `agent.ts` is present, `model` is required.
+to `zai/glm-5.2`. GLM 5.2 does not support image input; choose a
+vision-capable model or [route image inputs to Gemini
+Flash](./guides/dynamic-capabilities#route-image-inputs-to-a-vision-model).
+When `agent.ts` is present, `model` is required.
 
 `model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
 
@@ -45,21 +52,23 @@ Model use is subject to the terms, data-processing commitments, retention behavi
 
 ### Choose the model dynamically
 
-`model` also accepts `defineDynamic({ fallback, events })`. `fallback` is the
-compiled static model: it anchors build-time metadata (routing, credentials,
-context window) and serves whenever no dynamic selection is set.
+`model` also accepts `defineDynamic({ events })`. Each matching handler must
+return the concrete model for its scope; a dynamic model has no compiled
+default.
 
 ```ts title="agent/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
 
 export default defineAgent({
   model: defineDynamic({
-    fallback: "anthropic/claude-sonnet-5",
     events: {
-      "session.started": (_event, ctx) =>
-        ctx.session.auth.initiator?.attributes.plan === "enterprise"
-          ? "anthropic/claude-opus-4.8"
-          : null,
+      "session.started": (_event, ctx) => {
+        if (ctx.session.auth.initiator?.attributes.plan === "enterprise") {
+          return "anthropic/claude-opus-4.8";
+        }
+
+        return "anthropic/claude-sonnet-5";
+      },
     },
   }),
 });
@@ -68,24 +77,28 @@ export default defineAgent({
 Handlers receive the shared [dynamic resolver
 context](./guides/dynamic-capabilities) (`ctx.session`, `ctx.channel`,
 `ctx.messages`) and return a gateway model id, an AI SDK `LanguageModel`, a
-selection object, or `null` to leave the scope unset.
+selection object. Returning `null` or `undefined` fails the turn.
 
 - **Scopes.** `session.started` (once per session), `turn.started` (once per
   turn), `step.started` (every model step). Precedence: step > turn >
-  session > `fallback`. Prefer `session.started`: prompt caches are per
-  model, so every switch re-ingests the conversation at uncached prices.
-- **Failures degrade, never fail the turn.** A resolver that throws or
-  returns an invalid selection logs an error and leaves its scope unset.
-  Build-time validation covers only `fallback`; a selected model without
-  credentials fails at request time.
+  session. Prefer `session.started`: prompt caches are per model, so every
+  switch re-ingests the conversation at uncached prices. If no active
+  selection exists before model-dependent work begins, the turn fails.
+- **Failures stop the turn.** A resolver that throws, returns no model, or
+  returns an invalid selection fails before the provider call. A selected
+  model without valid credentials fails at request time.
 - **Serialization.** Session/turn selections must be model id strings; return
   live `LanguageModel` objects only from `step.started`.
 - **Selection object.** `{ model, modelContextWindowTokens?, modelOptions? }`.
-  Set `modelContextWindowTokens` when the selected model's window differs
-  from the fallback's — it is never inherited. Omitted `modelOptions` reuses
-  the agent-level `modelOptions`.
+  When `modelContextWindowTokens` is omitted, eve resolves it from the AI
+  Gateway catalog and caches successful metadata in durable session state for
+  24 hours. Set it explicitly for an unlisted or custom model. Dynamic agents
+  cannot set sibling `modelContextWindowTokens` or `modelOptions` fields;
+  return per-model values from the handler.
 
-Runtime identity reports a dynamic agent's model as `dynamic:<fallback id>`.
+The `session.started` runtime identity does not include a model id for a
+dynamic agent. Each public `step.started` event reports the concrete `modelId`
+selected for that model call.
 
 ## Reasoning effort
 
@@ -103,6 +116,7 @@ Supported values are `"provider-default"`, `"none"`, `"minimal"`, `"low"`,
 `"medium"`, `"high"`, and `"xhigh"`. The selected model and provider determine
 which levels are available and how they map to provider-native settings. Use
 `modelOptions.providerOptions` when you need provider-specific reasoning controls.
+Run `eve set --reasoning high` to update this field from the command line.
 
 ## Compaction
 
@@ -131,9 +145,17 @@ export default defineAgent({
   limits: {
     maxInputTokensPerSession: 200_000,
     maxOutputTokensPerSession: 20_000,
+    sessionTimeoutMs: 7 * 24 * 60 * 60 * 1_000,
   },
 });
 ```
+
+`sessionTimeoutMs` sets an absolute lifetime for every session, including
+delegated sessions. It defaults to 30 days, starts at creation, and survives
+restarts and redeployments. At the deadline, eve lets an active turn settle,
+then emits `session.completed` and releases the continuation; the next
+qualifying channel message starts fresh. Set it to `false` to disable the
+timeout. Expiration does not delete stored session data.
 
 Input and output budgets are checked independently. The model call that crosses
 either limit is allowed to finish because providers only report exact token
@@ -147,12 +169,14 @@ still over budget, the next message re-raises the prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
 delegation tree — the delegating parent never receives an error result it
 could retry against a fresh quota share. A reply that answers neither option
-re-raises the prompt; the reply stays in history and is processed once the
-budget is granted.
+is queued while the existing prompt stays pending; eve does not raise another
+copy. The reply is processed once the budget is granted.
 
 Sessions that cannot reach a human — task-mode runs such as schedules and
 subagents without input proxying — skip the prompt and fail the next model
-call with `SESSION_TOKEN_LIMIT_REACHED`.
+call with `SESSION_TOKEN_LIMIT_REACHED`. A delegated task with no inherited
+quota also fails instead of raising a continuation prompt that could only
+grant another zero-token window.
 
 When `maxInputTokensPerSession` is omitted, root sessions apply a default
 input budget of `40_000_000` provider-reported input tokens.
@@ -161,11 +185,13 @@ to `false` uncaps that axis — the session never stops on it.
 
 Delegated subagent sessions have no fixed default. Each child receives a
 share of the delegating parent's remaining quota at dispatch time — the
-remainder (limit minus accumulated usage) split evenly across the batch's
-local subagent calls — and a completed child's usage counts against the
-parent's quota, so a delegation tree can never outspend the budget configured
-at its root. An authored child limit applies only when it is tighter than the
-parent's grant; an uncapped parent delegates uncapped children.
+remainder in the current budget window split evenly across the batch's local
+subagent calls — and a completed child's usage counts against the parent's
+quota, so a delegation tree can never outspend the budget configured at its
+root. Approving a continuation opens a fresh parent window for later child
+grants without erasing lifetime usage. An authored child limit applies only
+when it is tighter than the parent's grant; an uncapped parent delegates
+uncapped children.
 
 ## Workflow world
 
@@ -206,16 +232,16 @@ installed package must stay external in hosted output, list it in
 
 ## Other defineAgent fields
 
-`defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API](./reference/typescript-api).
+`defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
-| Field          | Type                                    | Default          | Description                                                                                                                                                                                                                                                                |
-| -------------- | --------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                              |
-| `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                                                     |
-| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. `maxInputTokensPerSession` defaults to `40_000_000` for root sessions, and delegated subagent sessions inherit the parent's remaining quota; `maxOutputTokensPerSession` is unset unless configured; `false` uncaps a session token limit. |
-| `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent.                                                              |
-| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                                                                                 |
-| `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                   |
+| Field          | Type                                    | Default          | Description                                                                                                                                                                                                   |
+| -------------- | --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                 |
+| `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                        |
+| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; token-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                   |
+| `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
+| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                    |
+| `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.      |
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.
 
@@ -234,5 +260,5 @@ During `eve dev`, ordinary dependencies are bundled into each retained runtime g
 ## What to read next
 
 - [Default harness](./concepts/default-harness) for the loop and built-in tools this config drives
-- [TypeScript API](./reference/typescript-api) for every `defineAgent` field and type
+- [TypeScript API Reference](./reference/typescript-api) for every `defineAgent` field and type
 - [Subagents](./subagents) for the `description` requirement and child-agent config

@@ -232,6 +232,21 @@ describe("createSlackFetchFile", () => {
 
     await expect(fetchFile("https://files.slack.com/locked.csv")).rejects.toThrow("HTTP 403");
   });
+
+  it("rejects HTML returned for a private Slack file", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!DOCTYPE html><html><body>Slack sign in</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
+    );
+
+    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+
+    await expect(fetchFile("https://files.slack.com/locked.png")).rejects.toThrow(
+      /files:read.*reinstall/is,
+    );
+  });
 });
 
 describe("collectInboundFileParts", () => {

@@ -1,9 +1,104 @@
 import { describe, expect, it } from "vitest";
 
-import { compiledAgentManifestSchema, createCompiledAgentManifest } from "#compiler/manifest.js";
+import {
+  compiledAgentManifestSchema,
+  createCompiledAgentResources,
+  createCompiledAgentManifest,
+  createCompiledAgentNodeManifest,
+} from "#compiler/manifest.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 
 describe("compiledAgentManifestSchema", () => {
+  it("accepts authored HEAD and OPTIONS channel routes", () => {
+    const channel = {
+      adapterKind: "mcp",
+      kind: "channel" as const,
+      logicalPath: "channels/mcp.ts",
+      name: "mcp",
+      sourceId: "channel-mcp",
+      sourceKind: "module" as const,
+      urlPath: "/.well-known/oauth-protected-resource",
+    };
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      channels: [
+        { ...channel, method: "HEAD" },
+        { ...channel, method: "OPTIONS" },
+      ],
+      config: {
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(manifest);
+    expect(
+      parsed.channels.map((entry) => (entry.kind === "channel" ? entry.method : null)),
+    ).toEqual(["HEAD", "OPTIONS"]);
+  });
+
+  it("requires exactly one static description or dynamic resolver for each subagent", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+    });
+    const subagent = {
+      agent: createCompiledAgentNodeManifest({
+        agentRoot: "/app/agent/subagents/research",
+        appRoot: "/app",
+        config: {
+          model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+          name: "research",
+        },
+      }),
+      entryPath: "subagents/research/agent.ts",
+      logicalPath: "subagents/research",
+      name: "research",
+      nodeId: "research",
+      rootPath: "/app/agent/subagents/research",
+      sourceId: "subagents/research/agent.ts",
+      sourceKind: "module",
+    } as const;
+    const parses = (variant: Readonly<Record<string, unknown>>): boolean =>
+      compiledAgentManifestSchema.safeParse({
+        ...manifest,
+        subagents: [{ ...subagent, ...variant }],
+      }).success;
+
+    expect(parses({ description: "Research requests." })).toBe(true);
+    expect(
+      parses({
+        agent: createCompiledAgentResources({
+          agentRoot: "/app/agent/subagents/research",
+          appRoot: "/app",
+        }),
+        configResolver: {
+          eventNames: ["session.started"],
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module",
+        },
+      }),
+    ).toBe(true);
+    expect(parses({})).toBe(false);
+    expect(
+      parses({
+        description: "Research requests.",
+        configResolver: {
+          eventNames: ["session.started"],
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module",
+        },
+      }),
+    ).toBe(false);
+  });
+
   it("preserves reasoning configuration", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",
@@ -28,6 +123,7 @@ describe("compiledAgentManifestSchema", () => {
         limits: {
           maxInputTokensPerSession: 200_000,
           maxOutputTokensPerSession: 20_000,
+          sessionTimeoutMs: 86_400_000,
         },
         model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
         name: "app",
@@ -39,6 +135,7 @@ describe("compiledAgentManifestSchema", () => {
     expect(parsed.config.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      sessionTimeoutMs: 86_400_000,
     });
   });
 
@@ -94,6 +191,22 @@ describe("compiledAgentManifestSchema", () => {
     expect(parsed.workflowTool).toEqual({ maxSubagents: 6 });
   });
 
+  it("preserves web search provider configuration", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+      webSearchProvider: "exa",
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(manifest);
+
+    expect(parsed.webSearchProvider).toBe("exa");
+  });
+
   it("preserves dynamic model resolver source", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",
@@ -105,7 +218,6 @@ describe("compiledAgentManifestSchema", () => {
           sourceId: "agent-config",
           sourceKind: "module",
         },
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
         name: "app",
       },
     });
@@ -118,6 +230,32 @@ describe("compiledAgentManifestSchema", () => {
       sourceId: "agent-config",
       sourceKind: "module",
     });
+    expect(parsed.config.model).toBeUndefined();
+  });
+
+  it("rejects compiled configs with both static and dynamic models", () => {
+    expect(() =>
+      compiledAgentManifestSchema.parse({
+        ...createCompiledAgentManifest({
+          agentRoot: "/app/agent",
+          appRoot: "/app",
+          config: {
+            model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+            name: "app",
+          },
+        }),
+        config: {
+          dynamicModel: {
+            eventNames: ["session.started"],
+            logicalPath: "agent.ts",
+            sourceId: "agent-config",
+            sourceKind: "module",
+          },
+          model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+          name: "app",
+        },
+      }),
+    ).toThrow();
   });
 
   it("preserves uncapped (false) session token limits", () => {
@@ -128,6 +266,7 @@ describe("compiledAgentManifestSchema", () => {
         limits: {
           maxInputTokensPerSession: false,
           maxOutputTokensPerSession: false,
+          sessionTimeoutMs: false,
         },
         model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
         name: "app",
@@ -139,6 +278,7 @@ describe("compiledAgentManifestSchema", () => {
     expect(parsed.config.limits).toEqual({
       maxInputTokensPerSession: false,
       maxOutputTokensPerSession: false,
+      sessionTimeoutMs: false,
     });
   });
 

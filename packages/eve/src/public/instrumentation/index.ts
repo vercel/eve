@@ -1,14 +1,20 @@
-import type { ExactDefinition } from "#public/definitions/exact.js";
-
 /**
- * Instrumentation authoring helpers for `agent/instrumentation.ts`.
+ * Instrumentation authoring helpers for `agent/instrumentation.ts` and, with
+ * `experimental.instrumentationProviders` on, `agent/instrumentation/`.
  */
 
 import type { ModelMessage, SystemModelMessage } from "ai";
 
 import type { SessionAuthContext, SessionParent } from "#channel/types.js";
 import type { InstrumentationChannel } from "#public/channels/index.js";
+import {
+  PROVIDER,
+  type ProviderDefinition,
+  type ProviderSetupContext,
+} from "#public/instrumentation/provider.js";
 import type { JsonObject } from "#shared/json.js";
+
+export * from "#public/instrumentation/provider.js";
 
 // Re-export channel metadata types so existing `eve/instrumentation`
 // imports continue to work. The canonical home is `eve/channels`.
@@ -23,14 +29,13 @@ export {
 
 /**
  * Context passed to the {@link InstrumentationDefinition.setup} callback.
+ *
+ * The same context both layouts receive. Keeping one type is what gives
+ * {@link defineInstrumentation}'s union a contextual signature for `setup`;
+ * two divergent ones would leave every authored `setup(context)` parameter an
+ * implicit `any`.
  */
-export interface InstrumentationSetupContext {
-  /**
-   * The agent name declared by `defineAgent`. Use as the `serviceName` for
-   * `registerOTel` instead of a hard-coded string.
-   */
-  readonly agentName: string;
-}
+export interface InstrumentationSetupContext extends ProviderSetupContext {}
 
 /**
  * User-authored runtime context values attached to AI SDK telemetry spans.
@@ -87,9 +92,9 @@ export interface InstrumentationModelInput {
 }
 
 /**
- * Input passed to `events["step.started"]`. eve runs the callback after
- * building the final model input for this attempt and before constructing
- * the AI SDK model call.
+ * Input passed to `events["step.started"]` and to a provider's
+ * `runtimeContext` resolver. eve builds it after assembling the final model
+ * input for this attempt and before constructing the AI SDK model call.
  */
 export interface InstrumentationStepStartedEventInput {
   readonly channel: InstrumentationChannel;
@@ -98,6 +103,13 @@ export interface InstrumentationStepStartedEventInput {
   readonly step: InstrumentationStep;
   readonly turn: InstrumentationTurn;
 }
+
+/**
+ * Input passed to a provider's `runtimeContext` resolver. Same shape as
+ * {@link InstrumentationStepStartedEventInput}: channel, session, model input,
+ * step, and turn coordinates.
+ */
+export type InstrumentationRuntimeContextInput = InstrumentationStepStartedEventInput;
 
 /**
  * Result of a `step.started` callback. eve merges `runtimeContext` into the
@@ -144,31 +156,57 @@ export interface InstrumentationDefinition {
   readonly events?: InstrumentationEvents;
   /**
    * Whether to record full model inputs in telemetry spans. Defaults to
-   * `true` when `instrumentation.ts` is present. Set `false` for sensitive
-   * inputs or to reduce span payload size.
+   * `false`. Set `true` only when the destination is approved to receive
+   * input content.
    */
   readonly recordInputs?: boolean;
   /**
    * Whether to record full model outputs in telemetry spans. Defaults to
-   * `true` when `instrumentation.ts` is present.
+   * `false`. Set `true` only when the destination is approved to receive
+   * output content.
    */
   readonly recordOutputs?: boolean;
   /**
-   * Setup callback invoked at server startup with the resolved agent name.
-   * Use it to call `registerOTel` or other OTel provider setup;
-   * `context.agentName` comes from `defineAgent`.
+   * Whether to emit the inbound HTTP `SERVER` span that wraps each channel
+   * request (the parent of the turn trace and any `hook.resume`/outgoing
+   * HTTP spans). Defaults to `false`. Set `true` to emit these request spans
+   * alongside the rest of the trace.
    */
-  readonly setup?: (context: InstrumentationSetupContext) => void;
+  readonly traceChannelRequests?: boolean;
+  /**
+   * Setup callback invoked at server startup, before the first request. Use it
+   * to call `registerOTel` or other OTel provider setup; `context.agentName`
+   * comes from `defineAgent`. A returned promise is awaited.
+   */
+  readonly setup?: (context: InstrumentationSetupContext) => void | PromiseLike<void>;
 }
 
 /**
- * Export the result as the default export of `agent/instrumentation.ts`. eve
- * reads these settings at server startup and applies them to every AI SDK
- * model call. The `setup` callback runs later with the resolved agent name,
- * not during `defineInstrumentation` itself.
+ * Declares instrumentation, in either of eve's two layouts.
+ *
+ * Export the result as the default export of `agent/instrumentation.ts`, or —
+ * with `experimental.instrumentationProviders` on — of one file under
+ * `agent/instrumentation/`. The layout decides how eve reads the value; the two
+ * are mutually exclusive builds, so only one can apply. `setup` runs at server
+ * startup, not during this call.
+ *
+ * The parameter is a union because a provider and a legacy config overlap on
+ * `events` and `setup`, so no value-level check separates them. One consequence
+ * is that excess-property checking is weaker here than it was against the
+ * config shape alone, and a misspelled key can reach `eve build` rather than
+ * failing at `tsc`.
  */
-export function defineInstrumentation<T extends InstrumentationDefinition>(
-  definition: ExactDefinition<T, InstrumentationDefinition>,
-): T {
-  return definition;
+export function defineInstrumentation<
+  const TDefinition extends InstrumentationDefinition | ProviderDefinition,
+>(definition: TDefinition): InstrumentationDeclaration<TDefinition> {
+  return { ...definition, [PROVIDER]: true };
 }
+
+/** The branded result of {@link defineInstrumentation}. */
+export type InstrumentationDeclaration<
+  TDefinition extends InstrumentationDefinition | ProviderDefinition =
+    | InstrumentationDefinition
+    | ProviderDefinition,
+> = TDefinition & {
+  readonly [PROVIDER]: true;
+};

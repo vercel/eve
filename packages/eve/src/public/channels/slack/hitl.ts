@@ -134,7 +134,7 @@ export function isHitlAction(actionId: string): boolean {
  * - `display === "select"` with more options → `static_select`
  *   dropdown so the picker stays scrollable.
  * - Anything else with options → Slack `card` blocks with action
- *   buttons. Best for visually distinct choices (approve / deny /
+ *   buttons. Best for visually distinct choices (allow / cancel /
  *   cancel).
  * - No options (or `allowFreeform: true`) → a single "Type your answer"
  *   button that opens a Slack modal with a plain_text_input. The modal
@@ -193,6 +193,37 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
   }
 
   return [prompt];
+}
+
+export interface SlackInputRequestPostPart {
+  readonly blocks: unknown[];
+  readonly text: string;
+}
+
+/**
+ * Splits approval details from their interactive controls. Slack includes the
+ * originating message in `block_actions`, so putting large tool input beside
+ * the buttons makes the callback body grow with model-authored input.
+ */
+export function renderInputRequestPostParts(request: InputRequest): {
+  readonly controls: SlackInputRequestPostPart;
+  readonly details?: SlackInputRequestPostPart;
+} {
+  const blocks = renderInputRequestBlocks(request);
+  const firstBlock = blocks[0];
+  if (!isApprovalRequest(request) || !isBlockType(firstBlock, "card") || blocks.length === 1) {
+    return {
+      controls: { blocks, text: formatInputRequestFallbackText(request) },
+    };
+  }
+
+  return {
+    controls: { blocks: [firstBlock], text: request.prompt },
+    details: {
+      blocks: blocks.slice(1),
+      text: formatInputRequestFallbackText(request),
+    },
+  };
 }
 
 /**
@@ -323,13 +354,13 @@ function cardButtonOptions(request: InputRequest): CardButtonOption[] {
   const options = request.options ?? [];
   if (!isApprovalRequest(request)) return options.map(toCardButtonOption);
 
-  const approve = options.find((option) => option.id === "approve");
-  const deny = options.find((option) => option.id === "deny");
-  if (!approve || !deny) return options.map(toCardButtonOption);
+  const allow = options.find((option) => option.id === "approve");
+  const cancel = options.find((option) => option.id === "cancel");
+  if (!allow || !cancel) return options.map(toCardButtonOption);
 
   return [
-    { id: deny.id, label: "Deny" },
-    { id: approve.id, label: "Allow", style: "primary" },
+    { id: cancel.id, label: "Cancel" },
+    { id: allow.id, label: "Approve", style: "primary" },
   ];
 }
 
@@ -431,11 +462,10 @@ function truncateWithEllipsis(value: string, maxLength: number): string {
   return `${value.slice(0, sliceLength).trimEnd()}...`;
 }
 
+function isBlockType(value: unknown, type: string): boolean {
+  return typeof value === "object" && value !== null && (value as { type?: unknown }).type === type;
+}
+
 function isApprovalRequest(request: InputRequest): boolean {
-  return (
-    request.display === "confirmation" &&
-    request.options?.length === 2 &&
-    request.options[0]?.id === "approve" &&
-    request.options[1]?.id === "deny"
-  );
+  return request.kind === "tool-approval";
 }

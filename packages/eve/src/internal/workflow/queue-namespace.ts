@@ -19,6 +19,17 @@ export function deriveEveWorkflowQueueTopic(agentName: string): string {
   return `${deriveEveWorkflowQueuePrefix(agentName)}*`;
 }
 
+/** Builds the Vercel queue trigger that invokes an eve agent's flow function. */
+export function createEveWorkflowQueueTrigger(agentName: string) {
+  return {
+    type: "queue/v2beta" as const,
+    topic: deriveEveWorkflowQueueTopic(agentName),
+    consumer: "default",
+    retryAfterSeconds: 5,
+    initialDelaySeconds: 0,
+  };
+}
+
 /** Installs the agent-scoped namespace used by Workflow runtime operations. */
 export function installEveWorkflowQueueNamespace(agentName: string): string {
   const namespace = deriveEveWorkflowQueueNamespace(agentName);

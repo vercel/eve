@@ -6,7 +6,7 @@ import {
   MODEL_SKILL_ROOT,
   formatFallbackSkillPath,
   formatSkillModelPath,
-  resolveSandboxSeedFilePath,
+  resolveSandboxModelPath,
   resolveSandboxSkillReadPaths,
   resolveSandboxSkillRoot,
 } from "#shared/skill-paths.js";
@@ -39,6 +39,34 @@ describe("skill path helpers", () => {
     expect(sandbox.commandLog).toEqual([HOME_PROBE_COMMAND]);
   });
 
+  it("expands a leading $HOME in model-supplied paths", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent/\n" },
+      },
+    });
+
+    await expect(
+      resolveSandboxModelPath({ path: "$HOME/notes/todo.md", sandbox: sandbox.session }),
+    ).resolves.toBe("/home/agent/notes/todo.md");
+    await expect(
+      resolveSandboxModelPath({ path: "$HOME", sandbox: sandbox.session }),
+    ).resolves.toBe("/home/agent");
+    expect(sandbox.commandLog).toEqual([HOME_PROBE_COMMAND]);
+  });
+
+  it("does not treat lookalike variables or embedded $HOME as home paths", async () => {
+    const sandbox = mockSandbox();
+
+    await expect(
+      resolveSandboxModelPath({ path: "$HOME_DIR/notes.md", sandbox: sandbox.session }),
+    ).resolves.toBe("$HOME_DIR/notes.md");
+    await expect(
+      resolveSandboxModelPath({ path: "/workspace/$HOME/notes.md", sandbox: sandbox.session }),
+    ).resolves.toBe("/workspace/$HOME/notes.md");
+    expect(sandbox.commandLog).toEqual([]);
+  });
+
   it("falls back to /workspace/skills when HOME is unusable", async () => {
     const sandbox = mockSandbox({
       commands: {
@@ -49,6 +77,12 @@ describe("skill path helpers", () => {
     await expect(resolveSandboxSkillRoot({ sandbox: sandbox.session })).resolves.toBe(
       FALLBACK_SKILL_ROOT,
     );
+    await expect(
+      resolveSandboxModelPath({
+        path: `${MODEL_SKILL_ROOT}/research/references/catalog.md`,
+        sandbox: sandbox.session,
+      }),
+    ).resolves.toBe("/workspace/skills/research/references/catalog.md");
   });
 
   it("reads only from the resolved HOME skill root when HOME is usable", async () => {
@@ -91,7 +125,7 @@ describe("skill path helpers", () => {
     });
 
     await expect(
-      resolveSandboxSeedFilePath({
+      resolveSandboxModelPath({
         path: `${MODEL_SKILL_ROOT}/research/references/catalog.md`,
         sandbox: sandbox.session,
       }),

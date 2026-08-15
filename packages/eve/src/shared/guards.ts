@@ -36,6 +36,11 @@ export function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+/** Returns a non-empty string or `undefined` for any other value. */
+export function readNonEmptyString(value: unknown): string | undefined {
+  return isNonEmptyString(value) ? value : undefined;
+}
+
 /**
  * Returns `true` when `value` is a thenable — an object with a `then`
  * function. Used to reject async instrumentation metadata projectors

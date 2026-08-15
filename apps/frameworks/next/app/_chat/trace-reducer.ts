@@ -1,11 +1,11 @@
 import type { EveAgentReducer, EveAgentReducerEvent } from "eve/react";
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 
 import { buildTraceTurnsFromTranscript } from "./trace";
 import type { TraceStep, TraceTurn, TranscriptStreamEvent } from "./types";
 
 export interface TraceProjection {
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly turns: readonly TraceTurn[];
 }
 
@@ -70,9 +70,7 @@ function reduceTraceProjection(
   }
 }
 
-function buildTraceTurnsFromEvents(
-  events: readonly HandleMessageStreamEvent[],
-): readonly TraceTurn[] {
+function buildTraceTurnsFromEvents(events: readonly MessageStreamEvent[]): readonly TraceTurn[] {
   return buildTraceTurnsFromTranscript(events as readonly TranscriptStreamEvent[]);
 }
 

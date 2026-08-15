@@ -3,16 +3,22 @@ import { describe, expect, it } from "vitest";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
-import { CallbackBaseUrlKey, isAuthorizationSignal } from "#harness/authorization.js";
+import {
+  CallbackBaseUrlKey,
+  isAuthorizationSignal,
+  PendingAuthorizationResultKey,
+} from "#harness/authorization.js";
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ConnectionRegistry, ConnectionToolMetadata } from "#runtime/connections/types.js";
-import {
-  createConnectionSearchEvents,
-  extractDiscoveredTools,
-} from "#runtime/framework-tools/connection-search-dynamic.js";
+import { extractDiscoveredTools } from "#runtime/framework-tools/connection-search-dynamic.js";
+import { getFrameworkDynamicToolResolvers } from "#runtime/framework-tools/index.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import type { DynamicResolveContext, DynamicToolSet } from "#shared/dynamic-tool-definition.js";
+import {
+  isBrandedToolEntry,
+  type DynamicResolveContext,
+  type DynamicToolSet,
+} from "#shared/dynamic-tool-definition.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Msg = any;
@@ -39,7 +45,7 @@ async function executeConnectionSearch(
   setupContext?.(ctx);
 
   return contextStorage.run(ctx, async () => {
-    const resolve = createConnectionSearchEvents()["step.started"]!;
+    const resolve = getConnectionSearchResolver().events["step.started"]!;
     const resolved = (await resolve({}, {
       channel: {},
       messages: [],
@@ -48,6 +54,10 @@ async function executeConnectionSearch(
 
     return resolved["connection_search"]!.execute(input, {} as ToolContext);
   });
+}
+
+function getConnectionSearchResolver() {
+  return getFrameworkDynamicToolResolvers()[0]!;
 }
 
 function registry(input: {
@@ -68,6 +78,81 @@ function registry(input: {
     getConnections: () => input.connections,
   };
 }
+
+describe("connection dynamic tools", () => {
+  it("contributes no tools when no connections are available", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(
+      ConnectionRegistryKey,
+      registry({
+        connections: [],
+        loadTools: {},
+      }),
+    );
+    const resolve = getConnectionSearchResolver().events["step.started"]!;
+
+    const tools = await contextStorage.run(ctx, () =>
+      resolve(
+        {},
+        {
+          channel: {},
+          messages: [],
+          session: { auth: { current: null, initiator: null }, id: "test-session" },
+        },
+      ),
+    );
+
+    expect(tools).toBeNull();
+  });
+
+  it("uses the shared resolver and public tool definitions", async () => {
+    const linear = connection("linear");
+    const connectionRegistry = registry({
+      connections: [linear],
+      loadTools: { linear: async () => [] },
+    });
+    const messages: Msg[] = [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-1",
+            toolName: "connection_search",
+            output: [
+              {
+                connection: "linear",
+                description: "List issues",
+                inputSchema: { type: "object" },
+                qualifiedName: "linear__list_issues",
+                tool: "list_issues",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const ctx = new ContextContainer();
+    ctx.set(ConnectionRegistryKey, connectionRegistry);
+    const resolver = getConnectionSearchResolver();
+    const resolve = resolver.events["step.started"]!;
+
+    const tools = await contextStorage.run(ctx, async () => {
+      return (await resolve(
+        {},
+        {
+          channel: {},
+          messages,
+          session: { auth: { current: null, initiator: null }, id: "test-session" },
+        },
+      )) as DynamicToolSet;
+    });
+
+    expect(resolver.eventNames).toEqual(["step.started"]);
+    expect(Object.keys(tools)).toEqual(["connection_search", "linear__list_issues"]);
+    expect(Object.values(tools).every(isBrandedToolEntry)).toBe(true);
+  });
+});
 
 describe("connection_search", () => {
   it("fails when every targeted connection fails to load", async () => {
@@ -201,6 +286,62 @@ describe("connection_search", () => {
         error: 'Failed to load tools for "incident": MCP SSE Transport Error: 400 Bad Request',
       },
     ]);
+  });
+
+  it("does not complete an unrelated connection authorization", async () => {
+    let notionCompletions = 0;
+    const notion: ResolvedConnectionDefinition = {
+      ...connection("notion"),
+      authorization: {
+        completeAuthorization: async () => {
+          notionCompletions += 1;
+          throw new Error("stale Notion callback");
+        },
+        getToken: async () => ({ token: "notion-token" }),
+        principalType: "user",
+        startAuthorization: async () => ({
+          challenge: { url: "https://idp.example.com/authorize" },
+        }),
+      },
+    };
+    const linear = connection("linear");
+    const connectionRegistry = registry({
+      connections: [notion, linear],
+      loadTools: {
+        notion: async () => [],
+        linear: async () => [
+          {
+            description: "List issues",
+            inputSchema: { type: "object" },
+            name: "list_issues",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(
+        connectionRegistry,
+        { connection: "linear", keywords: "list issues" },
+        (ctx) => {
+          ctx.set(PendingAuthorizationResultKey, [
+            {
+              attemptId: "attempt-notion",
+              callback: { method: "GET", params: {} },
+              hookUrl: "https://agent.example.com/eve/v1/connections/notion/callback/auth",
+              name: "notion",
+              principal: { type: "app" },
+            },
+          ]);
+        },
+      ),
+    ).resolves.toMatchObject([
+      {
+        connection: "linear",
+        qualifiedName: "linear__list_issues",
+      },
+    ]);
+    expect(notionCompletions).toBe(0);
   });
 
   it("returns an authorization signal when sign-in can be started", async () => {

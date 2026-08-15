@@ -129,6 +129,7 @@ function stripTypingStatusMarkdown(status: string): string {
     .replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1")
     .replace(/`([^`]+)`/gu, "$1")
     .replace(/~~([^~]+)~~/gu, "$1")
-    .replace(/(\*\*|__)([^*_]+)\1/gu, "$2")
-    .replace(/(^|[^\p{L}\p{N}])([*_])([^*_]+)\2(?=$|[^\p{L}\p{N}])/gu, "$1$3");
+    .replace(/(^|[^\p{L}\p{N}])(\*\*|__)([^*_]+)\2(?=$|[^\p{L}\p{N}])/gu, "$1$3")
+    .replace(/(^|[^\p{L}\p{N}*])\*([^*_]+)\*(?=$|[^\p{L}\p{N}*])/gu, "$1$2")
+    .replace(/(^|[^\p{L}\p{N}_])_([^*_]+)_(?=$|[^\p{L}\p{N}_])/gu, "$1$2");
 }

@@ -53,15 +53,45 @@ type ChatToolChoice =
   | "required"
   | { readonly type: "function"; readonly function: { readonly name: string } };
 
-export function createAutoevalsClient(config: AutoevalsClientConfig): AutoevalsClient {
-  const adapter: unknown = {
-    chat: {
-      completions: {
-        create: (params: ChatParams) => createChatCompletion(params, config),
-      },
-    },
+/**
+ * Constructible OpenAI-shaped adapter for bundled autoevals graders.
+ *
+ * Braintrust installs a global wrapper that makes autoevals reconstruct the
+ * supplied client through its prototype constructor. The reconstructed client
+ * must retain `chat.completions.create`, and its probe function must differ
+ * from the live function so autoevals does not wrap the AI SDK bridge.
+ */
+class AutoevalsOpenAIClientAdapter {
+  readonly chat: {
+    readonly completions: {
+      readonly create: (params: ChatParams) => Promise<{ readonly choices: readonly unknown[] }>;
+    };
   };
+
+  constructor(config: AutoevalsClientConfig | { readonly apiKey?: string }) {
+    this.chat = {
+      completions: {
+        create: isAutoevalsClientConfig(config)
+          ? (params) => createChatCompletion(params, config)
+          : createProbeChatCompletion,
+      },
+    };
+  }
+}
+
+export function createAutoevalsClient(config: AutoevalsClientConfig): AutoevalsClient {
+  const adapter: unknown = new AutoevalsOpenAIClientAdapter(config);
   return adapter as AutoevalsClient;
+}
+
+function isAutoevalsClientConfig(
+  config: AutoevalsClientConfig | { readonly apiKey?: string },
+): config is AutoevalsClientConfig {
+  return "languageModel" in config;
+}
+
+async function createProbeChatCompletion(): Promise<{ readonly choices: readonly unknown[] }> {
+  return { choices: [] };
 }
 
 async function createChatCompletion(

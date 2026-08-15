@@ -177,7 +177,9 @@ function createEmptyToolRegistry(): RuntimeToolRegistry {
   };
 }
 
-function createTestTurnAgent(overrides?: Partial<RuntimeTurnAgent>): RuntimeTurnAgent {
+type StaticRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly model: unknown }>;
+
+function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): RuntimeTurnAgent {
   return {
     id: "test-agent",
     instructions: ["You are a test agent."],
@@ -204,6 +206,8 @@ function createTestNode(
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
     sandboxRegistry: createStubSandboxRegistry(),
     subagentRegistry: {
+      dynamicNodeIds: new Set(),
+      dynamicResolvers: [],
       preparedTools: [],
       subagentsByName: new Map(),
       subagentsByNodeId: new Map(),
@@ -216,13 +220,18 @@ function createTestNode(
 
 function createNoopRuntime(): Runtime {
   return {
-    cancelTurn: vi.fn(),
-    deliver: vi.fn(),
-    resolveSession: vi.fn(),
-    run: vi.fn().mockRejectedValue(new Error("runtime.run should not be called in this test")),
+    createSession: vi
+      .fn()
+      .mockRejectedValue(new Error("runtime.createSession should not be called in this test")),
+    dispatchContinuation: vi.fn(),
+    dispatchSession: vi.fn(),
     getEventStream: vi
       .fn()
       .mockRejectedValue(new Error("runtime.getEventStream should not be called in this test")),
+    getStreamTailIndex: vi
+      .fn()
+      .mockRejectedValue(new Error("runtime.getStreamTailIndex should not be called in this test")),
+    resolveContinuation: vi.fn(),
   };
 }
 
@@ -264,6 +273,51 @@ describe("createNodeHarnessTools", () => {
     });
 
     expect(tools.has("agent")).toBe(false);
+  });
+
+  it("does not inject task tools without experimental.tasks", () => {
+    const tools = createNodeHarnessTools({ node: createTestNode() });
+
+    for (const name of ["task_peek", "task_cancel", "task_sleep", "task_update"]) {
+      expect(tools.has(name)).toBe(false);
+    }
+  });
+
+  it("injects the task tools when experimental.tasks is on", () => {
+    const node = createTestNode();
+    const tools = createNodeHarnessTools({
+      node: {
+        ...node,
+        agent: {
+          ...node.agent,
+          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
+        },
+      },
+    });
+
+    for (const name of ["task_peek", "task_cancel", "task_update"]) {
+      expect(tools.get(name)?.runtimeAction).toEqual({ kind: "task-control" });
+      expect(tools.get(name)?.execute).toBeUndefined();
+    }
+    expect(tools.get("task_sleep")?.execute).toBeDefined();
+    expect(tools.get("task_sleep")?.runtimeAction).toBeUndefined();
+  });
+
+  it("respects disableTool for individual task tools", () => {
+    const node = createTestNode();
+    const tools = createNodeHarnessTools({
+      node: {
+        ...node,
+        agent: {
+          ...node.agent,
+          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
+          disabledFrameworkTools: ["task_cancel"],
+        },
+      },
+    });
+
+    expect(tools.has("task_peek")).toBe(true);
+    expect(tools.has("task_cancel")).toBe(false);
   });
 });
 

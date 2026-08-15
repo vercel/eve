@@ -1,5 +1,8 @@
 import type { ToolExecutionOptions } from "ai";
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import type {
+  StandardJSONSchemaV1,
+  StandardSchemaV1,
+} from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -11,7 +14,7 @@ export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
 export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   input: TInput,
   options: ToolExecuteOptions,
-) => Promise<TOutput> | TOutput;
+) => Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
 
 interface ToolDefinitionBase {
   readonly description: string;
@@ -31,6 +34,7 @@ export interface InternalToolDefinition extends ToolDefinitionBase {
 }
 
 export type PublicToolInputSchema<TInput = unknown> =
+  | StandardSchemaV1<unknown, TInput>
   | StandardJSONSchemaV1<unknown, TInput>
   | JsonObject;
 
@@ -72,7 +76,31 @@ export interface PublicToolDefinitionWithExecuteFn<
  * eve-owned shape for the model-facing tool result produced by
  * `toModelOutput`. Structurally compatible with the AI SDK's
  * `ToolResultOutput` so the harness can forward it without conversion.
+ *
+ * The `content` variant carries an ordered list of
+ * {@link ToolModelOutputPart} entries, letting a tool hand the model
+ * text alongside inline files (e.g. a screenshot as vision input).
  */
 export type ToolModelOutput =
   | { readonly type: "text"; readonly value: string }
-  | { readonly type: "json"; readonly value: unknown };
+  | { readonly type: "json"; readonly value: unknown }
+  | { readonly type: "content"; readonly value: readonly ToolModelOutputPart[] };
+
+/**
+ * One part of a `content` {@link ToolModelOutput}. Mirrors the AI SDK's
+ * `ToolResultOutput` content parts narrowed to the JSON-safe subset:
+ * file data is the SDK's tagged `FileData` union restricted to
+ * `{ type: "data" }` with a base64 string, so persisted tool results
+ * survive the durable JSON boundary. Use the `toolOutputPart` builders
+ * from `eve/tools` to construct parts without hand-writing the nesting.
+ */
+export type ToolModelOutputPart =
+  | { readonly type: "text"; readonly text: string }
+  | {
+      readonly type: "file";
+      /** Tagged file data; only JSON-safe base64 payloads are accepted. */
+      readonly data: { readonly type: "data"; readonly data: string };
+      /** IANA media type, e.g. `image/png`. */
+      readonly mediaType: string;
+      readonly filename?: string;
+    };

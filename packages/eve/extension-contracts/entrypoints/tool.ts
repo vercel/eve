@@ -9,5 +9,8 @@ export {
   experimental_workflow,
   isDisabledToolSentinel,
   isExperimentalWorkflowToolDefinition,
+  toolOutput,
+  toolOutputPart,
   toolResultFrom,
+  webSearch,
 } from "../../src/public/tools/index.ts";

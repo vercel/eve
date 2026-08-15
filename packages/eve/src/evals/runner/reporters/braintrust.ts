@@ -133,14 +133,18 @@ class BraintrustReporter implements EvalReporter {
     // scores under a `gate:` prefix so experiments diff gate regressions the
     // same way they diff soft-score regressions.
     const scores: Record<string, number> = {};
+    const scoreNameCounts = new Map<string, number>();
     for (const assertion of result.assertions) {
-      const key = assertion.severity === "gate" ? `gate:${assertion.name}` : assertion.name;
+      const baseName = assertion.severity === "gate" ? `gate:${assertion.name}` : assertion.name;
+      const count = (scoreNameCounts.get(baseName) ?? 0) + 1;
+      scoreNameCounts.set(baseName, count);
+      const key = count === 1 ? baseName : `${baseName}#${count}`;
       scores[key] = assertion.score;
     }
 
     const failedAssertions = result.assertions
       .filter((assertion) => !assertion.passed)
-      .map((assertion) => ({ name: assertion.name, message: assertion.message }));
+      .map((assertion) => ({ ...assertion }));
 
     const metadata: Record<string, unknown> = {
       ...evaluation?.metadata,
@@ -152,6 +156,13 @@ class BraintrustReporter implements EvalReporter {
       eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
       eveParked: result.result.derived.parked,
     };
+
+    if (result.result.traceContexts.length > 0) {
+      metadata.eveTraceIds = [
+        ...new Set(result.result.traceContexts.map((traceContext) => traceContext.traceId)),
+      ];
+      metadata.eveTraceContexts = result.result.traceContexts;
+    }
 
     if (failedAssertions.length > 0) {
       metadata.eveFailedAssertions = failedAssertions;

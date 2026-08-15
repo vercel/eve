@@ -1,6 +1,11 @@
 import type { ModelMessage, TextPart, UserContent } from "ai";
 
-import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import type {
+  ChannelDeliveryMetadataEntry,
+  DeliverPayload,
+  SessionAuthContext,
+  TurnCaller,
+} from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { StepInput } from "#harness/types.js";
 
@@ -215,6 +220,8 @@ function toUserContentArray(value: string | UserContent): UserContentArray {
  */
 interface DeliverLike {
   readonly auth?: SessionAuthContext | null;
+  readonly caller?: TurnCaller;
+  readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
 }
@@ -226,7 +233,8 @@ interface DeliverLike {
  * Used by the workflow runtime to batch follow-up deliveries that
  * arrived while a turn or subagent delegation was in progress. Each
  * payload is later passed to `onDeliver` individually so channel-
- * specific fields are never lost.
+ * specific fields are never lost. A caller defines a turn boundary, so
+ * callers must be partitioned before coalescing.
  */
 export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): T {
   const [first, ...rest] = items;
@@ -236,14 +244,35 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
   }
 
   let auth = first.auth;
+  let caller = first.caller;
   const payloads = [...first.payloads];
+  const deliveryMetadata = [...(first.deliveryMetadata ?? [])];
 
   for (const item of rest) {
+    const payloadOffset = payloads.length;
     if (item.auth !== undefined) {
       auth = item.auth;
     }
+    if (item.caller !== undefined) {
+      if (caller !== undefined) {
+        throw new Error("Cannot coalesce deliveries from different turns.");
+      }
+      caller = item.caller;
+    }
     payloads.push(...item.payloads);
+    deliveryMetadata.push(
+      ...(item.deliveryMetadata ?? []).map((entry) => ({
+        ...entry,
+        payloadIndex: entry.payloadIndex + payloadOffset,
+      })),
+    );
   }
 
-  return { ...first, auth, payloads };
+  return {
+    ...first,
+    auth,
+    caller,
+    deliveryMetadata: deliveryMetadata.length === 0 ? undefined : deliveryMetadata,
+    payloads,
+  };
 }

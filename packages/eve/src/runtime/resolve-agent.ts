@@ -1,5 +1,6 @@
 import type {
   CompiledAgentNodeManifest,
+  CompiledAgentResources,
   CompiledInstructionsDefinition,
 } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
@@ -29,7 +30,7 @@ import type {
  * Input for resolving one compiled authored agent into a runtime-owned model.
  */
 export interface ResolveAgentInput {
-  manifest: CompiledAgentNodeManifest;
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   moduleMap: CompiledModuleMap;
   nodeId?: string;
 }
@@ -99,11 +100,10 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     input.manifest.sandbox === null
       ? null
       : await resolveSandboxDefinition(input.manifest.sandbox, input.moduleMap, input.nodeId);
-  const instructions = createResolvedInstructionsDefinition(input.manifest.instructions);
+  const instructions = input.manifest.instructions.map(createResolvedInstructionsDefinition);
   const workspaceResourceRoot = input.manifest.workspaceResourceRoot;
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
-    config: createResolvedAgentConfig(input.manifest),
     connections: resolvedConnections,
     disabledFrameworkChannels,
     disabledFrameworkTools: [...input.manifest.disabledFrameworkTools],
@@ -111,10 +111,12 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       input.manifest.workflowTool === undefined
         ? undefined
         : { maxSubagents: input.manifest.workflowTool.maxSubagents },
+    webSearchProvider: input.manifest.webSearchProvider,
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,
     hooks: resolvedHooks,
+    instructions,
     metadata: {
       agentRoot: input.manifest.agentRoot,
       appRoot: input.manifest.appRoot,
@@ -127,65 +129,42 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     workspaceSpec: { rootEntries: [...workspaceResourceRoot.rootEntries] },
   };
 
-  if (instructions !== undefined) {
-    return { ...resolvedAgent, instructions };
-  }
-
-  return resolvedAgent;
+  return "config" in input.manifest
+    ? { ...resolvedAgent, config: createResolvedAgentConfig(input.manifest) }
+    : resolvedAgent;
 }
 
 function createResolvedInstructionsDefinition(
-  instructions: CompiledInstructionsDefinition | undefined,
-): ResolvedInstructionsDefinition | undefined {
-  if (instructions === undefined) {
-    return undefined;
-  }
-
+  instructions: CompiledInstructionsDefinition,
+): ResolvedInstructionsDefinition {
   return {
+    content: instructions.content,
     name: instructions.name,
     logicalPath: instructions.logicalPath,
-    markdown: instructions.markdown,
+    role: instructions.role,
     sourceId: instructions.sourceId,
     sourceKind: instructions.sourceKind,
   };
 }
 
-function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): ResolvedAgent["config"] {
+function createResolvedAgentConfig(
+  manifest: CompiledAgentNodeManifest,
+): NonNullable<ResolvedAgent["config"]> {
   const config: {
-    compaction?: ResolvedAgent["config"]["compaction"];
-    dynamicModel?: ResolvedAgent["config"]["dynamicModel"];
-    experimental?: ResolvedAgent["config"]["experimental"];
-    model: ResolvedAgent["config"]["model"];
+    compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
+    experimental?: NonNullable<ResolvedAgent["config"]>["experimental"];
     name: string;
-    outputSchema?: ResolvedAgent["config"]["outputSchema"];
-    reasoning?: ResolvedAgent["config"]["reasoning"];
-    source?: ResolvedAgent["config"]["source"];
-    limits?: ResolvedAgent["config"]["limits"];
+    outputSchema?: NonNullable<ResolvedAgent["config"]>["outputSchema"];
+    reasoning?: NonNullable<ResolvedAgent["config"]>["reasoning"];
+    source?: NonNullable<ResolvedAgent["config"]>["source"];
+    limits?: NonNullable<ResolvedAgent["config"]>["limits"];
   } = {
-    model:
-      manifest.config.model.source === undefined
-        ? {
-            id: manifest.config.model.id,
-            contextWindowTokens: manifest.config.model.contextWindowTokens,
-            providerOptions: manifest.config.model.providerOptions,
-          }
-        : {
-            contextWindowTokens: manifest.config.model.contextWindowTokens,
-            id: manifest.config.model.id,
-            providerOptions: manifest.config.model.providerOptions,
-            source: {
-              exportName: manifest.config.model.source.exportName,
-              sourceKind: "module" as const,
-              logicalPath: manifest.config.model.source.logicalPath,
-              sourceId: manifest.config.model.source.sourceId,
-            },
-          },
     name: manifest.config.name,
   };
 
   if (manifest.config.compaction !== undefined) {
     const compaction: {
-      model?: ResolvedAgent["config"]["model"];
+      model?: NonNullable<NonNullable<ResolvedAgent["config"]>["compaction"]>["model"];
       thresholdPercent?: number;
     } = {};
 
@@ -195,11 +174,13 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
           ? {
               contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
               id: manifest.config.compaction.model.id,
+              maxOutputTokens: manifest.config.compaction.model.maxOutputTokens,
               providerOptions: manifest.config.compaction.model.providerOptions,
             }
           : {
               contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
               id: manifest.config.compaction.model.id,
+              maxOutputTokens: manifest.config.compaction.model.maxOutputTokens,
               providerOptions: manifest.config.compaction.model.providerOptions,
               source: {
                 exportName: manifest.config.compaction.model.source.exportName,
@@ -217,15 +198,11 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     config.compaction = compaction;
   }
 
-  if (manifest.config.dynamicModel !== undefined) {
-    config.dynamicModel = {
-      ...createResolvedModuleSourceRef(manifest.config.dynamicModel),
-      eventNames: [...manifest.config.dynamicModel.eventNames],
-    };
-  }
-
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
+      instrumentationProviders: manifest.config.experimental.instrumentationProviders,
+      subagentPersistentSessions: manifest.config.experimental.subagentPersistentSessions,
+      tasks: manifest.config.experimental.tasks,
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined
@@ -249,8 +226,42 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     config.limits = {
       maxInputTokensPerSession: manifest.config.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: manifest.config.limits.maxOutputTokensPerSession,
+      sessionTimeoutMs: manifest.config.limits.sessionTimeoutMs,
     };
   }
 
-  return config;
+  if (manifest.config.dynamicModel !== undefined) {
+    return {
+      ...config,
+      dynamicModel: {
+        ...createResolvedModuleSourceRef(manifest.config.dynamicModel),
+        eventNames: [...manifest.config.dynamicModel.eventNames],
+      },
+    };
+  }
+
+  const model = manifest.config.model;
+  return {
+    ...config,
+    model:
+      model.source === undefined
+        ? {
+            id: model.id,
+            contextWindowTokens: model.contextWindowTokens,
+            maxOutputTokens: model.maxOutputTokens,
+            providerOptions: model.providerOptions,
+          }
+        : {
+            contextWindowTokens: model.contextWindowTokens,
+            id: model.id,
+            maxOutputTokens: model.maxOutputTokens,
+            providerOptions: model.providerOptions,
+            source: {
+              exportName: model.source.exportName,
+              sourceKind: "module" as const,
+              logicalPath: model.source.logicalPath,
+              sourceId: model.source.sourceId,
+            },
+          },
+  };
 }

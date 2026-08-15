@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import { openDevelopmentMessageStream } from "./live-stream.js";
 
@@ -9,11 +9,11 @@ import { openDevelopmentMessageStream } from "./live-stream.js";
  * Test-only helper.
  */
 export async function readMessageStreamEvents(input: {
-  onEvent?(event: HandleMessageStreamEvent): void;
+  onEvent?(event: MessageStreamEvent): void;
   response: Response;
   startAfterBoundaryCount?: number;
-  stopWhen?(event: HandleMessageStreamEvent): boolean;
-}): Promise<HandleMessageStreamEvent[]> {
+  stopWhen?(event: MessageStreamEvent): boolean;
+}): Promise<MessageStreamEvent[]> {
   const stream = openDevelopmentMessageStream({
     resourceUrl: "",
     response: input.response,
@@ -31,9 +31,7 @@ export async function readMessageStreamEvents(input: {
  *
  * Test-only helper.
  */
-export function countCurrentTurnBoundaryEvents(
-  events: readonly HandleMessageStreamEvent[],
-): number {
+export function countCurrentTurnBoundaryEvents(events: readonly MessageStreamEvent[]): number {
   return events.filter(isCurrentTurnBoundaryEvent).length;
 }
 
@@ -44,7 +42,7 @@ export function countCurrentTurnBoundaryEvents(
  * Test-only helper.
  */
 export function extractCurrentTurnBoundaryEvent(
-  events: readonly HandleMessageStreamEvent[],
-): HandleMessageStreamEvent | undefined {
+  events: readonly MessageStreamEvent[],
+): MessageStreamEvent | undefined {
   return [...events].reverse().find(isCurrentTurnBoundaryEvent);
 }

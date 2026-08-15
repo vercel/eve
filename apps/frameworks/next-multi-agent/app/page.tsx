@@ -57,7 +57,7 @@ function AgentPanel({
     const trimmed = message.trim();
     if (trimmed.length === 0 || isBusy) return;
     setMessage("");
-    await eve.send({ message: trimmed });
+    await eve.send(trimmed);
   };
 
   return (

@@ -3,6 +3,7 @@ import { defineEval } from "eve/evals";
 // The resolver's simulated I/O runs once; the durable cache replays its
 // result on the second turn so ioCallCount stays at 1.
 export default defineEval({
+  tags: ["real-model"],
   description: "Dynamic tools smoke: resolver I/O runs once and replays from the durable cache.",
   async test(t) {
     const first = await t.send(

@@ -3,6 +3,7 @@ import { equals, satisfies } from "eve/evals/expect";
 
 /** Proves an every-minute polling schedule can leave its target channel silent. */
 export default defineEval({
+  tags: ["real-model"],
   description: "Conditional channel delivery: an empty scheduled alert check sends no message.",
 
   async test(t) {

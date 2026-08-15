@@ -16,9 +16,7 @@ export const WEB_FETCH_INPUT_SCHEMA = z.strictObject({
     )
     .optional(),
   timeout: z.number().describe("Optional timeout in seconds. Defaults to 30, max 120.").optional(),
-  url: z
-    .string()
-    .describe("The fully-formed URL to fetch content from. Must start with http:// or https://."),
+  url: z.string().describe("The fully-formed URL to fetch content from. Must start with https://."),
 });
 
 export const WEB_FETCH_OUTPUT_SCHEMA = z.strictObject({
@@ -33,7 +31,7 @@ export const WEB_FETCH_TOOL_DEFINITION: ResolvedToolDefinition = {
     "Fetch a webpage and return its content in the requested format. Use this to retrieve and analyze content from URLs.",
     "",
     "Usage notes:",
-    "- The URL must be a fully-formed valid URL starting with http:// or https://",
+    "- The URL must be a fully-formed valid URL starting with https://",
     "- HTML responses are automatically converted to markdown or plain text based on the requested format",
     '- Format options: "markdown" (default), "text", or "html"',
     "- Default timeout is 30 seconds (max 120 seconds)",

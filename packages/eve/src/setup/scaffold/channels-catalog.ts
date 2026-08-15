@@ -1,16 +1,16 @@
 /**
  * Build-time catalog of channels used by programmatic setup and
- * `eve channels add`.
+ * `eve add channel/slack`.
  *
  * Channel *identity* (slug, name, and whether it is scaffoldable) is owned by
- * `@vercel/eve-catalog`, the cross-surface source of truth shared with the docs
+ * `@eve/catalog`, the cross-surface source of truth shared with the docs
  * gallery. This module overlays the scaffolder-only concerns — the internal
  * {@link ChannelKind} (the catalog's `eve` web-chat channel is surfaced to users
  * as `web`), the picker copy, and the picker order — and validates that the
  * overlay and the catalog cannot drift apart.
  */
 
-import { channelEntries } from "@vercel/eve-catalog";
+import { channelEntries } from "@eve/catalog";
 import type { ChannelKind } from "./update/channels.js";
 
 /** Scaffolder overlay for one catalog channel the CLI can scaffold. */
@@ -19,12 +19,12 @@ interface ChannelScaffold {
   slug: string;
   /** Internal scaffolder kind; the catalog's `eve` channel is surfaced as `web`. */
   kind: ChannelKind;
+  /** Canonical item in the official eve registry. */
+  registryItem: `channel/${ChannelKind}`;
   /** Picker label. */
   label: string;
   /** Optional picker hint. */
   hint?: string;
-  /** The add sub-flow provisions against the linked Vercel project. */
-  requiresVercelProject?: true;
 }
 
 /**
@@ -35,13 +35,19 @@ interface ChannelScaffold {
  * for *which* channels are scaffoldable.
  */
 const CHANNEL_SCAFFOLDS: readonly ChannelScaffold[] = [
-  { slug: "eve", kind: "web", label: "Web Chat", hint: "Next.js app" },
+  {
+    slug: "eve",
+    kind: "web",
+    registryItem: "channel/web",
+    label: "Web Chat",
+    hint: "Next.js app",
+  },
   {
     slug: "slack",
     kind: "slack",
+    registryItem: "channel/slack",
     label: "Slack",
-    hint: "Creates slackbot and deploys to Vercel",
-    requiresVercelProject: true,
+    hint: "Slack app mentions and DMs",
   },
 ];
 
@@ -51,12 +57,12 @@ export interface ScaffoldableChannel {
   slug: string;
   /** Internal scaffolder kind passed to `ensureChannel`. */
   kind: ChannelKind;
+  /** Canonical item in the official eve registry. */
+  registryItem: `channel/${ChannelKind}`;
   /** Picker label. */
   label: string;
   /** Optional picker hint. */
   hint?: string;
-  /** The add sub-flow provisions against the linked Vercel project. */
-  requiresVercelProject?: true;
 }
 
 function buildScaffoldableChannels(): ScaffoldableChannel[] {
@@ -70,19 +76,17 @@ function buildScaffoldableChannels(): ScaffoldableChannel[] {
   for (const scaffold of CHANNEL_SCAFFOLDS) {
     if (!scaffoldableSlugs.delete(scaffold.slug)) {
       throw new Error(
-        `Channel overlay "${scaffold.slug}" is not a scaffoldable channel in @vercel/eve-catalog.`,
+        `Channel overlay "${scaffold.slug}" is not a scaffoldable channel in @eve/catalog.`,
       );
     }
     const channel: ScaffoldableChannel = {
       slug: scaffold.slug,
       kind: scaffold.kind,
+      registryItem: scaffold.registryItem,
       label: scaffold.label,
     };
     if (scaffold.hint !== undefined) {
       channel.hint = scaffold.hint;
-    }
-    if (scaffold.requiresVercelProject !== undefined) {
-      channel.requiresVercelProject = scaffold.requiresVercelProject;
     }
     channels.push(channel);
   }
@@ -97,7 +101,7 @@ function buildScaffoldableChannels(): ScaffoldableChannel[] {
 
 /**
  * Channels the CLI can scaffold, in picker order. Derived from
- * `@vercel/eve-catalog` (`surfaces.scaffoldable`) overlaid with
+ * `@eve/catalog` (`surfaces.scaffoldable`) overlaid with
  * {@link CHANNEL_SCAFFOLDS}. Throws at module load if the two disagree.
  */
 export const SCAFFOLDABLE_CHANNELS: readonly ScaffoldableChannel[] = buildScaffoldableChannels();

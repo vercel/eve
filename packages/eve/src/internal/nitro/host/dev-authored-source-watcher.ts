@@ -26,6 +26,7 @@ const WATCHED_LOCKFILE_NAMES = [
 const WATCH_ROOT_MARKER_NAMES = [".git", "pnpm-workspace.yaml"] as const;
 const TS_CONFIG_GLOB_NAME = "tsconfig.*.json";
 const WATCHER_IGNORED_DIRECTORY_NAMES = new Set([
+  ".devtools",
   ".generated",
   ".eve",
   ".git",
@@ -44,6 +45,8 @@ export interface AuthoredSourceWatcherHandle {
   close(): Promise<void>;
   flush(): Promise<void>;
   rebuild(): Promise<void>;
+  suspend(): Promise<void>;
+  resume(options?: { silent?: boolean }): Promise<void>;
 }
 
 /**
@@ -61,6 +64,7 @@ export async function startAuthoredSourceWatcher(input: {
   let queue: Promise<void> = Promise.resolve();
   let debounceTimer: NodeJS.Timeout | undefined;
   let isWatcherReady = false;
+  let suspensionCount = 0;
   const pendingEvents = new Map<string, WatcherChangeEvent>();
   const pendingChangedPaths = new Set<string>();
   const initialWatchPaths = await resolveAuthoredWatchPaths(currentHost);
@@ -76,8 +80,8 @@ export async function startAuthoredSourceWatcher(input: {
   });
   const watcherReady = waitForWatcherReady(watcher);
 
-  const rebuild = async (force: boolean) => {
-    if (closed) {
+  const rebuild = async (force: boolean, silent = false) => {
+    if (closed || suspensionCount > 0) {
       return;
     }
 
@@ -96,7 +100,7 @@ export async function startAuthoredSourceWatcher(input: {
         pendingEvents.clear();
         pendingChangedPaths.clear();
         const previousHost = currentHost;
-        if (changeEvents.length > 0) {
+        if (!silent && changeEvents.length > 0) {
           console.log(formatChangeDetectedLogLine(previousHost.appRoot, changeEvents));
         }
 
@@ -104,10 +108,12 @@ export async function startAuthoredSourceWatcher(input: {
           const result = await input.coordinator.rebuild({ changedPaths });
           currentHost = result.host;
 
-          if (result.kind === "structural") {
-            console.log(STRUCTURAL_RELOAD_LOG_LINE);
-          } else {
-            console.log(AUTHORED_ARTIFACTS_UPDATED_LOG_LINE);
+          if (!silent) {
+            if (result.kind === "structural") {
+              console.log(STRUCTURAL_RELOAD_LOG_LINE);
+            } else {
+              console.log(AUTHORED_ARTIFACTS_UPDATED_LOG_LINE);
+            }
           }
 
           const nextWatchPaths = await resolveAuthoredWatchPaths(currentHost);
@@ -132,12 +138,12 @@ export async function startAuthoredSourceWatcher(input: {
     }
     await rebuild(false);
   };
-  const forceRebuild = async () => {
+  const forceRebuild = async (silent = false) => {
     if (debounceTimer !== undefined) {
       clearTimeout(debounceTimer);
       debounceTimer = undefined;
     }
-    await rebuild(true);
+    await rebuild(true, silent);
   };
   watcher.on("all", (event, changedPath) => {
     if (closed || !isWatcherReady || event === "addDir" || event === "unlinkDir") {
@@ -172,6 +178,19 @@ export async function startAuthoredSourceWatcher(input: {
     },
     flush,
     rebuild: forceRebuild,
+    async suspend() {
+      suspensionCount += 1;
+      if (debounceTimer !== undefined) {
+        clearTimeout(debounceTimer);
+        debounceTimer = undefined;
+      }
+      await queue;
+    },
+    async resume(options) {
+      if (suspensionCount === 0) return;
+      suspensionCount -= 1;
+      if (suspensionCount === 0) await forceRebuild(options?.silent);
+    },
   };
 }
 

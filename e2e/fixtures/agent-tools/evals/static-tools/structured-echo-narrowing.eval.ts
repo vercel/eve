@@ -5,6 +5,7 @@ import { defineEval } from "eve/evals";
 // toolResultFrom: a symbol-identity miss throws inside the hook, which
 // surfaces as turn.failed and trips the succeeded check.
 export default defineEval({
+  tags: ["real-model"],
   description: "Static tools smoke: structured tool-result narrowing via toolResultFrom.",
   async test(t) {
     await t.send(

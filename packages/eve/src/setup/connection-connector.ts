@@ -45,6 +45,17 @@ function parseJson(source: string): unknown {
   }
 }
 
+function connectorCreationFailure(service: string, stderr: string | undefined): string {
+  const detail = stderr
+    ?.split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("Vercel CLI "))
+    .at(-1);
+  return detail === undefined
+    ? `Could not create the ${service} connector.`
+    : `Could not create the ${service} connector. Vercel returned: ${detail}`;
+}
+
 function parseConnectorRef(value: unknown): ConnectConnectorRef | undefined {
   if (!isRecord(value) || typeof value["uid"] !== "string" || typeof value["id"] !== "string") {
     return undefined;
@@ -305,7 +316,7 @@ async function resolveFallbackConnector(
     if (connector !== undefined) return { kind: "created", connector };
     const message = created.ok
       ? `The ${options.service} connector does not support user authorization.`
-      : `Could not create the ${options.service} connector.`;
+      : connectorCreationFailure(options.service, created.stderr);
     if (ownedId !== undefined) {
       try {
         await cleanupCreatedConnectionConnector({

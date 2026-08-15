@@ -9,12 +9,13 @@
  * 2. Open the freeform-answer modal inline when the click was a "Type
  *    your answer" button (Slack's `trigger_id` is only valid for ~3s,
  *    so this can't run under `waitUntil`).
- * 3. Resolve `view_submission` payloads (freeform modal submissions)
- *    back into parked HITL requests via `send`.
+ * 3. Authorize decoded fixed-choice and freeform submissions through
+ *    `onInputResponse`, then resolve accepted answers against parked HITL
+ *    requests.
  *
- * Anything we don't consume flows through to the user-supplied
- * `onInteraction` callback. Always returns `Response("ok")` — followup
- * work runs under `waitUntil` so the webhook ACK is immediate.
+ * User-owned block actions flow through to the supplied `onInteraction`
+ * callback. Always returns `Response("ok")` — followup work runs under
+ * `waitUntil` so the webhook ACK is immediate.
  */
 
 import {
@@ -46,14 +47,17 @@ import {
   SLACK_CARD_SUBTEXT_MAX_LENGTH,
   truncateCardSubtext,
 } from "#public/channels/slack/limits.js";
+import { authorizeInputResponse } from "#public/channels/slack/input-response.js";
 import type {
   SlackChannelConfig,
   SlackChannelState,
-  SlackContext,
+  SlackInputResponseSubmission,
   SlackInteractionAction,
+  SlackInteractionContext,
   SlackInteractionUser,
 } from "#public/channels/slack/slackChannel.js";
-import type { SendFn } from "#public/definitions/channel.js";
+import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
 
 const log = createLogger("slack.interactions");
 
@@ -318,28 +322,24 @@ function hasCardContent(block: Record<string, unknown>): boolean {
   return block.body !== undefined || block.title !== undefined || block.hero_image !== undefined;
 }
 
-/**
- * Channel-supplied dependencies for {@link handleInteractionPost}.
- *
- * Carries the bits the handler needs that come from channel
- * construction: credentials for outbound API calls and the user's
- * `onInteraction` callback for non-HITL clicks.
- */
+/** Channel-supplied dependencies for {@link handleInteractionPost}. */
 export interface InteractionHandlerDeps {
   readonly config: SlackChannelConfig;
+  readonly onInputResponse: NonNullable<SlackChannelConfig["onInputResponse"]>;
 }
 
 /**
  * Entry point for Slack's form-encoded interactivity endpoint. Routes
  * `view_submission` payloads to the freeform-answer flow, intercepts
  * "Type your answer" button clicks to open a modal, resolves
- * framework HITL clicks against the parked session, and forwards
- * anything else to `config.onInteraction`.
+ * framework HITL clicks through `onInputResponse` to the parked session,
+ * and forwards anything else to `config.onInteraction`.
  */
 export async function handleInteractionPost(
   rawBody: string,
   ctx: {
-    send: SendFn<SlackChannelState>;
+    from: ChannelFrom<SlackChannelState>;
+    resolveSession: ChannelResolveSession;
     waitUntil: (task: Promise<unknown>) => void;
   },
   deps: InteractionHandlerDeps,
@@ -372,43 +372,25 @@ export async function handleInteractionPost(
   }
 
   const continuationToken = slackContinuationToken(interaction.channelId, interaction.threadTs);
-  const inputResponses = interaction.actions
-    .map(deriveHitlResponse)
-    .filter((r): r is { requestId: string; optionId: string } => r !== null);
+  const hitlActions = interaction.actions.flatMap((action) => {
+    const response = deriveHitlResponse(action);
+    return response === null ? [] : [{ action, response }];
+  });
 
-  if (inputResponses.length > 0) {
-    const user = interaction.actions[0]?.user;
-    if (!user) return ack;
-
+  if (hitlActions.length > 0) {
+    const user = hitlActions[0]!.action.user;
     ctx.waitUntil(
-      ctx
-        .send(
-          { inputResponses },
-          {
-            auth: buildSlackAuthContext({
-              channelId: interaction.channelId,
-              teamId: interaction.teamId,
-              threadTs: interaction.threadTs,
-              userId: user.id,
-              userName: user.username ?? user.name,
-            }),
-            continuationToken,
-            state: {
-              channelId: interaction.channelId,
-              threadTs: interaction.threadTs,
-              teamId: interaction.teamId ?? null,
-              triggeringUserId: user.id,
-            },
-          },
-        )
-        .catch((error: unknown) => {
-          log.error("HITL interaction delivery failed", { error });
-        }),
-    );
-
-    ctx.waitUntil(
-      updateAnsweredHitlCard(interaction, deps).catch((error: unknown) => {
-        log.error("HITL answered-card update failed", { error });
+      dispatchBlockInputResponses({
+        ctx,
+        deps,
+        interaction,
+        submission: {
+          type: "block_actions",
+          actions: hitlActions.map(({ action }) => action),
+          inputResponses: hitlActions.map(({ response }) => response),
+          messageTs: hitlActions[0]!.action.messageTs,
+          user,
+        },
       }),
     );
   }
@@ -417,13 +399,35 @@ export async function handleInteractionPost(
   if (onInteraction) {
     const customActions = interaction.actions.filter((a) => !isHitlAction(a.actionId));
     if (customActions.length > 0) {
+      const actionUser = customActions[0]!.user;
       const { thread, slack } = buildSlackBinding({
         botToken: deps.config.credentials?.botToken,
         channelId: interaction.channelId,
         threadTs: interaction.threadTs,
         teamId: interaction.teamId,
       });
-      const slackCtx: SlackContext = { thread, slack };
+      const slackCtx: SlackInteractionContext = {
+        ...bindSlackSessionOperations({
+          address: continuationToken,
+          defaultAuth: buildSlackAuthContext({
+            channelId: interaction.channelId,
+            teamId: interaction.teamId,
+            threadTs: interaction.threadTs,
+            userId: actionUser.id,
+            userName: actionUser.username ?? actionUser.name,
+          }),
+          from: ctx.from,
+          resolveSession: ctx.resolveSession,
+          state: {
+            channelId: interaction.channelId,
+            teamId: interaction.teamId ?? null,
+            threadTs: interaction.threadTs,
+            triggeringUserId: actionUser.id,
+          },
+        }),
+        thread,
+        slack,
+      };
       for (const action of customActions) {
         ctx.waitUntil(
           Promise.resolve(onInteraction(action, slackCtx)).catch((error: unknown) => {
@@ -435,6 +439,39 @@ export async function handleInteractionPost(
   }
 
   return ack;
+}
+
+async function dispatchBlockInputResponses(input: {
+  readonly ctx: {
+    from: ChannelFrom<SlackChannelState>;
+  };
+  readonly deps: InteractionHandlerDeps;
+  readonly interaction: ParsedBlockActionsPayload;
+  readonly submission: Extract<SlackInputResponseSubmission, { type: "block_actions" }>;
+}): Promise<void> {
+  const result = await authorizeInputResponse({
+    channelId: input.interaction.channelId,
+    deps: input.deps,
+    submission: input.submission,
+    teamId: input.interaction.teamId,
+    threadTs: input.interaction.threadTs,
+  });
+  if (result === null) return;
+
+  try {
+    await input.ctx
+      .from(slackContinuationToken(input.interaction.channelId, input.interaction.threadTs))
+      .respond(input.submission.inputResponses, { auth: result.auth });
+  } catch (error) {
+    log.error("HITL interaction delivery failed", { error });
+    return;
+  }
+
+  try {
+    await updateAnsweredHitlCard(input.interaction, input.deps);
+  } catch (error) {
+    log.error("HITL answered-card update failed", { error });
+  }
 }
 
 async function openFreeformModal(input: {
@@ -493,10 +530,10 @@ async function openFreeformModal(input: {
 async function handleViewSubmission(
   payload: SlackViewSubmissionPayload,
   ctx: {
-    send: SendFn<SlackChannelState>;
+    from: ChannelFrom<SlackChannelState>;
     waitUntil: (task: Promise<unknown>) => void;
   },
-  _deps: InteractionHandlerDeps,
+  deps: InteractionHandlerDeps,
 ): Promise<Response> {
   // Slack view submissions require an empty 200 body to close the modal.
   const ack = new Response(null, { status: 200 });
@@ -532,46 +569,61 @@ async function handleViewSubmission(
   const user = payload.user;
   const triggeringUserId = payload.userId;
   const teamId = user?.teamId ?? payload.teamId ?? null;
+  const submission: SlackInputResponseSubmission = {
+    type: "view_submission",
+    inputResponses: [{ requestId: metadata.requestId, text }],
+    messageTs: metadata.messageTs,
+    user: {
+      id: triggeringUserId,
+      username: user?.username,
+      name: user?.name,
+    },
+  };
 
-  ctx.waitUntil(
-    ctx
-      .send(
-        { inputResponses: [{ requestId: metadata.requestId, text }] },
-        {
-          auth: buildSlackAuthContext({
-            channelId: metadata.channelId,
-            teamId,
-            threadTs: metadata.threadTs,
-            userId: triggeringUserId,
-            userName: user?.username ?? user?.name,
-          }),
-          continuationToken: metadata.continuationToken,
-          state: {
-            channelId: metadata.channelId,
-            threadTs: metadata.threadTs,
-            teamId,
-            triggeringUserId,
-          },
-        },
-      )
-      .catch((error: unknown) => {
-        log.error("freeform answer delivery failed", { error });
-      }),
-  );
-
-  ctx.waitUntil(
-    updateAnsweredFreeformCard({
-      channelId: metadata.channelId,
-      messageTs: metadata.messageTs,
-      answerLabel: text,
-      userId: triggeringUserId ?? undefined,
-      deps: _deps,
-    }).catch((error: unknown) => {
-      log.error("freeform answered-card update failed", { error });
-    }),
-  );
+  ctx.waitUntil(dispatchViewInputResponse({ ctx, deps, metadata, submission, teamId, text }));
 
   return ack;
+}
+
+async function dispatchViewInputResponse(input: {
+  readonly ctx: { from: ChannelFrom<SlackChannelState> };
+  readonly deps: InteractionHandlerDeps;
+  readonly metadata: HitlFreeformModalMetadata;
+  readonly submission: Extract<SlackInputResponseSubmission, { type: "view_submission" }>;
+  readonly teamId: string | null;
+  readonly text: string;
+}): Promise<void> {
+  const result = await authorizeInputResponse({
+    channelId: input.metadata.channelId,
+    deps: input.deps,
+    submission: input.submission,
+    teamId: input.teamId,
+    threadTs: input.metadata.threadTs,
+  });
+  if (result === null) return;
+
+  try {
+    await input.ctx
+      .from(input.metadata.continuationToken)
+      .respond(input.submission.inputResponses, {
+        auth: result.auth,
+      });
+  } catch (error) {
+    log.error("freeform answer delivery failed", { error });
+    return;
+  }
+
+  try {
+    await updateAnsweredFreeformCard({
+      channelId: input.metadata.channelId,
+      messageTs: input.metadata.messageTs,
+      answerLabel: input.text,
+      userId: input.submission.user.id,
+      deps: input.deps,
+    });
+  } catch (error) {
+    log.error("freeform answered-card update failed", { error });
+  }
 }
 
 async function updateAnsweredHitlCard(
