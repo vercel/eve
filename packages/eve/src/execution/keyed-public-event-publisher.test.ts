@@ -236,4 +236,68 @@ describe("keyed public event publisher", () => {
     expect(write).toHaveBeenCalledTimes(1);
     await writer.releaseLock();
   });
+
+  it("never falls back to ordinary append for an exact-recovery publisher", async () => {
+    const write = vi.fn();
+    const writable = parentWritable();
+    const writer = writable.getWriter();
+    vi.spyOn(writer, "write").mockImplementation(write);
+    appendKeyedStreamChunk.mockRejectedValue(new KeyedStreamAppendUnavailableError());
+    const publisher = createKeyedPublicEventPublisher({
+      exactRecovery: true,
+      parentWritable: writable,
+      parentWriter: writer,
+      sessionId: "sess-a",
+    });
+
+    await expect(publisher.publish(event("hello"))).rejects.toBeInstanceOf(
+      KeyedStreamAppendUnavailableError,
+    );
+    expect(write).not.toHaveBeenCalled();
+    writer.releaseLock();
+  });
+
+  it("waits for the ordinary writer before reporting insertion", async () => {
+    let releaseWrite!: () => void;
+    const pendingWrite = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const writable = parentWritable();
+    const writer = writable.getWriter();
+    vi.spyOn(writer, "write").mockReturnValue(pendingWrite);
+    appendKeyedStreamChunk.mockRejectedValue(new KeyedStreamAppendUnavailableError());
+    const publisher = createKeyedPublicEventPublisher({
+      exactRecovery: false,
+      parentWritable: writable,
+      parentWriter: writer,
+      sessionId: "sess-a",
+    });
+
+    let inserted = false;
+    const publishing = publisher.publish(event("hello")).then(() => {
+      inserted = true;
+    });
+    await Promise.resolve();
+    expect(inserted).toBe(false);
+    releaseWrite();
+    await publishing;
+    expect(inserted).toBe(true);
+    writer.releaseLock();
+  });
+
+  it("propagates an ordinary writer failure instead of reporting insertion", async () => {
+    const writable = parentWritable();
+    const writer = writable.getWriter();
+    vi.spyOn(writer, "write").mockRejectedValue(new Error("durable writer failed"));
+    appendKeyedStreamChunk.mockRejectedValue(new KeyedStreamAppendUnavailableError());
+    const publisher = createKeyedPublicEventPublisher({
+      exactRecovery: false,
+      parentWritable: writable,
+      parentWriter: writer,
+      sessionId: "sess-a",
+    });
+
+    await expect(publisher.publish(event("hello"))).rejects.toThrow("durable writer failed");
+    writer.releaseLock();
+  });
 });

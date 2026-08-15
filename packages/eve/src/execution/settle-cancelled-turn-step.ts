@@ -32,6 +32,7 @@ import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state
 import { type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createKeyedPublicEventPublisher } from "#execution/keyed-public-event-publisher.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { CapabilitiesKey } from "#context/keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 export interface CancelledTurnSettleResult {
@@ -84,6 +85,7 @@ export async function settleCancelledTurnStep(input: {
   if (!alreadyEpilogued) {
     const writer = input.parentWritable.getWriter();
     const publisher = createKeyedPublicEventPublisher({
+      exactRecovery: ctx.get(CapabilitiesKey)?.exactRecovery === true,
       parentWritable: input.parentWritable,
       parentWriter: writer,
       sessionId: session.sessionId,

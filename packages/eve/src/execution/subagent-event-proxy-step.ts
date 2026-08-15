@@ -5,7 +5,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
-import { ModeKey } from "#context/keys.js";
+import { CapabilitiesKey, ModeKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -78,6 +78,7 @@ export async function emitProxiedSubagentEvent(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const writer = input.parentWritable.getWriter();
   const publisher = createKeyedPublicEventPublisher({
+    exactRecovery: ctx.get(CapabilitiesKey)?.exactRecovery === true,
     parentWritable: input.parentWritable,
     parentWriter: writer,
     sessionId: session.sessionId,

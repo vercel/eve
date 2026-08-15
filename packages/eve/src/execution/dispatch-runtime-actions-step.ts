@@ -173,6 +173,7 @@ export async function dispatchRuntimeActionsStep(input: {
   // never leaks the writer lock.
   const writer = input.parentWritable.getWriter();
   const publisher = createKeyedPublicEventPublisher({
+    exactRecovery: capabilities?.exactRecovery === true,
     parentWritable: input.parentWritable,
     parentWriter: writer,
     sessionId: session.sessionId,

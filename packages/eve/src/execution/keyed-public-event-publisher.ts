@@ -41,6 +41,8 @@ interface StreamIdentity {
 
 /** Publishes one step's public events through Workflow's canonical keyed receipt. */
 export function createKeyedPublicEventPublisher(input: {
+  /** Exact-recovery runs must never downgrade a missing keyed receipt. */
+  readonly exactRecovery?: boolean;
   readonly parentWritable: WritableStream<Uint8Array>;
   /** The owning step's writer, used only by the non-exact compatibility path. */
   readonly parentWriter?: WritableStreamDefaultWriter<Uint8Array>;
@@ -86,7 +88,7 @@ export function createKeyedPublicEventPublisher(input: {
           semanticDigest,
         });
       } catch (error) {
-        if (!(error instanceof KeyedStreamAppendUnavailableError)) throw error;
+        if (input.exactRecovery === true || !(error instanceof KeyedStreamAppendUnavailableError)) throw error;
         keyedAppendAvailable = false;
         return await appendOrdinaryPublicEvent(input.parentWriter, encoded, stamped);
       }
@@ -105,11 +107,7 @@ async function appendOrdinaryPublicEvent(
   event: MessageStreamEvent,
 ): Promise<{ readonly event: MessageStreamEvent; readonly inserted: true }> {
   if (writer === undefined) throw new KeyedPublicEventCompatibilityError();
-  // beta34 flushes the parent stream only after the step releases its writer;
-  // awaiting this write here would wait on that same release. The owning step
-  // already closes the writer in its finally block, which drains this queued
-  // ordinary chunk in order.
-  void writer.write(encoded);
+  await writer.write(encoded);
   return { event, inserted: true };
 }
 
