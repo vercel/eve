@@ -27,17 +27,93 @@ function startIndexOf(url: string | undefined): number {
   return Number(new URL(url ?? "", "http://127.0.0.1").searchParams.get("startIndex") ?? "0");
 }
 
-function follow(host: string, options?: { follow?: boolean }) {
+function follow(host: string, options?: { follow?: boolean; signal?: AbortSignal }) {
   return followStreamIterable({
     follow: options?.follow,
     host,
     resolveHeaders: () => Promise.resolve(new Headers()),
     sessionId: "s",
+    signal: options?.signal,
     startIndex: 0,
   });
 }
 
+function trackAbortListeners(signal: AbortSignal) {
+  let adds = 0;
+  let removes = 0;
+  const add = signal.addEventListener.bind(signal);
+  const remove = signal.removeEventListener.bind(signal);
+  Object.defineProperties(signal, {
+    addEventListener: {
+      value(
+        type: string,
+        listener: Parameters<AbortSignal["addEventListener"]>[1],
+        options?: Parameters<AbortSignal["addEventListener"]>[2],
+      ) {
+        if (type === "abort") adds += 1;
+        return add(type, listener, options);
+      },
+    },
+    removeEventListener: {
+      value(
+        type: string,
+        listener: Parameters<AbortSignal["removeEventListener"]>[1],
+        options?: Parameters<AbortSignal["removeEventListener"]>[2],
+      ) {
+        if (type === "abort") removes += 1;
+        return remove(type, listener, options);
+      },
+    },
+  });
+  return { adds: () => adds, removes: () => removes };
+}
+
 describe("stream following over real sockets", () => {
+  it("releases external abort forwarding on EOF, return, throw, and pre-abort", async () => {
+    const host = await listen(
+      createServer((_req, res) => {
+        res.writeHead(200, {
+          "content-type": "application/x-ndjson",
+          "x-eve-stream-tail-index": "-1",
+        });
+        res.end();
+      }),
+    );
+
+    const eofController = new AbortController();
+    const eofListeners = trackAbortListeners(eofController.signal);
+    await expect(
+      follow(host, { follow: false, signal: eofController.signal })[Symbol.asyncIterator]().next(),
+    ).resolves.toMatchObject({ done: true });
+    eofController.abort();
+    expect(eofListeners.adds()).toBe(1);
+    expect(eofListeners.removes()).toBe(1);
+
+    for (const method of ["return", "throw"] as const) {
+      const controller = new AbortController();
+      const listeners = trackAbortListeners(controller.signal);
+      const iterator = follow(host, { follow: false, signal: controller.signal })[
+        Symbol.asyncIterator
+      ]();
+      if (method === "return") await iterator.return?.();
+      else
+        await expect(iterator.throw?.(new Error("caller stopped following"))).rejects.toThrow(
+          "caller stopped following",
+        );
+      controller.abort();
+      expect(listeners.adds()).toBe(1);
+      expect(listeners.removes()).toBe(1);
+    }
+
+    const preAborted = new AbortController();
+    preAborted.abort(new Error("already stopped"));
+    const preAbortedListeners = trackAbortListeners(preAborted.signal);
+    const iterator = follow(host, { signal: preAborted.signal })[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+    expect(preAbortedListeners.adds()).toBe(0);
+    expect(preAbortedListeners.removes()).toBe(0);
+  });
+
   it("joins a pending live pull when its iterator returns", async () => {
     let activeConnections = 0;
     let closedConnections = 0;

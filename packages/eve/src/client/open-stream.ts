@@ -108,32 +108,65 @@ export function followStreamIterable(input: FollowStreamInput): AsyncIterable<Me
   return {
     [Symbol.asyncIterator](): AsyncIterator<MessageStreamEvent> {
       const ownedAbort = new AbortController();
+      const mergedAbort = mergeAbortSignals(input.signal, ownedAbort);
       const iterator = followStreamEvents({
         ...input,
-        signal: mergeAbortSignals(input.signal, ownedAbort),
+        signal: mergedAbort.signal,
       });
+      let cleaned = false;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        mergedAbort.cleanup();
+      };
       return {
-        next: async () => await iterator.next(),
+        next: async () => {
+          try {
+            const result = await iterator.next();
+            if (result.done) cleanup();
+            return result;
+          } catch (error) {
+            cleanup();
+            throw error;
+          }
+        },
         return: async (value?: MessageStreamEvent) => {
           ownedAbort.abort();
-          return (await iterator.return?.(value)) ?? { done: true, value };
+          try {
+            return (await iterator.return?.(value)) ?? { done: true, value };
+          } finally {
+            cleanup();
+          }
         },
         throw: async (error?: unknown) => {
           ownedAbort.abort();
-          if (iterator.throw === undefined) throw error;
-          return await iterator.throw(error);
+          try {
+            if (iterator.throw === undefined) throw error;
+            return await iterator.throw(error);
+          } finally {
+            cleanup();
+          }
         },
       };
     },
   };
 }
 
-function mergeAbortSignals(external: AbortSignal | undefined, owned: AbortController): AbortSignal {
-  if (external === undefined) return owned.signal;
+function mergeAbortSignals(
+  external: AbortSignal | undefined,
+  owned: AbortController,
+): { readonly cleanup: () => void; readonly signal: AbortSignal } {
+  if (external === undefined) return { cleanup: () => {}, signal: owned.signal };
+  if (external.aborted) {
+    owned.abort(external.reason);
+    return { cleanup: () => {}, signal: owned.signal };
+  }
   const forward = () => owned.abort(external.reason);
   external.addEventListener("abort", forward, { once: true });
-  if (external.aborted) forward();
-  return owned.signal;
+  return {
+    cleanup: () => external.removeEventListener("abort", forward),
+    signal: owned.signal,
+  };
 }
 
 async function* followStreamEvents(input: FollowStreamInput): AsyncGenerator<MessageStreamEvent> {

@@ -1,4 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, readdir, realpath } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 import { getRun, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
@@ -29,6 +33,56 @@ import type {
 } from "#runtime/connections/types.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#shared/tool-schema.js";
+
+const require = createRequire(import.meta.url);
+
+interface BundledRuntimeVendorStamp {
+  readonly moduleInputDigests: Record<string, string>;
+  readonly moduleVersions: Record<string, string>;
+}
+
+interface CopiedRuntimeIdentity {
+  readonly codecContract: string;
+  readonly emittedDigest: string;
+  readonly inputDigest: string;
+  readonly packageVersion: string;
+  readonly version: number;
+}
+
+async function digestTree(root: string, excludedNames: readonly string[] = []): Promise<string> {
+  const hash = createHash("sha256");
+  const excluded = new Set(excludedNames);
+  async function visit(current: string): Promise<void> {
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (excluded.has(entry.name)) continue;
+      const fullPath = join(current, entry.name);
+      const relativePath = relative(root, fullPath).replaceAll("\\", "/");
+      if (entry.isDirectory()) {
+        hash.update(`d:${relativePath}\0`);
+        await visit(fullPath);
+      } else if (entry.isFile()) {
+        hash.update(`f:${relativePath}\0`);
+        hash.update(await readFile(fullPath));
+        hash.update("\0");
+      }
+    }
+  }
+  await visit(root);
+  return hash.digest("hex");
+}
+
+async function resolvedPackage(
+  name: string,
+): Promise<{ readonly root: string; readonly version: string }> {
+  const entry = require.resolve(name);
+  const root = await realpath(join(dirname(entry), ".."));
+  const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
+    readonly version?: unknown;
+  };
+  if (typeof packageJson.version !== "string") throw new Error(`Missing ${name} package version.`);
+  return { root, version: packageJson.version };
+}
 
 function buildSerializedContext(overrides: {
   auth?: Record<string, unknown>;
@@ -735,6 +789,46 @@ describe("workflowEntry integration", () => {
         await run.cancel();
       }
     });
+  });
+
+  it("attests bundled ordinary runtime bytes to restored installed beta.34 inputs", async () => {
+    const [worldLocal, core, stamp, copiedRuntime] = await Promise.all([
+      resolvedPackage("@workflow/world-local"),
+      resolvedPackage("@workflow/core"),
+      readFile(
+        new URL("../../.generated/compiled/.vendor-stamp.json", import.meta.url),
+        "utf8",
+      ).then((value) => JSON.parse(value) as BundledRuntimeVendorStamp),
+      readFile(
+        new URL(
+          "../../.generated/compiled/@workflow/core/.eve-copied-runtime-identity.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ).then((value) => JSON.parse(value) as CopiedRuntimeIdentity),
+    ]);
+
+    expect(worldLocal.version).toBe("5.0.0-beta.34");
+    expect(worldLocal.root.replaceAll("\\", "/")).toContain(
+      "/node_modules/.pnpm/@workflow+world-local@5.0.0-beta.34_",
+    );
+    expect(stamp.moduleVersions["@workflow/world-local"]).toBe(worldLocal.version);
+    expect(stamp.moduleInputDigests["@workflow/world-local"]).toBe(
+      await digestTree(worldLocal.root),
+    );
+    expect(stamp.moduleVersions["@workflow/core"]).toBe(core.version);
+    expect(copiedRuntime).toMatchObject({
+      codecContract: "workflow-public-codec-v1",
+      inputDigest: stamp.moduleInputDigests["@workflow/core"],
+      packageVersion: core.version,
+      version: 1,
+    });
+    expect(copiedRuntime.emittedDigest).toBe(
+      await digestTree(
+        fileURLToPath(new URL("../../.generated/compiled/@workflow/core", import.meta.url)),
+        [".eve-copied-runtime-identity.json"],
+      ),
+    );
   });
 
   it("uses installed world-local beta.34 for one ordinary runtime start and continuation", async () => {
