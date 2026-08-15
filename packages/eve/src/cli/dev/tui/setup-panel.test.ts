@@ -815,7 +815,7 @@ describe("renderSelectQuestion", () => {
     const options = [
       {
         value: "project",
-        label: "AI Gateway via Project",
+        label: "AI Gateway via Vercel Project",
         hint: "Authenticates with AI Gateway automatically\nin a new or existing project. No keys to manage.",
       },
     ];
