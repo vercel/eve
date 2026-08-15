@@ -89,6 +89,12 @@ export async function startEveDev(
   options: StartEveDevOptions = {},
 ): Promise<RunningEveDev> {
   const child = spawnEveDev(appRoot, options);
+  const ownedProcessIds = new Set<number>();
+  if (child.pid !== undefined) ownedProcessIds.add(child.pid);
+  const snapshotOwnedProcessTree = () => {
+    if (child.pid === undefined) return;
+    for (const pid of collectProcessTreePids(child.pid)) ownedProcessIds.add(pid);
+  };
   let stderr = "";
   let stdout = "";
 
@@ -118,6 +124,7 @@ export async function startEveDev(
       if (child.exitCode !== null || child.signalCode !== null) {
         return;
       }
+      snapshotOwnedProcessTree();
       await withinDeadline(
         new Promise<void>((resolve, reject) => {
           child.once("exit", () => resolve());
@@ -126,7 +133,9 @@ export async function startEveDev(
         "Timed out waiting for the dev server process to crash.",
       );
     },
-    isProcessTreeAbsent: () => child.exitCode !== null || child.signalCode !== null,
+    isProcessTreeAbsent: () =>
+      (child.exitCode !== null || child.signalCode !== null) &&
+      [...ownedProcessIds].every((pid) => !isProcessPresent(pid)),
     stderr: () => stderr,
     stdout: () => stdout,
     async signalAndAwaitExit(signal, deadlineMs = 1_000) {
@@ -148,10 +157,42 @@ export async function startEveDev(
       });
     },
     async stop() {
+      snapshotOwnedProcessTree();
       await stopEveDevChild(child);
     },
     url,
   };
+}
+
+/** Captures the root and all descendants before test-owned termination. */
+function collectProcessTreePids(rootPid: number): number[] {
+  if (process.platform !== "win32") return [rootPid];
+  const script = [
+    `$all = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId`,
+    `$pending = [System.Collections.Generic.Queue[int]]::new()`,
+    `$seen = [System.Collections.Generic.HashSet[int]]::new()`,
+    `$pending.Enqueue(${String(rootPid)})`,
+    `while ($pending.Count -gt 0) { $pid = $pending.Dequeue(); if (-not $seen.Add($pid)) { continue }; $all | Where-Object { $_.ParentProcessId -eq $pid } | ForEach-Object { $pending.Enqueue([int]$_.ProcessId) } }`,
+    `$seen`,
+  ].join("; ");
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.status !== 0 || typeof result.stdout !== "string") return [rootPid];
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => Number.parseInt(line.trim(), 10))
+    .filter((pid) => Number.isSafeInteger(pid));
+}
+
+function isProcessPresent(pid: number): boolean {
+  if (process.platform !== "win32") return false;
+  const result = spawnSync("tasklist", ["/FI", `PID eq ${String(pid)}`, "/NH"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return result.status === 0 && typeof result.stdout === "string" && !result.stdout.includes("No tasks");
 }
 
 async function forceCrashEveDevChild(

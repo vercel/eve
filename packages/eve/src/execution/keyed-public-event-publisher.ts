@@ -39,7 +39,12 @@ interface StreamIdentity {
   readonly runId: string;
 }
 
-/** Publishes one step's public events through Workflow's canonical keyed receipt. */
+/**
+ * Publishes one step's public events through Workflow's canonical keyed receipt.
+ * Exact-recovery admission never falls back. Normal beta.34-compatible operation
+ * may use the ordinary writer only for the typed pre-commit unavailable result,
+ * and waits for that writer before exposing insertion to downstream effects.
+ */
 export function createKeyedPublicEventPublisher(input: {
   /** Exact-recovery runs must never downgrade a missing keyed receipt. */
   readonly exactRecovery?: boolean;
@@ -107,6 +112,8 @@ async function appendOrdinaryPublicEvent(
   event: MessageStreamEvent,
 ): Promise<{ readonly event: MessageStreamEvent; readonly inserted: true }> {
   if (writer === undefined) throw new KeyedPublicEventCompatibilityError();
+  // Preserve the normal writer's success boundary: a pending or rejected write
+  // cannot be reported as an inserted event.
   await writer.write(encoded);
   return { event, inserted: true };
 }

@@ -20,6 +20,8 @@ type ProviderEvent =
   | "completed"
   | "listener-settled"
   | "stream-settled"
+  | "source-publisher-settled"
+  | "watchdog-cleared"
   | "underlying-cancel"
   | "watchdog";
 
@@ -195,6 +197,8 @@ describe("public model-stream cancellation", () => {
         { attempt: recovery.replacementAttempt, event: "interrupted" },
         { attempt: recovery.replacementAttempt, event: "listener-settled" },
         { attempt: recovery.replacementAttempt, event: "stream-settled" },
+        { attempt: recovery.replacementAttempt, event: "source-publisher-settled" },
+        { attempt: recovery.replacementAttempt, event: "watchdog-cleared" },
       ]),
     );
     expect(recovery.replacementAttempt).toBeGreaterThan(recovery.crashedAttempt);
@@ -420,6 +424,14 @@ async function runHeldProviderScenario(input: {
         rendezvous.waitFor("stream-settled"),
         "provider stream reader did not settle",
       );
+      await withinDeadline(
+        rendezvous.waitFor("source-publisher-settled"),
+        "provider source publisher did not settle",
+      );
+      await withinDeadline(
+        rendezvous.waitFor("watchdog-cleared"),
+        "provider watchdog did not settle",
+      );
     }
     if (input.restartAfterCancel === true) {
       await server.crash();
@@ -563,9 +575,7 @@ async function readThroughSessionWaiting(
       closed = true;
       const closing = iterator.return?.();
       if (closing === undefined) return;
-      // Some transport iterators wait for the peer to close. The caller's
-      // server shutdown is that peer closure, so this only bounds cleanup.
-      await Promise.race([closing, new Promise<void>((resolve) => setTimeout(resolve, 250))]);
+      await closing;
     };
     return {
       close,
@@ -586,7 +596,15 @@ async function readThroughSessionWaiting(
               : `Public stream emitted ${outcome.result.value.type} after session.waiting.`,
           );
         }
+        // `return()` must settle the pending pull before server shutdown. A
+        // timeout is evidence of an unjoined source owner, not permission to
+        // abandon that owner and let shutdown make the test pass.
         await close();
+        const settled = await next;
+        if (!settled.result.done)
+          throw new Error(
+            `Public stream emitted ${settled.result.value.type} while closing after session.waiting.`,
+          );
       },
     };
   }
@@ -801,13 +819,16 @@ const model = new MockLanguageModelV3({
       let controller: ReadableStreamDefaultController<any> | undefined;
       let abort: (() => void) | undefined;
       let watchdog: ReturnType<typeof setTimeout> | undefined;
-      const settle = (event: "interrupted" | "completed" | "watchdog", failure?: unknown, terminalize = true) => {
+      const settle = async (event: "interrupted" | "completed" | "watchdog", failure?: unknown, terminalize = true) => {
         if (settled) return;
         settled = true;
-        if (watchdog !== undefined) clearTimeout(watchdog);
+        if (watchdog !== undefined) {
+          clearTimeout(watchdog);
+          await reportAttempt("watchdog-cleared");
+        }
         if (abort !== undefined) abortSignal?.removeEventListener("abort", abort);
-        void reportAttempt(event);
-        void reportAttempt("listener-settled");
+        await reportAttempt(event);
+        await reportAttempt("listener-settled");
         if (terminalize && controller !== undefined) {
           if (failure !== undefined) controller.error(failure);
           else if (event === "completed") {
@@ -816,13 +837,16 @@ const model = new MockLanguageModelV3({
             controller.close();
           } else controller.error(new Error("provider interrupted"));
         }
-        void reportAttempt("stream-settled");
+        await reportAttempt("stream-settled");
+        // This is the provider's owned source-publisher barrier. It is
+        // emitted only after all preceding listener/stream reports settle.
+        await reportAttempt("source-publisher-settled");
       };
       return new ReadableStream({
       start(nextController) {
         controller = nextController;
         void reportAttempt("stream-start");
-        abort = () => settle("interrupted", abortSignal?.reason);
+        abort = () => void settle("interrupted", abortSignal?.reason);
         abortSignal?.addEventListener("abort", abort, { once: true });
         watchdog = setTimeout(() => settle("watchdog", new Error("provider hold timed out")), 5_000);
         void reportAttempt("handler-ready")
@@ -835,13 +859,13 @@ const model = new MockLanguageModelV3({
             controller.enqueue({ delta: "pending", id: "held-text", type: "text-delta" });
             return reportAttempt("first-delta").then(() => fetch(url("/release"))).then(() => settle("completed"));
           })
-          .catch((error: unknown) => settle("watchdog", error));
+          .catch((error: unknown) => void settle("watchdog", error));
       },
       cancel() {
         // Reader cancellation owns terminalization, so do not call
         // controller.error() on an already-cancelled underlying stream.
         void reportAttempt("underlying-cancel");
-        settle("interrupted", undefined, false);
+        void settle("interrupted", undefined, false);
       },
     });
     })(),

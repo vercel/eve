@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
@@ -401,6 +403,40 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startMock.mock.calls[0]?.[2]).toMatchObject({
       idempotencyKey: "eve-child-start/v1/op_1",
     });
+  });
+
+  it("keeps ordinary start and continuation on the tracked world-local beta.34 boundary", async () => {
+    const installedWorld = JSON.parse(
+      await readFile(
+        new URL("../../node_modules/@workflow/world-local/package.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { version?: unknown };
+    expect(installedWorld.version).toBe("5.0.0-beta.34");
+
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "ordinary-run" });
+    resumeHookMock.mockResolvedValue({ runId: "ordinary-run" });
+    getHookByTokenMock.mockResolvedValue({ runId: "ordinary-run" });
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      adapter,
+      auth: null,
+      input: { message: "ordinary beta34 child" },
+      mode: "task",
+    });
+    await buildRuntime(compiledArtifactsSource).dispatchSession({
+      command: { kind: "clear" },
+      sessionId: "ordinary-run",
+    });
+
+    expect(startMock.mock.calls[0]?.[2]).not.toHaveProperty("idempotencyKey");
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      sessionCommandHookToken("ordinary-run"),
+      { kind: "clear" },
+    );
+    expect(getWorldMock).not.toHaveBeenCalled();
   });
 
   it("rejects an exact-recovery child start before Workflow when v1 receipts are absent", async () => {
