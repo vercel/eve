@@ -24,8 +24,10 @@ import {
 import {
   SLACK_CARD_BODY_TEXT_MAX_LENGTH,
   SLACK_CARD_SUBTEXT_MAX_LENGTH,
+  SLACK_MARKDOWN_TEXT_MAX_LENGTH,
   SLACK_MAX_BLOCKS_PER_MESSAGE,
   SLACK_MESSAGE_TEXT_MAX_LENGTH,
+  SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
 } from "#public/channels/slack/limits.js";
 import { defaultSlackAuth } from "#public/channels/slack/index.js";
@@ -374,6 +376,98 @@ describe("slackChannel() default event handlers", () => {
       thread_ts: "1700000000.000001",
       markdown_text: "Hello from the agent",
     });
+  });
+
+  it("message.completed splits replies that exceed Slack's recommended message length", async () => {
+    vi.useFakeTimers();
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const message = [
+      "a".repeat(3_500),
+      "b".repeat(3_500),
+      "c".repeat(3_500),
+      "d".repeat(3_500),
+    ].join("\n\n");
+    fetchMock.mockImplementation(async (_url, init) => {
+      const body = parseSlackRequestBody(init as RequestInit);
+      const markdown = String(body.markdown_text);
+      return new Response(
+        JSON.stringify(
+          markdown.length > SLACK_MARKDOWN_TEXT_MAX_LENGTH
+            ? { ok: false, error: "msg_too_long" }
+            : { ok: true, ts: "1700000001.000001" },
+        ),
+        { headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const delivery = callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    await vi.runAllTimersAsync();
+    await delivery;
+
+    const posts = fetchMock.mock.calls.map(([, init]) =>
+      parseSlackRequestBody(init as RequestInit),
+    );
+    expect(posts.length).toBeGreaterThan(1);
+    expect(
+      posts.every(
+        (post) => String(post.markdown_text).length <= SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH,
+      ),
+    ).toBe(true);
+    expect(posts.map((post) => post.markdown_text).join("")).toBe(message);
+  });
+
+  it("message.completed paces chunks to avoid flooding Slack", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const message = Array.from({ length: 7 }, (_, index) => String(index).repeat(3_500)).join(
+      "\n\n",
+    );
+    const postTimes: number[] = [];
+    fetchMock.mockImplementation(async () => {
+      postTimes.push(Date.now());
+      return new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const delivery = callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    await vi.runAllTimersAsync();
+    await delivery;
+
+    const posts = fetchMock.mock.calls.map(([, init]) =>
+      parseSlackRequestBody(init as RequestInit),
+    );
+    expect(posts.map((post) => post.markdown_text).join("")).toBe(message);
+    expect(postTimes).toEqual([0, 1_000, 2_000, 3_000, 4_000, 5_000, 6_000]);
   });
 
   it("message.completed skips post when finishReason is tool-calls", async () => {

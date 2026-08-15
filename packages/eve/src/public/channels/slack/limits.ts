@@ -44,6 +44,15 @@ export const SLACK_CARD_SUBTEXT_MAX_LENGTH = 200;
  */
 export const SLACK_MESSAGE_TEXT_MAX_LENGTH = 40000;
 
+/** Slack caps the `markdown_text` field at 12000 characters. */
+export const SLACK_MARKDOWN_TEXT_MAX_LENGTH = 12000;
+
+/**
+ * Slack recommends keeping messages to 4000 characters for reliable,
+ * readable delivery. Longer completed replies are split at this boundary.
+ */
+export const SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH = 4000;
+
 /**
  * `chat.postMessage` rejects payloads with more than 50 blocks
  * (`invalid_blocks`).
@@ -109,6 +118,48 @@ export function truncateCardSubtext(value: string): string {
  */
 export function truncateMessageText(value: string): string {
   return truncateWithEllipsis(value, SLACK_MESSAGE_TEXT_MAX_LENGTH);
+}
+
+/**
+ * Splits a completed reply without dropping content. Paragraph boundaries
+ * win over line boundaries; content with neither is cut at the limit.
+ */
+export function chunkMessageText(value: string): string[] {
+  if (value.length <= SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH) return [value];
+
+  const chunks: string[] = [];
+  let remaining = value;
+  while (remaining.length > SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH) {
+    const paragraphBoundary = remaining.lastIndexOf(
+      "\n\n",
+      SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH - 2,
+    );
+    const lineBoundary = remaining.lastIndexOf("\n", SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH - 1);
+    let end =
+      paragraphBoundary > 0 && remaining.slice(0, paragraphBoundary).trim().length > 0
+        ? paragraphBoundary + 2
+        : lineBoundary > 0 && remaining.slice(0, lineBoundary).trim().length > 0
+          ? lineBoundary + 1
+          : SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH;
+
+    // Avoid cutting between the UTF-16 surrogate pair of an emoji or other
+    // supplementary character when no natural text boundary is available.
+    const precedingCodeUnit = remaining.charCodeAt(end - 1);
+    const followingCodeUnit = remaining.charCodeAt(end);
+    if (
+      precedingCodeUnit >= 0xd800 &&
+      precedingCodeUnit <= 0xdbff &&
+      followingCodeUnit >= 0xdc00 &&
+      followingCodeUnit <= 0xdfff
+    ) {
+      end -= 1;
+    }
+
+    chunks.push(remaining.slice(0, end));
+    remaining = remaining.slice(end);
+  }
+  if (remaining.length > 0) chunks.push(remaining);
+  return chunks;
 }
 
 /**

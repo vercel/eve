@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  chunkMessageText,
   SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH,
   SLACK_CARD_BODY_TEXT_MAX_LENGTH,
   SLACK_CARD_SUBTEXT_MAX_LENGTH,
   SLACK_MESSAGE_TEXT_MAX_LENGTH,
+  SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH,
   SLACK_MODAL_TITLE_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
   SLACK_TYPING_STATUS_MAX_LENGTH,
@@ -149,5 +151,48 @@ describe("truncateMessageText", () => {
     const result = truncateMessageText(long);
     expect(result.length).toBeLessThanOrEqual(SLACK_MESSAGE_TEXT_MAX_LENGTH);
     expect(result.endsWith("...")).toBe(true);
+  });
+});
+
+describe("chunkMessageText", () => {
+  it("returns short messages unchanged", () => {
+    expect(chunkMessageText("Hello")).toEqual(["Hello"]);
+  });
+
+  it("prefers paragraph boundaries and preserves all content", () => {
+    const message = `${"a".repeat(3_000)}\n\n${"b".repeat(2_000)}`;
+    const chunks = chunkMessageText(message);
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toHaveLength(3_002);
+    expect(chunks.join("")).toBe(message);
+  });
+
+  it("falls back to line boundaries, then a hard cut", () => {
+    const lineMessage = `${"a".repeat(3_000)}\n${"b".repeat(2_000)}`;
+    const hardCutMessage = "x".repeat(SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH + 1);
+
+    expect(chunkMessageText(lineMessage).map((chunk) => chunk.length)).toEqual([3_001, 2_000]);
+    expect(chunkMessageText(hardCutMessage).map((chunk) => chunk.length)).toEqual([
+      SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH,
+      1,
+    ]);
+  });
+
+  it("does not split a UTF-16 surrogate pair", () => {
+    const message = `${"x".repeat(SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH - 1)}😀tail`;
+    const chunks = chunkMessageText(message);
+
+    expect(chunks[0]).toHaveLength(SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH - 1);
+    expect(chunks[1]?.startsWith("😀")).toBe(true);
+    expect(chunks.join("")).toBe(message);
+  });
+
+  it("does not emit a whitespace-only chunk for leading blank lines", () => {
+    const message = `\n\n${"x".repeat(SLACK_MESSAGE_TEXT_RECOMMENDED_LENGTH + 1)}`;
+    const chunks = chunkMessageText(message);
+
+    expect(chunks[0]?.trim().length).toBeGreaterThan(0);
+    expect(chunks.join("")).toBe(message);
   });
 });
