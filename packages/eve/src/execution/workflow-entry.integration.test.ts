@@ -37,6 +37,7 @@ import { toInputSchema } from "#shared/tool-schema.js";
 const require = createRequire(import.meta.url);
 
 interface BundledRuntimeVendorStamp {
+  readonly generatedOutputDigest: string;
   readonly moduleInputDigests: Record<string, string>;
   readonly moduleVersions: Record<string, string>;
 }
@@ -815,6 +816,12 @@ describe("workflowEntry integration", () => {
     expect(stamp.moduleVersions["@workflow/world-local"]).toBe(worldLocal.version);
     expect(stamp.moduleInputDigests["@workflow/world-local"]).toBe(
       await digestTree(worldLocal.root),
+    );
+    expect(stamp.generatedOutputDigest).toBe(
+      await digestTree(fileURLToPath(new URL("../../.generated/compiled", import.meta.url)), [
+        ".vendor-lock",
+        ".vendor-stamp.json",
+      ]),
     );
     expect(stamp.moduleVersions["@workflow/core"]).toBe(core.version);
     expect(copiedRuntime).toMatchObject({

@@ -114,6 +114,80 @@ describe("stream following over real sockets", () => {
     expect(preAbortedListeners.removes()).toBe(0);
   });
 
+  it("releases external abort forwarding after a rejected next", async () => {
+    const host = await listen(
+      createServer((_req, res) => {
+        res.writeHead(400, { "content-type": "text/plain" });
+        res.end("bad stream request");
+      }),
+    );
+    const controller = new AbortController();
+    const listeners = trackAbortListeners(controller.signal);
+    const iterator = follow(host, { signal: controller.signal })[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toThrow("bad stream request");
+    controller.abort(new Error("late external abort"));
+    expect(listeners.adds()).toBe(1);
+    expect(listeners.removes()).toBe(1);
+  });
+
+  it("removes one registered external abort forwarder after external abort", async () => {
+    let requests = 0;
+    const host = await listen(
+      createServer((_req, res) => {
+        requests += 1;
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.flushHeaders();
+      }),
+    );
+    const controller = new AbortController();
+    const listeners = trackAbortListeners(controller.signal);
+    const iterator = follow(host, { signal: controller.signal })[Symbol.asyncIterator]();
+    const pending = iterator.next();
+
+    await waitFor(() => requests === 1);
+    controller.abort(new Error("external stop"));
+    await expect(withTimeout(pending, "externally aborted pull")).rejects.toThrow("external stop");
+    controller.abort(new Error("late external abort"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(requests).toBe(1);
+    expect(listeners.adds()).toBe(1);
+    expect(listeners.removes()).toBe(1);
+  });
+
+  it("balances one long-lived external signal across settled iterators", async () => {
+    const host = await listen(
+      createServer((_req, res) => {
+        res.writeHead(200, {
+          "content-type": "application/x-ndjson",
+          "x-eve-stream-tail-index": "-1",
+        });
+        res.end();
+      }),
+    );
+    const controller = new AbortController();
+    const listeners = trackAbortListeners(controller.signal);
+
+    for (let index = 0; index < 3; index += 1) {
+      const iterator = follow(host, { follow: false, signal: controller.signal })[
+        Symbol.asyncIterator
+      ]();
+      await expect(iterator.next()).resolves.toMatchObject({ done: true });
+      expect(listeners.adds()).toBe(index + 1);
+      expect(listeners.removes()).toBe(index + 1);
+    }
+
+    const returned = follow(host, { follow: false, signal: controller.signal })[
+      Symbol.asyncIterator
+    ]();
+    await expect(returned.return?.()).resolves.toMatchObject({ done: true });
+    expect(listeners.adds()).toBe(4);
+    expect(listeners.removes()).toBe(4);
+    controller.abort(new Error("late external abort"));
+    expect(listeners.adds()).toBe(4);
+    expect(listeners.removes()).toBe(4);
+  });
+
   it("joins a pending live pull when its iterator returns", async () => {
     let activeConnections = 0;
     let closedConnections = 0;
